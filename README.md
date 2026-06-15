@@ -1,36 +1,522 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TradeStats — статистика трейдера
 
-## Getting Started
+Веб-приложение для анализа торговых результатов. Подключаете биржу
+(**Binance**, **Bybit**, **OKX**) по read-only API-ключу — сделки импортируются
+автоматически, и на их основе считается полная статистика: доходность, риск,
+win rate, просадки и десятки других метрик.
 
-First, run the development server:
+## Возможности
+
+- **Мультиаккаунт / мультибиржа** — несколько аккаунтов в одном дашборде,
+  фильтры по аккаунту, рынку (спот / фьючерсы) и символу.
+- **Реконструкция позиций** — биржи отдают *исполнения* (fills); приложение
+  собирает их в закрытые round-trip сделки методом средней цены (поддержка
+  усреднения, частичных закрытий и разворотов позиции).
+- **60+ метрик** — Net P&L, ROI, Win Rate, Profit Factor, Expectancy, Payoff,
+  Sharpe, Sortino, Calmar, максимальная просадка (абс. и %), длительность
+  просадки, серии побед/поражений, лучшая/худшая сделка, среднее время в позиции.
+- **Графики** — кривая капитала, P&L по дням, календарь-теплокарта P&L,
+  разбивки по бирже / месяцу / дню недели / часу / символу / стороне (long/short).
+- **Таблица сделок** — сортировка и фильтрация по символу, стороне, результату.
+- **Безопасность** — пароли через bcrypt, сессии на JWT (HttpOnly cookie),
+  секреты бирж шифруются **AES-256-GCM** перед записью в БД.
+- **Демо-режим** — генератор синтетических сделок, чтобы исследовать дашборд
+  без реальных ключей.
+
+## Стек
+
+| Слой | Технология |
+|------|-----------|
+| Фреймворк | Next.js 16 (App Router) + React 19 + TypeScript |
+| Стили | Tailwind CSS v4 (тёмная тема) |
+| БД / ORM | Prisma 6 + PostgreSQL (dev и prod) |
+| Биржи | CCXT (единый API для Binance/Bybit/OKX) |
+| Графики | Recharts |
+| Аутентификация | bcryptjs + jose (JWT) |
+
+## Запуск
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cp .env.example .env          # затем впишите свои секреты (см. ниже)
+docker compose up -d db       # локальный PostgreSQL в Docker (порт 5432)
+npm install
+npx prisma migrate dev        # применить миграции к БД
+npm run dev                   # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+> БД одна и та же в dev и prod — PostgreSQL. Миграции Prisma привязаны к
+> провайдеру, поэтому единый набор в `prisma/migrations/` гарантирует
+> dev/prod-паритет. Локальный Postgres поднимается через `docker compose`
+> (креды совпадают с `DATABASE_URL` из `.env.example`); если Postgres у вас
+> уже есть — просто укажите свою строку подключения и пропустите `docker compose`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Переменные окружения (`.env`, пример — в `.env.example`):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+DATABASE_URL   — строка подключения к БД
+JWT_SECRET     — секрет для подписи сессий
+ENCRYPTION_KEY — 32-байтный ключ (64 hex) для шифрования API-секретов
+```
 
-## Learn More
+Сгенерировать секреты:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"  # JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # ENCRYPTION_KEY
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Быстрый старт без ключей
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+1. Зарегистрируйтесь на `/register`.
+2. На странице **«Биржи»** добавьте аккаунт (для демо подойдут любые значения
+   ключей).
+3. Нажмите **«Демо»** у аккаунта — сгенерируются тестовые сделки.
+4. Откройте **«Обзор»** — статистика и графики готовы.
 
-## Deploy on Vercel
+## Архитектура
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```
+src/
+  app/
+    api/                 # route handlers (auth, accounts, sync, demo, stats)
+    dashboard/           # дашборд: обзор / сделки / биржи
+    login, register/     # страницы аутентификации
+  lib/
+    analytics/
+      positions.ts       # реконструкция round-trip сделок из исполнений
+      metrics.ts         # расчёт всех метрик и разбивок
+    exchanges.ts         # фабрика CCXT + нормализация сделок
+    sync.ts              # импорт сделок с биржи (пагинация, дедупликация)
+    demo.ts              # генератор демо-данных
+    crypto.ts            # AES-256-GCM для API-секретов
+    auth.ts              # хэш паролей + JWT-сессии
+  middleware.ts          # защита /dashboard
+  components/            # UI: графики, карточки, навигация, формы
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Прод-замечания
+
+- **PostgreSQL**: провайдер БД — `postgresql` и в dev, и в prod (менять ничего
+  не нужно). В проде задайте `DATABASE_URL` на managed/self-hosted инстанс и
+  примените миграции через `npx prisma migrate deploy`.
+- **Синхронизация бирж** реализована best-effort: сначала пробуется выгрузка
+  всех сделок без указания символа (работает на Bybit/OKX), при ошибке —
+  перебор по символам (текущие балансы + список мейджоров). Для Binance,
+  где исторические закрытые позиции не видны без символа, перебор может не
+  покрыть все пары — это место для доработки под конкретную биржу.
+- Метрики считаются в quote-валюте (предполагается USDT/USDC). Для мульти-quote
+  портфелей потребуется конвертация по курсам.
+
+---
+
+# Деплой на VPS (Linux, продакшн)
+
+Полное пошаговое руководство по выводу проекта в прод на чистом сервере
+(пример — **Ubuntu 22.04 / 24.04 LTS**). Стек на сервере: Node.js LTS,
+PostgreSQL, Nginx (reverse proxy + TLS), PM2 (менеджер процессов).
+
+## 0. Что понадобится
+
+- VPS с Ubuntu (минимум 1 vCPU / 1–2 ГБ RAM; ccxt + сборка Next любят память —
+  при 1 ГБ добавьте swap, см. ниже).
+- Доменное имя, указывающее A-записью на IP сервера (для HTTPS).
+- SSH-доступ под пользователем с `sudo`.
+
+## 1. Базовая подготовка сервера
+
+```bash
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y git curl build-essential ufw
+
+# (опционально, если RAM ≤ 1 ГБ) — swap, чтобы next build не падал по OOM
+sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Фаервол: открываем SSH и HTTP/HTTPS, всё остальное закрыто.
+
+```bash
+sudo ufw allow OpenSSH
+sudo ufw allow 'Nginx Full'   # 80 + 443
+sudo ufw enable
+```
+
+## 2. Node.js LTS
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v   # должно быть v22.x (≥ 20 обязательно)
+```
+
+## 3. PostgreSQL
+
+```bash
+sudo apt install -y postgresql postgresql-contrib
+sudo -u postgres psql <<'SQL'
+CREATE DATABASE tradestats;
+CREATE USER tradestats WITH ENCRYPTED PASSWORD 'СМЕНИТЕ_ПАРОЛЬ';
+GRANT ALL PRIVILEGES ON DATABASE tradestats TO tradestats;
+ALTER DATABASE tradestats OWNER TO tradestats;
+SQL
+```
+
+Провайдер в `prisma/schema.prisma` уже `postgresql` — менять ничего не нужно,
+достаточно указать `DATABASE_URL` (шаг 5) на этот инстанс.
+
+## 4. Код и зависимости
+
+```bash
+sudo adduser --system --group --home /opt/tradestats deploy   # сервисный юзер
+sudo mkdir -p /opt/tradestats && sudo chown deploy:deploy /opt/tradestats
+sudo -u deploy -H bash
+cd /opt/tradestats
+git clone <URL_РЕПОЗИТОРИЯ> .
+npm ci                       # точная установка по package-lock.json
+```
+
+## 5. Переменные окружения
+
+Создайте `/opt/tradestats/.env` (см. `.env.example`). Сгенерируйте секреты:
+
+```bash
+node -e "console.log('JWT_SECRET='+require('crypto').randomBytes(48).toString('hex'))"
+node -e "console.log('ENCRYPTION_KEY='+require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log('CRON_SECRET='+require('crypto').randomBytes(24).toString('hex'))"
+```
+
+`.env` для прода:
+
+```env
+DATABASE_URL="postgresql://tradestats:СМЕНИТЕ_ПАРОЛЬ@localhost:5432/tradestats?schema=public"
+JWT_SECRET="<сгенерированный>"
+ENCRYPTION_KEY="<сгенерированный 32-байтный hex>"
+CRON_SECRET="<сгенерированный>"
+NODE_ENV="production"
+# Внутрипроцессный планировщик включён — авто-синхронизация работает внутри app.
+ENABLE_SCHEDULER="true"
+```
+
+> ВАЖНО: `ENCRYPTION_KEY` нельзя терять и менять — иначе ранее сохранённые
+> API-секреты бирж не расшифруются. Бэкапьте `.env` отдельно и безопасно.
+
+## 6. Миграции и сборка
+
+```bash
+npx prisma generate
+npx prisma migrate deploy     # применяет миграции из prisma/migrations (без prompt)
+npm run build                 # продакшн-сборка Next.js
+```
+
+## 7. Запуск через PM2
+
+```bash
+sudo npm install -g pm2
+# Next слушает порт 3000; биндим только на localhost (наружу — через Nginx)
+PORT=3000 pm2 start "npm run start" --name tradestats
+pm2 save
+pm2 startup systemd           # выполните выведенную команду, чтобы стартовать при ребуте
+```
+
+Полезное: `pm2 logs tradestats`, `pm2 restart tradestats`, `pm2 status`.
+
+### Альтернатива — systemd (вместо PM2)
+
+`/etc/systemd/system/tradestats.service`:
+
+```ini
+[Unit]
+Description=TradeStats
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=deploy
+WorkingDirectory=/opt/tradestats
+Environment=NODE_ENV=production
+Environment=PORT=3000
+EnvironmentFile=/opt/tradestats/.env
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now tradestats
+```
+
+## 8. Nginx + HTTPS
+
+```bash
+sudo apt install -y nginx
+```
+
+`/etc/nginx/sites-available/tradestats`:
+
+```nginx
+server {
+    listen 80;
+    server_name your-domain.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300;   # запас под долгую синхронизацию/cron
+    }
+}
+```
+
+```bash
+sudo ln -s /etc/nginx/sites-available/tradestats /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# Бесплатный TLS-сертификат Let's Encrypt
+sudo apt install -y certbot python3-certbot-nginx
+sudo certbot --nginx -d your-domain.com
+```
+
+Certbot сам пропишет 443/редирект и настроит авто-обновление сертификата.
+
+## 9. Авто-синхронизация в проде
+
+Два варианта (используйте один):
+
+- **Внутрипроцессный планировщик** (по умолчанию): `ENABLE_SCHEDULER="true"`.
+  Подходит, когда приложение работает одним постоянным процессом (PM2/systemd).
+- **Внешний cron** (для нескольких инстансов/serverless): поставьте
+  `ENABLE_SCHEDULER="false"` и дёргайте защищённый эндпоинт. Пример crontab
+  (`crontab -e`), каждые 15 минут:
+
+  ```cron
+  */15 * * * * curl -fsS -H "Authorization: Bearer ВАШ_CRON_SECRET" https://your-domain.com/api/cron/sync >/dev/null 2>&1
+  ```
+
+## 10. Обновление (redeploy)
+
+```bash
+cd /opt/tradestats
+git pull
+npm ci
+npx prisma migrate deploy
+npm run build
+pm2 restart tradestats      # или: sudo systemctl restart tradestats
+```
+
+## 11. Бэкапы и безопасность
+
+- **БД**: регулярный дамп — `pg_dump -U tradestats tradestats > backup_$(date +%F).sql`
+  (можно cron'ом + выгрузка в S3/удалённое хранилище).
+- **`.env`** (особенно `ENCRYPTION_KEY`) — хранить в секрет-менеджере/офлайн-бэкапе.
+- Биржевые ключи добавляйте **только read-only** (без вывода и торговли).
+- Включите авто-обновления безопасности: `sudo apt install unattended-upgrades`.
+- Postgres слушает только localhost (дефолт) — не открывайте 5432 наружу.
+
+## Альтернатива: Docker
+
+В репозитории уже есть `docker-compose.yml` с сервисом `db` (PostgreSQL 16 +
+volume) — для локальной разработки достаточно `docker compose up -d db`.
+
+Чтобы контейнеризовать и само приложение для прода — добавьте `Dockerfile`
+(multi-stage: `npm ci` → `npm run build` → `npm run start`) и сервис `app`
+(порт 3000) в тот же compose, прокинув `.env` и зависимость от `db`.
+Reverse-proxy и TLS — через Nginx/Caddy перед контейнером. Не забудьте
+`npx prisma migrate deploy` на старте контейнера (entrypoint).
+
+---
+
+# Сервер из iPhone (iSH + Cloudflare Tunnel)
+
+Запуск приложения как **постоянного сервера прямо на iPhone** (без джейлбрейка),
+с доступом из глобального интернета и собственным доменом. Подходит для
+небольшой нагрузки / личного использования.
+
+> 🛠 В репозитории есть готовые скрипты [`deploy/iphone/`](deploy/iphone/):
+> `setup.sh` (разовая настройка) и `start.sh` (запуск + авто-перезапуск).
+> Шаги ниже объясняют, что они делают, и нужны для туннеля/домена/Гид-доступа,
+> которые скриптами не автоматизируются.
+
+## Как это устроено
+
+```
+   Пользователи в интернете
+            │   https://app.твой-домен.com
+            ▼
+   Cloudflare  (DNS + бесплатный HTTPS)
+            │   зашифрованный исходящий туннель (без проброса портов и белого IP)
+            ▼
+   cloudflared  ── процесс на телефоне
+            │   http://localhost:3000
+            ▼
+   Next.js (это приложение)  ── в iSH на телефоне
+            │
+            ▼
+   PostgreSQL  ── рекомендуется облачный (Neon) ради сохранности данных
+```
+
+Туннель исходящий, поэтому **меняющийся домашний IP и NAT/CGNAT не мешают** —
+проброс портов не нужен, домен продолжает работать после смены IP / перезагрузки
+роутера.
+
+## Важные ограничения
+
+- iOS усыпляет приложения в фоне → сервер живёт, только пока iSH на переднем
+  плане и экран включён (см. «Гид-доступ» ниже).
+- Node и Postgres на iOS работают только **через эмуляцию Linux** (iSH) — медленно
+  и греет телефон.
+- **Единственную копию данных пользователей не держите в локальном Postgres на
+  телефоне** — эмулированный PG нестабилен и повреждается при жёстком выключении.
+  База — на облачном Postgres (Neon/Supabase) с бэкапами; на телефоне — только
+  веб-сервер.
+
+## 1. Подготовка телефона
+
+- **Настройки → Экран и яркость → Автоблокировка → Никогда.**
+- Телефон постоянно на зарядке, Wi-Fi. Снять чехол (нагрев), прохладное место.
+
+## 2. Linux-окружение (iSH)
+
+App Store → **iSH Shell** → установить → открыть, затем:
+
+```sh
+apk update && apk upgrade
+apk add nodejs npm git openssl nano tmux
+node -v && npm -v && git --version
+```
+
+> Если `node` нестабилен под iSH — более совместимая, но тяжёлая альтернатива:
+> приложение **UTM SE** (полноценная ВМ с Ubuntu, где работает обычный
+> `apt install nodejs postgresql ...` по гайду «Деплой на VPS» выше).
+
+## 3. База данных (Neon — рекомендуется)
+
+Зарегистрируйтесь на **neon.tech**, создайте проект и скопируйте строку
+подключения `postgresql://...?sslmode=require` — она пойдёт в `DATABASE_URL`.
+
+## 4. Код и окружение
+
+```sh
+cd ~
+git clone <URL-репозитория> tradestats     # приватный репо: https://<TOKEN>@github.com/...
+cd tradestats
+cp .env.example .env
+nano .env
+```
+
+В `.env` пропишите `DATABASE_URL` (из Neon) и сгенерируйте секреты:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"  # JWT_SECRET
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # ENCRYPTION_KEY
+node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"  # CRON_SECRET
+```
+
+`ENABLE_SCHEDULER="true"` — встроенный планировщик авто-синхронизации заработает,
+т.к. процесс на телефоне всегда живой.
+
+> 🔒 `ENCRYPTION_KEY` нельзя терять/менять — иначе сохранённые ключи бирж не
+> расшифровать.
+
+## 5. Установка, миграции, сборка
+
+Шаги 2, 4 и 5 можно выполнить одной командой через готовый скрипт (создаст `.env`
+с секретами при первом запуске; после того как впишете `DATABASE_URL` — запустите
+его повторно для install + миграций + сборки):
+
+```sh
+sh deploy/iphone/setup.sh
+```
+
+Либо вручную:
+
+```sh
+npm install
+npx prisma migrate deploy
+npx prisma generate
+npm run build       # один раз; на эмуляции долго (10–30+ мин)
+```
+
+> Если `npm run build` падает по памяти — соберите проект на компьютере и
+> скопируйте папку `.next` на телефон, либо как временное решение запускайте
+> в dev-режиме (`npm run dev`).
+
+## 6. Туннель Cloudflare
+
+Быстрый тест без домена (версия `386` — под iSH):
+
+```sh
+wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386 -O /usr/local/bin/cloudflared
+chmod +x /usr/local/bin/cloudflared
+cloudflared tunnel --url http://localhost:3000   # выдаст временный https://*.trycloudflare.com
+```
+
+Постоянный домен:
+
+1. Купите домен; заведите бесплатный аккаунт Cloudflare, добавьте домен (**Add a
+   site**) и смените NS-серверы у регистратора на выданные Cloudflare.
+2. Привяжите туннель:
+
+```sh
+cloudflared login                                   # подтвердите домен в браузере
+cloudflared tunnel create tradestats
+cloudflared tunnel route dns tradestats app.твой-домен.com
+nano ~/.cloudflared/config.yml
+```
+
+`config.yml` (ID туннеля — из `cloudflared tunnel list`):
+
+```yaml
+tunnel: <ID>
+credentials-file: /root/.cloudflared/<ID>.json
+ingress:
+  - hostname: app.твой-домен.com
+    service: http://localhost:3000
+  - service: http_status:404
+```
+
+После этого `https://app.твой-домен.com` ведёт на телефон с автоматическим HTTPS.
+
+## 7. Запуск с авто-перезапуском (watchdog)
+
+Готовый скрипт [`deploy/iphone/start.sh`](deploy/iphone/start.sh) поднимает
+приложение и туннель и перезапускает упавший процесс (если продакшн-сборки нет —
+стартует в dev-режиме). Запуск в фоновой сессии `tmux`:
+
+```sh
+tmux new -d -s srv "$PWD/deploy/iphone/start.sh"   # запуск в фоне
+tmux attach -t srv                                 # логи (выход из просмотра: Ctrl+B, затем D)
+```
+
+## 8. Чтобы iOS не усыплял (ключевое)
+
+1. Автоблокировка → **Никогда** (см. шаг 1).
+2. **Гид-доступ**: Настройки → Универсальный доступ → **Гид-доступ** → включить.
+   Открыть iSH → **тройное нажатие боковой кнопки** → «Запустить». Телефон
+   «приклеен» к iSH с включённым экраном — режим киоска/сервера.
+
+## 9. После перезагрузки телефона
+
+iOS не запускает приложения сам. Один раз вручную:
+
+```sh
+# открыть iSH, затем:
+tmux new -d -s srv "$HOME/tradestats/deploy/iphone/start.sh"
+```
+
+и снова включить Гид-доступ (шаг 8.2).
+
+## 10. Проверка
+
+- С другого устройства открыть `https://app.твой-домен.com`.
+- Логи: `tmux attach -t srv` (выход из просмотра — `Ctrl+B`, затем `D`).

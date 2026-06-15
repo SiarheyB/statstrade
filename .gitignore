@@ -32,6 +32,12 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+
+# local databases (Postgres runs in Docker; never commit a db file)
+*.db
+*.db-journal
+*.sqlite
 
 # vercel
 .vercel

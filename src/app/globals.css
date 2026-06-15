@@ -1,26 +1,188 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme {
+  /* Modern Dark (fintech / trading) — slate neutrals, deep navy base (no pure
+     black), blue accent; green/red kept for P&L semantics. */
+  --color-bg: #0a0e17;
+  --color-surface: #131a27;
+  --color-surface-2: #1b2435;
+  --color-border: #283044;
+  --color-border-strong: #3a4358;
+  --color-fg: #eef2f8;
+  --color-muted: #94a0b5;
+  --color-faint: #5d6779;
+  --color-accent: #3b82f6;
+  --color-accent-soft: #1e3a5f;
+  --color-profit: #16c784;
+  --color-loss: #ea3943;
+  --color-warn: #f0b90b;
+
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  /* Premium spring-like easing (no linear/ease-in-out for interactive motion). */
+  --ease-premium: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html {
+  color-scheme: dark;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Accessible focus + reduced motion (per design-system checklist) */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
   }
 }
 
+/* --- Selectable themes (override palette + background per data-theme) --- */
+:root,
+[data-theme="midnight"] {
+  --app-bg: url("/bg-midnight.svg");
+}
+
+[data-theme="terminal"] {
+  --color-bg: #05080a;
+  --color-surface: #0b1410;
+  --color-surface-2: #10201a;
+  --color-border: #1c3a2b;
+  --color-border-strong: #2a5740;
+  --color-fg: #d6f5e3;
+  --color-muted: #7fae93;
+  --color-faint: #4f7a63;
+  --color-accent: #22c55e;
+  --color-accent-soft: #143524;
+  --app-bg: url("/bg-terminal.svg");
+}
+
+[data-theme="bull"] {
+  --color-bg: #07110b;
+  --color-surface: #0e1a12;
+  --color-surface-2: #15261a;
+  --color-border: #23402c;
+  --color-border-strong: #356b48;
+  --color-fg: #eaf5ee;
+  --color-muted: #8fb39c;
+  --color-faint: #5d7d68;
+  --color-accent: #16c784;
+  --color-accent-soft: #0f3a28;
+  --color-warn: #f0b90b;
+  --app-bg: url("/bg-bull.svg");
+}
+
+[data-theme="bear"] {
+  --color-bg: #0e0810;
+  --color-surface: #190f1c;
+  --color-surface-2: #241228;
+  --color-border: #3a2342;
+  --color-border-strong: #5a3566;
+  --color-fg: #f1e8f3;
+  --color-muted: #a98fb0;
+  --color-faint: #745d7a;
+  --color-accent: #f43f5e;
+  --color-accent-soft: #3a1426;
+  --app-bg: url("/bg-bear.svg");
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-fg);
+  font-family: var(--font-sans);
+}
+
+/* Fixed, subtle trading background layer driven by the active theme. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image: var(--app-bg, url("/bg-midnight.svg"));
+  background-size: cover;
+  background-position: center;
+  pointer-events: none;
+}
+
+/* Subtle scrollbars to match the dark theme */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 4px;
+}
+
+/* Frosted-glass card with subtle depth (Modern Dark style). */
+@utility card {
+  background-color: color-mix(in srgb, var(--color-surface) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.1);
+  -webkit-backdrop-filter: blur(14px) saturate(1.1);
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 10px 30px -16px rgba(0, 0, 0, 0.6);
+  transition:
+    border-color 0.3s var(--ease-premium),
+    box-shadow 0.3s var(--ease-premium);
+}
+
+/* Subtle premium depth on hover — border catches light, shadow deepens.
+   No transform (keeps dense dashboard grids from jittering). */
+.card:hover {
+  border-color: var(--color-border-strong);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 18px 44px -22px rgba(0, 0, 0, 0.72);
+}
+
+/* Tactile press feedback on buttons. */
+button:not(:disabled):active {
+  transform: scale(0.97);
+}
+
+/* Tabular, slightly tightened figures for all numeric/data cells. */
+/* All numeric/data cells use the monospace face with tabular figures, so
+   prices, P&L, volumes and ratios align perfectly in columns (terminal-grade). */
+.tabular-nums {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Translucent panel for nav / headers. */
+@utility glass-panel {
+  background-color: color-mix(in srgb, var(--color-surface) 72%, transparent);
+  backdrop-filter: blur(16px) saturate(1.1);
+  -webkit-backdrop-filter: blur(16px) saturate(1.1);
+}
+
+@utility input-base {
+  background-color: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: 0.5rem;
+  color: var(--color-fg);
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  outline: none;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.input-base:focus {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
 }

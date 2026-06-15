@@ -1,0 +1,114 @@
+// Prisma schema for the trader-statistics app.
+// PostgreSQL in both dev (local Docker) and production — dev/prod parity.
+// Monetary values use Float (double precision): fine for crypto prices/PnL and
+// keeps the JS analytics engine simple. Switch to Decimal if you ever need
+// exact accounting-grade arithmetic.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String            @id @default(cuid())
+  email     String            @unique
+  password  String // bcrypt hash
+  name      String?
+  createdAt DateTime          @default(now())
+  // JSON arrays of user-configurable dropdown options for trade annotations.
+  entryPointOptions String?
+  entryTypeOptions  String?
+  mistakeOptions    String?
+  accounts     ExchangeAccount[]
+  annotations  TradeAnnotation[]
+  journalNotes JournalNote[]
+}
+
+// A free-text diary note for a single day (the "Дневник" tab).
+model JournalNote {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date      String // YYYY-MM-DD
+  text      String
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId])
+}
+
+// Manual, user-supplied annotations attached to a reconstructed round-trip
+// trade. Trades have no DB row of their own, so they are referenced by a
+// stable composite key (account + symbol + market + entry timestamp).
+model TradeAnnotation {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeKey   String
+  entryPoint String? // ТВХ (точка входа)
+  entryType  String? // тип входа
+  mistake    String? // ошибка в сделке
+  stopLoss   Float? // цена стоп-лосса (для маркера на графике)
+  note       String?
+  updatedAt  DateTime @updatedAt
+
+  @@unique([userId, tradeKey])
+  @@index([userId])
+}
+
+// A connected exchange account (one API key) belonging to a user.
+model ExchangeAccount {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchange   String // binance | bybit | okx
+  label      String
+  apiKey     String // AES-256-GCM encrypted
+  apiSecret  String // AES-256-GCM encrypted
+  passphrase String? // AES-256-GCM encrypted (OKX requires a passphrase)
+  marketType String    @default("both") // spot | futures | both
+  createdAt  DateTime  @default(now())
+  lastSyncAt DateTime?
+  syncStatus String    @default("idle") // idle | syncing | error
+  syncError  String?
+  // Background auto-sync on a schedule.
+  autoSync            Boolean @default(false)
+  syncIntervalMinutes Int     @default(60)
+  fills      Fill[]
+
+  @@index([userId])
+}
+
+// A single execution (fill) imported from an exchange. Round-trip trades are
+// reconstructed from these on the fly by the analytics layer.
+model Fill {
+  id           String          @id @default(cuid())
+  accountId    String
+  account      ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  exchange     String
+  tradeId      String // exchange-side fill/trade id
+  orderId      String?
+  symbol       String // e.g. BTC/USDT
+  base         String // BTC
+  quote        String // USDT
+  market       String // spot | swap | future
+  side         String // buy | sell
+  price        Float
+  amount       Float // base amount filled
+  cost         Float // quote cost = price * amount
+  fee          Float          @default(0) // fee amount
+  feeCurrency  String?
+  realizedPnl  Float? // exchange-provided realized pnl, when available (futures)
+  takerOrMaker String?
+  timestamp    DateTime
+  createdAt    DateTime        @default(now())
+
+  @@unique([accountId, tradeId, symbol])
+  @@index([accountId])
+  @@index([accountId, timestamp])
+  @@index([accountId, symbol])
+}

@@ -1,0 +1,24 @@
+# Local PostgreSQL for development (and a reference for production).
+# Dev:   docker compose up -d db
+# Prod:  use a managed Postgres or this service behind your own backups.
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tradestats-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradestats
+      POSTGRES_PASSWORD: tradestats
+      POSTGRES_DB: tradestats
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradestats_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradestats -d tradestats"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  tradestats_pg:
