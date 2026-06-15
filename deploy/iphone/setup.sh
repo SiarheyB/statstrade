@@ -1,16 +1,18 @@
 #!/bin/sh
 # Разовая настройка приложения для запуска как сервера на iPhone (iSH / Alpine).
-# Запускать ИЗНУТРИ iSH, после `git clone`:
+# База данных — облачная (Neon). Запускать ИЗНУТРИ iSH, после `git clone`:
 #   sh ~/tradestats/deploy/iphone/setup.sh
-#
-# Скрипт идемпотентный — можно запускать повторно.
+# Идемпотентный — можно запускать повторно.
 set -e
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO"
 
 echo "==> Установка пакетов (Alpine)…"
-apk add nodejs npm git openssl nano tmux wget
+apk add nodejs npm git openssl nano wget
+
+echo "==> Менеджер процессов pm2…"
+command -v pm2 >/dev/null 2>&1 || npm install -g pm2
 
 echo "==> Проверка cloudflared…"
 if ! command -v cloudflared >/dev/null 2>&1; then
@@ -50,7 +52,7 @@ NODE
 if [ "$NEW_ENV" = "1" ]; then
   echo ""
   echo "!!  Файл .env создан, секреты сгенерированы."
-  echo "!!  Теперь впиши строку подключения к БД (из Neon) в DATABASE_URL:"
+  echo "!!  Теперь впиши строку подключения из neon.tech в DATABASE_URL:"
   echo "!!      nano .env"
   echo "!!  Затем запусти этот скрипт снова:"
   echo "!!      sh deploy/iphone/setup.sh"
@@ -73,9 +75,10 @@ if ! npm run build; then
 fi
 
 echo ""
-echo "==> Готово. Запуск сервера в фоне:"
-echo "    tmux new -d -s srv '$REPO/deploy/iphone/start.sh'"
-echo "    tmux attach -t srv      # логи (выход из просмотра: Ctrl+B, затем D)"
+echo "==> Готово. Запуск сервера:"
+echo "    sh $REPO/deploy/iphone/start.sh   # приложение + туннель (pm2)"
+echo "    pm2 status                        # что запущено"
+echo "    pm2 logs                          # логи"
 echo ""
-echo "    Перед запуском настрой туннель Cloudflare (README → раздел"
-echo "    «Сервер из iPhone», шаг 6) и включи Гид-доступ + Автоблокировку «Никогда»."
+echo "    Перед запуском настрой туннель Cloudflare (README → «Сервер из iPhone», шаг 6)"
+echo "    и включи Гид-доступ + Автоблокировку «Никогда»."
