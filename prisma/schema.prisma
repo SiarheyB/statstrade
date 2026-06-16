@@ -121,3 +121,19 @@ model Fill {
   @@index([accountId, timestamp])
   @@index([accountId, symbol])
 }
+
+// Aggregated crypto news from external RSS sources. Global (not per-user);
+// deduped by canonical URL and refreshed lazily by the /api/news endpoint.
+model NewsItem {
+  id          String   @id @default(cuid())
+  source      String // coindesk | cointelegraph | decrypt
+  title       String
+  url         String   @unique
+  summary     String?
+  imageUrl    String?
+  publishedAt DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([publishedAt])
+  @@index([source])
+}

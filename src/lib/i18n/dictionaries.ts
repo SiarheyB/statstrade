@@ -26,8 +26,15 @@ const en: Dict = {
   "nav.journal": "Journal",
   "nav.trades": "Trades",
   "nav.exchanges": "Exchanges",
+  "nav.news": "News",
   "nav.settings": "Settings",
   "nav.logout": "Log out",
+  // news
+  "news.title": "News",
+  "news.subtitle": "Market-moving crypto headlines from leading outlets.",
+  "news.refresh": "Refresh",
+  "news.all": "All",
+  "news.empty": "No news yet — try refreshing.",
 
   // calendar
   "cal.title": "Calendar",
@@ -423,8 +430,15 @@ const ru: Dict = {
   "nav.journal": "Дневник",
   "nav.trades": "Сделки",
   "nav.exchanges": "Биржи",
+  "nav.news": "Новости",
   "nav.settings": "Настройки",
   "nav.logout": "Выйти",
+  // news
+  "news.title": "Новости",
+  "news.subtitle": "Главные крипто-новости от ведущих изданий — то, что двигает рынок.",
+  "news.refresh": "Обновить",
+  "news.all": "Все",
+  "news.empty": "Пока нет новостей — попробуйте обновить.",
 
   // calendar
   "cal.title": "Календарь",
