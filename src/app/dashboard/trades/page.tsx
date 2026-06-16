@@ -5,7 +5,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText } from "lucide-reac
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/TradeChart";
-import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum } from "@/lib/format";
+import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol } from "@/lib/format";
 import { downloadCsv, nodeToPdf, dateStamp } from "@/lib/export";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -24,6 +24,7 @@ export default function TradesPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
+  const [accountFilter, setAccountFilter] = useState("all");
   const [symbolFilter, setSymbolFilter] = useState("all");
   const [marketFilter, setMarketFilter] = useState("all");
   const [sideFilter, setSideFilter] = useState("all");
@@ -100,6 +101,7 @@ export default function TradesPage() {
 
   const filtered = useMemo(() => {
     let rows = data?.trades ?? [];
+    if (accountFilter !== "all") rows = rows.filter((tr) => tr.accountId === accountFilter);
     if (symbolFilter !== "all") rows = rows.filter((tr) => tr.symbol === symbolFilter);
     if (marketFilter === "spot") rows = rows.filter((tr) => tr.market === "spot");
     else if (marketFilter === "futures") rows = rows.filter((tr) => tr.market !== "spot");
@@ -126,7 +128,7 @@ export default function TradesPage() {
       return sortDir === "asc" ? av - bv : bv - av;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ann, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, sortKey, sortDir]);
+  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, sortKey, sortDir]);
 
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -157,7 +159,7 @@ export default function TradesPage() {
       const a = annOf(tr);
       const rr = rrOf(tr, a.stopLoss);
       return [
-        tr.symbol,
+        fmtSymbol(tr.symbol),
         tr.side === "long" ? "Long" : "Short",
         tr.market === "spot" ? "spot" : "perp",
         fmtDate(tr.entryTime),
@@ -219,9 +221,13 @@ export default function TradesPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
+        <select className={SELECT} value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(0); }}>
+          <option value="all">{t("trades.allAccounts")}</option>
+          {data?.accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select>
         <select className={SELECT} value={symbolFilter} onChange={(e) => { setSymbolFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("trades.allSymbols")}</option>
-          {data?.symbols.map((s) => <option key={s} value={s}>{s}</option>)}
+          {data?.symbols.map((s) => <option key={s} value={s}>{fmtSymbol(s)}</option>)}
         </select>
         <select className={SELECT} value={marketFilter} onChange={(e) => { setMarketFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allMarkets")}</option>
@@ -295,7 +301,7 @@ export default function TradesPage() {
                         onMouseEnter={(e) => onTickerEnter(e, tr)}
                         onMouseLeave={onTickerLeave}
                       >
-                        <span className="cursor-pointer border-b border-dotted border-faint/50">{tr.symbol}</span>
+                        <span className="cursor-pointer border-b border-dotted border-faint/50">{fmtSymbol(tr.symbol)}</span>
                       </td>
                       <td className="px-3 py-2"><SideBadge side={tr.side} /></td>
                       <td className="px-3 py-2 text-xs text-faint uppercase">
@@ -367,7 +373,7 @@ export default function TradesPage() {
                 const rr = rrOf(tr, a.stopLoss);
                 return (
                   <tr key={tr.id} className="border-b border-border">
-                    <td className="px-2 py-1 font-medium">{tr.symbol}</td>
+                    <td className="px-2 py-1 font-medium">{fmtSymbol(tr.symbol)}</td>
                     <td className="px-2 py-1">{tr.side === "long" ? "Long" : "Short"}</td>
                     <td className="px-2 py-1 uppercase text-faint">{tr.market === "spot" ? "spot" : "perp"}</td>
                     <td className="px-2 py-1 text-muted">{fmtDate(tr.exitTime)}</td>
@@ -399,7 +405,7 @@ export default function TradesPage() {
         >
           <div className="card border-border-strong p-3 w-[360px] shadow-2xl">
             <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium">{chart.trade.symbol}</span>
+              <span className="text-sm font-medium">{fmtSymbol(chart.trade.symbol)}</span>
               <SideBadge side={chart.trade.side} />
             </div>
             <TradeChart trade={{ ...chart.trade, stopLoss: annOf(chart.trade).stopLoss }} />

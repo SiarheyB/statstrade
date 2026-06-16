@@ -75,6 +75,12 @@ export function fmtDate(iso: string | Date): string {
   });
 }
 
+// CCXT unified symbols carry a settle suffix for derivatives
+// (e.g. "RIF/USDT:USDT"). Show just the base/quote pair: "RIF/USDT".
+export function fmtSymbol(symbol: string): string {
+  return symbol.split(":")[0];
+}
+
 export function pnlColor(value: number): string {
   if (value > 0) return "text-profit";
   if (value < 0) return "text-loss";
