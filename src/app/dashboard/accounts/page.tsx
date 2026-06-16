@@ -20,6 +20,7 @@ type Account = {
   exchange: string;
   label: string;
   marketType: string;
+  demoTrading: boolean;
   apiKeyMasked: string;
   lastSyncAt: string | null;
   syncStatus: string;
@@ -39,9 +40,9 @@ type Prog = { done: number; total: number; imported: number; phase: string | nul
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
 
 const EXCHANGES = [
-  { id: "binance", name: "Binance", needsPassphrase: false },
-  { id: "bybit", name: "Bybit", needsPassphrase: false },
-  { id: "okx", name: "OKX", needsPassphrase: true },
+  { id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: false },
+  { id: "bybit", name: "Bybit", needsPassphrase: false, supportsDemo: true },
+  { id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: false },
 ];
 
 export default function AccountsPage() {
@@ -212,6 +213,11 @@ export default function AccountsPage() {
                   <div>
                     <div className="font-medium flex items-center gap-2">
                       {a.label}
+                      {a.demoTrading && (
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-warn/15 text-warn">
+                          demo
+                        </span>
+                      )}
                       <StatusPill status={a.syncStatus} />
                     </div>
                     <div className="text-xs text-faint">
@@ -339,10 +345,12 @@ function AccountForm({
   const [apiSecret, setApiSecret] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [marketType, setMarketType] = useState("both");
+  const [demoTrading, setDemoTrading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const needsPassphrase = EXCHANGES.find((e) => e.id === exchange)?.needsPassphrase;
+  const supportsDemo = EXCHANGES.find((e) => e.id === exchange)?.supportsDemo;
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -359,6 +367,7 @@ function AccountForm({
           apiSecret,
           passphrase: needsPassphrase ? passphrase : undefined,
           marketType,
+          demoTrading: supportsDemo ? demoTrading : false,
         }),
       });
       const data = await res.json();
@@ -421,6 +430,17 @@ function AccountForm({
               <option value="futures">{t("acc.market.futures")}</option>
             </select>
           </div>
+          {supportsDemo && (
+            <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={demoTrading}
+                onChange={(e) => setDemoTrading(e.target.checked)}
+                className="accent-accent h-4 w-4"
+              />
+              {t("acc.form.demo")}
+            </label>
+          )}
           <div>
             <label className="block text-xs text-muted mb-1">
               <Term name="API Key">API Key</Term>

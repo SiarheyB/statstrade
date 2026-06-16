@@ -220,6 +220,7 @@ async function buildPlan(
   creds: Creds,
   accountId: string,
   diag: string[],
+  demo: boolean,
 ): Promise<string[]> {
   const kinds = passesFor(marketType);
 
@@ -246,7 +247,7 @@ async function buildPlan(
   const tasks: string[] = [];
 
   for (const kind of kinds) {
-    const exchange = createExchange(exchangeId, creds, kind);
+    const exchange = createExchange(exchangeId, creds, kind, demo);
     try {
       await exchange.loadMarkets();
       const markets = (exchange.markets ?? {}) as unknown as Record<string, Record<string, unknown>>;
@@ -365,7 +366,7 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
       try {
         let ex = exchanges.get(kind);
         if (!ex) {
-          ex = createExchange(exchangeId, creds, kind);
+          ex = createExchange(exchangeId, creds, kind, account.demoTrading);
           await ex.loadMarkets();
           exchanges.set(kind, ex);
         }
@@ -487,6 +488,7 @@ export async function syncChunk(
       credsFor(account),
       accountId,
       diag,
+      account.demoTrading,
     );
   } catch (err) {
     await prisma.exchangeAccount.update({

@@ -12,6 +12,7 @@ const createSchema = z.object({
   apiSecret: z.string().trim().min(1, "Введите API secret"),
   passphrase: z.string().trim().optional(),
   marketType: z.enum(["spot", "futures", "both"]).default("both"),
+  demoTrading: z.boolean().optional().default(false),
 });
 
 export async function GET() {
@@ -30,6 +31,7 @@ export async function GET() {
       exchange: a.exchange,
       label: a.label,
       marketType: a.marketType,
+      demoTrading: a.demoTrading,
       apiKeyMasked: maskSecret(safeDecrypt(a.apiKey)),
       lastSyncAt: a.lastSyncAt,
       syncStatus: a.syncStatus,
@@ -76,6 +78,7 @@ export async function POST(req: Request) {
         exchange: data.exchange,
         label: data.label,
         marketType: data.marketType,
+        demoTrading: data.demoTrading,
         apiKey: encrypt(data.apiKey),
         apiSecret: encrypt(data.apiSecret),
         passphrase: data.passphrase ? encrypt(data.passphrase) : null,

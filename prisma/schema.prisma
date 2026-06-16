@@ -71,6 +71,7 @@ model ExchangeAccount {
   apiSecret  String // AES-256-GCM encrypted
   passphrase String? // AES-256-GCM encrypted (OKX requires a passphrase)
   marketType String    @default("both") // spot | futures | both
+  demoTrading Boolean  @default(false) // Bybit Demo Trading key -> use demo API host
   createdAt  DateTime  @default(now())
   lastSyncAt DateTime?
   syncStatus String    @default("idle") // idle | syncing | error

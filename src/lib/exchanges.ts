@@ -47,6 +47,7 @@ export function createExchange(
   id: ExchangeId,
   creds: ExchangeCredentials,
   kind: MarketKind,
+  demo = false,
 ): Exchange {
   const ctor = ccxt[id] as unknown as new (config: Record<string, unknown>) => Exchange;
   const exchange = new ctor({
@@ -58,6 +59,11 @@ export function createExchange(
       defaultType: kind, // spot | swap
     },
   });
+  // Demo-trading keys (e.g. Bybit Demo) only work against the demo API host.
+  if (demo) {
+    const ex = exchange as unknown as { enableDemoTrading?: (v: boolean) => void };
+    if (typeof ex.enableDemoTrading === "function") ex.enableDemoTrading(true);
+  }
   return exchange;
 }
 
