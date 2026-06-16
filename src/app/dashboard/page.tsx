@@ -163,6 +163,14 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
+  // Restore the capital input from the previous session (per-browser preference).
+  useEffect(() => {
+    const saved = Number(localStorage.getItem("ts_capital"));
+    if (Number.isFinite(saved) && saved > 0) {
+      setFilters((f) => ({ ...f, initialCapital: saved }));
+    }
+  }, []);
+
   const m = data?.metrics;
   const hasAccounts = (data?.accounts.length ?? 0) > 0;
   const hasTrades = (m?.tradeCount ?? 0) > 0;
@@ -270,9 +278,11 @@ export default function DashboardPage() {
               className="bg-transparent w-20 outline-none text-sm"
               value={filters.initialCapital}
               min={1}
-              onChange={(e) =>
-                setFilters((f) => ({ ...f, initialCapital: Number(e.target.value) || 0 }))
-              }
+              onChange={(e) => {
+                const v = Number(e.target.value) || 0;
+                setFilters((f) => ({ ...f, initialCapital: v }));
+                if (v > 0) localStorage.setItem("ts_capital", String(v));
+              }}
             />
           </div>
           <button

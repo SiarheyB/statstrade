@@ -523,6 +523,9 @@ function ProgressBar({
           style={{ width: `${pct}%` }}
         />
       </div>
+      {phase !== "incremental" && (
+        <p className="mt-1.5 text-xs text-faint leading-snug">{t("acc.sync.hint")}</p>
+      )}
     </div>
   );
 }
