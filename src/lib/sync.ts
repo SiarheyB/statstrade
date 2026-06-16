@@ -219,6 +219,7 @@ async function buildPlan(
   phase: "full" | "incremental",
   creds: Creds,
   accountId: string,
+  diag: string[],
 ): Promise<string[]> {
   const kinds = passesFor(marketType);
 
@@ -268,6 +269,9 @@ async function buildPlan(
           if (s) symbols.add(s);
         }
         for (const s of tradedByKind.get("swap") ?? []) symbols.add(s);
+        diag.push(
+          `swap: ${Object.keys(markets).length} markets, ${ids.size} traded, ${symbols.size} pairs`,
+        );
         // Floor a day before earliest activity so we don't over-walk empty windows.
         const floor = Math.max(fullFloor, earliest - 86_400_000);
         for (const sym of symbols) tasks.push(encodeTask("swap", sym, floor));
@@ -307,9 +311,10 @@ async function buildPlan(
         }
       }
 
+      diag.push(`spot: ${Object.keys(markets).length} markets, ${symbols.size} pairs`);
       for (const sym of symbols) tasks.push(encodeTask("spot", sym));
-    } catch {
-      // skip a kind whose markets fail to load
+    } catch (err) {
+      diag.push(`${kind} setup failed: ${(err as Error).message}`);
     } finally {
       if (typeof exchange.close === "function") await exchange.close().catch(() => {});
     }
@@ -472,6 +477,7 @@ export async function syncChunk(
     data: { syncStatus: "syncing", syncPhase: phase, syncError: null, syncCursor: 0, syncImported: 0 },
   });
 
+  const diag: string[] = [];
   let plan: string[];
   try {
     plan = await buildPlan(
@@ -480,6 +486,7 @@ export async function syncChunk(
       phase,
       credsFor(account),
       accountId,
+      diag,
     );
   } catch (err) {
     await prisma.exchangeAccount.update({
@@ -490,8 +497,23 @@ export async function syncChunk(
   }
 
   if (plan.length === 0) {
-    await finishScan(accountId, phase, 0, [], account.fullSyncAt);
-    return { status: "idle", phase, done: 0, total: 0, imported: 0, error: null };
+    // No tasks usually means loadMarkets/income failed (e.g. exchange blocked
+    // the server IP). Surface the reason instead of silently completing.
+    const why = diag.join(" | ") || "no tradable pairs found";
+    await prisma.exchangeAccount.update({
+      where: { id: accountId },
+      data: {
+        syncStatus: "error",
+        syncError: why,
+        syncPlan: null,
+        syncCursor: 0,
+        syncTotal: 0,
+        syncImported: 0,
+        syncPhase: null,
+        lastSyncAt: new Date(),
+      },
+    });
+    return { status: "error", phase, done: 0, total: 0, imported: 0, error: why };
   }
 
   await prisma.exchangeAccount.update({
