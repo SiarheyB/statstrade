@@ -112,6 +112,10 @@ async function discoverFutures(
   return { ids: ids, earliest: ids.size ? earliest : Date.now() };
 }
 
+// Some exchanges reject trade queries older than a fixed window (Bybit allows
+// ~2 years). Clamp the lookback floor so the request stays valid.
+const MAX_LOOKBACK_DAYS: Partial<Record<ExchangeId, number>> = { bybit: 720 };
+
 // Pull trades for one symbol (or all, when symbol is undefined). The pagination
 // strategy is exchange/market specific because Binance has no "all trades" call
 // and applies time windows that silently return nothing if used naively.
@@ -122,6 +126,8 @@ async function fetchTrades(
   exchangeId: ExchangeId,
   kind: MarketKind,
 ): Promise<NormalizedFill[]> {
+  const cap = MAX_LOOKBACK_DAYS[exchangeId];
+  if (cap) sinceFloor = Math.max(sinceFloor, Date.now() - cap * 86_400_000);
   const fills: NormalizedFill[] = [];
   const seen = new Set<string>();
   const collect = (trades: unknown[]) => {
