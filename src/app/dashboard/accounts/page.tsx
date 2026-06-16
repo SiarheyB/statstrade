@@ -176,6 +176,11 @@ export default function AccountsPage() {
         <p>{t("acc.security")}</p>
       </div>
 
+      <div className="card p-3 mb-5 flex items-start gap-3 text-sm text-muted">
+        <RefreshCw size={18} className="text-accent shrink-0 mt-0.5" />
+        <p>{t("acc.updateNote")}</p>
+      </div>
+
       {notice && (
         <div className="card p-3 mb-5 text-sm flex items-center justify-between gap-3">
           <span>{notice}</span>

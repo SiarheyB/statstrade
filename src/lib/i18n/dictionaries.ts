@@ -250,6 +250,8 @@ const en: Dict = {
   "acc.add": "Add",
   "acc.security":
     "Create API keys with read-only access (no withdrawals or trading). Secrets are stored encrypted (AES-256-GCM). No keys? Click Demo on an account to generate test trades.",
+  "acc.updateNote":
+    "Exchange data updates automatically about every 30 minutes when auto-sync is on. Press “Sync” to refresh immediately.",
   "acc.empty": "No connected exchanges yet",
   "acc.connectFirst": "Connect your first exchange",
   "acc.demo": "Demo",
@@ -650,6 +652,8 @@ const ru: Dict = {
   "acc.add": "Добавить",
   "acc.security":
     "Создавайте API-ключи только с правом чтения (без вывода и торговли). Секреты хранятся в зашифрованном виде (AES-256-GCM). Нет ключей? Нажмите «Демо» у аккаунта, чтобы сгенерировать тестовые сделки.",
+  "acc.updateNote":
+    "Данные бирж обновляются автоматически примерно раз в 30 минут при включённой авто-синхронизации. Нажмите «Синхр.», чтобы обновить сейчас.",
   "acc.empty": "Пока нет подключённых бирж",
   "acc.connectFirst": "Подключить первую биржу",
   "acc.demo": "Демо",
