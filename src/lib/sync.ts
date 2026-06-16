@@ -61,18 +61,19 @@ function decodeTask(task: string): { kind: MarketKind; symbol: string } {
   return { kind: task.slice(0, i) as MarketKind, symbol: task.slice(i + 1) };
 }
 
-// Paginate trades for one symbol (or all trades when symbol is undefined).
+// Pull trades for one symbol (or all, when symbol is undefined).
+// Per-symbol exchanges (Binance) are paginated *backwards* via endTime with no
+// startTime: passing an old `since` as startTime makes Binance apply a 24h
+// window and return nothing. All-at-once exchanges page forward from the floor.
 async function fetchTrades(
   exchange: Exchange,
   symbol: string | undefined,
-  since: number,
+  sinceFloor: number,
+  requiresSymbol: boolean,
 ): Promise<NormalizedFill[]> {
   const fills: NormalizedFill[] = [];
   const seen = new Set<string>();
-  let cursor = since;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
-    if (!trades.length) break;
+  const collect = (trades: unknown[]) => {
     for (const raw of trades) {
       const fill = normalizeFill(exchange, raw as Record<string, unknown>);
       if (!fill) continue;
@@ -81,13 +82,41 @@ async function fetchTrades(
       seen.add(key);
       fills.push(fill);
     }
-    const last = trades[trades.length - 1] as { timestamp?: number };
-    const next = Number(last.timestamp) + 1;
-    if (!Number.isFinite(next) || next <= cursor) break;
-    cursor = next;
-    if (trades.length < PAGE_LIMIT) break;
+  };
+
+  if (!requiresSymbol) {
+    // Bybit/OKX: forward pagination from the lookback floor.
+    let cursor = sinceFloor;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
+      if (!trades.length) break;
+      collect(trades);
+      const last = trades[trades.length - 1] as { timestamp?: number };
+      const next = Number(last.timestamp) + 1;
+      if (!Number.isFinite(next) || next <= cursor) break;
+      cursor = next;
+      if (trades.length < PAGE_LIMIT) break;
+    }
+    return fills;
   }
-  return fills;
+
+  // Binance: most-recent first, then page backwards by endTime down to the floor.
+  let endTime: number | undefined;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const params = endTime ? { endTime } : {};
+    const trades = (await exchange.fetchMyTrades(symbol, undefined, PAGE_LIMIT, params)) as unknown[];
+    if (!trades.length) break;
+    collect(trades);
+    let oldest = Infinity;
+    for (const t of trades) {
+      const ts = Number((t as { timestamp?: number }).timestamp);
+      if (Number.isFinite(ts) && ts < oldest) oldest = ts;
+    }
+    if (!Number.isFinite(oldest) || oldest <= sinceFloor) break;
+    if (trades.length < PAGE_LIMIT) break;
+    endTime = oldest - 1;
+  }
+  return fills.filter((f) => f.timestamp.getTime() >= sinceFloor);
 }
 
 type Creds = { apiKey: string; apiSecret: string; passphrase: string | null };
@@ -231,7 +260,12 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
           await ex.loadMarkets();
           exchanges.set(kind, ex);
         }
-        const fills = await fetchTrades(ex, symbol || undefined, since);
+        const fills = await fetchTrades(
+          ex,
+          symbol || undefined,
+          since,
+          REQUIRES_SYMBOL[account.exchange as ExchangeId],
+        );
         imported += await persistFills(accountId, account.exchange, fills);
       } catch (err) {
         errors.push(`${symbol || kind}: ${(err as Error).message}`);
