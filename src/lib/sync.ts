@@ -115,6 +115,9 @@ async function discoverFutures(
 // Some exchanges reject trade queries older than a fixed window (Bybit allows
 // ~2 years). Clamp the lookback floor so the request stays valid.
 const MAX_LOOKBACK_DAYS: Partial<Record<ExchangeId, number>> = { bybit: 720 };
+// Bybit returns executions only within ~7-day query windows, so page in time
+// steps (newest first) instead of one forward stream from `since`.
+const WINDOW_DAYS: Partial<Record<ExchangeId, number>> = { bybit: 7 };
 
 // Pull trades for one symbol (or all, when symbol is undefined). The pagination
 // strategy is exchange/market specific because Binance has no "all trades" call
@@ -141,8 +144,42 @@ async function fetchTrades(
     }
   };
 
-  // Bybit/OKX: one stream of all trades, paginated forward from the floor.
   if (!REQUIRES_SYMBOL[exchangeId]) {
+    const windowDays = WINDOW_DAYS[exchangeId];
+    if (windowDays) {
+      // Bybit: walk back in fixed time windows (executions are capped per query),
+      // collecting across windows and stopping after a run of empty ones.
+      const windowMs = windowDays * 86_400_000;
+      let end = Date.now();
+      let emptyStreak = 0;
+      for (let w = 0; w < FUTURES_MAX_WINDOWS && end > sinceFloor; w++) {
+        const start = Math.max(sinceFloor, end - windowMs);
+        let got = 0;
+        let inner = start;
+        for (let p = 0; p < 5; p++) {
+          const trades = (await exchange.fetchMyTrades(symbol, inner, PAGE_LIMIT, {
+            endTime: end,
+          })) as unknown[];
+          if (!trades.length) break;
+          got += trades.length;
+          collect(trades);
+          if (trades.length < PAGE_LIMIT) break;
+          let newest = inner;
+          for (const t of trades) {
+            const ts = Number((t as { timestamp?: number }).timestamp);
+            if (Number.isFinite(ts) && ts > newest) newest = ts;
+          }
+          if (newest <= inner) break;
+          inner = newest + 1;
+        }
+        emptyStreak = got === 0 ? emptyStreak + 1 : 0;
+        if (emptyStreak >= 8) break; // ~8 weeks of no trades → assume done
+        end = start - 1;
+      }
+      return fills.filter((f) => f.timestamp.getTime() >= sinceFloor);
+    }
+
+    // OKX etc.: one continuous forward stream from the floor.
     let cursor = sinceFloor;
     for (let page = 0; page < MAX_PAGES; page++) {
       const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
