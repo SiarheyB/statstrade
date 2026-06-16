@@ -16,20 +16,25 @@ const MAX_PAGES = 30;
 const FULL_LOOKBACK_DAYS = 365 * 3;
 const INCREMENTAL_OVERLAP_DAYS = 7;
 const INCREMENTAL_FALLBACK_DAYS = 30;
+// Binance futures only returns trades inside a bounded window, so we walk back
+// in fixed steps. Income discovery (below) bounds how far we actually walk.
+const FUTURES_WINDOW_MS = 7 * 86_400_000;
+const FUTURES_MAX_WINDOWS = 230;
+const FUTURES_DISCOVERY_INCREMENTAL_DAYS = 90;
 // Time budget for one chunk — kept under the serverless maxDuration (60s) so a
 // chunk always finishes and checkpoints before the platform kills the function.
 const CHUNK_BUDGET_MS = 42_000;
 
 // Exchanges whose API requires a symbol on every trade query (no "all trades"
-// endpoint). For these we enumerate every candidate pair; the rest fetch all
-// trades in one pass.
+// endpoint). For these we enumerate candidate pairs; the rest fetch all trades
+// in one pass.
 const REQUIRES_SYMBOL: Record<ExchangeId, boolean> = {
   binance: true,
   bybit: false,
   okx: false,
 };
 
-// Quote currencies whose pairs a full scan enumerates (per-symbol exchanges).
+// Quote currencies whose spot pairs a full scan enumerates (per-symbol exchanges).
 const SCAN_QUOTES = [
   "USDT", "USDC", "FDUSD", "TUSD", "BUSD", "BTC", "ETH", "BNB", "EUR", "TRY",
 ];
@@ -54,22 +59,68 @@ function passesFor(marketType: string): MarketKind[] {
   return ["spot", "swap"];
 }
 
-// A scan task is "kind|symbol"; an empty symbol means "fetch all trades".
-const encodeTask = (kind: MarketKind, symbol: string) => `${kind}|${symbol}`;
-function decodeTask(task: string): { kind: MarketKind; symbol: string } {
-  const i = task.indexOf("|");
-  return { kind: task.slice(0, i) as MarketKind, symbol: task.slice(i + 1) };
+// A scan task is "kind|symbol" (empty symbol = fetch all trades). Futures tasks
+// carry a third "|floorMs" — the start of activity, so we don't walk empty
+// 7-day windows back further than the trader was actually active.
+const encodeTask = (kind: MarketKind, symbol: string, floor?: number) =>
+  floor !== undefined ? `${kind}|${symbol}|${floor}` : `${kind}|${symbol}`;
+function decodeTask(task: string): { kind: MarketKind; symbol: string; floor?: number } {
+  const parts = task.split("|");
+  return {
+    kind: parts[0] as MarketKind,
+    symbol: parts[1] ?? "",
+    floor: parts[2] ? Number(parts[2]) : undefined,
+  };
 }
 
-// Pull trades for one symbol (or all, when symbol is undefined).
-// Per-symbol exchanges (Binance) are paginated *backwards* via endTime with no
-// startTime: passing an old `since` as startTime makes Binance apply a 24h
-// window and return nothing. All-at-once exchanges page forward from the floor.
+// Discover which Binance futures symbols were actually traded (and the earliest
+// activity time) from income history — enumerating all perps × time windows is
+// infeasible. Returns raw exchange ids (e.g. "BTCUSDT").
+async function discoverFutures(
+  exchange: Exchange,
+  sinceFloor: number,
+): Promise<{ ids: Set<string>; earliest: number }> {
+  const ids = new Set<string>();
+  let earliest = Date.now();
+  const api = exchange as unknown as {
+    fapiPrivateGetIncome?: (params: Record<string, unknown>) => Promise<unknown[]>;
+  };
+  if (typeof api.fapiPrivateGetIncome !== "function") return { ids, earliest };
+
+  let startTime = sinceFloor;
+  for (let page = 0; page < 60; page++) {
+    let rows: unknown[];
+    try {
+      rows = await api.fapiPrivateGetIncome({ startTime, limit: 1000 });
+    } catch {
+      break;
+    }
+    if (!Array.isArray(rows) || rows.length === 0) break;
+    let maxTime = startTime;
+    for (const r of rows) {
+      const rec = r as { symbol?: string; time?: number | string };
+      if (rec.symbol) ids.add(rec.symbol);
+      const t = Number(rec.time);
+      if (Number.isFinite(t)) {
+        if (t < earliest) earliest = t;
+        if (t > maxTime) maxTime = t;
+      }
+    }
+    if (rows.length < 1000 || maxTime <= startTime) break;
+    startTime = maxTime + 1;
+  }
+  return { ids: ids, earliest: ids.size ? earliest : Date.now() };
+}
+
+// Pull trades for one symbol (or all, when symbol is undefined). The pagination
+// strategy is exchange/market specific because Binance has no "all trades" call
+// and applies time windows that silently return nothing if used naively.
 async function fetchTrades(
   exchange: Exchange,
   symbol: string | undefined,
   sinceFloor: number,
-  requiresSymbol: boolean,
+  exchangeId: ExchangeId,
+  kind: MarketKind,
 ): Promise<NormalizedFill[]> {
   const fills: NormalizedFill[] = [];
   const seen = new Set<string>();
@@ -84,8 +135,8 @@ async function fetchTrades(
     }
   };
 
-  if (!requiresSymbol) {
-    // Bybit/OKX: forward pagination from the lookback floor.
+  // Bybit/OKX: one stream of all trades, paginated forward from the floor.
+  if (!REQUIRES_SYMBOL[exchangeId]) {
     let cursor = sinceFloor;
     for (let page = 0; page < MAX_PAGES; page++) {
       const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
@@ -100,7 +151,35 @@ async function fetchTrades(
     return fills;
   }
 
-  // Binance: most-recent first, then page backwards by endTime down to the floor.
+  // Binance futures: API returns only a bounded window (and the last 7 days by
+  // default). Walk back in 7-day windows from now down to the floor.
+  if (kind === "swap") {
+    let end = Date.now();
+    for (let w = 0; w < FUTURES_MAX_WINDOWS && end > sinceFloor; w++) {
+      const start = Math.max(sinceFloor, end - FUTURES_WINDOW_MS);
+      let inner = start;
+      for (let p = 0; p < 5; p++) {
+        const trades = (await exchange.fetchMyTrades(symbol, inner, PAGE_LIMIT, {
+          endTime: end,
+        })) as unknown[];
+        if (!trades.length) break;
+        collect(trades);
+        if (trades.length < PAGE_LIMIT) break;
+        let newest = inner;
+        for (const t of trades) {
+          const ts = Number((t as { timestamp?: number }).timestamp);
+          if (Number.isFinite(ts) && ts > newest) newest = ts;
+        }
+        if (newest <= inner) break;
+        inner = newest + 1;
+      }
+      end = start - 1;
+    }
+    return fills.filter((f) => f.timestamp.getTime() >= sinceFloor);
+  }
+
+  // Binance spot: most-recent first (no startTime → avoids the 24h window),
+  // then page backwards by endTime down to the floor.
   let endTime: number | undefined;
   for (let page = 0; page < MAX_PAGES; page++) {
     const params = endTime ? { endTime } : {};
@@ -162,24 +241,48 @@ async function buildPlan(
     }
   }
 
+  const fullFloor = Date.now() - FULL_LOOKBACK_DAYS * 86_400_000;
   const tasks: string[] = [];
+
   for (const kind of kinds) {
     const exchange = createExchange(exchangeId, creds, kind);
     try {
       await exchange.loadMarkets();
-      const markets = (exchange.markets ?? {}) as Record<string, Record<string, unknown>>;
-      const isKind = (m: Record<string, unknown>) =>
-        kind === "spot" ? m.type === "spot" : m.type === "swap";
+      const markets = (exchange.markets ?? {}) as unknown as Record<string, Record<string, unknown>>;
       const symbols = new Set<string>();
 
+      if (kind === "swap") {
+        // Futures: discover traded symbols (+ earliest activity) via income.
+        const discoverSince =
+          phase === "full"
+            ? fullFloor
+            : Date.now() - FUTURES_DISCOVERY_INCREMENTAL_DAYS * 86_400_000;
+        const { ids, earliest } = await discoverFutures(exchange, discoverSince);
+        const idToSymbol = new Map<string, string>();
+        for (const sym of Object.keys(markets)) {
+          const m = markets[sym];
+          if (m && m.type === "swap" && typeof m.id === "string") idToSymbol.set(m.id, sym);
+        }
+        for (const id of ids) {
+          const s = idToSymbol.get(id);
+          if (s) symbols.add(s);
+        }
+        for (const s of tradedByKind.get("swap") ?? []) symbols.add(s);
+        // Floor a day before earliest activity so we don't over-walk empty windows.
+        const floor = Math.max(fullFloor, earliest - 86_400_000);
+        for (const sym of symbols) tasks.push(encodeTask("swap", sym, floor));
+        continue;
+      }
+
+      // Spot.
       if (phase === "full") {
         for (const sym of Object.keys(markets)) {
           const m = markets[sym];
           if (!m || m.active === false) continue;
-          if (isKind(m) && SCAN_QUOTES.includes(m.quote as string)) symbols.add(sym);
+          if (m.type === "spot" && SCAN_QUOTES.includes(m.quote as string)) symbols.add(sym);
         }
       } else {
-        for (const s of tradedByKind.get(kind) ?? []) symbols.add(s);
+        for (const s of tradedByKind.get("spot") ?? []) symbols.add(s);
         try {
           const balance = await exchange.fetchBalance();
           const totals = (balance.total ?? {}) as unknown as Record<string, number>;
@@ -187,7 +290,7 @@ async function buildPlan(
             if ((totals[asset] ?? 0) <= 0) continue;
             for (const sym of Object.keys(markets)) {
               const m = markets[sym];
-              if (m && isKind(m) && m.base === asset && MAJOR_QUOTES.includes(m.quote as string)) {
+              if (m && m.type === "spot" && m.base === asset && MAJOR_QUOTES.includes(m.quote as string)) {
                 symbols.add(sym);
               }
             }
@@ -197,14 +300,14 @@ async function buildPlan(
         }
         for (const sym of Object.keys(markets)) {
           const m = markets[sym];
-          if (!m || m.active === false || !isKind(m)) continue;
+          if (!m || m.active === false || m.type !== "spot") continue;
           if (MAJOR_BASES.includes(m.base as string) && MAJOR_QUOTES.includes(m.quote as string)) {
             symbols.add(sym);
           }
         }
       }
 
-      for (const sym of symbols) tasks.push(encodeTask(kind, sym));
+      for (const sym of symbols) tasks.push(encodeTask("spot", sym));
     } catch {
       // skip a kind whose markets fail to load
     } finally {
@@ -243,7 +346,8 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
   }
 
   const creds = credsFor(account);
-  const since = sinceForPhase(phase, account.lastSyncAt);
+  const baseSince = sinceForPhase(phase, account.lastSyncAt);
+  const exchangeId = account.exchange as ExchangeId;
   const exchanges = new Map<MarketKind, Exchange>();
   const errors: string[] = [];
   let imported = account.syncImported;
@@ -252,20 +356,15 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
 
   try {
     while (cursor < total && Date.now() - start < CHUNK_BUDGET_MS) {
-      const { kind, symbol } = decodeTask(plan[cursor]);
+      const { kind, symbol, floor } = decodeTask(plan[cursor]);
       try {
         let ex = exchanges.get(kind);
         if (!ex) {
-          ex = createExchange(account.exchange as ExchangeId, creds, kind);
+          ex = createExchange(exchangeId, creds, kind);
           await ex.loadMarkets();
           exchanges.set(kind, ex);
         }
-        const fills = await fetchTrades(
-          ex,
-          symbol || undefined,
-          since,
-          REQUIRES_SYMBOL[account.exchange as ExchangeId],
-        );
+        const fills = await fetchTrades(ex, symbol || undefined, floor ?? baseSince, exchangeId, kind);
         imported += await persistFills(accountId, account.exchange, fills);
       } catch (err) {
         errors.push(`${symbol || kind}: ${(err as Error).message}`);
@@ -364,9 +463,9 @@ export async function syncChunk(
     return processChunk(accountId);
   }
 
-  // Start a new scan: build the plan (heavy loadMarkets) and return immediately;
-  // the client's next call processes the first chunk. This keeps the start call
-  // well under the serverless time limit.
+  // Start a new scan: build the plan (heavy loadMarkets + futures discovery) and
+  // return immediately; the client's next call processes the first chunk. This
+  // keeps the start call well under the serverless time limit.
   const phase: "full" | "incremental" = account.fullSyncAt ? "incremental" : "full";
   await prisma.exchangeAccount.update({
     where: { id: accountId },
