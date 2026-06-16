@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { syncAccount } from "@/lib/sync";
+import { syncChunk } from "@/lib/sync";
 
-// Long-running: fetches trades from the exchange. Keep generous timeout.
-export const maxDuration = 120;
+// One chunk of a chunked background import. The client calls this repeatedly
+// (while status === "syncing") to walk the scan and render a progress bar.
+// Kept under the Hobby plan's 60s function limit.
+export const maxDuration = 60;
 
 export async function POST(
   req: Request,
@@ -19,17 +21,17 @@ export async function POST(
   });
   if (!account) return badRequest("Аккаунт не найден");
 
-  let sinceDays = 180;
+  let rescan = false;
   try {
     const body = await req.json();
-    if (typeof body?.sinceDays === "number") sinceDays = body.sinceDays;
+    rescan = !!body?.rescan;
   } catch {
     // no body is fine
   }
 
   try {
-    const result = await syncAccount(id, { sinceDays });
-    return NextResponse.json(result);
+    const progress = await syncChunk(id, { rescan });
+    return NextResponse.json(progress);
   } catch (err) {
     return serverError((err as Error).message);
   }

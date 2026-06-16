@@ -78,6 +78,15 @@ model ExchangeAccount {
   // Background auto-sync on a schedule.
   autoSync            Boolean @default(false)
   syncIntervalMinutes Int     @default(60)
+  // Chunked background import progress. A scan walks a persisted task plan
+  // (one task per trading pair on per-symbol exchanges like Binance) in
+  // time-bounded chunks so it survives serverless timeouts.
+  syncPhase    String? // null | "full" | "incremental"
+  syncPlan     String? // JSON array of "kind|symbol" tasks for the active scan
+  syncCursor   Int       @default(0) // index of the next task to process
+  syncTotal    Int       @default(0) // total tasks in the active scan
+  syncImported Int       @default(0) // fills imported so far in the active scan
+  fullSyncAt   DateTime? // when the last full (all-pairs) scan completed
   fills      Fill[]
 
   @@index([userId])

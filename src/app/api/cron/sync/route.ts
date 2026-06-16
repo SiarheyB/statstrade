@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { runDueSyncs } from "@/lib/sync";
 
-export const maxDuration = 300;
+export const maxDuration = 60;
 
 // Token-protected endpoint for external cron platforms (Vercel Cron, system
 // cron, etc.). Accepts the secret via "Authorization: Bearer <secret>" header

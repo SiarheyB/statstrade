@@ -13,9 +13,9 @@ export function startScheduler(): void {
     try {
       const { runDueSyncs } = await import("./sync");
       const res = await runDueSyncs();
-      if (res.synced.length || res.failed.length) {
+      if (res.advanced.length || res.failed.length) {
         console.log(
-          `[scheduler] synced=${res.synced.length} failed=${res.failed.length} due=${res.due}`,
+          `[scheduler] advanced=${res.advanced.length} failed=${res.failed.length} due=${res.due}`,
         );
       }
     } catch (err) {

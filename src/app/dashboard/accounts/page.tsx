@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Plus,
   RefreshCw,
@@ -24,10 +24,17 @@ type Account = {
   lastSyncAt: string | null;
   syncStatus: string;
   syncError: string | null;
+  syncPhase: string | null;
+  syncCursor: number;
+  syncTotal: number;
+  syncImported: number;
+  fullSyncAt: string | null;
   autoSync: boolean;
   syncIntervalMinutes: number;
   fillCount: number;
 };
+
+type Prog = { done: number; total: number; imported: number; phase: string | null };
 
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
 
@@ -44,6 +51,8 @@ export default function AccountsPage() {
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [progress, setProgress] = useState<Record<string, Prog>>({});
+  const resumingRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -56,26 +65,58 @@ export default function AccountsPage() {
     load();
   }, [load]);
 
+  // Resume a scan that was already in progress (e.g. started on another device
+  // or before a reload) so the progress bar picks up where it left off.
+  useEffect(() => {
+    for (const a of accounts) {
+      if (a.syncStatus === "syncing" && !resumingRef.current.has(a.id)) {
+        resumingRef.current.add(a.id);
+        void syncAccount(a.id);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accounts]);
+
   function marketLabel(m: string): string {
     if (m === "spot") return t("acc.market.spot");
     if (m === "futures") return t("acc.market.futures");
     return t("acc.market.both");
   }
 
-  async function syncAccount(id: string) {
+  // Drive a chunked background import: POST repeatedly while status === "syncing",
+  // updating the progress bar each chunk, until the scan finishes.
+  async function syncAccount(id: string, rescan = false) {
     setBusy(id);
     setNotice(null);
+    const post = (body: object) =>
+      fetch(`/api/accounts/${id}/sync`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
     try {
-      const res = await fetch(`/api/accounts/${id}/sync`, { method: "POST" });
-      const data = await res.json();
+      let res = await post({ rescan });
+      let data = await res.json();
+      let guard = 0;
+      while (res.ok && data.status === "syncing" && guard < 500) {
+        guard++;
+        setProgress((p) => ({
+          ...p,
+          [id]: { done: data.done, total: data.total, imported: data.imported, phase: data.phase },
+        }));
+        res = await post({});
+        data = await res.json();
+      }
+      setProgress((p) => {
+        const next = { ...p };
+        delete next[id];
+        return next;
+      });
       if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
-      else
-        setNotice(
-          t("acc.notice.imported", { imported: data.imported, fetched: data.fetched }) +
-            (data.errors?.length ? t("acc.notice.warnings", { n: data.errors.length }) : ""),
-        );
+      else setNotice(t("acc.notice.scanned", { imported: data.imported ?? 0, total: data.total ?? 0 }));
     } finally {
       setBusy(null);
+      resumingRef.current.delete(id);
       load();
     }
   }
@@ -204,12 +245,29 @@ export default function AccountsPage() {
                 <span>
                   {t("acc.lastSync")} {a.lastSyncAt ? fmtDate(a.lastSyncAt) : t("acc.never")}
                 </span>
-                {a.syncError && (
+                {a.fullSyncAt && busy !== a.id && (
+                  <button
+                    onClick={() => syncAccount(a.id, true)}
+                    className="text-faint hover:text-accent transition underline-offset-2 hover:underline"
+                  >
+                    {t("acc.sync.rescan")}
+                  </button>
+                )}
+                {a.syncError && !progress[a.id] && (
                   <span className="text-loss truncate max-w-md" title={a.syncError}>
                     {a.syncError}
                   </span>
                 )}
               </div>
+
+              {progress[a.id] && (
+                <ProgressBar
+                  done={progress[a.id].done}
+                  total={progress[a.id].total}
+                  imported={progress[a.id].imported}
+                  phase={progress[a.id].phase}
+                />
+              )}
 
               <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border text-xs">
                 <button
@@ -432,6 +490,40 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
     >
       {exchange.slice(0, 3)}
     </span>
+  );
+}
+
+function ProgressBar({
+  done,
+  total,
+  imported,
+  phase,
+}: {
+  done: number;
+  total: number;
+  imported: number;
+  phase: string | null;
+}) {
+  const { t } = useI18n();
+  const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-xs mb-1.5">
+        <span className="inline-flex items-center gap-1.5 text-accent font-medium">
+          <RefreshCw size={12} className="animate-spin" />
+          {phase === "incremental" ? t("acc.sync.incremental") : t("acc.sync.full")}
+        </span>
+        <span className="font-mono text-faint tabular-nums">
+          {done}/{total} {t("acc.sync.pairs")} · {imported} {t("common.trades")} · {pct}%
+        </span>
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+        <div
+          className="h-full rounded-full bg-gradient-to-r from-accent/60 to-accent transition-[width] duration-500 ease-out"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
   );
 }
 
