@@ -35,6 +35,8 @@ const en: Dict = {
   "news.refresh": "Refresh",
   "news.all": "All",
   "news.empty": "No news yet — try refreshing.",
+  "news.prev": "Back",
+  "news.next": "Next",
 
   // calendar
   "cal.title": "Calendar",
@@ -439,6 +441,8 @@ const ru: Dict = {
   "news.refresh": "Обновить",
   "news.all": "Все",
   "news.empty": "Пока нет новостей — попробуйте обновить.",
+  "news.prev": "Назад",
+  "news.next": "Вперёд",
 
   // calendar
   "cal.title": "Календарь",

@@ -1,13 +1,26 @@
 import { prisma } from "./db";
 
+export type Lang = "en" | "ru";
 export type NewsSource = { id: string; name: string; url: string };
 
-// Three of the most market-impactful crypto outlets that expose a free RSS feed.
-export const NEWS_SOURCES: NewsSource[] = [
-  { id: "coindesk", name: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml" },
-  { id: "cointelegraph", name: "Cointelegraph", url: "https://cointelegraph.com/rss" },
-  { id: "decrypt", name: "Decrypt", url: "https://decrypt.co/feed" },
-];
+// The most market-impactful crypto outlets per language, each with a free RSS
+// feed. RU uses native Russian outlets so headlines and links are in Russian.
+export const NEWS_SOURCES: Record<Lang, NewsSource[]> = {
+  en: [
+    { id: "coindesk", name: "CoinDesk", url: "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml" },
+    { id: "cointelegraph", name: "Cointelegraph", url: "https://cointelegraph.com/rss" },
+    { id: "decrypt", name: "Decrypt", url: "https://decrypt.co/feed" },
+  ],
+  ru: [
+    { id: "forklog", name: "ForkLog", url: "https://forklog.com/feed/" },
+    { id: "beincrypto-ru", name: "BeInCrypto", url: "https://ru.beincrypto.com/feed/" },
+    { id: "incrypted", name: "Incrypted", url: "https://incrypted.com/feed/" },
+  ],
+};
+
+export function asLang(value: string | null | undefined): Lang {
+  return value === "ru" ? "ru" : "en";
+}
 
 const REFRESH_MS = 15 * 60 * 1000;
 const FETCH_THROTTLE_MS = 60 * 1000;
@@ -22,7 +35,7 @@ type ParsedItem = {
   publishedAt: Date;
 };
 
-// --- Minimal RSS 2.0 parsing (the three feeds are standard <item> RSS). ---
+// --- Minimal RSS 2.0 parsing (all feeds are standard <item> RSS). ---
 
 function decodeEntities(s: string): string {
   return s
@@ -63,8 +76,7 @@ function parseFeed(xml: string): ParsedItem[] {
       if (/^https?:\/\//.test(guid)) url = guid;
     }
     if (!title || !/^https?:\/\//.test(url)) continue;
-    // Drop tracking query params so the URL is a stable dedup key.
-    url = url.split("?")[0];
+    url = url.split("?")[0]; // drop tracking params -> stable dedup key
 
     const summary = clean(tagContent(block, "description")).slice(0, 400) || null;
     const pubRaw = clean(tagContent(block, "pubDate")) || clean(tagContent(block, "dc:date"));
@@ -86,13 +98,15 @@ function parseFeed(xml: string): ParsedItem[] {
   return items;
 }
 
-async function ingestSource(src: NewsSource): Promise<number> {
+async function ingestSource(src: NewsSource, lang: Lang): Promise<number> {
   const res = await fetch(src.url, {
     headers: {
       "user-agent": UA,
       accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
     },
     cache: "no-store",
+    // Don't let one slow feed block the refresh (sources run in parallel).
+    signal: AbortSignal.timeout(15000),
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const xml = await res.text();
@@ -104,6 +118,7 @@ async function ingestSource(src: NewsSource): Promise<number> {
     seen.add(it.url);
     rows.push({
       source: src.id,
+      lang,
       title: it.title,
       url: it.url,
       summary: it.summary,
@@ -118,11 +133,11 @@ async function ingestSource(src: NewsSource): Promise<number> {
 
 export type RefreshResult = { source: string; added: number; error?: string };
 
-export async function refreshNews(): Promise<RefreshResult[]> {
+export async function refreshNews(lang: Lang): Promise<RefreshResult[]> {
   return Promise.all(
-    NEWS_SOURCES.map(async (src) => {
+    NEWS_SOURCES[lang].map(async (src) => {
       try {
-        return { source: src.id, added: await ingestSource(src) };
+        return { source: src.id, added: await ingestSource(src, lang) };
       } catch (err) {
         return { source: src.id, added: 0, error: (err as Error).message };
       }
@@ -130,28 +145,32 @@ export async function refreshNews(): Promise<RefreshResult[]> {
   );
 }
 
-// Best-effort throttle so a burst of requests on one warm instance doesn't
-// hammer the upstream feeds (across instances it's still bounded by staleness).
-let lastFetchAttempt = 0;
+// Best-effort per-language throttle so bursts on a warm instance don't hammer
+// the upstream feeds (across instances it's still bounded by staleness).
+const lastFetchAttempt: Record<Lang, number> = { en: 0, ru: 0 };
 
-export async function getNews(opts: { force?: boolean; limit?: number } = {}) {
+export async function getNews(opts: { lang?: Lang; force?: boolean; limit?: number } = {}) {
+  const lang = asLang(opts.lang);
   const limit = opts.limit ?? 60;
+
   const newest = await prisma.newsItem.findFirst({
+    where: { lang },
     orderBy: { publishedAt: "desc" },
     select: { publishedAt: true },
   });
   const stale = !newest || Date.now() - newest.publishedAt.getTime() > REFRESH_MS;
-  const throttled = Date.now() - lastFetchAttempt < FETCH_THROTTLE_MS;
+  const throttled = Date.now() - lastFetchAttempt[lang] < FETCH_THROTTLE_MS;
 
   let refreshed: RefreshResult[] = [];
   if (opts.force || (!throttled && stale)) {
-    lastFetchAttempt = Date.now();
-    refreshed = await refreshNews();
+    lastFetchAttempt[lang] = Date.now();
+    refreshed = await refreshNews(lang);
   }
 
   const items = await prisma.newsItem.findMany({
+    where: { lang },
     orderBy: { publishedAt: "desc" },
     take: limit,
   });
-  return { items, sources: NEWS_SOURCES, refreshed };
+  return { items, lang, sources: NEWS_SOURCES[lang], refreshed };
 }

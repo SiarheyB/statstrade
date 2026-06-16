@@ -126,7 +126,8 @@ model Fill {
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
   id          String   @id @default(cuid())
-  source      String // coindesk | cointelegraph | decrypt
+  source      String // coindesk | cointelegraph | decrypt | forklog | beincrypto-ru | incrypted
+  lang        String   @default("en") // en | ru — language of the article/headline
   title       String
   url         String   @unique
   summary     String?
@@ -134,6 +135,6 @@ model NewsItem {
   publishedAt DateTime
   createdAt   DateTime @default(now())
 
-  @@index([publishedAt])
+  @@index([lang, publishedAt])
   @@index([source])
 }
