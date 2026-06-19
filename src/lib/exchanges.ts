@@ -67,6 +67,38 @@ export function createExchange(
   return exchange;
 }
 
+const STABLECOINS = ["USDT", "USDC", "BUSD", "FDUSD", "TUSD", "DAI"];
+
+// Fetch the account's balance/equity in USDT terms (sum of stablecoin totals).
+// For derivatives wallets total.USDT is the equity; for spot it's the cash.
+// Returns null on failure so sync stays non-fatal.
+export async function fetchBalanceUsdt(
+  id: ExchangeId,
+  creds: ExchangeCredentials,
+  kind: MarketKind,
+  demo = false,
+): Promise<number | null> {
+  const exchange = createExchange(id, creds, kind, demo);
+  try {
+    const bal = await exchange.fetchBalance();
+    const totals = (bal.total ?? {}) as unknown as Record<string, number>;
+    let sum = 0;
+    let seen = false;
+    for (const s of STABLECOINS) {
+      const v = Number(totals[s]);
+      if (Number.isFinite(v) && v !== 0) {
+        sum += v;
+        seen = true;
+      }
+    }
+    return seen ? sum : 0;
+  } catch {
+    return null;
+  } finally {
+    if (typeof exchange.close === "function") await exchange.close().catch(() => {});
+  }
+}
+
 // Cached public (keyless) exchange instances for market data (OHLCV).
 const publicCache = new Map<string, Exchange>();
 

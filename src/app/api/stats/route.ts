@@ -31,7 +31,7 @@ export async function GET(req: Request) {
     // Restrict to accounts owned by this user.
     const accounts = await prisma.exchangeAccount.findMany({
       where: { userId: user.userId },
-      select: { id: true, label: true, exchange: true },
+      select: { id: true, label: true, exchange: true, balance: true },
     });
     const ownedIds = new Set(accounts.map((a) => a.id));
 

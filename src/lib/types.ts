@@ -33,6 +33,7 @@ export type AccountSummary = {
   id: string;
   label: string;
   exchange: string;
+  balance: number | null;
 };
 
 export type StatsResponse = {

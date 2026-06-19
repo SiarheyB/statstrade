@@ -72,6 +72,8 @@ model ExchangeAccount {
   passphrase String? // AES-256-GCM encrypted (OKX requires a passphrase)
   marketType String    @default("both") // spot | futures | both
   demoTrading Boolean  @default(false) // Bybit Demo Trading key -> use demo API host
+  balance    Float?    // last fetched account balance/equity in USDT (deposit)
+  balanceAt  DateTime? // when balance was last fetched
   createdAt  DateTime  @default(now())
   lastSyncAt DateTime?
   syncStatus String    @default("idle") // idle | syncing | error
@@ -138,4 +140,20 @@ model NewsItem {
 
   @@index([lang, publishedAt])
   @@index([source])
+}
+
+// Risk-manager limits. One row per user is the default profile (accountId = "");
+// additional rows with a real accountId override the default for that account.
+model RiskProfile {
+  id             String   @id @default(cuid())
+  userId         String
+  accountId      String   @default("") // "" = default profile, else per-account override
+  enabled        Boolean  @default(false)
+  maxStopsPerDay Int? // max losing trades per day before "stop"
+  // JSON: { day|week|month|year: { on: bool, value: number, unit: "pct"|"amount" } }
+  lossLimits     String?
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, accountId])
+  @@index([userId])
 }

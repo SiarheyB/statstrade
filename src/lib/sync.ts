@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { decrypt } from "./crypto";
 import {
   createExchange,
+  fetchBalanceUsdt,
   isExchangeId,
   normalizeFill,
   type ExchangeId,
@@ -520,6 +521,25 @@ export async function syncChunk(
     where: { id: accountId },
     data: { syncStatus: "syncing", syncPhase: phase, syncError: null, syncCursor: 0, syncImported: 0 },
   });
+
+  // Refresh the account balance (deposit) for the risk manager / capital field.
+  try {
+    const kind: MarketKind = account.marketType === "spot" ? "spot" : "swap";
+    const bal = await fetchBalanceUsdt(
+      account.exchange as ExchangeId,
+      credsFor(account),
+      kind,
+      account.demoTrading,
+    );
+    if (bal != null) {
+      await prisma.exchangeAccount.update({
+        where: { id: accountId },
+        data: { balance: bal, balanceAt: new Date() },
+      });
+    }
+  } catch {
+    // balance is best-effort; never fail the sync over it
+  }
 
   const diag: string[] = [];
   let plan: string[];

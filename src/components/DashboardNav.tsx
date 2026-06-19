@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -12,6 +13,10 @@ import {
   Plug,
   Settings,
   Newspaper,
+  SlidersHorizontal,
+  Tags,
+  ShieldAlert,
+  ChevronDown,
   LogOut,
 } from "lucide-react";
 import clsx from "clsx";
@@ -24,20 +29,33 @@ const LINKS = [
   { href: "/dashboard/analytics", key: "nav.analytics", icon: PieChart },
   { href: "/dashboard/journal", key: "nav.journal", icon: BookOpen },
   { href: "/dashboard/trades", key: "nav.trades", icon: ListOrdered },
-  { href: "/dashboard/accounts", key: "nav.exchanges", icon: Plug },
-  { href: "/dashboard/settings", key: "nav.settings", icon: Settings },
 ];
+
+const SETTINGS_CHILDREN = [
+  { href: "/dashboard/settings", key: "nav.general", icon: SlidersHorizontal },
+  { href: "/dashboard/accounts", key: "nav.exchanges", icon: Plug },
+  { href: "/dashboard/settings/trades", key: "nav.tradeSettings", icon: Tags },
+  { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
+];
+
+function isSettingsRoute(pathname: string): boolean {
+  return pathname.startsWith("/dashboard/settings") || pathname.startsWith("/dashboard/accounts");
+}
 
 export default function DashboardNav({ email }: { email: string }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
+  const [open, setOpen] = useState(() => isSettingsRoute(pathname));
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/login");
     router.refresh();
   }
+
+  const childActive = (href: string) =>
+    href === "/dashboard/settings" ? pathname === "/dashboard/settings" : pathname.startsWith(href);
 
   return (
     <aside className="w-60 shrink-0 border-r border-border glass-panel flex flex-col">
@@ -48,12 +66,10 @@ export default function DashboardNav({ email }: { email: string }) {
         TradeStats
       </div>
 
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         {LINKS.map((l) => {
           const active =
-            l.href === "/dashboard"
-              ? pathname === "/dashboard"
-              : pathname.startsWith(l.href);
+            l.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(l.href);
           return (
             <Link
               key={l.href}
@@ -70,6 +86,44 @@ export default function DashboardNav({ email }: { email: string }) {
             </Link>
           );
         })}
+
+        {/* Settings group (expandable) */}
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className={clsx(
+            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            isSettingsRoute(pathname) && !open
+              ? "text-accent"
+              : "text-muted hover:text-fg hover:bg-surface-2",
+          )}
+        >
+          <Settings size={18} />
+          <span className="flex-1 text-left">{t("nav.settings")}</span>
+          <ChevronDown size={15} className={clsx("transition", open && "rotate-180")} />
+        </button>
+
+        {open && (
+          <div className="ml-4 pl-3 border-l border-border space-y-1">
+            {SETTINGS_CHILDREN.map((c) => {
+              const active = childActive(c.href);
+              return (
+                <Link
+                  key={c.href}
+                  href={c.href}
+                  className={clsx(
+                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                    active
+                      ? "bg-accent/15 text-accent"
+                      : "text-muted hover:text-fg hover:bg-surface-2",
+                  )}
+                >
+                  <c.icon size={16} />
+                  {t(c.key)}
+                </Link>
+              );
+            })}
+          </div>
+        )}
       </nav>
 
       <div className="p-3 border-t border-border">

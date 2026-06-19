@@ -237,5 +237,11 @@ export async function seedDemoData(
     await prisma.tradeAnnotation.createMany({ data: annotations });
   }
 
+  // Give the demo account a deposit so the capital field / risk manager work.
+  await prisma.exchangeAccount.update({
+    where: { id: accountId },
+    data: { balance: 10000, balanceAt: new Date() },
+  });
+
   return rows.length;
 }

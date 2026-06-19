@@ -7,6 +7,7 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { EquityChart, DailyPnlChart, BreakdownChart } from "@/components/charts";
 import PnlHeatmap from "@/components/PnlHeatmap";
+import RiskBanner from "@/components/RiskBanner";
 import { nodeToPng, nodeToPdf, dateStamp } from "@/lib/export";
 import {
   METRIC_GROUPS,
@@ -27,7 +28,6 @@ type Filters = {
   accountId: string;
   market: string;
   symbol: string;
-  initialCapital: number;
   entryPoint: string;
   entryType: string;
   mistake: string;
@@ -106,11 +106,11 @@ export default function DashboardPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [accountsBal, setAccountsBal] = useState<{ id: string; balance: number | null }[]>([]);
   const [filters, setFilters] = useState<Filters>({
     accountId: "all",
     market: "all",
     symbol: "all",
-    initialCapital: 10000,
     entryPoint: "all",
     entryType: "all",
     mistake: "all",
@@ -120,6 +120,17 @@ export default function DashboardPage() {
   const [entryMetric, setEntryMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [exporting, setExporting] = useState<null | "png" | "pdf">(null);
   const dashRef = useRef<HTMLDivElement>(null);
+
+  // Capital = exchange balance: the selected account's balance, or the sum of
+  // all connected accounts when "all" is selected. Not user-editable.
+  const capital = useMemo(() => {
+    const sel =
+      filters.accountId === "all"
+        ? accountsBal
+        : accountsBal.filter((a) => a.id === filters.accountId);
+    const sum = sel.reduce((s, a) => s + (a.balance ?? 0), 0);
+    return sum > 0 ? sum : 10000;
+  }, [accountsBal, filters.accountId]);
 
   async function exportDashboard(kind: "png" | "pdf") {
     if (!dashRef.current) return;
@@ -144,7 +155,7 @@ export default function DashboardPage() {
         entryPoint: filters.entryPoint,
         entryType: filters.entryType,
         mistake: filters.mistake,
-        initialCapital: String(filters.initialCapital),
+        initialCapital: String(capital),
       });
       const fromMs = rangeFrom(filters.range);
       if (fromMs != null) params.set("from", new Date(fromMs).toISOString());
@@ -157,18 +168,21 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [filters]);
+  }, [filters, capital]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  // Restore the capital input from the previous session (per-browser preference).
+  // Load per-account balances (the capital source) once on mount.
   useEffect(() => {
-    const saved = Number(localStorage.getItem("ts_capital"));
-    if (Number.isFinite(saved) && saved > 0) {
-      setFilters((f) => ({ ...f, initialCapital: saved }));
-    }
+    (async () => {
+      const res = await fetch("/api/accounts");
+      if (res.ok) {
+        const accs = (await res.json()) as { id: string; balance: number | null }[];
+        setAccountsBal(accs.map((a) => ({ id: a.id, balance: a.balance })));
+      }
+    })();
   }, []);
 
   const m = data?.metrics;
@@ -176,8 +190,8 @@ export default function DashboardPage() {
   const hasTrades = (m?.tradeCount ?? 0) > 0;
   const entryMetricLabel = entryMetric === "netPnl" ? t("metric.pnl") : t("metric.winRateShort");
   const trend = useMemo(
-    () => (data?.trades ? computeTrend(data.trades, filters.initialCapital) : null),
-    [data, filters.initialCapital],
+    () => (data?.trades ? computeTrend(data.trades, capital) : null),
+    [data, capital],
   );
 
   return (
@@ -271,19 +285,9 @@ export default function DashboardPage() {
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
           </select>
-          <div className="flex items-center gap-1 input-base py-1.5">
+          <div className="flex items-center gap-1.5 input-base py-1.5" title={t("dash.capitalHint")}>
             <span className="text-xs text-faint">{t("dash.capital")}</span>
-            <input
-              type="number"
-              className="bg-transparent w-20 outline-none text-sm"
-              value={filters.initialCapital}
-              min={1}
-              onChange={(e) => {
-                const v = Number(e.target.value) || 0;
-                setFilters((f) => ({ ...f, initialCapital: v }));
-                if (v > 0) localStorage.setItem("ts_capital", String(v));
-              }}
-            />
+            <span className="text-sm tabular-nums font-medium">{fmtUsd(capital)}</span>
           </div>
           <button
             onClick={load}
@@ -308,6 +312,8 @@ export default function DashboardPage() {
           </button>
         </div>
       </div>
+
+      <RiskBanner accountId={filters.accountId} />
 
       {error && (
         <div className="card p-4 text-sm text-loss border-loss/30 mb-5">{error}</div>

@@ -32,6 +32,7 @@ export async function GET() {
       label: a.label,
       marketType: a.marketType,
       demoTrading: a.demoTrading,
+      balance: a.balance,
       apiKeyMasked: maskSecret(safeDecrypt(a.apiKey)),
       lastSyncAt: a.lastSyncAt,
       syncStatus: a.syncStatus,
@@ -86,6 +87,10 @@ export async function POST(req: Request) {
     });
     return NextResponse.json({ id: account.id });
   } catch (err) {
+    // FK violation = the session points at a user that no longer exists.
+    if ((err as { code?: string }).code === "P2003") {
+      return badRequest("Сессия устарела — выйдите и войдите снова");
+    }
     return serverError((err as Error).message);
   }
 }
