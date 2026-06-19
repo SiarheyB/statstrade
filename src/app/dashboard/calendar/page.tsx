@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
-import { fmtUsd, fmtDate } from "@/lib/format";
+import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
 
 type DayStat = { pnl: number; trades: number; wins: number };
 
@@ -235,7 +235,7 @@ export default function CalendarPage() {
               {selectedTrades.map((tr) => (
                 <div key={tr.id} className="flex items-center justify-between border-b border-border last:border-0 py-1.5 text-sm">
                   <div className="flex items-center gap-2">
-                    <span className="font-medium">{tr.symbol}</span>
+                    <span className="font-medium">{fmtSymbol(tr.symbol)}</span>
                     <span className={`text-xs px-1.5 py-0.5 rounded ${tr.side === "long" ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"}`}>
                       {tr.side === "long" ? "Long" : "Short"}
                     </span>

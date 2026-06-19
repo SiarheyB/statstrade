@@ -17,6 +17,8 @@ import {
   Tags,
   ShieldAlert,
   ChevronDown,
+  Menu,
+  X,
   LogOut,
 } from "lucide-react";
 import clsx from "clsx";
@@ -47,6 +49,7 @@ export default function DashboardNav({ email }: { email: string }) {
   const router = useRouter();
   const { t } = useI18n();
   const [open, setOpen] = useState(() => isSettingsRoute(pathname));
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -57,9 +60,9 @@ export default function DashboardNav({ email }: { email: string }) {
   const childActive = (href: string) =>
     href === "/dashboard/settings" ? pathname === "/dashboard/settings" : pathname.startsWith(href);
 
-  return (
-    <aside className="w-60 shrink-0 border-r border-border glass-panel flex flex-col">
-      <div className="flex items-center gap-2 font-semibold px-5 h-16 border-b border-border">
+  const body = (onNavigate: () => void) => (
+    <>
+      <div className="flex items-center gap-2 font-semibold px-5 h-16 border-b border-border shrink-0">
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
           <BarChart3 size={18} />
         </span>
@@ -74,11 +77,10 @@ export default function DashboardNav({ email }: { email: string }) {
             <Link
               key={l.href}
               href={l.href}
+              onClick={onNavigate}
               className={clsx(
                 "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
-                active
-                  ? "bg-accent/15 text-accent"
-                  : "text-muted hover:text-fg hover:bg-surface-2",
+                active ? "bg-accent/15 text-accent" : "text-muted hover:text-fg hover:bg-surface-2",
               )}
             >
               <l.icon size={18} />
@@ -87,7 +89,6 @@ export default function DashboardNav({ email }: { email: string }) {
           );
         })}
 
-        {/* Settings group (expandable) */}
         <button
           onClick={() => setOpen((o) => !o)}
           className={clsx(
@@ -104,38 +105,82 @@ export default function DashboardNav({ email }: { email: string }) {
 
         {open && (
           <div className="ml-4 pl-3 border-l border-border space-y-1">
-            {SETTINGS_CHILDREN.map((c) => {
-              const active = childActive(c.href);
-              return (
-                <Link
-                  key={c.href}
-                  href={c.href}
-                  className={clsx(
-                    "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
-                    active
-                      ? "bg-accent/15 text-accent"
-                      : "text-muted hover:text-fg hover:bg-surface-2",
-                  )}
-                >
-                  <c.icon size={16} />
-                  {t(c.key)}
-                </Link>
-              );
-            })}
+            {SETTINGS_CHILDREN.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                onClick={onNavigate}
+                className={clsx(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  childActive(c.href)
+                    ? "bg-accent/15 text-accent"
+                    : "text-muted hover:text-fg hover:bg-surface-2",
+                )}
+              >
+                <c.icon size={16} />
+                {t(c.key)}
+              </Link>
+            ))}
           </div>
         )}
       </nav>
 
-      <div className="p-3 border-t border-border">
+      <div className="p-3 border-t border-border shrink-0">
         <div className="px-3 py-2 text-xs text-faint truncate">{email}</div>
         <button
-          onClick={logout}
+          onClick={() => {
+            onNavigate();
+            logout();
+          }}
           className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-loss hover:bg-surface-2 transition"
         >
           <LogOut size={18} />
           {t("nav.logout")}
         </button>
       </div>
-    </aside>
+    </>
+  );
+
+  return (
+    <>
+      {/* Mobile top bar */}
+      <div className="md:hidden sticky top-0 z-30 flex items-center gap-3 h-14 px-4 border-b border-border glass-panel">
+        <button
+          onClick={() => setMobileOpen(true)}
+          className="p-1.5 -ml-1.5 text-muted hover:text-fg"
+          aria-label="menu"
+        >
+          <Menu size={20} />
+        </button>
+        <span className="font-semibold flex items-center gap-2">
+          <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15 text-accent">
+            <BarChart3 size={15} />
+          </span>
+          TradeStats
+        </span>
+      </div>
+
+      {/* Desktop sidebar */}
+      <aside className="hidden md:flex w-60 shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0">
+        {body(() => {})}
+      </aside>
+
+      {/* Mobile drawer */}
+      {mobileOpen && (
+        <div className="md:hidden fixed inset-0 z-50">
+          <div className="absolute inset-0 bg-black/50" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-64 max-w-[80%] bg-bg border-r border-border flex flex-col">
+            <button
+              onClick={() => setMobileOpen(false)}
+              className="absolute top-4 right-3 z-10 text-faint hover:text-fg"
+              aria-label="close menu"
+            >
+              <X size={18} />
+            </button>
+            {body(() => setMobileOpen(false))}
+          </aside>
+        </div>
+      )}
+    </>
   );
 }

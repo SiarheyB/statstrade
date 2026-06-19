@@ -19,7 +19,7 @@ import type { Metrics } from "@/lib/analytics/metrics";
 import { Term } from "@/components/Term";
 import { matchTerm } from "@/lib/glossary";
 import { useI18n } from "@/lib/i18n/provider";
-import { fmtUsd, fmtPct, fmtRatio, fmtDuration, fmtNum } from "@/lib/format";
+import { fmtUsd, fmtPct, fmtRatio, fmtDuration, fmtNum, fmtSymbol } from "@/lib/format";
 
 const UNSET = "__unset__";
 const SELECT_CLS = "input-base text-sm py-1.5 cursor-pointer";
@@ -249,7 +249,7 @@ export default function DashboardPage() {
           >
             <option value="all">{t("dash.allSymbols")}</option>
             {data?.symbols.map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>{fmtSymbol(s)}</option>
             ))}
           </select>
           <select
@@ -650,7 +650,7 @@ function SymbolTable({
           key={r.symbol}
           className="flex items-center justify-between text-sm py-1.5 border-b border-border last:border-0"
         >
-          <span className="font-medium">{r.symbol}</span>
+          <span className="font-medium">{fmtSymbol(r.symbol)}</span>
           <div className="flex items-center gap-4 text-xs text-faint">
             <span>{r.trades}</span>
             <span>{r.winRate.toFixed(0)}%</span>

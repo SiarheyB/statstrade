@@ -196,7 +196,7 @@ export default function TradesPage() {
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";
 
   return (
-    <div className="px-6 py-5 max-w-7xl mx-auto">
+    <div className="px-4 sm:px-6 py-5">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-semibold">{t("trades.title")}</h1>

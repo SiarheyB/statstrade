@@ -11,7 +11,7 @@ export default async function DashboardLayout({
   if (!session) redirect("/login");
 
   return (
-    <div className="flex min-h-screen">
+    <div className="md:flex min-h-screen">
       <DashboardNav email={session.email} />
       <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
     </div>
