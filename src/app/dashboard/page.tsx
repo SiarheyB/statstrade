@@ -418,11 +418,11 @@ export default function DashboardPage() {
 
           {/* Daily pnl + heatmap */}
           <div className="grid gap-5 lg:grid-cols-2">
-            <div className="card p-5">
+            <div className="card p-5 min-w-0">
               <SectionTitle title={t("dash.dailyPnl")} />
               <DailyPnlChart data={m.daily} />
             </div>
-            <div className="card p-5">
+            <div className="card p-5 min-w-0">
               <SectionTitle title={t("dash.calendar")} />
               <PnlHeatmap daily={m.daily} />
               <div className="grid grid-cols-3 gap-2 mt-4">
