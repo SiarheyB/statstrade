@@ -229,7 +229,10 @@ export async function seedDemoData(
         // leave some trades unmarked for realism
         entryPoint: Math.random() < 0.8 && entryPoints.length ? pick(entryPoints) : null,
         entryType: Math.random() < 0.75 && entryTypes.length ? pick(entryTypes) : null,
-        mistake: Math.random() < mistakeProb && mistakes.length ? pick(mistakes) : null,
+        mistake:
+          Math.random() < mistakeProb && mistakes.length
+            ? JSON.stringify([pick(mistakes)])
+            : null,
         pattern: Math.random() < 0.85 && patterns.length ? pick(patterns) : null,
         stopLoss,
         note: null as string | null,

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
+import { findRiskMistake } from "@/lib/annotations";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/TradeChart";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol } from "@/lib/format";
@@ -14,7 +15,7 @@ type SortKey = "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
 type Ann = {
   entryPoint: string | null;
   entryType: string | null;
-  mistake: string | null;
+  mistakes: string[];
   pattern: string | null;
   stopLoss: number | null;
 };
@@ -66,7 +67,7 @@ export default function TradesPage() {
         map[tr.id] = {
           entryPoint: tr.entryPoint,
           entryType: tr.entryType,
-          mistake: tr.mistake,
+          mistakes: tr.mistakes,
           pattern: tr.pattern,
           stopLoss: tr.stopLoss,
         };
@@ -93,13 +94,25 @@ export default function TradesPage() {
   const etOptions = data?.entryTypeOptions ?? [];
   const mtOptions = data?.mistakeOptions ?? [];
   const ptOptions = data?.patternOptions ?? [];
+  // The configured mistake meaning "risk exceeded" (auto-tagged when RR < -1).
+  const riskMistake = findRiskMistake(mtOptions);
+
+  // Mistakes shown for a trade = user-set ones + the auto "risk exceeded" tag
+  // when the loss exceeded the per-trade risk (RR < -1). The auto tag is derived
+  // (not persisted), so it can't be removed and never fights manual edits.
+  function effectiveMistakes(mistakes: string[], rr: number | null): string[] {
+    if (rr != null && rr < -1 && riskMistake && !mistakes.includes(riskMistake)) {
+      return [...mistakes, riskMistake];
+    }
+    return mistakes;
+  }
 
   function annOf(tr: SerializedTrade): Ann {
     return (
       ann[tr.id] ?? {
         entryPoint: tr.entryPoint,
         entryType: tr.entryType,
-        mistake: tr.mistake,
+        mistakes: tr.mistakes,
         pattern: tr.pattern,
         stopLoss: tr.stopLoss,
       }
@@ -149,8 +162,8 @@ export default function TradesPage() {
       });
     if (mtFilter !== "all")
       rows = rows.filter((tr) => {
-        const v = annOf(tr).mistake;
-        return mtFilter === UNSET ? !v : v === mtFilter;
+        const ms = annOf(tr).mistakes;
+        return mtFilter === UNSET ? ms.length === 0 : ms.includes(mtFilter);
       });
     if (ptFilter !== "all")
       rows = rows.filter((tr) => {
@@ -212,7 +225,7 @@ export default function TradesPage() {
         a.pattern ?? "",
         a.entryPoint ?? "",
         a.entryType ?? "",
-        a.mistake ?? "",
+        effectiveMistakes(a.mistakes, rr).join("; "),
       ];
     });
     downloadCsv(`trades-${dateStamp()}.csv`, headers, rows);
@@ -375,7 +388,12 @@ export default function TradesPage() {
                         <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
                       </td>
                       <td className="px-3 py-2">
-                        <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
+                        <MistakeMultiSelect
+                          value={a.mistakes}
+                          options={mtOptions}
+                          auto={rr != null && rr < -1 ? riskMistake : null}
+                          onChange={(v) => saveAnn(tr.id, { ...a, mistakes: v })}
+                        />
                       </td>
                     </tr>
                   );
@@ -431,7 +449,7 @@ export default function TradesPage() {
                     <td className="px-2 py-1">{a.pattern ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryPoint ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryType ?? "—"}</td>
-                    <td className="px-2 py-1">{a.mistake ?? "—"}</td>
+                    <td className="px-2 py-1">{effectiveMistakes(a.mistakes, rr).join("; ") || "—"}</td>
                   </tr>
                 );
               })}
@@ -491,6 +509,68 @@ function AnnSelect({
         <option key={o} value={o}>{o}</option>
       ))}
     </select>
+  );
+}
+
+// Multi-select for mistakes: selected ones are removable chips; `auto` (when
+// set) is a non-removable derived chip ("risk exceeded"); the dropdown adds the
+// remaining options.
+function MistakeMultiSelect({
+  value,
+  options,
+  auto,
+  onChange,
+}: {
+  value: string[];
+  options: string[];
+  auto: string | null;
+  onChange: (v: string[]) => void;
+}) {
+  const { t } = useI18n();
+  const showAuto = auto && !value.includes(auto);
+  const available = options.filter((o) => !value.includes(o));
+  return (
+    <div className="flex flex-wrap items-center gap-1 min-w-[10rem] max-w-[16rem]">
+      {value.map((m) => (
+        <span
+          key={m}
+          className="inline-flex items-center gap-1 rounded bg-surface-2 border border-border px-1.5 py-0.5 text-xs"
+        >
+          {m}
+          <button
+            onClick={() => onChange(value.filter((x) => x !== m))}
+            className="text-faint hover:text-loss leading-none"
+            aria-label="remove"
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {showAuto && (
+        <span
+          title={t("trades.mistake.autoRisk")}
+          className="inline-flex items-center gap-1 rounded border border-dashed border-loss/50 bg-loss/10 text-loss px-1.5 py-0.5 text-xs"
+        >
+          {auto}
+          <span className="opacity-70">⚠</span>
+        </span>
+      )}
+      {available.length > 0 && (
+        <select
+          value=""
+          onChange={(e) => {
+            if (e.target.value) onChange([...value, e.target.value]);
+          }}
+          className="input-base text-xs py-1 cursor-pointer w-8"
+          aria-label={t("trades.col.mistake")}
+        >
+          <option value="">＋</option>
+          {available.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      )}
+    </div>
   );
 }
 

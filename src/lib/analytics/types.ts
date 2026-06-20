@@ -42,7 +42,7 @@ export type RoundTripTrade = {
   // Manual annotations (attached after reconstruction).
   entryPoint?: string | null; // ТВХ
   entryType?: string | null; // тип входа
-  mistake?: string | null; // ошибка
+  mistakes?: string[]; // ошибки (можно несколько)
   pattern?: string | null; // паттерн
   stopLoss?: number | null; // цена стоп-лосса
 };

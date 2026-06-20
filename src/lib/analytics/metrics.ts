@@ -374,11 +374,28 @@ export function computeMetrics(
     (k) => k,
   ).sort((a, b) => b.netPnl - a.netPnl);
 
-  const byMistake = bucketStats(
-    sorted,
-    (t) => t.mistake || UNSET_LABEL,
-    (k) => k,
-  ).sort((a, b) => a.netPnl - b.netPnl); // worst (most negative) first
+  // Mistakes are multi-valued: a trade contributes to each of its mistakes (so
+  // P&L is counted once per tagged mistake). Untagged trades go to UNSET_LABEL.
+  const mistakeMap = new Map<string, { trades: number; netPnl: number; wins: number }>();
+  for (const t of sorted) {
+    const keys = t.mistakes && t.mistakes.length ? t.mistakes : [UNSET_LABEL];
+    for (const key of keys) {
+      const b = mistakeMap.get(key) ?? { trades: 0, netPnl: 0, wins: 0 };
+      b.trades += 1;
+      b.netPnl += t.netPnl;
+      if (t.result === "win") b.wins += 1;
+      mistakeMap.set(key, b);
+    }
+  }
+  const byMistake = Array.from(mistakeMap.entries())
+    .map(([key, b]) => ({
+      key,
+      label: key,
+      trades: b.trades,
+      netPnl: b.netPnl,
+      winRate: b.trades > 0 ? (b.wins / b.trades) * 100 : 0,
+    }))
+    .sort((a, b) => a.netPnl - b.netPnl); // worst (most negative) first
 
   const byPattern = bucketStats(
     sorted,

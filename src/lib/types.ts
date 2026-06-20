@@ -25,7 +25,7 @@ export type SerializedTrade = {
   result: TradeResult;
   entryPoint: string | null;
   entryType: string | null;
-  mistake: string | null;
+  mistakes: string[];
   pattern: string | null;
   stopLoss: number | null;
 };

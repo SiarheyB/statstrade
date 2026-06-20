@@ -6,6 +6,7 @@ import { computeMetrics } from "@/lib/analytics/metrics";
 import type { FillInput } from "@/lib/analytics/types";
 import {
   parseOptions,
+  parseMistakes,
   DEFAULT_ENTRY_POINTS,
   DEFAULT_ENTRY_TYPES,
   DEFAULT_MISTAKES,
@@ -92,7 +93,7 @@ export async function GET(req: Request) {
       const a = annMap.get(t.id);
       t.entryPoint = a?.entryPoint ?? null;
       t.entryType = a?.entryType ?? null;
-      t.mistake = a?.mistake ?? null;
+      t.mistakes = parseMistakes(a?.mistake);
       t.pattern = a?.pattern ?? null;
       t.stopLoss = a?.stopLoss ?? null;
     }
@@ -121,7 +122,9 @@ export async function GET(req: Request) {
     }
     if (mistake !== "all") {
       filteredTrades = filteredTrades.filter((t) =>
-        mistake === "__unset__" ? !t.mistake : t.mistake === mistake,
+        mistake === "__unset__"
+          ? !t.mistakes || t.mistakes.length === 0
+          : (t.mistakes ?? []).includes(mistake),
       );
     }
     if (pattern !== "all") {
@@ -142,7 +145,8 @@ export async function GET(req: Request) {
       ...t,
       entryPoint: t.entryPoint ?? null,
       entryType: t.entryType ?? null,
-      mistake: t.mistake ?? null,
+      mistakes: t.mistakes ?? [],
+      pattern: t.pattern ?? null,
       stopLoss: t.stopLoss ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),

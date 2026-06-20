@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { parseMistakes, serializeMistakes } from "@/lib/annotations";
 
 const schema = z.object({
   tradeKey: z.string().min(1).max(200),
   entryPoint: z.string().max(40).nullable().optional(),
   entryType: z.string().max(40).nullable().optional(),
-  mistake: z.string().max(60).nullable().optional(),
+  mistakes: z.array(z.string().max(60)).max(20).optional(),
   pattern: z.string().max(60).nullable().optional(),
   stopLoss: z.number().positive().nullable().optional(),
 });
@@ -31,7 +32,7 @@ export async function PUT(req: Request) {
 
   const entryPoint = parsed.data.entryPoint?.trim() || null;
   const entryType = parsed.data.entryType?.trim() || null;
-  const mistake = parsed.data.mistake?.trim() || null;
+  const mistake = serializeMistakes(parsed.data.mistakes ?? []);
   const pattern = parsed.data.pattern?.trim() || null;
   const stopLoss = parsed.data.stopLoss ?? null;
   const { tradeKey } = parsed.data;
@@ -48,7 +49,7 @@ export async function PUT(req: Request) {
       tradeKey: result.tradeKey,
       entryPoint: result.entryPoint,
       entryType: result.entryType,
-      mistake: result.mistake,
+      mistakes: parseMistakes(result.mistake),
       pattern: result.pattern,
       stopLoss: result.stopLoss,
     });
