@@ -95,9 +95,9 @@ export default function JournalPage() {
                         <span className={`text-xs px-1.5 py-0.5 rounded ${tr.side === "long" ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"}`}>
                           {tr.side === "long" ? "Long" : "Short"}
                         </span>
-                        {tr.mistakes.map((m) => (
-                          <span key={m} className="text-xs px-1.5 py-0.5 rounded bg-warn/15 text-warn">{m}</span>
-                        ))}
+                        {tr.mistake && (
+                          <span className="text-xs px-1.5 py-0.5 rounded bg-warn/15 text-warn">{tr.mistake}</span>
+                        )}
                       </div>
                       <span className={`tabular-nums font-medium ${tr.netPnl >= 0 ? "text-profit" : "text-loss"}`}>
                         {fmtUsd(tr.netPnl, { sign: true })}
