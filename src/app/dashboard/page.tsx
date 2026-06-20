@@ -30,6 +30,7 @@ type Filters = {
   symbol: string;
   entryPoint: string;
   entryType: string;
+  pattern: string;
   mistake: string;
   range: string; // 7d | 30d | 90d | ytd | all
 };
@@ -113,11 +114,13 @@ export default function DashboardPage() {
     symbol: "all",
     entryPoint: "all",
     entryType: "all",
+    pattern: "all",
     mistake: "all",
     range: "all",
   });
   const [timeTab, setTimeTab] = useState<"dow" | "hour" | "month">("month");
   const [entryMetric, setEntryMetric] = useState<"netPnl" | "winRate">("netPnl");
+  const [patternMetric, setPatternMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [exporting, setExporting] = useState<null | "png" | "pdf">(null);
   const dashRef = useRef<HTMLDivElement>(null);
 
@@ -154,6 +157,7 @@ export default function DashboardPage() {
         symbol: filters.symbol,
         entryPoint: filters.entryPoint,
         entryType: filters.entryType,
+        pattern: filters.pattern,
         mistake: filters.mistake,
         initialCapital: String(capital),
       });
@@ -270,6 +274,17 @@ export default function DashboardPage() {
           >
             <option value="all">{t("dash.allEntryTypes")}</option>
             {data?.entryTypeOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+            <option value={UNSET}>{t("common.unset")}</option>
+          </select>
+          <select
+            className={SELECT_CLS}
+            value={filters.pattern}
+            onChange={(e) => setFilters((f) => ({ ...f, pattern: e.target.value }))}
+          >
+            <option value="all">{t("dash.allPatterns")}</option>
+            {data?.patternOptions.map((s) => (
               <option key={s} value={s}>{s}</option>
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
@@ -488,6 +503,27 @@ export default function DashboardPage() {
                 <BreakdownChart data={m.byEntryType} metric={entryMetric} />
               </div>
             </div>
+          </div>
+
+          {/* Pattern analysis (паттерн) */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-medium text-sm">{t("dash.byPattern")}</h3>
+              <div className="flex gap-1 text-xs">
+                {(["netPnl", "winRate"] as const).map((mk) => (
+                  <button
+                    key={mk}
+                    onClick={() => setPatternMetric(mk)}
+                    className={`px-2.5 py-1 rounded-md transition ${
+                      patternMetric === mk ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
+                    }`}
+                  >
+                    {mk === "netPnl" ? t("metric.pnl") : t("metric.winRateShort")}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <BreakdownChart data={m.byPattern} metric={patternMetric} height={260} />
           </div>
 
           {/* Mistakes analysis */}

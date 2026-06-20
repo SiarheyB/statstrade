@@ -6,6 +6,7 @@ import {
   DEFAULT_ENTRY_POINTS,
   DEFAULT_ENTRY_TYPES,
   DEFAULT_MISTAKES,
+  DEFAULT_PATTERNS,
 } from "./annotations";
 
 // Generates realistic synthetic fills so the whole analytics + UI pipeline can
@@ -171,11 +172,13 @@ export async function seedDemoData(
       entryPointOptions: true,
       entryTypeOptions: true,
       mistakeOptions: true,
+      patternOptions: true,
     },
   });
   const entryPoints = parseOptions(user?.entryPointOptions, DEFAULT_ENTRY_POINTS);
   const entryTypes = parseOptions(user?.entryTypeOptions, DEFAULT_ENTRY_TYPES);
   const mistakes = parseOptions(user?.mistakeOptions, DEFAULT_MISTAKES);
+  const patterns = parseOptions(user?.patternOptions, DEFAULT_PATTERNS);
 
   const fills: FillInput[] = rows.map((r) => ({
     symbol: r.symbol,
@@ -227,11 +230,12 @@ export async function seedDemoData(
         entryPoint: Math.random() < 0.8 && entryPoints.length ? pick(entryPoints) : null,
         entryType: Math.random() < 0.75 && entryTypes.length ? pick(entryTypes) : null,
         mistake: Math.random() < mistakeProb && mistakes.length ? pick(mistakes) : null,
+        pattern: Math.random() < 0.85 && patterns.length ? pick(patterns) : null,
         stopLoss,
         note: null as string | null,
       };
     })
-    .filter((a) => a.entryPoint || a.entryType || a.mistake || a.stopLoss != null);
+    .filter((a) => a.entryPoint || a.entryType || a.mistake || a.pattern || a.stopLoss != null);
 
   if (annotations.length) {
     await prisma.tradeAnnotation.createMany({ data: annotations });

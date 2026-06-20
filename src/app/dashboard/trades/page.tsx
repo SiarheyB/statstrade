@@ -14,6 +14,7 @@ type Ann = {
   entryPoint: string | null;
   entryType: string | null;
   mistake: string | null;
+  pattern: string | null;
   stopLoss: number | null;
 };
 const PAGE_SIZE = 25;
@@ -32,6 +33,7 @@ export default function TradesPage() {
   const [epFilter, setEpFilter] = useState("all");
   const [etFilter, setEtFilter] = useState("all");
   const [mtFilter, setMtFilter] = useState("all");
+  const [ptFilter, setPtFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("exitTime");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -63,6 +65,7 @@ export default function TradesPage() {
           entryPoint: tr.entryPoint,
           entryType: tr.entryType,
           mistake: tr.mistake,
+          pattern: tr.pattern,
           stopLoss: tr.stopLoss,
         };
       }
@@ -78,6 +81,7 @@ export default function TradesPage() {
   const epOptions = data?.entryPointOptions ?? [];
   const etOptions = data?.entryTypeOptions ?? [];
   const mtOptions = data?.mistakeOptions ?? [];
+  const ptOptions = data?.patternOptions ?? [];
 
   function annOf(tr: SerializedTrade): Ann {
     return (
@@ -85,6 +89,7 @@ export default function TradesPage() {
         entryPoint: tr.entryPoint,
         entryType: tr.entryType,
         mistake: tr.mistake,
+        pattern: tr.pattern,
         stopLoss: tr.stopLoss,
       }
     );
@@ -122,13 +127,18 @@ export default function TradesPage() {
         const v = annOf(tr).mistake;
         return mtFilter === UNSET ? !v : v === mtFilter;
       });
+    if (ptFilter !== "all")
+      rows = rows.filter((tr) => {
+        const v = annOf(tr).pattern;
+        return ptFilter === UNSET ? !v : v === ptFilter;
+      });
     return [...rows].sort((a, b) => {
       const av = sortVal(a, sortKey);
       const bv = sortVal(b, sortKey);
       return sortDir === "asc" ? av - bv : bv - av;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, sortKey, sortDir]);
+  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, ptFilter, sortKey, sortDir]);
 
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -152,8 +162,8 @@ export default function TradesPage() {
       t("trades.export.open"), t("trades.export.close"), t("trades.export.durationMin"),
       t("trades.col.qty"), t("trades.col.entry"), t("trades.col.exit"), t("trades.col.stop"),
       t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
-      t("trades.export.result"), t("trades.col.entryPoint"), t("trades.col.entryType"),
-      t("trades.col.mistake"),
+      t("trades.export.result"), t("trades.col.pattern"), t("trades.col.entryPoint"),
+      t("trades.col.entryType"), t("trades.col.mistake"),
     ];
     const rows = filtered.map((tr) => {
       const a = annOf(tr);
@@ -174,6 +184,7 @@ export default function TradesPage() {
         tr.returnPct.toFixed(2),
         tr.netPnl.toFixed(2),
         resultLabel(tr.result),
+        a.pattern ?? "",
         a.entryPoint ?? "",
         a.entryType ?? "",
         a.mistake ?? "",
@@ -255,6 +266,11 @@ export default function TradesPage() {
           {etOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
         </select>
+        <select className={SELECT} value={ptFilter} onChange={(e) => { setPtFilter(e.target.value); setPage(0); }}>
+          <option value="all">{t("dash.allPatterns")}</option>
+          {ptOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+          <option value={UNSET}>{t("common.unset")}</option>
+        </select>
         <select className={SELECT} value={mtFilter} onChange={(e) => { setMtFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allMistakes")}</option>
           {mtOptions.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -285,6 +301,7 @@ export default function TradesPage() {
                   <Th right sortable onClick={() => toggleSort("fees")} active={sortKey === "fees"}><Term name="Fees">{t("trades.col.fees")}</Term></Th>
                   <Th right>{t("trades.col.stop")}</Th>
                   <Th right><Term name="RR">{t("trades.col.rr")}</Term></Th>
+                  <Th>{t("trades.col.pattern")}</Th>
                   <Th>{t("trades.col.entryPoint")}</Th>
                   <Th>{t("trades.col.entryType")}</Th>
                   <Th>{t("trades.col.mistake")}</Th>
@@ -324,6 +341,9 @@ export default function TradesPage() {
                         {fmtRR(rr)}
                       </td>
                       <td className="px-3 py-2">
+                        <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, { ...a, pattern: v })} />
+                      </td>
+                      <td className="px-3 py-2">
                         <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryPoint: v })} />
                       </td>
                       <td className="px-3 py-2">
@@ -361,7 +381,7 @@ export default function TradesPage() {
                   t("trades.col.symbol"), t("trades.col.side"), t("trades.col.market"),
                   t("trades.col.close"), t("trades.col.duration"), t("trades.col.return"),
                   t("trades.col.netPnl"), t("trades.col.fees"), t("trades.col.stop"), t("trades.col.rr"),
-                  t("trades.col.entryPoint"), t("trades.col.entryType"), t("trades.col.mistake"),
+                  t("trades.col.pattern"), t("trades.col.entryPoint"), t("trades.col.entryType"), t("trades.col.mistake"),
                 ].map((h) => (
                   <th key={h} className="px-2 py-1.5 text-left">{h}</th>
                 ))}
@@ -383,6 +403,7 @@ export default function TradesPage() {
                     <td className="px-2 py-1 text-muted">{fmtUsd(tr.fees)}</td>
                     <td className="px-2 py-1">{a.stopLoss ?? "—"}</td>
                     <td className="px-2 py-1">{fmtRR(rr)}</td>
+                    <td className="px-2 py-1">{a.pattern ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryPoint ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryType ?? "—"}</td>
                     <td className="px-2 py-1">{a.mistake ?? "—"}</td>

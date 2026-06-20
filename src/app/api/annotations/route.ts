@@ -8,6 +8,7 @@ const schema = z.object({
   entryPoint: z.string().max(40).nullable().optional(),
   entryType: z.string().max(40).nullable().optional(),
   mistake: z.string().max(60).nullable().optional(),
+  pattern: z.string().max(60).nullable().optional(),
   stopLoss: z.number().positive().nullable().optional(),
 });
 
@@ -31,10 +32,11 @@ export async function PUT(req: Request) {
   const entryPoint = parsed.data.entryPoint?.trim() || null;
   const entryType = parsed.data.entryType?.trim() || null;
   const mistake = parsed.data.mistake?.trim() || null;
+  const pattern = parsed.data.pattern?.trim() || null;
   const stopLoss = parsed.data.stopLoss ?? null;
   const { tradeKey } = parsed.data;
 
-  const data = { entryPoint, entryType, mistake, stopLoss };
+  const data = { entryPoint, entryType, mistake, pattern, stopLoss };
 
   try {
     const result = await prisma.tradeAnnotation.upsert({
@@ -47,6 +49,7 @@ export async function PUT(req: Request) {
       entryPoint: result.entryPoint,
       entryType: result.entryType,
       mistake: result.mistake,
+      pattern: result.pattern,
       stopLoss: result.stopLoss,
     });
   } catch (err) {

@@ -8,6 +8,12 @@ export const DEFAULT_MISTAKES = [
   "Ранний вход",
   "Превышен риск",
 ];
+export const DEFAULT_PATTERNS = [
+  "Пробой",
+  "Ложный пробой",
+  "Сложный ложный пробой",
+  "Отбой",
+];
 
 export const UNSET_LABEL = "Не задано";
 
@@ -30,6 +36,7 @@ export type AnnotationValue = {
   entryPoint: string | null;
   entryType: string | null;
   mistake: string | null;
+  pattern: string | null;
   stopLoss: number | null;
 };
 
@@ -37,4 +44,5 @@ export type UserAnnotationSettings = {
   entryPointOptions: string[];
   entryTypeOptions: string[];
   mistakeOptions: string[];
+  patternOptions: string[];
 };

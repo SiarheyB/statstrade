@@ -23,6 +23,7 @@ model User {
   entryPointOptions String?
   entryTypeOptions  String?
   mistakeOptions    String?
+  patternOptions    String?
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
   journalNotes JournalNote[]
@@ -52,6 +53,7 @@ model TradeAnnotation {
   entryPoint String? // ТВХ (точка входа)
   entryType  String? // тип входа
   mistake    String? // ошибка в сделке
+  pattern    String? // паттерн
   stopLoss   Float? // цена стоп-лосса (для маркера на графике)
   note       String?
   updatedAt  DateTime @updatedAt

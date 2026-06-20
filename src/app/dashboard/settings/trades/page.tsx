@@ -9,6 +9,7 @@ export default function TradeSettingsPage() {
   const [entryPoints, setEntryPoints] = useState<string[]>([]);
   const [entryTypes, setEntryTypes] = useState<string[]>([]);
   const [mistakes, setMistakes] = useState<string[]>([]);
+  const [patterns, setPatterns] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -22,6 +23,7 @@ export default function TradeSettingsPage() {
         setEntryPoints(d.entryPointOptions);
         setEntryTypes(d.entryTypeOptions);
         setMistakes(d.mistakeOptions);
+        setPatterns(d.patternOptions);
       }
       setLoading(false);
     })();
@@ -39,6 +41,7 @@ export default function TradeSettingsPage() {
           entryPointOptions: entryPoints,
           entryTypeOptions: entryTypes,
           mistakeOptions: mistakes,
+          patternOptions: patterns,
         }),
       });
       const d = await res.json();
@@ -49,6 +52,7 @@ export default function TradeSettingsPage() {
       setEntryPoints(d.entryPointOptions);
       setEntryTypes(d.entryTypeOptions);
       setMistakes(d.mistakeOptions);
+      setPatterns(d.patternOptions);
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
     } finally {
@@ -84,6 +88,12 @@ export default function TradeSettingsPage() {
             hint={t("settings.mistakesHint")}
             items={mistakes}
             onChange={setMistakes}
+          />
+          <ListEditor
+            title={t("settings.patterns")}
+            hint={t("settings.patternsHint")}
+            items={patterns}
+            onChange={setPatterns}
           />
 
           {error && (

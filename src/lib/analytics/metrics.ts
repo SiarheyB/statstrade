@@ -115,6 +115,7 @@ export type Metrics = {
   byEntryPoint: Bucket[]; // ТВХ
   byEntryType: Bucket[];
   byMistake: Bucket[]; // ошибки
+  byPattern: Bucket[]; // паттерн
 };
 
 function mean(xs: number[]): number {
@@ -378,6 +379,12 @@ export function computeMetrics(
     (k) => k,
   ).sort((a, b) => a.netPnl - b.netPnl); // worst (most negative) first
 
+  const byPattern = bucketStats(
+    sorted,
+    (t) => t.pattern || UNSET_LABEL,
+    (k) => k,
+  ).sort((a, b) => b.netPnl - a.netPnl);
+
   // derived scalars
   const tradeCount = sorted.length;
   const winRate = tradeCount > 0 ? (wins.length / tradeCount) * 100 : 0;
@@ -478,5 +485,6 @@ export function computeMetrics(
     byEntryPoint,
     byEntryType,
     byMistake,
+    byPattern,
   };
 }

@@ -9,6 +9,7 @@ import {
   DEFAULT_ENTRY_POINTS,
   DEFAULT_ENTRY_TYPES,
   DEFAULT_MISTAKES,
+  DEFAULT_PATTERNS,
 } from "@/lib/annotations";
 import type { Prisma } from "@prisma/client";
 
@@ -25,6 +26,7 @@ export async function GET(req: Request) {
   const entryPoint = url.searchParams.get("entryPoint") ?? "all";
   const entryType = url.searchParams.get("entryType") ?? "all";
   const mistake = url.searchParams.get("mistake") ?? "all";
+  const pattern = url.searchParams.get("pattern") ?? "all";
   const initialCapital = Number(url.searchParams.get("initialCapital") ?? "10000");
 
   try {
@@ -78,6 +80,7 @@ export async function GET(req: Request) {
           entryPointOptions: true,
           entryTypeOptions: true,
           mistakeOptions: true,
+          patternOptions: true,
         },
       }),
       prisma.tradeAnnotation.findMany({
@@ -90,6 +93,7 @@ export async function GET(req: Request) {
       t.entryPoint = a?.entryPoint ?? null;
       t.entryType = a?.entryType ?? null;
       t.mistake = a?.mistake ?? null;
+      t.pattern = a?.pattern ?? null;
       t.stopLoss = a?.stopLoss ?? null;
     }
 
@@ -120,6 +124,11 @@ export async function GET(req: Request) {
         mistake === "__unset__" ? !t.mistake : t.mistake === mistake,
       );
     }
+    if (pattern !== "all") {
+      filteredTrades = filteredTrades.filter((t) =>
+        pattern === "__unset__" ? !t.pattern : t.pattern === pattern,
+      );
+    }
 
     const metrics = computeMetrics(
       filteredTrades,
@@ -148,6 +157,7 @@ export async function GET(req: Request) {
       entryPointOptions: parseOptions(userRow?.entryPointOptions, DEFAULT_ENTRY_POINTS),
       entryTypeOptions: parseOptions(userRow?.entryTypeOptions, DEFAULT_ENTRY_TYPES),
       mistakeOptions: parseOptions(userRow?.mistakeOptions, DEFAULT_MISTAKES),
+      patternOptions: parseOptions(userRow?.patternOptions, DEFAULT_PATTERNS),
     });
   } catch (err) {
     return serverError((err as Error).message);

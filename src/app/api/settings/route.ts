@@ -7,6 +7,7 @@ import {
   DEFAULT_ENTRY_POINTS,
   DEFAULT_ENTRY_TYPES,
   DEFAULT_MISTAKES,
+  DEFAULT_PATTERNS,
 } from "@/lib/annotations";
 
 const optionList = z.array(z.string().trim().min(1).max(60)).max(40);
@@ -14,6 +15,7 @@ const schema = z.object({
   entryPointOptions: optionList,
   entryTypeOptions: optionList,
   mistakeOptions: optionList,
+  patternOptions: optionList,
 });
 
 export async function GET() {
@@ -26,6 +28,7 @@ export async function GET() {
       entryPointOptions: true,
       entryTypeOptions: true,
       mistakeOptions: true,
+      patternOptions: true,
     },
   });
 
@@ -33,6 +36,7 @@ export async function GET() {
     entryPointOptions: parseOptions(row?.entryPointOptions, DEFAULT_ENTRY_POINTS),
     entryTypeOptions: parseOptions(row?.entryTypeOptions, DEFAULT_ENTRY_TYPES),
     mistakeOptions: parseOptions(row?.mistakeOptions, DEFAULT_MISTAKES),
+    patternOptions: parseOptions(row?.patternOptions, DEFAULT_PATTERNS),
   });
 }
 
@@ -57,6 +61,7 @@ export async function PUT(req: Request) {
   const entryPointOptions = uniq(parsed.data.entryPointOptions);
   const entryTypeOptions = uniq(parsed.data.entryTypeOptions);
   const mistakeOptions = uniq(parsed.data.mistakeOptions);
+  const patternOptions = uniq(parsed.data.patternOptions);
 
   try {
     await prisma.user.update({
@@ -65,9 +70,10 @@ export async function PUT(req: Request) {
         entryPointOptions: JSON.stringify(entryPointOptions),
         entryTypeOptions: JSON.stringify(entryTypeOptions),
         mistakeOptions: JSON.stringify(mistakeOptions),
+        patternOptions: JSON.stringify(patternOptions),
       },
     });
-    return NextResponse.json({ entryPointOptions, entryTypeOptions, mistakeOptions });
+    return NextResponse.json({ entryPointOptions, entryTypeOptions, mistakeOptions, patternOptions });
   } catch (err) {
     return serverError((err as Error).message);
   }

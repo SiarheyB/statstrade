@@ -26,6 +26,7 @@ export type SerializedTrade = {
   entryPoint: string | null;
   entryType: string | null;
   mistake: string | null;
+  pattern: string | null;
   stopLoss: number | null;
 };
 
@@ -45,4 +46,5 @@ export type StatsResponse = {
   entryPointOptions: string[];
   entryTypeOptions: string[];
   mistakeOptions: string[];
+  patternOptions: string[];
 };
