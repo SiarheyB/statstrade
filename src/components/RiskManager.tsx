@@ -90,6 +90,7 @@ export default function RiskManager() {
         heading={t("risk.default")}
         value={def}
         onChange={setDef}
+        balance={accounts.reduce((s, a) => s + (a.balance ?? 0), 0) || null}
       />
 
       {accounts.map((a) => (
@@ -116,6 +117,7 @@ export default function RiskManager() {
               <ProfileEditor
                 value={overrides[a.id] ?? def}
                 onChange={(v) => setOverrides((o) => ({ ...o, [a.id]: v }))}
+                balance={a.balance}
               />
             </div>
           )}
@@ -138,10 +140,12 @@ function ProfileEditor({
   heading,
   value,
   onChange,
+  balance,
 }: {
   heading?: string;
   value: RiskProfileData;
   onChange: (v: RiskProfileData) => void;
+  balance: number | null;
 }) {
   const { t } = useI18n();
   const set = (patch: Partial<RiskProfileData>) => onChange({ ...value, ...patch });
@@ -150,6 +154,16 @@ function ProfileEditor({
       ...value,
       lossLimits: { ...value.lossLimits, [key]: { ...value.lossLimits[key], ...patch } },
     });
+
+  // $ equivalent of a percent-based limit (nothing for $ limits or no balance).
+  function moneyHint(l: { on: boolean; value: number; unit: "pct" | "amount" }) {
+    if (!l.on || l.unit !== "pct" || !l.value || balance == null || balance <= 0) return null;
+    return (
+      <span className="text-xs text-faint tabular-nums whitespace-nowrap">
+        ≈ {fmtUsd((balance * l.value) / 100)}
+      </span>
+    );
+  }
 
   return (
     <div className={heading ? "card p-4" : ""}>
@@ -220,6 +234,7 @@ function ProfileEditor({
             <option value="pct">% {t("risk.ofDeposit")}</option>
             <option value="amount">$</option>
           </select>
+          {moneyHint(value.riskPerTrade)}
         </div>
         <p className="text-xs text-faint -mt-1">{t("risk.riskPerTradeHint")}</p>
 
@@ -253,6 +268,7 @@ function ProfileEditor({
                 <option value="pct">% {t("risk.ofDeposit")}</option>
                 <option value="amount">$</option>
               </select>
+              {moneyHint(l)}
             </div>
           );
         })}
