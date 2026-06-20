@@ -1,23 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createRemoteJWKSet, jwtVerify } from "jose";
 import { prisma } from "@/lib/db";
 import { createSessionCookie, createPendingCookie } from "@/lib/auth";
+import { verifyGoogleCredential, GoogleAuthError } from "@/lib/google";
 import { badRequest, serverError } from "@/lib/api";
 
 const schema = z.object({ credential: z.string().min(10) });
 
-// Google's public keys for verifying the id_token signature (cached by jose).
-const GOOGLE_JWKS = createRemoteJWKSet(
-  new URL("https://www.googleapis.com/oauth2/v3/certs"),
-);
-
 // Sign in / sign up with Google. The client (Google Identity Services) returns a
 // signed id_token; we verify it server-side, then find or create the user.
 export async function POST(req: Request) {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  if (!clientId) return serverError("Google вход не настроен на сервере");
-
   let body: unknown;
   try {
     body = await req.json();
@@ -27,32 +19,31 @@ export async function POST(req: Request) {
   const parsed = schema.safeParse(body);
   if (!parsed.success) return badRequest("Некорректный запрос");
 
-  let email: string;
-  let googleId: string;
-  let name: string | null;
+  let identity;
   try {
-    const { payload } = await jwtVerify(parsed.data.credential, GOOGLE_JWKS, {
-      issuer: ["https://accounts.google.com", "accounts.google.com"],
-      audience: clientId,
-    });
-    if (!payload.email || payload.email_verified === false) {
-      return badRequest("Google не подтвердил email");
+    identity = await verifyGoogleCredential(parsed.data.credential);
+  } catch (err) {
+    if (err instanceof GoogleAuthError && err.message === "not-configured") {
+      return serverError("Google вход не настроен на сервере");
     }
-    email = String(payload.email).toLowerCase();
-    googleId = String(payload.sub);
-    name = payload.name ? String(payload.name) : null;
-  } catch {
     return badRequest("Не удалось проверить вход через Google");
   }
 
   try {
-    let user = await prisma.user.findUnique({ where: { email } });
+    // Match by linked Google id first, then by email — so an account that linked
+    // Google in settings works even if its email differs from the Google email.
+    let user = await prisma.user.findFirst({
+      where: { OR: [{ googleId: identity.googleId }, { email: identity.email }] },
+    });
     if (!user) {
-      // New Google-only account (no password).
-      user = await prisma.user.create({ data: { email, googleId, name } });
+      user = await prisma.user.create({
+        data: { email: identity.email, googleId: identity.googleId, name: identity.name },
+      });
     } else if (!user.googleId) {
-      // Existing email account — link the Google identity.
-      user = await prisma.user.update({ where: { id: user.id }, data: { googleId } });
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { googleId: identity.googleId },
+      });
     }
 
     // Respect 2FA: even via Google, require the TOTP code if enabled.
