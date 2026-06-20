@@ -2,6 +2,7 @@
 
 import ThemeMenu from "@/components/ThemeMenu";
 import LocaleMenu from "@/components/LocaleMenu";
+import TwoFactorSettings from "@/components/TwoFactorSettings";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function GeneralSettingsPage() {
@@ -22,13 +23,15 @@ export default function GeneralSettingsPage() {
         <LocaleMenu />
       </div>
 
-      <div className="card p-5 flex items-center justify-between gap-4">
+      <div className="card p-5 mb-5 flex items-center justify-between gap-4">
         <div>
           <h3 className="font-medium text-sm">{t("settings.theme")}</h3>
           <p className="text-xs text-faint mt-0.5">{t("settings.themeHint")}</p>
         </div>
         <ThemeMenu />
       </div>
+
+      <TwoFactorSettings />
     </div>
   );
 }

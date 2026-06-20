@@ -14,6 +14,8 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [twoFactor, setTwoFactor] = useState(false);
+  const [code, setCode] = useState("");
 
   const isRegister = mode === "register";
 
@@ -28,6 +30,35 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         body: JSON.stringify(
           isRegister ? { email, password, name } : { email, password },
         ),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Error");
+        return;
+      }
+      // 2FA: switch to the code-entry step instead of navigating.
+      if (data.twoFactorRequired) {
+        setTwoFactor(true);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError(t("auth.networkError"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onSubmitCode(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/2fa/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -58,12 +89,57 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
 
         <div className="card p-6">
           <h1 className="text-xl font-semibold mb-1">
-            {isRegister ? t("auth.register.title") : t("auth.login.title")}
+            {twoFactor
+              ? t("auth.twoFactor.title")
+              : isRegister
+                ? t("auth.register.title")
+                : t("auth.login.title")}
           </h1>
           <p className="text-sm text-muted mb-5">
-            {isRegister ? t("auth.register.subtitle") : t("auth.login.subtitle")}
+            {twoFactor
+              ? t("auth.twoFactor.subtitle")
+              : isRegister
+                ? t("auth.register.subtitle")
+                : t("auth.login.subtitle")}
           </p>
 
+          {twoFactor ? (
+            <form onSubmit={onSubmitCode} className="space-y-3">
+              <div>
+                <label className="block text-xs text-muted mb-1">{t("auth.twoFactor.code")}</label>
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  required
+                  className="input-base w-full text-center text-lg tracking-[0.4em]"
+                  value={code}
+                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
+                  placeholder="000000"
+                />
+              </div>
+              {error && (
+                <div className="text-sm text-loss bg-loss/10 border border-loss/30 rounded-lg px-3 py-2">
+                  {error}
+                </div>
+              )}
+              <button
+                type="submit"
+                disabled={loading || code.length < 6}
+                className="w-full py-2.5 rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition disabled:opacity-50"
+              >
+                {loading ? t("auth.wait") : t("auth.twoFactor.verify")}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setTwoFactor(false); setCode(""); setError(null); }}
+                className="w-full py-2 text-sm text-muted hover:text-fg transition"
+              >
+                {t("common.back")}
+              </button>
+            </form>
+          ) : (
           <form onSubmit={onSubmit} className="space-y-3">
             {isRegister && (
               <div>
@@ -118,6 +194,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                   : t("auth.signIn")}
             </button>
           </form>
+          )}
         </div>
 
         <p className="text-center text-sm text-muted mt-4">

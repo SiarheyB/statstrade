@@ -24,6 +24,10 @@ model User {
   entryTypeOptions  String?
   mistakeOptions    String?
   patternOptions    String?
+  // Two-factor auth (TOTP / Google Authenticator). Secret is AES-256-GCM
+  // encrypted at rest; only active once the user confirms a code.
+  twoFactorEnabled  Boolean @default(false)
+  twoFactorSecret   String?
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
   journalNotes JournalNote[]

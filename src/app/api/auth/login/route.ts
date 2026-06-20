@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { verifyPassword, createSessionCookie } from "@/lib/auth";
+import { verifyPassword, createSessionCookie, createPendingCookie } from "@/lib/auth";
 import { badRequest, serverError } from "@/lib/api";
 
 const schema = z.object({
@@ -27,6 +27,12 @@ export async function POST(req: Request) {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !(await verifyPassword(password, user.password))) {
       return badRequest("Неверный email или пароль");
+    }
+
+    // 2FA enabled: defer the session until the TOTP code is verified.
+    if (user.twoFactorEnabled && user.twoFactorSecret) {
+      await createPendingCookie(user.id);
+      return NextResponse.json({ twoFactorRequired: true });
     }
 
     await createSessionCookie({ userId: user.id, email: user.email });
