@@ -40,9 +40,9 @@ type Prog = { done: number; total: number; imported: number; phase: string | nul
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
 
 const EXCHANGES = [
-  { id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: false },
+  { id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: true },
   { id: "bybit", name: "Bybit", needsPassphrase: false, supportsDemo: true },
-  { id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: false },
+  { id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: true },
 ];
 
 export default function AccountsPage() {

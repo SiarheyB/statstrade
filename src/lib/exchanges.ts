@@ -59,10 +59,20 @@ export function createExchange(
       defaultType: kind, // spot | swap
     },
   });
-  // Demo-trading keys (e.g. Bybit Demo) only work against the demo API host.
+  // Demo / testnet keys only work against the exchange's demo environment.
+  // Bybit has its own "Demo Trading" host (enableDemoTrading); Binance (testnet)
+  // and OKX (demo trading, x-simulated-trading header) use CCXT's unified
+  // sandbox mode.
   if (demo) {
-    const ex = exchange as unknown as { enableDemoTrading?: (v: boolean) => void };
-    if (typeof ex.enableDemoTrading === "function") ex.enableDemoTrading(true);
+    const ex = exchange as unknown as {
+      enableDemoTrading?: (v: boolean) => void;
+      setSandboxMode?: (v: boolean) => void;
+    };
+    if (id === "bybit" && typeof ex.enableDemoTrading === "function") {
+      ex.enableDemoTrading(true);
+    } else if (typeof ex.setSandboxMode === "function") {
+      ex.setSandboxMode(true);
+    }
   }
   return exchange;
 }
