@@ -19,7 +19,9 @@ win rate, просадки и десятки других метрик.
   разбивки по бирже / месяцу / дню недели / часу / символу / стороне (long/short).
 - **Таблица сделок** — сортировка и фильтрация по символу, стороне, результату.
 - **Безопасность** — пароли через bcrypt, сессии на JWT (HttpOnly cookie),
-  секреты бирж шифруются **AES-256-GCM** перед записью в БД.
+  секреты бирж шифруются **AES-256-GCM** перед записью в БД. Двухфакторная
+  аутентификация (**TOTP**, Google Authenticator/Authy), вход и регистрация
+  через **Google**, смена пароля в настройках.
 - **Демо-режим** — генератор синтетических сделок, чтобы исследовать дашборд
   без реальных ключей.
 
@@ -53,9 +55,11 @@ npm run dev                   # http://localhost:3000
 Переменные окружения (`.env`, пример — в `.env.example`):
 
 ```
-DATABASE_URL   — строка подключения к БД
-JWT_SECRET     — секрет для подписи сессий
-ENCRYPTION_KEY — 32-байтный ключ (64 hex) для шифрования API-секретов
+DATABASE_URL              — строка подключения к БД
+JWT_SECRET                — секрет для подписи сессий
+ENCRYPTION_KEY            — 32-байтный ключ (64 hex) для шифрования API-секретов
+GOOGLE_CLIENT_ID          — (опц.) Google OAuth Client ID для проверки входа на сервере
+NEXT_PUBLIC_GOOGLE_CLIENT_ID — (опц.) тот же Client ID, для кнопки «Войти через Google»
 ```
 
 Сгенерировать секреты:
@@ -64,6 +68,38 @@ ENCRYPTION_KEY — 32-байтный ключ (64 hex) для шифровани
 node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"  # JWT_SECRET
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"  # ENCRYPTION_KEY
 ```
+
+### Вход и регистрация через Google (опционально)
+
+Кнопка «Войти через Google» появляется на `/login` и `/register`, только если
+заданы обе переменные `GOOGLE_CLIENT_ID` и `NEXT_PUBLIC_GOOGLE_CLIENT_ID`
+(одно и то же значение). Без них всё остальное работает как обычно.
+
+Настройка:
+
+1. [Google Cloud Console](https://console.cloud.google.com/apis/credentials) →
+   **Create Credentials → OAuth client ID → Web application**.
+2. **Authorized JavaScript origins** — укажите адреса приложения, например
+   `http://localhost:3000` (dev) и `https://ваш-домен` (прод).
+3. Скопируйте **Client ID** и пропишите его в обе переменные `.env`:
+
+```env
+GOOGLE_CLIENT_ID="<client-id>.apps.googleusercontent.com"
+NEXT_PUBLIC_GOOGLE_CLIENT_ID="<client-id>.apps.googleusercontent.com"
+```
+
+> Client **secret** не нужен: используется Google Identity Services, а `id_token`
+> проверяется на сервере по публичным ключам Google (JWKS) через `jose`.
+> Если у пользователя включена 2FA, после Google-входа всё равно запрашивается
+> код из приложения.
+
+### Двухфакторная аутентификация (2FA)
+
+Включается в **Настройки → Общие**: сканируете QR (или вводите ключ вручную) в
+Google Authenticator / Authy / 1Password, подтверждаете кодом. После включения
+вход становится двухшаговым: пароль (или Google) → 6-значный код. TOTP по
+RFC 6238, секрет хранится зашифрованным (`ENCRYPTION_KEY`). Дополнительных
+переменных окружения не требует.
 
 ## Быстрый старт без ключей
 
@@ -196,6 +232,9 @@ CRON_SECRET="<сгенерированный>"
 NODE_ENV="production"
 # Внутрипроцессный планировщик включён — авто-синхронизация работает внутри app.
 ENABLE_SCHEDULER="true"
+# (опц.) вход через Google — см. раздел «Вход и регистрация через Google»
+GOOGLE_CLIENT_ID="<client-id>.apps.googleusercontent.com"
+NEXT_PUBLIC_GOOGLE_CLIENT_ID="<client-id>.apps.googleusercontent.com"
 ```
 
 > ВАЖНО: `ENCRYPTION_KEY` нельзя терять и менять — иначе ранее сохранённые
