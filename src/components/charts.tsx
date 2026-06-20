@@ -95,8 +95,16 @@ export function EquityChart({ data }: { data: EquityPoint[] }) {
   );
 }
 
-export function DailyPnlChart({ data }: { data: DailyPoint[] }) {
+export function DailyPnlChart({
+  data,
+  metric = "pnl",
+}: {
+  data: DailyPoint[];
+  metric?: "pnl" | "winRate";
+}) {
+  const { t: tr } = useI18n();
   if (data.length === 0) return <Empty />;
+  const isWin = metric === "winRate";
   return (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
@@ -110,10 +118,11 @@ export function DailyPnlChart({ data }: { data: DailyPoint[] }) {
             minTickGap={30}
           />
           <YAxis
-            tickFormatter={compact}
+            tickFormatter={isWin ? (v: number) => `${Math.round(v)}%` : compact}
+            domain={isWin ? [0, 100] : undefined}
             tick={{ fill: AXIS, fontSize: 11 }}
             stroke={GRID}
-            width={48}
+            width={isWin ? 40 : 48}
           />
           <Tooltip
             cursor={{ fill: "#ffffff08" }}
@@ -123,16 +132,23 @@ export function DailyPnlChart({ data }: { data: DailyPoint[] }) {
               return (
                 <TooltipBox>
                   <div className="text-muted">{p.date}</div>
-                  <div className={p.pnl >= 0 ? "text-profit" : "text-loss"}>
-                    {fmtUsd(p.pnl, { sign: true })}
-                  </div>
+                  {isWin ? (
+                    <>
+                      <div className="font-medium">{p.winRate.toFixed(1)}% win</div>
+                      <div className="text-faint">{p.trades} {tr("common.trades")}</div>
+                    </>
+                  ) : (
+                    <div className={p.pnl >= 0 ? "text-profit" : "text-loss"}>
+                      {fmtUsd(p.pnl, { sign: true })}
+                    </div>
+                  )}
                 </TooltipBox>
               );
             }}
           />
-          <Bar dataKey="pnl" radius={[2, 2, 0, 0]}>
+          <Bar dataKey={metric} radius={[2, 2, 0, 0]}>
             {data.map((d, i) => (
-              <Cell key={i} fill={d.pnl >= 0 ? PROFIT : LOSS} />
+              <Cell key={i} fill={isWin ? (d.winRate >= 50 ? PROFIT : LOSS) : d.pnl >= 0 ? PROFIT : LOSS} />
             ))}
           </Bar>
         </BarChart>

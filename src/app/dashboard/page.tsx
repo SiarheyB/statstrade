@@ -121,6 +121,8 @@ export default function DashboardPage() {
   const [timeTab, setTimeTab] = useState<"dow" | "hour" | "month">("month");
   const [entryMetric, setEntryMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [patternMetric, setPatternMetric] = useState<"netPnl" | "winRate">("netPnl");
+  const [dailyMetric, setDailyMetric] = useState<"pnl" | "winRate">("pnl");
+  const [exchangeMetric, setExchangeMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [exporting, setExporting] = useState<null | "png" | "pdf">(null);
   const dashRef = useRef<HTMLDivElement>(null);
 
@@ -434,8 +436,23 @@ export default function DashboardPage() {
           {/* Daily pnl + heatmap */}
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-5 min-w-0">
-              <SectionTitle title={t("dash.dailyPnl")} />
-              <DailyPnlChart data={m.daily} />
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-sm">{t("dash.dailyPnl")}</h3>
+                <div className="flex gap-1 text-xs">
+                  {(["pnl", "winRate"] as const).map((mk) => (
+                    <button
+                      key={mk}
+                      onClick={() => setDailyMetric(mk)}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        dailyMetric === mk ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
+                      }`}
+                    >
+                      {mk === "pnl" ? t("metric.pnl") : t("metric.winRateShort")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <DailyPnlChart data={m.daily} metric={dailyMetric} />
             </div>
             <div className="card p-5 min-w-0">
               <SectionTitle title={t("dash.calendar")} />
@@ -470,8 +487,23 @@ export default function DashboardPage() {
               <StatRow label={t("dash.avgHold")} value={fmtDuration(m.avgDurationMs)} />
             </div>
             <div className="card p-5">
-              <SectionTitle title={t("dash.byExchange")} />
-              <BreakdownChart data={m.byExchange} height={220} />
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-sm">{t("dash.byExchange")}</h3>
+                <div className="flex gap-1 text-xs">
+                  {(["netPnl", "winRate"] as const).map((mk) => (
+                    <button
+                      key={mk}
+                      onClick={() => setExchangeMetric(mk)}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        exchangeMetric === mk ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
+                      }`}
+                    >
+                      {mk === "netPnl" ? t("metric.pnl") : t("metric.winRateShort")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <BreakdownChart data={m.byExchange} metric={exchangeMetric} height={220} />
             </div>
           </div>
 

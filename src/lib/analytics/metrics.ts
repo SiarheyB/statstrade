@@ -26,7 +26,7 @@ export type Bucket = {
 };
 
 export type EquityPoint = { t: number; equity: number; pnl: number };
-export type DailyPoint = { date: string; pnl: number; cumulative: number; trades: number };
+export type DailyPoint = { date: string; pnl: number; cumulative: number; trades: number; winRate: number };
 
 export type Metrics = {
   initialCapital: number;
@@ -253,12 +253,13 @@ export function computeMetrics(
     : 0;
 
   // daily P&L series and daily returns for Sharpe/Sortino
-  const dayMap = new Map<string, { pnl: number; trades: number }>();
+  const dayMap = new Map<string, { pnl: number; trades: number; wins: number }>();
   for (const t of sorted) {
     const key = t.exitTime.toISOString().slice(0, 10);
-    const d = dayMap.get(key) ?? { pnl: 0, trades: 0 };
+    const d = dayMap.get(key) ?? { pnl: 0, trades: 0, wins: 0 };
     d.pnl += t.netPnl;
     d.trades += 1;
+    if (t.result === "win") d.wins += 1;
     dayMap.set(key, d);
   }
   const dailyKeys = Array.from(dayMap.keys()).sort();
@@ -269,7 +270,7 @@ export function computeMetrics(
   for (const key of dailyKeys) {
     const d = dayMap.get(key)!;
     cum += d.pnl;
-    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades });
+    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades, winRate: d.trades ? (d.wins / d.trades) * 100 : 0 });
     if (runningEquity > 0) dailyReturns.push(d.pnl / runningEquity);
     runningEquity += d.pnl;
   }
