@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText, AlertTriangle } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
@@ -340,10 +340,24 @@ export default function TradesPage() {
                     <tr key={tr.id} data-trade-id={tr.id} className="border-b border-border last:border-0 hover:bg-surface-2/50">
                       <td
                         className={`px-3 py-2 font-medium border-l-2 ${tr.side === "long" ? "border-l-profit/60" : "border-l-loss/60"}`}
-                        onMouseEnter={(e) => onTickerEnter(e, tr)}
-                        onMouseLeave={onTickerLeave}
                       >
-                        <span className="cursor-pointer border-b border-dotted border-faint/50">{fmtSymbol(tr.symbol)}</span>
+                        <span className="inline-flex items-center gap-1.5">
+                          {rr != null && rr < -1 && (
+                            <span className="relative group inline-flex shrink-0" title={t("trades.riskWarning")}>
+                              <AlertTriangle size={14} className="text-loss" />
+                              <span className="pointer-events-none absolute left-0 top-full mt-1 z-30 hidden group-hover:block w-56 whitespace-normal rounded-md border border-loss/40 bg-bg px-2.5 py-1.5 text-xs text-loss shadow-lg">
+                                {t("trades.riskWarning")}
+                              </span>
+                            </span>
+                          )}
+                          <span
+                            className="cursor-pointer border-b border-dotted border-faint/50"
+                            onMouseEnter={(e) => onTickerEnter(e, tr)}
+                            onMouseLeave={onTickerLeave}
+                          >
+                            {fmtSymbol(tr.symbol)}
+                          </span>
+                        </span>
                       </td>
                       <td className="px-3 py-2"><SideBadge side={tr.side} /></td>
                       <td className="px-3 py-2 text-xs text-faint uppercase">

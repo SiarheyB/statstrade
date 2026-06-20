@@ -86,6 +86,10 @@ export default function RiskManager() {
         </div>
       </div>
 
+      <div className="card p-4 text-sm text-muted bg-surface-2/40 border-accent/20">
+        <span className="font-medium text-fg">{t("risk.riskPerTrade")}.</span> {t("risk.autoMistake")}
+      </div>
+
       <ProfileEditor
         heading={t("risk.default")}
         value={def}
