@@ -11,6 +11,7 @@ export type LossLimits = Record<PeriodKey, PeriodLimit>;
 export type RiskProfileData = {
   enabled: boolean;
   maxStopsPerDay: number | null;
+  riskPerTrade: PeriodLimit; // risk per trade (1R) used for the R-multiple column
   lossLimits: LossLimits;
 };
 
@@ -20,6 +21,7 @@ export function defaultRiskProfile(): RiskProfileData {
   return {
     enabled: false,
     maxStopsPerDay: null,
+    riskPerTrade: emptyLimit(),
     lossLimits: { day: emptyLimit(), week: emptyLimit(), month: emptyLimit(), year: emptyLimit() },
   };
 }
@@ -28,6 +30,7 @@ export function defaultRiskProfile(): RiskProfileData {
 export function parseRiskProfile(row: {
   enabled?: boolean;
   maxStopsPerDay?: number | null;
+  riskPerTrade?: string | null;
   lossLimits?: string | null;
 } | null): RiskProfileData {
   const base = defaultRiskProfile();
@@ -35,6 +38,18 @@ export function parseRiskProfile(row: {
   base.enabled = !!row.enabled;
   base.maxStopsPerDay =
     typeof row.maxStopsPerDay === "number" && row.maxStopsPerDay > 0 ? row.maxStopsPerDay : null;
+  if (row.riskPerTrade) {
+    try {
+      const r = JSON.parse(row.riskPerTrade) as Partial<PeriodLimit>;
+      base.riskPerTrade = {
+        on: !!r.on,
+        value: Number.isFinite(Number(r.value)) ? Number(r.value) : 0,
+        unit: r.unit === "amount" ? "amount" : "pct",
+      };
+    } catch {
+      // keep default
+    }
+  }
   if (row.lossLimits) {
     try {
       const raw = JSON.parse(row.lossLimits) as Partial<Record<PeriodKey, Partial<PeriodLimit>>>;
@@ -57,6 +72,23 @@ export function parseRiskProfile(row: {
 
 export function serializeLossLimits(limits: LossLimits): string {
   return JSON.stringify(limits);
+}
+
+export function serializeRiskPerTrade(limit: PeriodLimit): string {
+  return JSON.stringify(limit);
+}
+
+// The money risk of one trade (1R) for the given profile, or null when it can't
+// be determined (disabled, not set, or a % unit without a known balance).
+export function riskPerTradeAmount(
+  profile: RiskProfileData,
+  balance: number | null,
+): number | null {
+  const r = profile.riskPerTrade;
+  if (!profile.enabled || !r.on || r.value <= 0) return null;
+  if (r.unit === "amount") return r.value;
+  if (balance == null || balance <= 0) return null;
+  return (balance * r.value) / 100;
 }
 
 // --- Status computation ---

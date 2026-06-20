@@ -180,6 +180,49 @@ function ProfileEditor({
           />
         </div>
 
+        <div className="flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            checked={value.riskPerTrade.on}
+            onChange={(e) => set({ riskPerTrade: { ...value.riskPerTrade, on: e.target.checked } })}
+            className="accent-accent h-4 w-4"
+          />
+          <span className="text-sm flex-1">{t("risk.riskPerTrade")}</span>
+          <input
+            type="number"
+            min={0}
+            value={value.riskPerTrade.value || ""}
+            placeholder="0"
+            disabled={!value.riskPerTrade.on}
+            onChange={(e) =>
+              set({
+                riskPerTrade: {
+                  ...value.riskPerTrade,
+                  value: Math.max(0, Number(e.target.value) || 0),
+                },
+              })
+            }
+            className="input-base w-28 text-right text-sm py-1 disabled:opacity-40"
+          />
+          <select
+            value={value.riskPerTrade.unit}
+            disabled={!value.riskPerTrade.on}
+            onChange={(e) =>
+              set({
+                riskPerTrade: {
+                  ...value.riskPerTrade,
+                  unit: e.target.value as "pct" | "amount",
+                },
+              })
+            }
+            className="input-base text-sm py-1 cursor-pointer disabled:opacity-40"
+          >
+            <option value="pct">% {t("risk.ofDeposit")}</option>
+            <option value="amount">$</option>
+          </select>
+        </div>
+        <p className="text-xs text-faint -mt-1">{t("risk.riskPerTradeHint")}</p>
+
         <div className="text-xs text-faint uppercase tracking-wide pt-1">{t("risk.lossLimits")}</div>
         {PERIODS.map((p) => {
           const l = value.lossLimits[p];

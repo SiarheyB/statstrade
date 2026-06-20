@@ -159,6 +159,9 @@ model RiskProfile {
   maxStopsPerDay Int? // max losing trades per day before "stop"
   // JSON: { day|week|month|year: { on: bool, value: number, unit: "pct"|"amount" } }
   lossLimits     String?
+  // JSON: { on: bool, value: number, unit: "pct"|"amount" } — risk per trade (1R),
+  // used to compute the risk-reward (R-multiple) column on trades.
+  riskPerTrade   String?
   updatedAt      DateTime @updatedAt
 
   @@unique([userId, accountId])

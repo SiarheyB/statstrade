@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/TradeChart";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol } from "@/lib/format";
@@ -25,6 +26,7 @@ export default function TradesPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
+  const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
   const [symbolFilter, setSymbolFilter] = useState("all");
   const [marketFilter, setMarketFilter] = useState("all");
@@ -78,6 +80,15 @@ export default function TradesPage() {
     load();
   }, [load]);
 
+  // Risk profiles drive the R-multiple column: when the risk manager is on and a
+  // per-trade risk is set, RR = netPnl / configured risk (1R).
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/risk/settings");
+      if (res.ok) setRiskProfiles((await res.json()).profiles ?? {});
+    })();
+  }, []);
+
   const epOptions = data?.entryPointOptions ?? [];
   const etOptions = data?.entryTypeOptions ?? [];
   const mtOptions = data?.mistakeOptions ?? [];
@@ -102,6 +113,20 @@ export default function TradesPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ tradeKey, ...next }),
     }).catch(() => {});
+  }
+
+  const balanceOf = (accountId: string): number | null =>
+    data?.accounts.find((a) => a.id === accountId)?.balance ?? null;
+
+  // R-multiple for a trade. If the risk manager is enabled with a per-trade risk,
+  // R = netPnl / risk (money-based). Otherwise fall back to the stop-loss model.
+  function rrFor(tr: SerializedTrade, stopLoss: number | null): number | null {
+    const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
+    if (prof) {
+      const riskAmt = riskPerTradeAmount(prof, balanceOf(tr.accountId));
+      if (riskAmt && riskAmt > 0) return tr.netPnl / riskAmt;
+    }
+    return rrOf(tr, stopLoss);
   }
 
   const filtered = useMemo(() => {
@@ -167,7 +192,7 @@ export default function TradesPage() {
     ];
     const rows = filtered.map((tr) => {
       const a = annOf(tr);
-      const rr = rrOf(tr, a.stopLoss);
+      const rr = rrFor(tr, a.stopLoss);
       return [
         fmtSymbol(tr.symbol),
         tr.side === "long" ? "Long" : "Short",
@@ -310,7 +335,7 @@ export default function TradesPage() {
               <tbody>
                 {pageRows.map((tr) => {
                   const a = annOf(tr);
-                  const rr = rrOf(tr, a.stopLoss);
+                  const rr = rrFor(tr, a.stopLoss);
                   return (
                     <tr key={tr.id} data-trade-id={tr.id} className="border-b border-border last:border-0 hover:bg-surface-2/50">
                       <td
@@ -390,7 +415,7 @@ export default function TradesPage() {
             <tbody>
               {filtered.map((tr) => {
                 const a = annOf(tr);
-                const rr = rrOf(tr, a.stopLoss);
+                const rr = rrFor(tr, a.stopLoss);
                 return (
                   <tr key={tr.id} className="border-b border-border">
                     <td className="px-2 py-1 font-medium">{fmtSymbol(tr.symbol)}</td>

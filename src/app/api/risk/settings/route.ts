@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { parseRiskProfile, serializeLossLimits, defaultRiskProfile } from "@/lib/risk";
+import {
+  parseRiskProfile,
+  serializeLossLimits,
+  serializeRiskPerTrade,
+  defaultRiskProfile,
+} from "@/lib/risk";
 
 const limitSchema = z.object({
   on: z.boolean(),
@@ -12,6 +17,7 @@ const limitSchema = z.object({
 const profileSchema = z.object({
   enabled: z.boolean(),
   maxStopsPerDay: z.number().int().min(0).max(1000).nullable(),
+  riskPerTrade: limitSchema.optional(),
   lossLimits: z.object({
     day: limitSchema,
     week: limitSchema,
@@ -62,6 +68,9 @@ export async function PUT(req: Request) {
         enabled: prof.enabled,
         maxStopsPerDay:
           prof.maxStopsPerDay && prof.maxStopsPerDay > 0 ? prof.maxStopsPerDay : null,
+        riskPerTrade: serializeRiskPerTrade(
+          prof.riskPerTrade ?? { on: false, value: 0, unit: "pct" },
+        ),
         lossLimits: serializeLossLimits(prof.lossLimits),
       };
       await prisma.riskProfile.upsert({
