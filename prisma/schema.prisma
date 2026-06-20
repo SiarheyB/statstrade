@@ -16,7 +16,8 @@ datasource db {
 model User {
   id        String            @id @default(cuid())
   email     String            @unique
-  password  String // bcrypt hash
+  password  String? // bcrypt hash (null for Google-only accounts)
+  googleId  String?           @unique // Google "sub" when linked to a Google account
   name      String?
   createdAt DateTime          @default(now())
   // JSON arrays of user-configurable dropdown options for trade annotations.

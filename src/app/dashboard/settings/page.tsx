@@ -3,6 +3,7 @@
 import ThemeMenu from "@/components/ThemeMenu";
 import LocaleMenu from "@/components/LocaleMenu";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
+import ChangePassword from "@/components/ChangePassword";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function GeneralSettingsPage() {
@@ -31,6 +32,7 @@ export default function GeneralSettingsPage() {
         <ThemeMenu />
       </div>
 
+      <ChangePassword />
       <TwoFactorSettings />
     </div>
   );

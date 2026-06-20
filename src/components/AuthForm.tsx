@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BarChart3 } from "lucide-react";
+import GoogleSignInButton from "@/components/GoogleSignInButton";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
@@ -37,6 +38,33 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         return;
       }
       // 2FA: switch to the code-entry step instead of navigating.
+      if (data.twoFactorRequired) {
+        setTwoFactor(true);
+        return;
+      }
+      router.push("/dashboard");
+      router.refresh();
+    } catch {
+      setError(t("auth.networkError"));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onGoogle(credential: string) {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/google", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ credential }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error ?? "Error");
+        return;
+      }
       if (data.twoFactorRequired) {
         setTwoFactor(true);
         return;
@@ -194,6 +222,17 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                   : t("auth.signIn")}
             </button>
           </form>
+          )}
+
+          {!twoFactor && (
+            <div className="mt-4">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="h-px flex-1 bg-border" />
+                <span className="text-xs text-faint">{t("auth.or")}</span>
+                <div className="h-px flex-1 bg-border" />
+              </div>
+              <GoogleSignInButton onCredential={onGoogle} />
+            </div>
           )}
         </div>
 

@@ -25,7 +25,7 @@ export async function POST(req: Request) {
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await verifyPassword(password, user.password))) {
+    if (!user || !user.password || !(await verifyPassword(password, user.password))) {
       return badRequest("Неверный email или пароль");
     }
 
