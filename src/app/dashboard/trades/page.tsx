@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText, AlertTriangle } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText, AlertTriangle, ChevronRight } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
@@ -39,6 +39,7 @@ export default function TradesPage() {
   const [sortKey, setSortKey] = useState<SortKey>("exitTime");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const [chart, setChart] = useState<{ trade: SerializedTrade; x: number; y: number } | null>(null);
@@ -313,6 +314,7 @@ export default function TradesPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-xs text-muted border-b border-border">
+                  <Th />
                   <Th>{t("trades.col.symbol")}</Th>
                   <Th>{t("trades.col.side")}</Th>
                   <Th>{t("trades.col.market")}</Th>
@@ -324,23 +326,25 @@ export default function TradesPage() {
                   <Th right sortable onClick={() => toggleSort("returnPct")} active={sortKey === "returnPct"}><Term name="Return">{t("trades.col.return")}</Term></Th>
                   <Th right sortable onClick={() => toggleSort("netPnl")} active={sortKey === "netPnl"}>{t("trades.col.netPnl")}</Th>
                   <Th right sortable onClick={() => toggleSort("fees")} active={sortKey === "fees"}><Term name="Fees">{t("trades.col.fees")}</Term></Th>
-                  <Th right>{t("trades.col.stop")}</Th>
                   <Th right><Term name="RR">{t("trades.col.rr")}</Term></Th>
-                  <Th>{t("trades.col.pattern")}</Th>
-                  <Th>{t("trades.col.entryPoint")}</Th>
-                  <Th>{t("trades.col.entryType")}</Th>
-                  <Th>{t("trades.col.mistake")}</Th>
                 </tr>
               </thead>
               <tbody>
                 {pageRows.map((tr) => {
                   const a = annOf(tr);
                   const rr = rrFor(tr, a.stopLoss);
+                  const expanded = expandedId === tr.id;
                   return (
-                    <tr key={tr.id} data-trade-id={tr.id} className="border-b border-border last:border-0 hover:bg-surface-2/50">
-                      <td
-                        className={`px-3 py-2 font-medium border-l-2 ${tr.side === "long" ? "border-l-profit/60" : "border-l-loss/60"}`}
-                      >
+                    <Fragment key={tr.id}>
+                    <tr
+                      data-trade-id={tr.id}
+                      onClick={() => setExpandedId(expanded ? null : tr.id)}
+                      className={`cursor-pointer border-b border-border last:border-0 hover:bg-surface-2/50 ${expanded ? "bg-surface-2/40" : ""}`}
+                    >
+                      <td className={`pl-3 pr-1 py-2 text-faint border-l-2 ${tr.side === "long" ? "border-l-profit/60" : "border-l-loss/60"}`}>
+                        <ChevronRight size={14} className={`transition ${expanded ? "rotate-90 text-fg" : ""}`} />
+                      </td>
+                      <td className="px-3 py-2 font-medium">
                         <span className="inline-flex items-center gap-1.5">
                           {rr != null && rr < -1 && (
                             <span className="relative group inline-flex shrink-0" title={t("trades.riskWarning")}>
@@ -351,7 +355,7 @@ export default function TradesPage() {
                             </span>
                           )}
                           <span
-                            className="cursor-pointer border-b border-dotted border-faint/50"
+                            className="border-b border-dotted border-faint/50"
                             onMouseEnter={(e) => onTickerEnter(e, tr)}
                             onMouseLeave={onTickerLeave}
                           >
@@ -373,25 +377,32 @@ export default function TradesPage() {
                       <td className={`px-3 py-2 text-right tabular-nums ${tr.returnPct >= 0 ? "text-profit" : "text-loss"}`}>{fmtPct(tr.returnPct)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums font-medium ${tr.netPnl >= 0 ? "text-profit" : "text-loss"}`}>{fmtUsd(tr.netPnl, { sign: true })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtUsd(tr.fees)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
-                      </td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : rr >= 0 ? "text-profit" : "text-loss"}`}>
-                        {fmtRR(rr)}
-                      </td>
-                      <td className="px-3 py-2">
-                        <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, { ...a, pattern: v })} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryPoint: v })} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
-                      </td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : rr >= 0 ? "text-profit" : "text-loss"}`}>{fmtRR(rr)}</td>
                     </tr>
+                    {expanded && (
+                      <tr className="border-b border-border bg-surface-2/20">
+                        <td colSpan={13} className="px-4 py-4">
+                          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-3xl">
+                            <DetailField label={t("trades.col.entryPoint")}>
+                              <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryPoint: v })} />
+                            </DetailField>
+                            <DetailField label={t("trades.col.entryType")}>
+                              <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
+                            </DetailField>
+                            <DetailField label={t("trades.col.pattern")}>
+                              <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, { ...a, pattern: v })} />
+                            </DetailField>
+                            <DetailField label={t("trades.col.mistake")}>
+                              <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
+                            </DetailField>
+                            <DetailField label={t("trades.col.stop")}>
+                              <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
+                            </DetailField>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -508,6 +519,22 @@ function AnnSelect({
   );
 }
 
+// One labelled control in the expanded trade-detail panel.
+function DetailField({
+  label,
+  children,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <div>
+      <div className="text-xs text-faint mb-1">{label}</div>
+      {children}
+    </div>
+  );
+}
+
 function parseStop(raw: string): number | null {
   const x = Number(raw.trim().replace(",", "."));
   return Number.isFinite(x) && x > 0 ? x : null;
@@ -577,7 +604,7 @@ function Th({
   active,
   onClick,
 }: {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   right?: boolean;
   sortable?: boolean;
   active?: boolean;
