@@ -5,8 +5,8 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { hashPassword, verifyPassword } from "@/lib/auth";
 
 const schema = z.object({
-  currentPassword: z.string().optional(),
-  newPassword: z.string().min(8, "Пароль минимум 8 символов"),
+  currentPassword: z.string().max(200).optional(),
+  newPassword: z.string().min(8, "Пароль минимум 8 символов").max(200),
 });
 
 // Status: does this account have a password? (Google-only accounts don't, so the

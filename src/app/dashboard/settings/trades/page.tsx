@@ -168,6 +168,7 @@ function ListEditor({
       <div className="flex gap-2">
         <input
           className="input-base flex-1"
+          maxLength={60}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {

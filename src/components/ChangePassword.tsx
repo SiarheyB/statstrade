@@ -101,6 +101,7 @@ export default function ChangePassword() {
               <input
                 type="password"
                 autoComplete="current-password"
+                maxLength={200}
                 className="input-base w-full"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
@@ -113,6 +114,7 @@ export default function ChangePassword() {
               type="password"
               autoComplete="new-password"
               minLength={8}
+              maxLength={200}
               className="input-base w-full"
               value={next}
               onChange={(e) => setNext(e.target.value)}
@@ -124,6 +126,7 @@ export default function ChangePassword() {
             <input
               type="password"
               autoComplete="new-password"
+              maxLength={200}
               className="input-base w-full"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}

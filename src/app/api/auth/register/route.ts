@@ -5,8 +5,8 @@ import { hashPassword, createSessionCookie } from "@/lib/auth";
 import { badRequest, serverError } from "@/lib/api";
 
 const schema = z.object({
-  email: z.string().email("Некорректный email"),
-  password: z.string().min(8, "Пароль минимум 8 символов"),
+  email: z.string().email("Некорректный email").max(254),
+  password: z.string().min(8, "Пароль минимум 8 символов").max(200),
   name: z.string().max(80).optional(),
 });
 

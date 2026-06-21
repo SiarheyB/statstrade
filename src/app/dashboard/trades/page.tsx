@@ -572,6 +572,7 @@ function NoteInput({
     <textarea
       value={draft}
       rows={3}
+      maxLength={2000}
       placeholder={t("trades.commentPlaceholder")}
       onFocus={() => {
         focused.current = true;
@@ -631,6 +632,7 @@ function StopInput({
       inputMode="decimal"
       value={draft}
       placeholder="—"
+      maxLength={20}
       onFocus={() => {
         focused.current = true;
       }}

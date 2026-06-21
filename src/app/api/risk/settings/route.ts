@@ -26,7 +26,7 @@ const profileSchema = z.object({
   }),
 });
 const bodySchema = z.object({
-  profiles: z.record(z.string(), profileSchema.nullable()),
+  profiles: z.record(z.string().max(200), profileSchema.nullable()),
 });
 
 // GET: all risk profiles for the user as { accountId: RiskProfileData }.

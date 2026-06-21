@@ -5,8 +5,8 @@ import { verifyPassword, createSessionCookie, createPendingCookie } from "@/lib/
 import { badRequest, serverError } from "@/lib/api";
 
 const schema = z.object({
-  email: z.string().email("Некорректный email"),
-  password: z.string().min(1, "Введите пароль"),
+  email: z.string().email("Некорректный email").max(254),
+  password: z.string().min(1, "Введите пароль").max(200),
 });
 
 export async function POST(req: Request) {

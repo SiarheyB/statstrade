@@ -5,7 +5,7 @@ import { createSessionCookie, createPendingCookie } from "@/lib/auth";
 import { verifyGoogleCredential, GoogleAuthError } from "@/lib/google";
 import { badRequest, serverError } from "@/lib/api";
 
-const schema = z.object({ credential: z.string().min(10) });
+const schema = z.object({ credential: z.string().min(10).max(4096) });
 
 // Sign in / sign up with Google. The client (Google Identity Services) returns a
 // signed id_token; we verify it server-side, then find or create the user.

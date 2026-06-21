@@ -15,7 +15,7 @@ export async function GET() {
   return NextResponse.json({ linked: !!row?.googleId, hasPassword: !!row?.password });
 }
 
-const schema = z.object({ credential: z.string().min(10) });
+const schema = z.object({ credential: z.string().min(10).max(4096) });
 
 // Link a Google account to the signed-in user, so they can later sign in with Google.
 export async function POST(req: Request) {

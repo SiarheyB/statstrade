@@ -174,6 +174,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                 <label className="block text-xs text-muted mb-1">{t("auth.name")}</label>
                 <input
                   className="input-base w-full"
+                  maxLength={80}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder={t("auth.namePlaceholder")}
@@ -185,6 +186,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               <input
                 type="email"
                 required
+                maxLength={254}
                 className="input-base w-full"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -197,6 +199,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
                 type="password"
                 required
                 minLength={isRegister ? 8 : undefined}
+                maxLength={200}
                 className="input-base w-full"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}

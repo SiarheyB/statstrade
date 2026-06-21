@@ -8,9 +8,9 @@ import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchanges";
 const createSchema = z.object({
   exchange: z.string().refine(isExchangeId, "Неподдерживаемая биржа"),
   label: z.string().min(1, "Укажите название").max(60),
-  apiKey: z.string().trim().min(1, "Введите API key"),
-  apiSecret: z.string().trim().min(1, "Введите API secret"),
-  passphrase: z.string().trim().optional(),
+  apiKey: z.string().trim().min(1, "Введите API key").max(256),
+  apiSecret: z.string().trim().min(1, "Введите API secret").max(256),
+  passphrase: z.string().trim().max(128).optional(),
   marketType: z.enum(["spot", "futures", "both"]).default("both"),
   demoTrading: z.boolean().optional().default(false),
 });

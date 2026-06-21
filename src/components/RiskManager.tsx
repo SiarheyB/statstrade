@@ -189,6 +189,7 @@ function ProfileEditor({
           <input
             type="number"
             min={0}
+            max={1000}
             value={value.maxStopsPerDay ?? ""}
             placeholder="—"
             onChange={(e) =>
@@ -305,6 +306,7 @@ function NumField({
       value={draft}
       placeholder={placeholder}
       disabled={disabled}
+      maxLength={15}
       onFocus={() => {
         focused.current = true;
       }}

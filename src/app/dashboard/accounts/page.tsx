@@ -412,6 +412,7 @@ function AccountForm({
             <label className="block text-xs text-muted mb-1">{t("acc.form.label")}</label>
             <input
               className="input-base w-full"
+              maxLength={60}
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               placeholder={t("acc.form.labelPlaceholder")}
@@ -447,6 +448,7 @@ function AccountForm({
             </label>
             <input
               className="input-base w-full font-mono text-xs"
+              maxLength={256}
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               required
@@ -460,6 +462,7 @@ function AccountForm({
             <input
               type="password"
               className="input-base w-full font-mono text-xs"
+              maxLength={256}
               value={apiSecret}
               onChange={(e) => setApiSecret(e.target.value)}
               required
@@ -474,6 +477,7 @@ function AccountForm({
               <input
                 type="password"
                 className="input-base w-full font-mono text-xs"
+                maxLength={128}
                 value={passphrase}
                 onChange={(e) => setPassphrase(e.target.value)}
                 required
