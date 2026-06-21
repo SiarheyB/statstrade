@@ -28,6 +28,7 @@ export type SerializedTrade = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  note: string | null;
 };
 
 export type AccountSummary = {

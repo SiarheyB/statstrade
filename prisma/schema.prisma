@@ -31,20 +31,6 @@ model User {
   twoFactorSecret   String?
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
-  journalNotes JournalNote[]
-}
-
-// A free-text diary note for a single day (the "Дневник" tab).
-model JournalNote {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date      String // YYYY-MM-DD
-  text      String
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, date])
-  @@index([userId])
 }
 
 // Manual, user-supplied annotations attached to a reconstructed round-trip

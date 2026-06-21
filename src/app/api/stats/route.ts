@@ -95,6 +95,7 @@ export async function GET(req: Request) {
       t.mistake = a?.mistake ?? null;
       t.pattern = a?.pattern ?? null;
       t.stopLoss = a?.stopLoss ?? null;
+      t.note = a?.note ?? null;
     }
 
     // Date range: keep trades CLOSED within [from, to] (exit time).
@@ -144,6 +145,7 @@ export async function GET(req: Request) {
       entryType: t.entryType ?? null,
       mistake: t.mistake ?? null,
       stopLoss: t.stopLoss ?? null,
+      note: t.note ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),
     }));

@@ -17,6 +17,7 @@ type Ann = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  note: string | null;
 };
 const PAGE_SIZE = 25;
 const UNSET = "__unset__";
@@ -70,6 +71,7 @@ export default function TradesPage() {
           mistake: tr.mistake,
           pattern: tr.pattern,
           stopLoss: tr.stopLoss,
+          note: tr.note,
         };
       }
       setAnn(map);
@@ -103,6 +105,7 @@ export default function TradesPage() {
         mistake: tr.mistake,
         pattern: tr.pattern,
         stopLoss: tr.stopLoss,
+        note: tr.note,
       }
     );
   }
@@ -382,22 +385,26 @@ export default function TradesPage() {
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
                         <td colSpan={13} className="px-4 py-4">
-                          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 max-w-3xl">
+                          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                            <DetailField label={t("trades.col.stop")}>
+                              <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
+                            </DetailField>
                             <DetailField label={t("trades.col.entryPoint")}>
                               <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryPoint: v })} />
-                            </DetailField>
-                            <DetailField label={t("trades.col.entryType")}>
-                              <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
                             </DetailField>
                             <DetailField label={t("trades.col.pattern")}>
                               <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, { ...a, pattern: v })} />
                             </DetailField>
+                            <DetailField label={t("trades.col.entryType")}>
+                              <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
+                            </DetailField>
                             <DetailField label={t("trades.col.mistake")}>
                               <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
                             </DetailField>
-                            <DetailField label={t("trades.col.stop")}>
-                              <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
-                            </DetailField>
+                          </div>
+                          <div className="mt-4">
+                            <div className="text-xs text-faint mb-1">{t("trades.comment")}</div>
+                            <NoteInput value={a.note} onSave={(v) => saveAnn(tr.id, { ...a, note: v })} />
                           </div>
                         </td>
                       </tr>
@@ -509,7 +516,7 @@ function AnnSelect({
     <select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
-      className="input-base text-xs py-1 cursor-pointer min-w-[8rem]"
+      className="input-base text-xs py-1 cursor-pointer w-full"
     >
       <option value="">—</option>
       {opts.map((o) => (
@@ -532,6 +539,56 @@ function DetailField({
       <div className="text-xs text-faint mb-1">{label}</div>
       {children}
     </div>
+  );
+}
+
+// Free-text comment for a trade. Debounced auto-save while typing, plus an
+// immediate commit on blur; the prop→draft sync is suppressed while focused.
+function NoteInput({
+  value,
+  onSave,
+}: {
+  value: string | null;
+  onSave: (v: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState(value ?? "");
+  const focused = useRef(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(value ?? "");
+  }, [value]);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  function commit(raw: string) {
+    const next = raw.trim() || null;
+    if (next !== (value ?? null)) onSave(next);
+  }
+
+  return (
+    <textarea
+      value={draft}
+      rows={3}
+      placeholder={t("trades.commentPlaceholder")}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => {
+        const v = e.target.value;
+        setDraft(v);
+        if (timer.current) clearTimeout(timer.current);
+        timer.current = setTimeout(() => commit(v), 700);
+      }}
+      onBlur={() => {
+        focused.current = false;
+        if (timer.current) clearTimeout(timer.current);
+        commit(draft);
+      }}
+      className="input-base w-full text-sm resize-y"
+    />
   );
 }
 
@@ -592,7 +649,7 @@ function StopInput({
       onKeyDown={(e) => {
         if (e.key === "Enter") (e.target as HTMLInputElement).blur();
       }}
-      className="input-base text-xs py-1 w-20 text-right"
+      className="input-base text-xs py-1 w-full text-right"
     />
   );
 }

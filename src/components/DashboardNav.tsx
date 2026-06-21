@@ -8,7 +8,6 @@ import {
   LayoutDashboard,
   CalendarDays,
   PieChart,
-  BookOpen,
   ListOrdered,
   Plug,
   Settings,
@@ -29,7 +28,6 @@ const LINKS = [
   { href: "/dashboard", key: "nav.overview", icon: LayoutDashboard },
   { href: "/dashboard/calendar", key: "nav.calendar", icon: CalendarDays },
   { href: "/dashboard/analytics", key: "nav.analytics", icon: PieChart },
-  { href: "/dashboard/journal", key: "nav.journal", icon: BookOpen },
   { href: "/dashboard/trades", key: "nav.trades", icon: ListOrdered },
 ];
 

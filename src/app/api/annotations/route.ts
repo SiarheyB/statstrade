@@ -10,6 +10,7 @@ const schema = z.object({
   mistake: z.string().max(60).nullable().optional(),
   pattern: z.string().max(60).nullable().optional(),
   stopLoss: z.number().positive().nullable().optional(),
+  note: z.string().max(2000).nullable().optional(),
 });
 
 // Upsert the manual annotation for a single reconstructed trade.
@@ -34,9 +35,10 @@ export async function PUT(req: Request) {
   const mistake = parsed.data.mistake?.trim() || null;
   const pattern = parsed.data.pattern?.trim() || null;
   const stopLoss = parsed.data.stopLoss ?? null;
+  const note = parsed.data.note?.trim() || null;
   const { tradeKey } = parsed.data;
 
-  const data = { entryPoint, entryType, mistake, pattern, stopLoss };
+  const data = { entryPoint, entryType, mistake, pattern, stopLoss, note };
 
   try {
     const result = await prisma.tradeAnnotation.upsert({
@@ -51,6 +53,7 @@ export async function PUT(req: Request) {
       mistake: result.mistake,
       pattern: result.pattern,
       stopLoss: result.stopLoss,
+      note: result.note,
     });
   } catch (err) {
     return serverError((err as Error).message);

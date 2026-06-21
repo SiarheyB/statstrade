@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Save, Check, ShieldAlert } from "lucide-react";
 import { fmtUsd } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
@@ -206,20 +206,10 @@ function ProfileEditor({
             className="accent-accent h-4 w-4"
           />
           <span className="text-sm flex-1">{t("risk.riskPerTrade")}</span>
-          <input
-            type="number"
-            min={0}
-            value={value.riskPerTrade.value || ""}
-            placeholder="0"
+          <NumField
+            value={value.riskPerTrade.value}
             disabled={!value.riskPerTrade.on}
-            onChange={(e) =>
-              set({
-                riskPerTrade: {
-                  ...value.riskPerTrade,
-                  value: Math.max(0, Number(e.target.value) || 0),
-                },
-              })
-            }
+            onChange={(n) => set({ riskPerTrade: { ...value.riskPerTrade, value: n } })}
             className="input-base w-28 text-right text-sm py-1 disabled:opacity-40"
           />
           <select
@@ -254,13 +244,10 @@ function ProfileEditor({
                 className="accent-accent h-4 w-4"
               />
               <span className="text-sm w-20">{t(`risk.period.${p}`)}</span>
-              <input
-                type="number"
-                min={0}
-                value={l.value || ""}
-                placeholder="0"
+              <NumField
+                value={l.value}
                 disabled={!l.on}
-                onChange={(e) => setLimit(p, { value: Math.max(0, Number(e.target.value) || 0) })}
+                onChange={(n) => setLimit(p, { value: n })}
                 className="input-base w-28 text-right text-sm py-1 disabled:opacity-40"
               />
               <select
@@ -278,5 +265,59 @@ function ProfileEditor({
         })}
       </div>
     </div>
+  );
+}
+
+// Numeric input that keeps a string draft while focused, so partial values like
+// "0.25" can be typed without the leading 0 being swallowed. Commits a parsed
+// number (>= 0) on every keystroke; empty/invalid -> 0.
+function NumField({
+  value,
+  onChange,
+  disabled,
+  placeholder = "0",
+  className,
+}: {
+  value: number;
+  onChange: (n: number) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}) {
+  const [draft, setDraft] = useState(value ? String(value) : "");
+  const focused = useRef(false);
+
+  useEffect(() => {
+    if (!focused.current) setDraft(value ? String(value) : "");
+  }, [value]);
+
+  function parse(raw: string): number {
+    const cleaned = raw.replace(",", ".").trim();
+    if (cleaned === "" || cleaned === ".") return 0;
+    const n = Number(cleaned);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  return (
+    <input
+      type="text"
+      inputMode="decimal"
+      value={draft}
+      placeholder={placeholder}
+      disabled={disabled}
+      onFocus={() => {
+        focused.current = true;
+      }}
+      onChange={(e) => {
+        const s = e.target.value.replace(/[^\d.,]/g, "");
+        setDraft(s);
+        onChange(parse(s));
+      }}
+      onBlur={() => {
+        focused.current = false;
+        setDraft(value ? String(value) : "");
+      }}
+      className={className}
+    />
   );
 }

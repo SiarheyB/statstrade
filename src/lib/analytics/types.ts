@@ -45,4 +45,5 @@ export type RoundTripTrade = {
   mistake?: string | null; // ошибка
   pattern?: string | null; // паттерн
   stopLoss?: number | null; // цена стоп-лосса
+  note?: string | null; // комментарий к сделке
 };

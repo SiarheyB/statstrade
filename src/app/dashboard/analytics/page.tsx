@@ -115,7 +115,7 @@ export default function AnalyticsPage() {
       {loading ? (
         <div className="text-sm text-faint">{t("common.loading")}</div>
       ) : !m || m.tradeCount === 0 ? (
-        <div className="card p-10 text-center text-muted">{t("jr.empty")}</div>
+        <div className="card p-10 text-center text-muted">{t("dash.empty.noTradesText")}</div>
       ) : (
         <div className="space-y-5">
           {/* Risk-adjusted ratios */}

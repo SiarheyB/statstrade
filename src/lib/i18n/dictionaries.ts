@@ -24,7 +24,6 @@ const en: Dict = {
   "nav.overview": "Overview",
   "nav.calendar": "Calendar",
   "nav.analytics": "Analytics",
-  "nav.journal": "Journal",
   "nav.trades": "Trades",
   "nav.exchanges": "Exchanges",
   "nav.news": "News",
@@ -67,13 +66,6 @@ const en: Dict = {
   "an.topSymbols": "By symbol",
   "an.count": "trades",
 
-  // journal
-  "jr.title": "Journal",
-  "jr.subtitle": "Day-by-day trades and diary notes",
-  "jr.notePlaceholder": "Notes for the day: what worked, mistakes, emotions, market context…",
-  "jr.noteSaved": "Saved",
-  "jr.empty": "No trades yet. Connect an exchange or load demo data.",
-  "jr.dayResult": "{w}W / {l}L",
 
   // locale / theme
   "locale.label": "Language",
@@ -267,6 +259,8 @@ const en: Dict = {
   "trades.col.pattern": "Pattern",
   "trades.col.mistake": "Mistakes",
   "trades.riskWarning": "Per-trade risk exceeded: the loss is larger than 1R (R < −1)",
+  "trades.comment": "Comment",
+  "trades.commentPlaceholder": "Notes about this trade…",
   "trades.page": "Page {p} of {total}",
   "trades.export.open": "Open",
   "trades.export.close": "Closed",
@@ -499,7 +493,6 @@ const ru: Dict = {
   "nav.overview": "Обзор",
   "nav.analytics": "Аналитика",
   "nav.calendar": "Календарь",
-  "nav.journal": "Дневник",
   "nav.trades": "Сделки",
   "nav.exchanges": "Биржи",
   "nav.news": "Новости",
@@ -542,13 +535,6 @@ const ru: Dict = {
   "an.topSymbols": "По символам",
   "an.count": "сделок",
 
-  // journal
-  "jr.title": "Дневник",
-  "jr.subtitle": "Сделки и заметки по дням",
-  "jr.notePlaceholder": "Заметка за день: что получилось, ошибки, эмоции, контекст рынка…",
-  "jr.noteSaved": "Сохранено",
-  "jr.empty": "Сделок пока нет. Подключите биржу или загрузите демо-данные.",
-  "jr.dayResult": "{w}П / {l}У",
 
   "locale.label": "Язык",
   "theme.label": "Тема",
@@ -736,6 +722,8 @@ const ru: Dict = {
   "trades.col.pattern": "Паттерн",
   "trades.col.mistake": "Ошибки",
   "trades.riskWarning": "Превышен риск на сделку: убыток больше 1R (R < −1)",
+  "trades.comment": "Комментарий",
+  "trades.commentPlaceholder": "Заметки по сделке…",
   "trades.page": "Стр. {p} из {total}",
   "trades.export.open": "Открытие",
   "trades.export.close": "Закрытие",
