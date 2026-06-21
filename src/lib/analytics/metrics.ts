@@ -102,6 +102,13 @@ export type Metrics = {
   totalFees: number;
   avgFeePerTrade: number;
   feesToProfitPct: number;
+  // forex / imported (0 for pure-crypto portfolios)
+  totalPips: number;
+  avgPips: number;
+  totalSwap: number;
+  totalCommission: number;
+  totalLots: number;
+  avgLot: number;
   // series
   equityCurve: EquityPoint[];
   daily: DailyPoint[];
@@ -116,7 +123,17 @@ export type Metrics = {
   byEntryType: Bucket[];
   byMistake: Bucket[]; // ошибки
   byPattern: Bucket[]; // паттерн
+  bySession: Bucket[]; // торговая сессия (forex)
 };
+
+// Trading session from the entry hour (UTC). Mutually exclusive bins.
+function sessionOf(d: Date): string {
+  const h = d.getUTCHours();
+  if (h >= 7 && h < 13) return "London";
+  if (h >= 13 && h < 16) return "London/NY";
+  if (h >= 16 && h < 22) return "New York";
+  return "Asia";
+}
 
 function mean(xs: number[]): number {
   if (xs.length === 0) return 0;
@@ -386,6 +403,20 @@ export function computeMetrics(
     (k) => k,
   ).sort((a, b) => b.netPnl - a.netPnl);
 
+  const bySession = bucketStats(
+    sorted,
+    (t) => sessionOf(t.entryTime),
+    (k) => k,
+  ).sort((a, b) => b.netPnl - a.netPnl);
+
+  // Forex / imported aggregates (fields are undefined for crypto trades).
+  const pipTrades = sorted.filter((t) => t.pips != null);
+  const totalPips = pipTrades.reduce((a, t) => a + (t.pips ?? 0), 0);
+  const totalSwap = sorted.reduce((a, t) => a + (t.swap ?? 0), 0);
+  const totalCommission = sorted.reduce((a, t) => a + (t.commission ?? 0), 0);
+  const lotTrades = sorted.filter((t) => t.lots != null);
+  const totalLots = lotTrades.reduce((a, t) => a + (t.lots ?? 0), 0);
+
   // derived scalars
   const tradeCount = sorted.length;
   const winRate = tradeCount > 0 ? (wins.length / tradeCount) * 100 : 0;
@@ -475,6 +506,12 @@ export function computeMetrics(
     totalFees,
     avgFeePerTrade: tradeCount > 0 ? totalFees / tradeCount : 0,
     feesToProfitPct: grossProfit > 0 ? (totalFees / grossProfit) * 100 : 0,
+    totalPips,
+    avgPips: pipTrades.length ? totalPips / pipTrades.length : 0,
+    totalSwap,
+    totalCommission,
+    totalLots,
+    avgLot: lotTrades.length ? totalLots / lotTrades.length : 0,
     equityCurve,
     daily,
     bySide,
@@ -487,5 +524,6 @@ export function computeMetrics(
     byEntryType,
     byMistake,
     byPattern,
+    bySession,
   };
 }

@@ -388,6 +388,21 @@ export default function TradesPage() {
                       <tr className="border-b border-border bg-surface-2/20">
                         <td colSpan={13} className="px-4 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                            {tr.lots != null && (
+                              <>
+                                <DetailField label={t("trades.col.lots")}>
+                                  <span className="text-sm tabular-nums">{fmtNum(tr.lots, 2)}</span>
+                                </DetailField>
+                                <DetailField label={t("trades.col.pips")}>
+                                  <span className={`text-sm tabular-nums ${(tr.pips ?? 0) >= 0 ? "text-profit" : "text-loss"}`}>
+                                    {tr.pips != null ? tr.pips.toFixed(1) : "—"}
+                                  </span>
+                                </DetailField>
+                                <DetailField label={t("trades.col.swap")}>
+                                  <span className="text-sm tabular-nums text-muted">{fmtUsd(tr.swap ?? 0, { sign: true })}</span>
+                                </DetailField>
+                              </>
+                            )}
                             <DetailField label={t("trades.col.stop")}>
                               <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
                             </DetailField>

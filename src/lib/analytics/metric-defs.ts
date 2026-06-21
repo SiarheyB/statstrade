@@ -16,7 +16,9 @@ export type MetricFormat =
   | "ratio"
   | "rr"
   | "int"
+  | "num1"
   | "num2"
+  | "pips"
   | "days"
   | "duration";
 
@@ -130,6 +132,18 @@ export const METRIC_GROUPS: MetricGroup[] = [
       { key: "feesToProfitPct", label: "Комиссии к прибыли", format: "pctPlain" },
     ],
   },
+  {
+    key: "forex",
+    title: "Форекс",
+    items: [
+      { key: "totalPips", label: "Всего пипсов", format: "pips" },
+      { key: "avgPips", label: "Средние пипсы", format: "num1" },
+      { key: "totalLots", label: "Объём (лоты)", format: "num2" },
+      { key: "avgLot", label: "Средний лот", format: "num2" },
+      { key: "totalSwap", label: "Свопы", format: "usdSigned" },
+      { key: "totalCommission", label: "Комиссии (forex)", format: "usdLoss" },
+    ],
+  },
 ];
 
 export const TOTAL_METRICS = METRIC_GROUPS.reduce(
@@ -160,8 +174,12 @@ export function formatMetric(
       return Number.isFinite(value) ? `${value > 0 ? "+" : ""}${value.toFixed(2)}R` : "—";
     case "int":
       return fmtNum(value, 0);
+    case "num1":
+      return fmtNum(value, 1);
     case "num2":
       return fmtNum(value, 2);
+    case "pips":
+      return Number.isFinite(value) ? `${value > 0 ? "+" : ""}${value.toFixed(1)}` : "—";
     case "days":
       return Number.isFinite(value) ? `${value.toFixed(1)} ${u("unit.day")}` : "—";
     case "duration": {

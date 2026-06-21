@@ -565,6 +565,12 @@ export default function DashboardPage() {
             <BreakdownChart data={m.byMistake} height={260} />
           </div>
 
+          {/* Trading-session breakdown (most relevant for forex) */}
+          <div className="card p-5">
+            <SectionTitle title={t("dash.bySession")} />
+            <BreakdownChart data={m.bySession} height={240} />
+          </div>
+
           {/* Time breakdown + symbols */}
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-5">
@@ -604,6 +610,10 @@ export default function DashboardPage() {
 
 function FullStats({ m }: { m: Metrics }) {
   const { t, locale } = useI18n();
+  // The forex group only makes sense when there are imported (forex) trades.
+  const hasForex =
+    m.totalLots > 0 || m.totalPips !== 0 || m.totalSwap !== 0 || m.totalCommission > 0;
+  const groups = METRIC_GROUPS.filter((g) => g.key !== "forex" || hasForex);
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between mb-4">
@@ -613,7 +623,7 @@ function FullStats({ m }: { m: Metrics }) {
         </span>
       </div>
       <div className="grid gap-x-8 gap-y-6 md:grid-cols-2 lg:grid-cols-3">
-        {METRIC_GROUPS.map((g) => (
+        {groups.map((g) => (
           <div key={g.key}>
             <div className="text-xs uppercase tracking-wide text-faint mb-1.5">
               {t(`metricGroup.${g.key}`)}
