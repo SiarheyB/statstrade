@@ -46,4 +46,11 @@ export type RoundTripTrade = {
   pattern?: string | null; // паттерн
   stopLoss?: number | null; // цена стоп-лосса
   note?: string | null; // комментарий к сделке
+  // Forex / imported-trade extras (undefined for crypto).
+  lots?: number;
+  pips?: number | null;
+  swap?: number;
+  commission?: number;
+  assetClass?: string; // "forex" for imported trades
+  accountCurrency?: string;
 };

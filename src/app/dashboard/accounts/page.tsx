@@ -9,9 +9,10 @@ import {
   ShieldCheck,
   AlertTriangle,
   CheckCircle2,
+  Upload,
   X,
 } from "lucide-react";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -19,9 +20,12 @@ type Account = {
   id: string;
   exchange: string;
   label: string;
+  source: string;
+  accountCurrency: string;
+  importedCount: number;
   marketType: string;
   demoTrading: boolean;
-  apiKeyMasked: string;
+  apiKeyMasked: string | null;
   lastSyncAt: string | null;
   syncStatus: string;
   syncError: string | null;
@@ -43,7 +47,13 @@ const EXCHANGES = [
   { id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: true },
   { id: "bybit", name: "Bybit", needsPassphrase: false, supportsDemo: true },
   { id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: true },
+  { id: "mt4", name: "MetaTrader 4", needsPassphrase: false, supportsDemo: false },
+  { id: "mt5", name: "MetaTrader 5", needsPassphrase: false, supportsDemo: false },
 ];
+
+const ACCOUNT_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"];
+
+const isMtSource = (s: string) => s === "mt4" || s === "mt5";
 
 export default function AccountsPage() {
   const { t } = useI18n();
@@ -136,6 +146,23 @@ export default function AccountsPage() {
     }
   }
 
+  // Import another MetaTrader report into an existing MT account.
+  async function importReport(id: string, file: File) {
+    setBusy(id);
+    setNotice(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch(`/api/accounts/${id}/import`, { method: "POST", body: fd });
+      const data = await res.json();
+      if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
+      else setNotice(t("acc.mt.imported", { n: data.imported, skipped: data.skipped }));
+    } finally {
+      setBusy(null);
+      load();
+    }
+  }
+
   async function remove(id: string) {
     if (!confirm(t("acc.confirmDelete"))) return;
     setBusy(id);
@@ -221,28 +248,56 @@ export default function AccountsPage() {
                       <StatusPill status={a.syncStatus} />
                     </div>
                     <div className="text-xs text-faint">
-                      {marketLabel(a.marketType)} · {a.apiKeyMasked} ·{" "}
-                      {t("acc.fillsCount", { n: a.fillCount })}
+                      {isMtSource(a.source) ? (
+                        <>
+                          {a.accountCurrency} · {t("acc.mt.tradesCount", { n: a.importedCount })}
+                        </>
+                      ) : (
+                        <>
+                          {marketLabel(a.marketType)} · {a.apiKeyMasked} ·{" "}
+                          {t("acc.fillsCount", { n: a.fillCount })}
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => seedDemo(a.id)}
-                    disabled={busy === a.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
-                  >
-                    <Database size={14} />
-                    {t("acc.demo")}
-                  </button>
-                  <button
-                    onClick={() => syncAccount(a.id)}
-                    disabled={busy === a.id}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={busy === a.id ? "animate-spin" : ""} />
-                    {t("acc.sync")}
-                  </button>
+                  {isMtSource(a.source) ? (
+                    <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 cursor-pointer">
+                      <input
+                        type="file"
+                        accept=".htm,.html,.html"
+                        className="hidden"
+                        disabled={busy === a.id}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) importReport(a.id, f);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                      <Upload size={14} />
+                      {t("acc.mt.import")}
+                    </label>
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => seedDemo(a.id)}
+                        disabled={busy === a.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+                      >
+                        <Database size={14} />
+                        {t("acc.demo")}
+                      </button>
+                      <button
+                        onClick={() => syncAccount(a.id)}
+                        disabled={busy === a.id}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={busy === a.id ? "animate-spin" : ""} />
+                        {t("acc.sync")}
+                      </button>
+                    </>
+                  )}
                   <button
                     onClick={() => remove(a.id)}
                     disabled={busy === a.id}
@@ -280,39 +335,41 @@ export default function AccountsPage() {
                 />
               )}
 
-              <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border text-xs">
-                <button
-                  onClick={() => updateAuto(a.id, { autoSync: !a.autoSync })}
-                  aria-pressed={a.autoSync}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
-                    a.autoSync ? "bg-accent" : "bg-surface-2 border border-border"
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition ${
-                      a.autoSync ? "translate-x-4" : "translate-x-1"
+              {!isMtSource(a.source) && (
+                <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border text-xs">
+                  <button
+                    onClick={() => updateAuto(a.id, { autoSync: !a.autoSync })}
+                    aria-pressed={a.autoSync}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
+                      a.autoSync ? "bg-accent" : "bg-surface-2 border border-border"
                     }`}
-                  />
-                </button>
-                <span className={a.autoSync ? "text-fg" : "text-muted"}>
-                  {t("acc.autoSync")}
-                </span>
-                <span className="text-faint">{t("acc.every")}</span>
-                <select
-                  value={a.syncIntervalMinutes}
-                  disabled={!a.autoSync}
-                  onChange={(e) =>
-                    updateAuto(a.id, { syncIntervalMinutes: Number(e.target.value) })
-                  }
-                  className="input-base py-1 text-xs cursor-pointer disabled:opacity-50"
-                >
-                  {INTERVALS.map((v) => (
-                    <option key={v} value={v}>
-                      {t(`acc.interval.${v}`)}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  >
+                    <span
+                      className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition ${
+                        a.autoSync ? "translate-x-4" : "translate-x-1"
+                      }`}
+                    />
+                  </button>
+                  <span className={a.autoSync ? "text-fg" : "text-muted"}>
+                    {t("acc.autoSync")}
+                  </span>
+                  <span className="text-faint">{t("acc.every")}</span>
+                  <select
+                    value={a.syncIntervalMinutes}
+                    disabled={!a.autoSync}
+                    onChange={(e) =>
+                      updateAuto(a.id, { syncIntervalMinutes: Number(e.target.value) })
+                    }
+                    className="input-base py-1 text-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {INTERVALS.map((v) => (
+                      <option key={v} value={v}>
+                        {t(`acc.interval.${v}`)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -346,17 +403,82 @@ function AccountForm({
   const [passphrase, setPassphrase] = useState("");
   const [marketType, setMarketType] = useState("both");
   const [demoTrading, setDemoTrading] = useState(false);
+  const [accountCurrency, setAccountCurrency] = useState("USD");
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState<
+    { parsed: number; netTotal: number; symbols: string[]; format: string; deposit: number | null } | null
+  >(null);
+  const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const isMt = isMtSource(exchange);
   const needsPassphrase = EXCHANGES.find((e) => e.id === exchange)?.needsPassphrase;
   const supportsDemo = EXCHANGES.find((e) => e.id === exchange)?.supportsDemo;
+
+  // Parse the selected report (no DB write) to preview before importing.
+  async function pickFile(f: File | null) {
+    setFile(f);
+    setPreview(null);
+    setError(null);
+    if (!f) return;
+    setPreviewing(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", f);
+      fd.append("source", exchange);
+      fd.append("accountCurrency", accountCurrency);
+      const res = await fetch("/api/mt/preview", { method: "POST", body: fd });
+      const d = await res.json();
+      if (!res.ok) {
+        setError(d.error ?? t("settings.saveError"));
+        return;
+      }
+      setPreview({
+        parsed: d.parsed,
+        netTotal: d.netTotal,
+        symbols: d.symbols,
+        format: d.format,
+        deposit: d.deposit ?? null,
+      });
+    } finally {
+      setPreviewing(false);
+    }
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSaving(true);
     try {
+      if (isMt) {
+        if (!file) {
+          setError(t("acc.mt.noFile"));
+          return;
+        }
+        // 1. create the MT account, 2. import the report into it.
+        const cRes = await fetch("/api/accounts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exchange, source: exchange, label, accountCurrency }),
+        });
+        const cData = await cRes.json();
+        if (!cRes.ok) {
+          setError(cData.error ?? t("settings.saveError"));
+          return;
+        }
+        const fd = new FormData();
+        fd.append("file", file);
+        const iRes = await fetch(`/api/accounts/${cData.id}/import`, { method: "POST", body: fd });
+        const iData = await iRes.json();
+        if (!iRes.ok) {
+          setError(iData.error ?? t("settings.saveError"));
+          return;
+        }
+        onCreated();
+        return;
+      }
+
       const res = await fetch("/api/accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -419,71 +541,137 @@ function AccountForm({
               required
             />
           </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">{t("acc.form.markets")}</label>
-            <select
-              className="input-base w-full cursor-pointer"
-              value={marketType}
-              onChange={(e) => setMarketType(e.target.value)}
-            >
-              <option value="both">{t("acc.market.both")}</option>
-              <option value="spot">{t("acc.market.spot")}</option>
-              <option value="futures">{t("acc.market.futures")}</option>
-            </select>
-          </div>
-          {supportsDemo && (
-            <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={demoTrading}
-                onChange={(e) => setDemoTrading(e.target.checked)}
-                className="accent-accent h-4 w-4"
-              />
-              {t("acc.form.demo")}
-            </label>
-          )}
-          <div>
-            <label className="block text-xs text-muted mb-1">
-              <Term name="API Key">API Key</Term>
-            </label>
-            <input
-              className="input-base w-full font-mono text-xs"
-              maxLength={256}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              required
-              autoComplete="off"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-muted mb-1">
-              <Term name="API Secret">API Secret</Term>
-            </label>
-            <input
-              type="password"
-              className="input-base w-full font-mono text-xs"
-              maxLength={256}
-              value={apiSecret}
-              onChange={(e) => setApiSecret(e.target.value)}
-              required
-              autoComplete="off"
-            />
-          </div>
-          {needsPassphrase && (
-            <div>
-              <label className="block text-xs text-muted mb-1">
-                <Term name="Passphrase">Passphrase</Term>
-              </label>
-              <input
-                type="password"
-                className="input-base w-full font-mono text-xs"
-                maxLength={128}
-                value={passphrase}
-                onChange={(e) => setPassphrase(e.target.value)}
-                required
-                autoComplete="off"
-              />
-            </div>
+          {isMt ? (
+            <>
+              <div>
+                <label className="block text-xs text-muted mb-1">{t("acc.form.currency")}</label>
+                <select
+                  className="input-base w-full cursor-pointer"
+                  value={accountCurrency}
+                  onChange={(e) => {
+                    setAccountCurrency(e.target.value);
+                    if (file) pickFile(file); // re-preview with the new currency
+                  }}
+                >
+                  {ACCOUNT_CURRENCIES.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="rounded-lg bg-surface-2/40 border border-border px-3 py-2.5 text-xs text-muted">
+                <div className="font-medium text-fg mb-1">
+                  {exchange === "mt4" ? t("acc.mt.help.mt4.title") : t("acc.mt.help.mt5.title")}
+                </div>
+                <ol className="list-decimal list-inside space-y-0.5">
+                  <li>{exchange === "mt4" ? t("acc.mt.help.mt4.1") : t("acc.mt.help.mt5.1")}</li>
+                  <li>{exchange === "mt4" ? t("acc.mt.help.mt4.2") : t("acc.mt.help.mt5.2")}</li>
+                  <li>{exchange === "mt4" ? t("acc.mt.help.mt4.3") : t("acc.mt.help.mt5.3")}</li>
+                </ol>
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">{t("acc.mt.report")}</label>
+                <label className="flex flex-col items-center justify-center gap-1 border border-dashed border-border rounded-lg px-3 py-6 text-sm text-muted cursor-pointer hover:border-border-strong">
+                  <Upload size={18} className="text-faint" />
+                  <span>{file ? file.name : t("acc.mt.dropzone")}</span>
+                  <input
+                    type="file"
+                    accept=".htm,.html"
+                    className="hidden"
+                    onChange={(e) => pickFile(e.target.files?.[0] ?? null)}
+                  />
+                </label>
+                <p className="text-xs text-faint mt-1">{t("acc.mt.dropHint")}</p>
+              </div>
+              {previewing && <div className="text-xs text-faint">{t("common.loading")}</div>}
+              {preview && (
+                <div className="rounded-lg bg-surface-2/50 border border-border px-3 py-2 text-xs space-y-1">
+                  <div className="font-medium text-fg uppercase">{preview.format}</div>
+                  <div>{t("acc.mt.previewTrades", { n: preview.parsed })}</div>
+                  <div>
+                    {t("acc.mt.previewNet")}{" "}
+                    <span className={preview.netTotal >= 0 ? "text-profit" : "text-loss"}>
+                      {fmtUsd(preview.netTotal, { sign: true })} {accountCurrency}
+                    </span>
+                  </div>
+                  {preview.deposit != null && (
+                    <div>
+                      {t("acc.mt.previewDeposit")}{" "}
+                      <span className="text-fg">{fmtUsd(preview.deposit)} {accountCurrency}</span>
+                    </div>
+                  )}
+                  <div className="text-faint truncate">{preview.symbols.join(", ")}</div>
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs text-muted mb-1">{t("acc.form.markets")}</label>
+                <select
+                  className="input-base w-full cursor-pointer"
+                  value={marketType}
+                  onChange={(e) => setMarketType(e.target.value)}
+                >
+                  <option value="both">{t("acc.market.both")}</option>
+                  <option value="spot">{t("acc.market.spot")}</option>
+                  <option value="futures">{t("acc.market.futures")}</option>
+                </select>
+              </div>
+              {supportsDemo && (
+                <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={demoTrading}
+                    onChange={(e) => setDemoTrading(e.target.checked)}
+                    className="accent-accent h-4 w-4"
+                  />
+                  {t("acc.form.demo")}
+                </label>
+              )}
+              <div>
+                <label className="block text-xs text-muted mb-1">
+                  <Term name="API Key">API Key</Term>
+                </label>
+                <input
+                  className="input-base w-full font-mono text-xs"
+                  maxLength={256}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  required
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-muted mb-1">
+                  <Term name="API Secret">API Secret</Term>
+                </label>
+                <input
+                  type="password"
+                  className="input-base w-full font-mono text-xs"
+                  maxLength={256}
+                  value={apiSecret}
+                  onChange={(e) => setApiSecret(e.target.value)}
+                  required
+                  autoComplete="off"
+                />
+              </div>
+              {needsPassphrase && (
+                <div>
+                  <label className="block text-xs text-muted mb-1">
+                    <Term name="Passphrase">Passphrase</Term>
+                  </label>
+                  <input
+                    type="password"
+                    className="input-base w-full font-mono text-xs"
+                    maxLength={128}
+                    value={passphrase}
+                    onChange={(e) => setPassphrase(e.target.value)}
+                    required
+                    autoComplete="off"
+                  />
+                </div>
+              )}
+            </>
           )}
 
           {error && (
@@ -494,10 +682,16 @@ function AccountForm({
 
           <button
             type="submit"
-            disabled={saving}
+            disabled={saving || (isMt && !preview)}
             className="w-full py-2.5 rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition disabled:opacity-50"
           >
-            {saving ? t("common.saving") : t("acc.form.connect")}
+            {saving
+              ? t("common.saving")
+              : isMt && preview
+                ? t("acc.mt.importN", { n: preview.parsed })
+                : isMt
+                  ? t("acc.mt.import")
+                  : t("acc.form.connect")}
           </button>
         </form>
       </div>

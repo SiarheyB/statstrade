@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { reconstructTrades } from "@/lib/analytics/positions";
 import { computeMetrics } from "@/lib/analytics/metrics";
-import type { FillInput } from "@/lib/analytics/types";
+import type { FillInput, RoundTripTrade, TradeSide } from "@/lib/analytics/types";
 import {
   parseOptions,
   DEFAULT_ENTRY_POINTS,
@@ -49,10 +49,15 @@ export async function GET(req: Request) {
     // Note: date range is applied to reconstructed trades (by exit time) below,
     // not to fills — otherwise positions opened before the range get truncated.
 
-    const fills = await prisma.fill.findMany({
-      where,
-      orderBy: { timestamp: "asc" },
-    });
+    // Crypto fills (reconstructed) vs. forex imported trades (taken as-is). The
+    // market filter routes between them: spot/futures = crypto only, forex =
+    // imported only, all = both.
+    const includeCrypto = market !== "forex";
+    const includeImported = market === "all" || market === "forex";
+
+    const fills = includeCrypto
+      ? await prisma.fill.findMany({ where, orderBy: { timestamp: "asc" } })
+      : [];
 
     const inputs: FillInput[] = fills.map((f) => ({
       symbol: f.symbol,
@@ -69,7 +74,50 @@ export async function GET(req: Request) {
       accountId: f.accountId,
     }));
 
-    const trades = reconstructTrades(inputs);
+    const cryptoTrades = reconstructTrades(inputs);
+
+    // Imported (forex / MetaTrader) closed round-trips — money taken as-is.
+    const importedWhere: Prisma.ImportedTradeWhereInput = {
+      account: { userId: user.userId },
+    };
+    if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
+    if (symbol !== "all") importedWhere.symbol = symbol;
+    const importedRows = includeImported
+      ? await prisma.importedTrade.findMany({ where: importedWhere, orderBy: { exitTime: "asc" } })
+      : [];
+    const importedTrades: RoundTripTrade[] = importedRows.map((it) => ({
+      id: `${it.accountId}:${it.externalId}`,
+      symbol: it.symbol,
+      base: it.base,
+      quote: it.quote,
+      market: it.market,
+      exchange: it.source,
+      accountId: it.accountId,
+      side: it.side as TradeSide,
+      entryTime: it.entryTime,
+      exitTime: it.exitTime,
+      durationMs: it.exitTime.getTime() - it.entryTime.getTime(),
+      qty: it.qty,
+      entryPrice: it.entryPrice,
+      exitPrice: it.exitPrice,
+      grossPnl: it.grossProfit + it.swap,
+      fees: it.commission,
+      netPnl: it.netPnl,
+      returnPct: 0, // price-based % is wrong-currency for forex; use pips / R instead
+      fillCount: 1,
+      result: it.netPnl > 1e-9 ? "win" : it.netPnl < -1e-9 ? "loss" : "breakeven",
+      lots: it.lots,
+      pips: it.pips,
+      swap: it.swap,
+      commission: it.commission,
+      assetClass: "forex",
+      accountCurrency: it.currency,
+      stopLoss: it.stopLoss,
+    }));
+
+    const trades = [...cryptoTrades, ...importedTrades].sort(
+      (a, b) => a.exitTime.getTime() - b.exitTime.getTime(),
+    );
 
     // Attach manual annotations (ТВХ / тип входа) to the reconstructed trades.
     const tradeKeys = trades.map((t) => t.id);
@@ -136,7 +184,9 @@ export async function GET(req: Request) {
       Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000,
     );
 
-    const allSymbols = Array.from(new Set(fills.map((f) => f.symbol))).sort();
+    const allSymbols = Array.from(
+      new Set([...fills.map((f) => f.symbol), ...importedRows.map((r) => r.symbol)]),
+    ).sort();
 
     // Serialize trades (Dates -> ISO) for the client table.
     const serializedTrades = filteredTrades.map((t) => ({

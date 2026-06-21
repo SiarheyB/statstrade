@@ -58,10 +58,15 @@ model ExchangeAccount {
   id         String    @id @default(cuid())
   userId     String
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  exchange   String // binance | bybit | okx
+  exchange   String // binance | bybit | okx | mt4 | mt5 | manual
   label      String
-  apiKey     String // AES-256-GCM encrypted
-  apiSecret  String // AES-256-GCM encrypted
+  // Data source. "exchange" = CCXT API sync; mt4/mt5/manual = file-imported
+  // round-trips (no API keys, no sync).
+  source          String  @default("exchange")
+  accountCurrency String  @default("USD") // account currency for imported (forex) trades
+  assetClass      String? // null = crypto | "forex"
+  apiKey     String? // AES-256-GCM encrypted (null for imported/manual accounts)
+  apiSecret  String? // AES-256-GCM encrypted (null for imported/manual accounts)
   passphrase String? // AES-256-GCM encrypted (OKX requires a passphrase)
   marketType String    @default("both") // spot | futures | both
   demoTrading Boolean  @default(false) // Bybit Demo Trading key -> use demo API host
@@ -83,9 +88,49 @@ model ExchangeAccount {
   syncTotal    Int       @default(0) // total tasks in the active scan
   syncImported Int       @default(0) // fills imported so far in the active scan
   fullSyncAt   DateTime? // when the last full (all-pairs) scan completed
-  fills      Fill[]
+  fills          Fill[]
+  importedTrades ImportedTrade[]
 
   @@index([userId])
+}
+
+// A closed round-trip imported from a MetaTrader 4/5 report (or entered
+// manually). Unlike crypto trades these are NOT reconstructed — the money
+// (profit / swap / commission) is taken as-is from the broker, in account
+// currency. The stats layer merges these with reconstructed crypto trades.
+model ImportedTrade {
+  id           String          @id @default(cuid())
+  accountId    String
+  account      ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  source       String // mt4 | mt5 | manual
+  externalId   String // ticket (MT4) / position id (MT5) — for dedup
+  symbol       String // EURUSD, XAUUSD, US30 ...
+  base         String
+  quote        String
+  market       String  @default("forex")
+  side         String // long | short
+  lots         Float
+  qty          Float // lots * contractSize (base units)
+  contractSize Float   @default(100000)
+  entryTime    DateTime
+  exitTime     DateTime
+  entryPrice   Float
+  exitPrice    Float
+  stopLoss     Float?
+  takeProfit   Float?
+  commission   Float    @default(0) // account currency
+  swap         Float    @default(0) // account currency
+  grossProfit  Float // broker profit before swap/commission, account currency
+  netPnl       Float // grossProfit + swap - commission
+  pips         Float?
+  currency     String   @default("USD") // account currency at import time
+  comment      String?
+  importedAt   DateTime @default(now())
+  importBatch  String? // id of the upload batch (for rollback)
+
+  @@unique([accountId, externalId])
+  @@index([accountId])
+  @@index([accountId, exitTime])
 }
 
 // A single execution (fill) imported from an exchange. Round-trip trades are

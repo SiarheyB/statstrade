@@ -247,6 +247,7 @@ export default function DashboardPage() {
             <option value="all">{t("dash.allMarkets")}</option>
             <option value="spot">{t("dash.spot")}</option>
             <option value="futures">{t("dash.futures")}</option>
+            <option value="forex">{t("dash.forex")}</option>
           </select>
           <select
             className={SELECT_CLS}

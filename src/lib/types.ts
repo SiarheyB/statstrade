@@ -29,6 +29,13 @@ export type SerializedTrade = {
   pattern: string | null;
   stopLoss: number | null;
   note: string | null;
+  // Forex / imported-trade extras (undefined for crypto trades).
+  lots?: number;
+  pips?: number | null;
+  swap?: number;
+  commission?: number;
+  assetClass?: string;
+  accountCurrency?: string;
 };
 
 export type AccountSummary = {

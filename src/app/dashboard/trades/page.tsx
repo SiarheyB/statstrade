@@ -138,7 +138,8 @@ export default function TradesPage() {
     if (accountFilter !== "all") rows = rows.filter((tr) => tr.accountId === accountFilter);
     if (symbolFilter !== "all") rows = rows.filter((tr) => tr.symbol === symbolFilter);
     if (marketFilter === "spot") rows = rows.filter((tr) => tr.market === "spot");
-    else if (marketFilter === "futures") rows = rows.filter((tr) => tr.market !== "spot");
+    else if (marketFilter === "futures") rows = rows.filter((tr) => tr.market === "swap" || tr.market === "future");
+    else if (marketFilter === "forex") rows = rows.filter((tr) => tr.market === "forex" || tr.market === "metal" || tr.market === "cfd");
     if (sideFilter !== "all") rows = rows.filter((tr) => tr.side === sideFilter);
     if (resultFilter !== "all") rows = rows.filter((tr) => tr.result === resultFilter);
     if (epFilter !== "all")
@@ -273,6 +274,7 @@ export default function TradesPage() {
           <option value="all">{t("dash.allMarkets")}</option>
           <option value="spot">{t("dash.spot")}</option>
           <option value="futures">{t("dash.futures")}</option>
+          <option value="forex">{t("dash.forex")}</option>
         </select>
         <select className={SELECT} value={sideFilter} onChange={(e) => { setSideFilter(e.target.value); setPage(0); }}>
           <option value="all">Long + Short</option>

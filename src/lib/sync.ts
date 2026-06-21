@@ -245,10 +245,14 @@ async function fetchTrades(
 type Creds = { apiKey: string; apiSecret: string; passphrase: string | null };
 
 function credsFor(account: {
-  apiKey: string;
-  apiSecret: string;
+  apiKey: string | null;
+  apiSecret: string | null;
   passphrase: string | null;
 }): Creds {
+  // Only exchange accounts reach the sync path, so keys are always present here.
+  if (!account.apiKey || !account.apiSecret) {
+    throw new Error("Аккаунт без API-ключей не синхронизируется");
+  }
   return {
     apiKey: decrypt(account.apiKey),
     apiSecret: decrypt(account.apiSecret),
