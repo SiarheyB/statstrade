@@ -27,6 +27,7 @@ const en: Dict = {
   "nav.trades": "Trades",
   "nav.exchanges": "Exchanges",
   "nav.news": "News",
+  "nav.econcal": "Calendar (econ.)",
   "nav.general": "General",
   "nav.tradeSettings": "Trade settings",
   "nav.risk": "Risk manager",
@@ -40,6 +41,20 @@ const en: Dict = {
   "news.empty": "No news yet — try refreshing.",
   "news.prev": "Back",
   "news.next": "Next",
+
+  // economic calendar
+  "econcal.title": "Economic calendar",
+  "econcal.subtitle": "Upcoming market-moving releases. Filter by country, importance and type.",
+  "econcal.refresh": "Refresh",
+  "econcal.thisWeek": "This week",
+  "econcal.allTypes": "All types",
+  "econcal.impact.high": "High",
+  "econcal.impact.medium": "Medium",
+  "econcal.impact.low": "Low",
+  "econcal.actual": "Actual",
+  "econcal.forecast": "Forecast",
+  "econcal.previous": "Previous",
+  "econcal.empty": "No events for the selected filters.",
 
   // calendar
   "cal.title": "Calendar",
@@ -532,6 +547,7 @@ const ru: Dict = {
   "nav.trades": "Сделки",
   "nav.exchanges": "Биржи",
   "nav.news": "Новости",
+  "nav.econcal": "Календарь (эконом.)",
   "nav.general": "Общие",
   "nav.tradeSettings": "Настройки сделок",
   "nav.risk": "Риск-менеджер",
@@ -545,6 +561,20 @@ const ru: Dict = {
   "news.empty": "Пока нет новостей — попробуйте обновить.",
   "news.prev": "Назад",
   "news.next": "Вперёд",
+
+  // economic calendar
+  "econcal.title": "Экономический календарь",
+  "econcal.subtitle": "Предстоящие значимые публикации. Фильтры по стране, важности и типу.",
+  "econcal.refresh": "Обновить",
+  "econcal.thisWeek": "Эта неделя",
+  "econcal.allTypes": "Все типы",
+  "econcal.impact.high": "Высокая",
+  "econcal.impact.medium": "Средняя",
+  "econcal.impact.low": "Низкая",
+  "econcal.actual": "Факт",
+  "econcal.forecast": "Прогноз",
+  "econcal.previous": "Пред.",
+  "econcal.empty": "Нет событий по выбранным фильтрам.",
 
   // calendar
   "cal.title": "Календарь",

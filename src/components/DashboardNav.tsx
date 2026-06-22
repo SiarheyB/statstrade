@@ -12,6 +12,7 @@ import {
   Plug,
   Settings,
   Newspaper,
+  CalendarClock,
   SlidersHorizontal,
   Tags,
   ShieldAlert,
@@ -24,12 +25,20 @@ import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
 const LINKS = [
-  { href: "/dashboard/news", key: "nav.news", icon: Newspaper },
   { href: "/dashboard", key: "nav.overview", icon: LayoutDashboard },
   { href: "/dashboard/calendar", key: "nav.calendar", icon: CalendarDays },
   { href: "/dashboard/analytics", key: "nav.analytics", icon: PieChart },
   { href: "/dashboard/trades", key: "nav.trades", icon: ListOrdered },
 ];
+
+const NEWS_CHILDREN = [
+  { href: "/dashboard/news", key: "nav.news", icon: Newspaper },
+  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock },
+];
+
+function isNewsRoute(pathname: string): boolean {
+  return pathname.startsWith("/dashboard/news") || pathname.startsWith("/dashboard/econcal");
+}
 
 const SETTINGS_CHILDREN = [
   { href: "/dashboard/settings", key: "nav.general", icon: SlidersHorizontal },
@@ -47,6 +56,7 @@ export default function DashboardNav({ email }: { email: string }) {
   const router = useRouter();
   const { t } = useI18n();
   const [open, setOpen] = useState(() => isSettingsRoute(pathname));
+  const [newsOpen, setNewsOpen] = useState(() => isNewsRoute(pathname));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function logout() {
@@ -68,6 +78,41 @@ export default function DashboardNav({ email }: { email: string }) {
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+        <button
+          onClick={() => setNewsOpen((o) => !o)}
+          className={clsx(
+            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            isNewsRoute(pathname) && !newsOpen
+              ? "text-accent"
+              : "text-muted hover:text-fg hover:bg-surface-2",
+          )}
+        >
+          <Newspaper size={18} />
+          <span className="flex-1 text-left">{t("nav.news")}</span>
+          <ChevronDown size={15} className={clsx("transition", newsOpen && "rotate-180")} />
+        </button>
+
+        {newsOpen && (
+          <div className="ml-4 pl-3 border-l border-border space-y-1">
+            {NEWS_CHILDREN.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                onClick={onNavigate}
+                className={clsx(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  childActive(c.href)
+                    ? "bg-accent/15 text-accent"
+                    : "text-muted hover:text-fg hover:bg-surface-2",
+                )}
+              >
+                <c.icon size={16} />
+                {t(c.key)}
+              </Link>
+            ))}
+          </div>
+        )}
+
         {LINKS.map((l) => {
           const active =
             l.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(l.href);

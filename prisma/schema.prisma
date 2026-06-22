@@ -198,3 +198,24 @@ model RiskProfile {
   @@unique([userId, accountId])
   @@index([userId])
 }
+
+// Economic-calendar event ingested from the free ForexFactory/faireconomy JSON
+// feed. Global (not per-user); deduped by time+currency+title and refreshed
+// lazily by the /api/econcal endpoint.
+model EconomicEvent {
+  id        String   @id @default(cuid())
+  time      DateTime // event time (UTC)
+  currency  String // USD, EUR, GBP ...
+  country   String // United States, Euro Area ... (derived)
+  title     String
+  impact    String // high | medium | low | holiday
+  category  String? // Employment | Inflation | Interest Rate ... (derived)
+  forecast  String?
+  previous  String?
+  actual    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([time, currency, title])
+  @@index([time])
+}
