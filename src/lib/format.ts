@@ -77,8 +77,15 @@ export function fmtDate(iso: string | Date): string {
 
 // CCXT unified symbols carry a settle suffix for derivatives
 // (e.g. "RIF/USDT:USDT"). Show just the base/quote pair: "RIF/USDT".
+// Display form: drop the settle suffix (":USDT") and the slash so crypto
+// ("BTC/USDT") and forex/MT ("BTCUSDT") share one look.
 export function fmtSymbol(symbol: string): string {
-  return symbol.split(":")[0];
+  return symbol.split(":")[0].replace(/\//g, "");
+}
+
+// Canonical key for matching/dedup ("BTC/USDT", "BTC/USDT:USDT", "BTCUSDT" → "BTCUSDT").
+export function canonSymbol(symbol: string): string {
+  return symbol.split(":")[0].replace(/\//g, "").toUpperCase();
 }
 
 export function pnlColor(value: number): string {

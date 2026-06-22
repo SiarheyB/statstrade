@@ -6,8 +6,9 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/TradeChart";
-import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol } from "@/lib/format";
+import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol, canonSymbol } from "@/lib/format";
 import { downloadCsv, nodeToPdf, dateStamp } from "@/lib/export";
+import SearchSelect from "@/components/SearchSelect";
 import { useI18n } from "@/lib/i18n/provider";
 
 type SortKey = "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
@@ -21,6 +22,13 @@ type Ann = {
 };
 const PAGE_SIZE = 25;
 const UNSET = "__unset__";
+
+// Short market label for the table/exports.
+function marketShort(market: string): string {
+  if (market === "spot") return "spot";
+  if (market === "forex" || market === "metal" || market === "cfd") return "forex";
+  return "perp";
+}
 
 export default function TradesPage() {
   const { t } = useI18n();
@@ -136,7 +144,7 @@ export default function TradesPage() {
   const filtered = useMemo(() => {
     let rows = data?.trades ?? [];
     if (accountFilter !== "all") rows = rows.filter((tr) => tr.accountId === accountFilter);
-    if (symbolFilter !== "all") rows = rows.filter((tr) => tr.symbol === symbolFilter);
+    if (symbolFilter !== "all") rows = rows.filter((tr) => canonSymbol(tr.symbol) === symbolFilter);
     if (marketFilter === "spot") rows = rows.filter((tr) => tr.market === "spot");
     else if (marketFilter === "futures") rows = rows.filter((tr) => tr.market === "swap" || tr.market === "future");
     else if (marketFilter === "forex") rows = rows.filter((tr) => tr.market === "forex" || tr.market === "metal" || tr.market === "cfd");
@@ -201,7 +209,7 @@ export default function TradesPage() {
       return [
         fmtSymbol(tr.symbol),
         tr.side === "long" ? "Long" : "Short",
-        tr.market === "spot" ? "spot" : "perp",
+        marketShort(tr.market),
         fmtDate(tr.entryTime),
         fmtDate(tr.exitTime),
         Math.round(tr.durationMs / 60000),
@@ -266,10 +274,14 @@ export default function TradesPage() {
           <option value="all">{t("trades.allAccounts")}</option>
           {data?.accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
         </select>
-        <select className={SELECT} value={symbolFilter} onChange={(e) => { setSymbolFilter(e.target.value); setPage(0); }}>
-          <option value="all">{t("trades.allSymbols")}</option>
-          {data?.symbols.map((s) => <option key={s} value={s}>{fmtSymbol(s)}</option>)}
-        </select>
+        <SearchSelect
+          value={symbolFilter}
+          options={data?.symbols ?? []}
+          allLabel={t("trades.allSymbols")}
+          placeholder={t("trades.searchSymbol")}
+          renderLabel={fmtSymbol}
+          onChange={(v) => { setSymbolFilter(v); setPage(0); }}
+        />
         <select className={SELECT} value={marketFilter} onChange={(e) => { setMarketFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allMarkets")}</option>
           <option value="spot">{t("dash.spot")}</option>
@@ -370,8 +382,8 @@ export default function TradesPage() {
                       </td>
                       <td className="px-3 py-2"><SideBadge side={tr.side} /></td>
                       <td className="px-3 py-2 text-xs text-faint uppercase">
-                        <Term name={tr.market === "spot" ? "spot" : "perp"}>
-                          {tr.market === "spot" ? "spot" : "perp"}
+                        <Term name={marketShort(tr.market)}>
+                          {marketShort(tr.market)}
                         </Term>
                       </td>
                       <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.exitTime)}</td>
@@ -469,7 +481,7 @@ export default function TradesPage() {
                   <tr key={tr.id} className="border-b border-border">
                     <td className="px-2 py-1 font-medium">{fmtSymbol(tr.symbol)}</td>
                     <td className="px-2 py-1">{tr.side === "long" ? "Long" : "Short"}</td>
-                    <td className="px-2 py-1 uppercase text-faint">{tr.market === "spot" ? "spot" : "perp"}</td>
+                    <td className="px-2 py-1 uppercase text-faint">{marketShort(tr.market)}</td>
                     <td className="px-2 py-1 text-muted">{fmtDate(tr.exitTime)}</td>
                     <td className="px-2 py-1 text-muted">{fmtDuration(tr.durationMs)}</td>
                     <td className={tr.returnPct >= 0 ? "text-profit px-2 py-1" : "text-loss px-2 py-1"}>{fmtPct(tr.returnPct)}</td>

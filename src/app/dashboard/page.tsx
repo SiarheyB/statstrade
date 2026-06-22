@@ -7,6 +7,7 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { EquityChart, DailyPnlChart, BreakdownChart } from "@/components/charts";
 import PnlHeatmap from "@/components/PnlHeatmap";
+import SearchSelect from "@/components/SearchSelect";
 import RiskBanner from "@/components/RiskBanner";
 import { nodeToPng, nodeToPdf, dateStamp } from "@/lib/export";
 import {
@@ -249,16 +250,14 @@ export default function DashboardPage() {
             <option value="futures">{t("dash.futures")}</option>
             <option value="forex">{t("dash.forex")}</option>
           </select>
-          <select
-            className={SELECT_CLS}
+          <SearchSelect
             value={filters.symbol}
-            onChange={(e) => setFilters((f) => ({ ...f, symbol: e.target.value }))}
-          >
-            <option value="all">{t("dash.allSymbols")}</option>
-            {data?.symbols.map((s) => (
-              <option key={s} value={s}>{fmtSymbol(s)}</option>
-            ))}
-          </select>
+            options={data?.symbols ?? []}
+            allLabel={t("dash.allSymbols")}
+            placeholder={t("trades.searchSymbol")}
+            renderLabel={fmtSymbol}
+            onChange={(v) => setFilters((f) => ({ ...f, symbol: v }))}
+          />
           <select
             className={SELECT_CLS}
             value={filters.entryPoint}

@@ -11,6 +11,7 @@ import {
   DEFAULT_MISTAKES,
   DEFAULT_PATTERNS,
 } from "@/lib/annotations";
+import { canonSymbol } from "@/lib/format";
 import type { Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
@@ -45,7 +46,8 @@ export async function GET(req: Request) {
     }
     if (market === "spot") where.market = "spot";
     else if (market === "futures") where.market = { in: ["swap", "future"] };
-    if (symbol !== "all") where.symbol = symbol;
+    // Symbol is filtered post-merge by canonical form (so "BTC/USDT" and
+    // "BTCUSDT" collapse to one), not via the raw-symbol SQL where.
     // Note: date range is applied to reconstructed trades (by exit time) below,
     // not to fills — otherwise positions opened before the range get truncated.
 
@@ -81,7 +83,6 @@ export async function GET(req: Request) {
       account: { userId: user.userId },
     };
     if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
-    if (symbol !== "all") importedWhere.symbol = symbol;
     const importedRows = includeImported
       ? await prisma.importedTrade.findMany({ where: importedWhere, orderBy: { exitTime: "asc" } })
       : [];
@@ -142,7 +143,8 @@ export async function GET(req: Request) {
       t.entryType = a?.entryType ?? null;
       t.mistake = a?.mistake ?? null;
       t.pattern = a?.pattern ?? null;
-      t.stopLoss = a?.stopLoss ?? null;
+      // Keep the imported S/L (from the MT report) unless the user overrode it.
+      t.stopLoss = a?.stopLoss ?? t.stopLoss ?? null;
       t.note = a?.note ?? null;
     }
 
@@ -157,6 +159,9 @@ export async function GET(req: Request) {
         if (toMs != null && x > toMs) return false;
         return true;
       });
+    }
+    if (symbol !== "all") {
+      filteredTrades = filteredTrades.filter((t) => canonSymbol(t.symbol) === symbol);
     }
     if (entryPoint !== "all") {
       filteredTrades = filteredTrades.filter((t) =>
@@ -185,7 +190,10 @@ export async function GET(req: Request) {
     );
 
     const allSymbols = Array.from(
-      new Set([...fills.map((f) => f.symbol), ...importedRows.map((r) => r.symbol)]),
+      new Set([
+        ...fills.map((f) => canonSymbol(f.symbol)),
+        ...importedRows.map((r) => canonSymbol(r.symbol)),
+      ]),
     ).sort();
 
     // Serialize trades (Dates -> ISO) for the client table.
