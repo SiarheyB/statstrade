@@ -25,6 +25,8 @@ const en: Dict = {
   "nav.calendar": "Calendar",
   "nav.analytics": "Analytics",
   "nav.trades": "Trades",
+  "nav.liqmap": "Liquidation map",
+  "nav.service": "Service",
   "nav.exchanges": "Exchanges",
   "nav.news": "News",
   "nav.econcal": "Calendar (econ.)",
@@ -55,6 +57,22 @@ const en: Dict = {
   "econcal.forecast": "Forecast",
   "econcal.previous": "Previous",
   "econcal.empty": "No events for the selected filters.",
+
+  // liquidation map
+  "liq.title": "Liquidation heatmap",
+  "liq.subtitle": "Estimated leverage liquidation levels, computed from futures candles. Binance · Bybit · OKX.",
+  "liq.refresh": "Refresh",
+  "liq.all": "All (aggregate)",
+  "liq.tf.1d": "24h",
+  "liq.tf.2d": "48h",
+  "liq.tf.7d": "7d",
+  "liq.tf.1M": "1M",
+  "liq.tf.3M": "3M",
+  "liq.reset": "Reset",
+  "liq.zoomHint": "Scroll to zoom · drag to pan",
+  "liq.legendLow": "Less",
+  "liq.legendHigh": "More",
+  "liq.disclaimer": "Estimate from price/volume and assumed leverage tiers (like any liquidation heatmap) — not exact positions.",
 
   // calendar
   "cal.title": "Calendar",
@@ -545,6 +563,8 @@ const ru: Dict = {
   "nav.analytics": "Аналитика",
   "nav.calendar": "Календарь",
   "nav.trades": "Сделки",
+  "nav.liqmap": "Карта ликвидаций",
+  "nav.service": "Сервис",
   "nav.exchanges": "Биржи",
   "nav.news": "Новости",
   "nav.econcal": "Календарь (эконом.)",
@@ -575,6 +595,22 @@ const ru: Dict = {
   "econcal.forecast": "Прогноз",
   "econcal.previous": "Пред.",
   "econcal.empty": "Нет событий по выбранным фильтрам.",
+
+  // liquidation map
+  "liq.title": "Карта ликвидаций",
+  "liq.subtitle": "Оценка уровней ликвидации плечевых позиций по фьючерсным свечам. Binance · Bybit · OKX.",
+  "liq.refresh": "Обновить",
+  "liq.all": "Все (агрегат)",
+  "liq.tf.1d": "24ч",
+  "liq.tf.2d": "48ч",
+  "liq.tf.7d": "7д",
+  "liq.tf.1M": "1М",
+  "liq.tf.3M": "3М",
+  "liq.reset": "Сброс",
+  "liq.zoomHint": "Колесо — зум · перетаскивание — сдвиг",
+  "liq.legendLow": "Меньше",
+  "liq.legendHigh": "Больше",
+  "liq.disclaimer": "Оценка по цене/объёму и предполагаемым плечам (как любая карта ликвидаций) — не точные позиции.",
 
   // calendar
   "cal.title": "Календарь",

@@ -13,6 +13,8 @@ import {
   Settings,
   Newspaper,
   CalendarClock,
+  Flame,
+  Wrench,
   SlidersHorizontal,
   Tags,
   ShieldAlert,
@@ -40,14 +42,24 @@ function isNewsRoute(pathname: string): boolean {
   return pathname.startsWith("/dashboard/news") || pathname.startsWith("/dashboard/econcal");
 }
 
+const SERVICE_CHILDREN = [
+  { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
+  { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
+];
+
+function isServiceRoute(pathname: string): boolean {
+  return pathname.startsWith("/dashboard/liqmap") || pathname.startsWith("/dashboard/settings/risk");
+}
+
 const SETTINGS_CHILDREN = [
   { href: "/dashboard/settings", key: "nav.general", icon: SlidersHorizontal },
   { href: "/dashboard/accounts", key: "nav.exchanges", icon: Plug },
   { href: "/dashboard/settings/trades", key: "nav.tradeSettings", icon: Tags },
-  { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
 ];
 
 function isSettingsRoute(pathname: string): boolean {
+  // Risk now lives under the Service group, so exclude it here.
+  if (pathname.startsWith("/dashboard/settings/risk")) return false;
   return pathname.startsWith("/dashboard/settings") || pathname.startsWith("/dashboard/accounts");
 }
 
@@ -57,6 +69,7 @@ export default function DashboardNav({ email }: { email: string }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(() => isSettingsRoute(pathname));
   const [newsOpen, setNewsOpen] = useState(() => isNewsRoute(pathname));
+  const [serviceOpen, setServiceOpen] = useState(() => isServiceRoute(pathname));
   const [mobileOpen, setMobileOpen] = useState(false);
 
   async function logout() {
@@ -131,6 +144,41 @@ export default function DashboardNav({ email }: { email: string }) {
             </Link>
           );
         })}
+
+        <button
+          onClick={() => setServiceOpen((o) => !o)}
+          className={clsx(
+            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            isServiceRoute(pathname) && !serviceOpen
+              ? "text-accent"
+              : "text-muted hover:text-fg hover:bg-surface-2",
+          )}
+        >
+          <Wrench size={18} />
+          <span className="flex-1 text-left">{t("nav.service")}</span>
+          <ChevronDown size={15} className={clsx("transition", serviceOpen && "rotate-180")} />
+        </button>
+
+        {serviceOpen && (
+          <div className="ml-4 pl-3 border-l border-border space-y-1">
+            {SERVICE_CHILDREN.map((c) => (
+              <Link
+                key={c.href}
+                href={c.href}
+                onClick={onNavigate}
+                className={clsx(
+                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  childActive(c.href)
+                    ? "bg-accent/15 text-accent"
+                    : "text-muted hover:text-fg hover:bg-surface-2",
+                )}
+              >
+                <c.icon size={16} />
+                {t(c.key)}
+              </Link>
+            ))}
+          </div>
+        )}
 
         <button
           onClick={() => setOpen((o) => !o)}

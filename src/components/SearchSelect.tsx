@@ -14,6 +14,7 @@ export default function SearchSelect({
   onChange,
   renderLabel = (v) => v,
   className = "",
+  hideAll = false,
 }: {
   value: string;
   options: string[];
@@ -23,6 +24,7 @@ export default function SearchSelect({
   onChange: (v: string) => void;
   renderLabel?: (v: string) => string;
   className?: string;
+  hideAll?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -71,9 +73,11 @@ export default function SearchSelect({
             />
           </div>
           <div className="max-h-64 overflow-y-auto py-1">
-            <Option active={value === allValue} onClick={() => pick(allValue)}>
-              {allLabel}
-            </Option>
+            {!hideAll && (
+              <Option active={value === allValue} onClick={() => pick(allValue)}>
+                {allLabel}
+              </Option>
+            )}
             {filtered.map((o) => (
               <Option key={o} active={value === o} onClick={() => pick(o)}>
                 {renderLabel(o)}
