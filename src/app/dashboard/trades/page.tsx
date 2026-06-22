@@ -200,7 +200,8 @@ export default function TradesPage() {
       t("trades.export.open"), t("trades.export.close"), t("trades.export.durationMin"),
       t("trades.col.qty"), t("trades.col.entry"), t("trades.col.exit"), t("trades.col.stop"),
       t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
-      t("trades.export.result"), t("trades.col.pattern"), t("trades.col.entryPoint"),
+      t("trades.export.result"), t("trades.col.lots"), t("trades.col.pips"), t("trades.col.swap"),
+      t("trades.col.pattern"), t("trades.col.entryPoint"),
       t("trades.col.entryType"), t("trades.col.mistake"),
     ];
     const rows = filtered.map((tr) => {
@@ -222,6 +223,9 @@ export default function TradesPage() {
         tr.returnPct.toFixed(2),
         tr.netPnl.toFixed(2),
         resultLabel(tr.result),
+        tr.lots ?? "",
+        tr.pips ?? "",
+        tr.swap ?? "",
         a.pattern ?? "",
         a.entryPoint ?? "",
         a.entryType ?? "",
@@ -467,6 +471,7 @@ export default function TradesPage() {
                   t("trades.col.symbol"), t("trades.col.side"), t("trades.col.market"),
                   t("trades.col.close"), t("trades.col.duration"), t("trades.col.return"),
                   t("trades.col.netPnl"), t("trades.col.fees"), t("trades.col.stop"), t("trades.col.rr"),
+                  t("trades.col.lots"), t("trades.col.pips"), t("trades.col.swap"),
                   t("trades.col.pattern"), t("trades.col.entryPoint"), t("trades.col.entryType"), t("trades.col.mistake"),
                 ].map((h) => (
                   <th key={h} className="px-2 py-1.5 text-left">{h}</th>
@@ -489,6 +494,9 @@ export default function TradesPage() {
                     <td className="px-2 py-1 text-muted">{fmtUsd(tr.fees)}</td>
                     <td className="px-2 py-1">{a.stopLoss ?? "—"}</td>
                     <td className="px-2 py-1">{fmtRR(rr)}</td>
+                    <td className="px-2 py-1">{tr.lots != null ? fmtNum(tr.lots, 2) : "—"}</td>
+                    <td className="px-2 py-1">{tr.pips != null ? tr.pips.toFixed(1) : "—"}</td>
+                    <td className="px-2 py-1">{tr.swap != null ? fmtUsd(tr.swap, { sign: true }) : "—"}</td>
                     <td className="px-2 py-1">{a.pattern ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryPoint ?? "—"}</td>
                     <td className="px-2 py-1">{a.entryType ?? "—"}</td>

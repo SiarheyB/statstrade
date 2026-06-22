@@ -107,3 +107,35 @@ export async function POST(
     return serverError((err as Error).message);
   }
 }
+
+// Roll back the most recent import batch for the account.
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await getAuthUser();
+  if (!user) return unauthorized();
+  const { id } = await params;
+
+  const account = await prisma.exchangeAccount.findFirst({
+    where: { id, userId: user.userId },
+    select: { id: true },
+  });
+  if (!account) return badRequest("Аккаунт не найден");
+
+  const latest = await prisma.importedTrade.findFirst({
+    where: { accountId: id, importBatch: { not: null } },
+    orderBy: { importedAt: "desc" },
+    select: { importBatch: true },
+  });
+  if (!latest?.importBatch) return badRequest("Нет загрузок для отката");
+
+  try {
+    const res = await prisma.importedTrade.deleteMany({
+      where: { accountId: id, importBatch: latest.importBatch },
+    });
+    return NextResponse.json({ deleted: res.count });
+  } catch (err) {
+    return serverError((err as Error).message);
+  }
+}

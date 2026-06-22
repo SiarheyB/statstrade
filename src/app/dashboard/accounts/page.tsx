@@ -146,6 +146,22 @@ export default function AccountsPage() {
     }
   }
 
+  // Roll back the last imported report for an MT account.
+  async function rollbackImport(id: string) {
+    if (!confirm(t("acc.mt.rollbackConfirm"))) return;
+    setBusy(id);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/accounts/${id}/import`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
+      else setNotice(t("acc.mt.rolledBack", { n: data.deleted }));
+    } finally {
+      setBusy(null);
+      load();
+    }
+  }
+
   // Import another MetaTrader report into an existing MT account.
   async function importReport(id: string, file: File) {
     setBusy(id);
@@ -278,7 +294,17 @@ export default function AccountsPage() {
                       <Upload size={14} />
                       {t("acc.mt.import")}
                     </label>
-                  ) : (
+                  ) : null}
+                  {isMtSource(a.source) && a.importedCount > 0 && (
+                    <button
+                      onClick={() => rollbackImport(a.id)}
+                      disabled={busy === a.id}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+                    >
+                      {t("acc.mt.rollback")}
+                    </button>
+                  )}
+                  {!isMtSource(a.source) && (
                     <>
                       <button
                         onClick={() => seedDemo(a.id)}

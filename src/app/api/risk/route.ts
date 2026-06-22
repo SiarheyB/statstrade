@@ -11,8 +11,10 @@ export async function GET() {
   if (!user) return unauthorized();
 
   try {
+    // Only live exchange accounts are risk-monitored; imported (forex) accounts
+    // are file-loaded and have no real-time state.
     const accounts = await prisma.exchangeAccount.findMany({
-      where: { userId: user.userId },
+      where: { userId: user.userId, source: "exchange" },
       select: { id: true, label: true, exchange: true, balance: true },
     });
 

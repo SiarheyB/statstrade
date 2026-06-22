@@ -6,7 +6,7 @@ import { fmtUsd } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
 import { defaultRiskProfile, PERIODS, type RiskProfileData, type PeriodKey } from "@/lib/risk";
 
-type Account = { id: string; label: string; exchange: string; balance: number | null };
+type Account = { id: string; label: string; exchange: string; source: string; balance: number | null };
 
 export default function RiskManager() {
   const { t } = useI18n();
@@ -24,7 +24,12 @@ export default function RiskManager() {
         fetch("/api/accounts"),
         fetch("/api/risk/settings"),
       ]);
-      if (accRes.ok) setAccounts(await accRes.json());
+      if (accRes.ok) {
+        // Risk monitoring is for live exchange accounts only — imported (forex)
+        // accounts have no real-time state, so they're excluded here.
+        const all = (await accRes.json()) as Account[];
+        setAccounts(all.filter((a) => a.source === "exchange"));
+      }
       if (riskRes.ok) {
         const { profiles } = (await riskRes.json()) as {
           profiles: Record<string, RiskProfileData>;
