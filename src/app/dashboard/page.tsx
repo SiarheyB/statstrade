@@ -1,15 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { RefreshCw, Plug, Database, Image as ImageIcon, FileText, CalendarRange } from "lucide-react";
+import { RefreshCw, Plug, Database, CalendarRange } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { EquityChart, DailyPnlChart, BreakdownChart } from "@/components/charts";
 import PnlHeatmap from "@/components/PnlHeatmap";
 import SearchSelect from "@/components/SearchSelect";
 import RiskBanner from "@/components/RiskBanner";
-import { nodeToPng, nodeToPdf, dateStamp } from "@/lib/export";
 import {
   METRIC_GROUPS,
   TOTAL_METRICS,
@@ -123,10 +122,7 @@ export default function DashboardPage() {
   const [timeTab, setTimeTab] = useState<"dow" | "hour" | "month">("month");
   const [entryMetric, setEntryMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [patternMetric, setPatternMetric] = useState<"netPnl" | "winRate">("netPnl");
-  const [dailyMetric, setDailyMetric] = useState<"pnl" | "winRate">("pnl");
   const [exchangeMetric, setExchangeMetric] = useState<"netPnl" | "winRate">("netPnl");
-  const [exporting, setExporting] = useState<null | "png" | "pdf">(null);
-  const dashRef = useRef<HTMLDivElement>(null);
 
   // Capital is user-set per account. Editable only for a single selected account;
   // for "all" it shows the sum of accounts that have a capital set (read-only).
@@ -160,18 +156,6 @@ export default function DashboardPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ capital: capVal }),
     }).catch(() => {});
-  }
-
-  async function exportDashboard(kind: "png" | "pdf") {
-    if (!dashRef.current) return;
-    setExporting(kind);
-    try {
-      const name = `dashboard-${dateStamp()}.${kind}`;
-      if (kind === "png") await nodeToPng(dashRef.current, name);
-      else await nodeToPdf(dashRef.current, name, "p");
-    } finally {
-      setExporting(null);
-    }
   }
 
   const load = useCallback(async () => {
@@ -232,9 +216,17 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-xl font-semibold">{t("dash.title")}</h1>
           <p className="text-sm text-muted">
-            {data
-              ? t("dash.subtitle", { trades: m?.tradeCount ?? 0, fills: data.fillCount })
-              : t("common.loading")}
+            {data ? (
+              <>
+                {t("dash.subtitleTrades", { trades: m?.tradeCount ?? 0 })}
+                {" · "}
+                <Term desc={t("dash.fillsHint")}>
+                  {t("dash.subtitleFills", { fills: data.fillCount })}
+                </Term>
+              </>
+            ) : (
+              t("common.loading")
+            )}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -355,20 +347,6 @@ export default function DashboardPage() {
           >
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
-          <button
-            onClick={() => exportDashboard("png")}
-            disabled={!hasTrades || exporting !== null}
-            className="inline-flex items-center gap-1.5 input-base py-1.5 text-sm hover:border-border-strong transition disabled:opacity-50"
-          >
-            <ImageIcon size={14} /> {exporting === "png" ? "…" : "PNG"}
-          </button>
-          <button
-            onClick={() => exportDashboard("pdf")}
-            disabled={!hasTrades || exporting !== null}
-            className="inline-flex items-center gap-1.5 input-base py-1.5 text-sm hover:border-border-strong transition disabled:opacity-50"
-          >
-            <FileText size={14} /> {exporting === "pdf" ? "…" : "PDF"}
-          </button>
         </div>
       </div>
 
@@ -399,7 +377,7 @@ export default function DashboardPage() {
       )}
 
       {m && hasTrades && (
-        <div className="space-y-5" ref={dashRef}>
+        <div className="space-y-5">
           {/* Headline stats */}
           <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
             <StatCard
@@ -478,23 +456,8 @@ export default function DashboardPage() {
           {/* Daily pnl + heatmap */}
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-5 min-w-0">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-sm">{t("dash.dailyPnl")}</h3>
-                <div className="flex gap-1 text-xs">
-                  {(["pnl", "winRate"] as const).map((mk) => (
-                    <button
-                      key={mk}
-                      onClick={() => setDailyMetric(mk)}
-                      className={`px-2.5 py-1 rounded-md transition ${
-                        dailyMetric === mk ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
-                      }`}
-                    >
-                      {mk === "pnl" ? t("metric.pnl") : t("metric.winRateShort")}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <DailyPnlChart data={m.daily} metric={dailyMetric} />
+              <SectionTitle title={t("dash.dailyPnl")} />
+              <DailyPnlChart data={m.daily} metric="pnl" />
             </div>
             <div className="card p-5 min-w-0">
               <SectionTitle title={t("dash.calendar")} />

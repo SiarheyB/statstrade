@@ -1,15 +1,16 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, FileText, AlertTriangle, ChevronRight } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/TradeChart";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol, canonSymbol } from "@/lib/format";
-import { downloadCsv, nodeToPdf, dateStamp } from "@/lib/export";
+import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
 import { useI18n } from "@/lib/i18n/provider";
+import { useSync } from "@/components/SyncProvider";
 
 type SortKey = "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
 type Ann = {
@@ -32,6 +33,7 @@ function marketShort(market: string): string {
 
 export default function TradesPage() {
   const { t } = useI18n();
+  const { anySyncing, completedAt, syncAll } = useSync();
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
@@ -49,8 +51,6 @@ export default function TradesPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [exporting, setExporting] = useState(false);
-  const printRef = useRef<HTMLDivElement>(null);
   const [chart, setChart] = useState<{ trade: SerializedTrade; x: number; y: number } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -90,6 +90,11 @@ export default function TradesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Reload trades once a background sync finishes (new fills may have landed).
+  useEffect(() => {
+    if (completedAt) load();
+  }, [completedAt, load]);
 
   // Risk profiles drive the R-multiple column: when the risk manager is on and a
   // per-trade risk is set, RR = netPnl / configured risk (1R).
@@ -235,17 +240,6 @@ export default function TradesPage() {
     downloadCsv(`trades-${dateStamp()}.csv`, headers, rows);
   }
 
-  async function exportPdf() {
-    if (!printRef.current) return;
-    setExporting(true);
-    try {
-      await new Promise((r) => setTimeout(r, 50));
-      await nodeToPdf(printRef.current, `trades-${dateStamp()}.pdf`, "l");
-    } finally {
-      setExporting(false);
-    }
-  }
-
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";
 
   return (
@@ -257,17 +251,18 @@ export default function TradesPage() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={() => syncAll()}
+            disabled={anySyncing}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-60"
+          >
+            <RefreshCw size={14} className={anySyncing ? "animate-spin" : ""} />
+            {anySyncing ? t("trades.syncing") : t("trades.syncAll")}
+          </button>
+          <button
             onClick={exportCsv}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong"
           >
             <FileDown size={14} /> {t("trades.csv")}
-          </button>
-          <button
-            onClick={exportPdf}
-            disabled={exporting}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
-          >
-            <FileText size={14} /> {exporting ? "…" : t("trades.pdf")}
           </button>
         </div>
       </div>
@@ -458,56 +453,6 @@ export default function TradesPage() {
           </div>
         </div>
       )}
-
-      {/* Hidden full-table render used only for PDF capture */}
-      <div style={{ position: "absolute", left: -99999, top: 0, width: 1400 }} aria-hidden>
-        <div ref={printRef} className="bg-bg p-6">
-          <div className="text-lg font-semibold mb-1">{t("trades.title")} — TradeStats</div>
-          <div className="text-sm text-muted mb-4">{filtered.length} {t("common.trades")} · {dateStamp()}</div>
-          <table className="w-full text-xs">
-            <thead>
-              <tr className="text-muted border-b border-border-strong">
-                {[
-                  t("trades.col.symbol"), t("trades.col.side"), t("trades.col.market"),
-                  t("trades.col.close"), t("trades.col.duration"), t("trades.col.return"),
-                  t("trades.col.netPnl"), t("trades.col.fees"), t("trades.col.stop"), t("trades.col.rr"),
-                  t("trades.col.lots"), t("trades.col.pips"), t("trades.col.swap"),
-                  t("trades.col.pattern"), t("trades.col.entryPoint"), t("trades.col.entryType"), t("trades.col.mistake"),
-                ].map((h) => (
-                  <th key={h} className="px-2 py-1.5 text-left">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((tr) => {
-                const a = annOf(tr);
-                const rr = rrFor(tr, a.stopLoss);
-                return (
-                  <tr key={tr.id} className="border-b border-border">
-                    <td className="px-2 py-1 font-medium">{fmtSymbol(tr.symbol)}</td>
-                    <td className="px-2 py-1">{tr.side === "long" ? "Long" : "Short"}</td>
-                    <td className="px-2 py-1 uppercase text-faint">{marketShort(tr.market)}</td>
-                    <td className="px-2 py-1 text-muted">{fmtDate(tr.exitTime)}</td>
-                    <td className="px-2 py-1 text-muted">{fmtDuration(tr.durationMs)}</td>
-                    <td className={tr.returnPct >= 0 ? "text-profit px-2 py-1" : "text-loss px-2 py-1"}>{fmtPct(tr.returnPct)}</td>
-                    <td className={tr.netPnl >= 0 ? "text-profit px-2 py-1" : "text-loss px-2 py-1"}>{fmtUsd(tr.netPnl, { sign: true })}</td>
-                    <td className="px-2 py-1 text-muted">{fmtUsd(tr.fees)}</td>
-                    <td className="px-2 py-1">{a.stopLoss ?? "—"}</td>
-                    <td className="px-2 py-1">{fmtRR(rr)}</td>
-                    <td className="px-2 py-1">{tr.lots != null ? fmtNum(tr.lots, 2) : "—"}</td>
-                    <td className="px-2 py-1">{tr.pips != null ? tr.pips.toFixed(1) : "—"}</td>
-                    <td className="px-2 py-1">{tr.swap != null ? fmtUsd(tr.swap, { sign: true }) : "—"}</td>
-                    <td className="px-2 py-1">{a.pattern ?? "—"}</td>
-                    <td className="px-2 py-1">{a.entryPoint ?? "—"}</td>
-                    <td className="px-2 py-1">{a.entryType ?? "—"}</td>
-                    <td className="px-2 py-1">{a.mistake ?? "—"}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
 
       {/* Floating trade chart on ticker hover */}
       {chart && (

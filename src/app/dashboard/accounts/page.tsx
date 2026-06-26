@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Plus,
   RefreshCw,
@@ -15,6 +15,7 @@ import {
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
+import { useSync } from "@/components/SyncProvider";
 
 type Account = {
   id: string;
@@ -39,8 +40,6 @@ type Account = {
   fillCount: number;
 };
 
-type Prog = { done: number; total: number; imported: number; phase: string | null };
-
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
 
 const EXCHANGES = [
@@ -57,13 +56,13 @@ const isMtSource = (s: string) => s === "mt4" || s === "mt5";
 
 export default function AccountsPage() {
   const { t } = useI18n();
+  // Exchange syncing is driven by the dashboard-level SyncProvider so a running
+  // scan survives navigation between dashboard pages.
+  const { progress, syncing, completedAt, notice, setNotice, syncAccount } = useSync();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [progress, setProgress] = useState<Record<string, Prog>>({});
-  const resumingRef = useRef<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -76,60 +75,16 @@ export default function AccountsPage() {
     load();
   }, [load]);
 
-  // Resume a scan that was already in progress (e.g. started on another device
-  // or before a reload) so the progress bar picks up where it left off.
+  // Refresh the account cards (last-sync time, counts, status) whenever a scan
+  // finishes anywhere in the app.
   useEffect(() => {
-    for (const a of accounts) {
-      if (a.syncStatus === "syncing" && !resumingRef.current.has(a.id)) {
-        resumingRef.current.add(a.id);
-        void syncAccount(a.id);
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accounts]);
+    if (completedAt) load();
+  }, [completedAt, load]);
 
   function marketLabel(m: string): string {
     if (m === "spot") return t("acc.market.spot");
     if (m === "futures") return t("acc.market.futures");
     return t("acc.market.both");
-  }
-
-  // Drive a chunked background import: POST repeatedly while status === "syncing",
-  // updating the progress bar each chunk, until the scan finishes.
-  async function syncAccount(id: string, rescan = false) {
-    setBusy(id);
-    setNotice(null);
-    const post = (body: object) =>
-      fetch(`/api/accounts/${id}/sync`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-    try {
-      let res = await post({ rescan });
-      let data = await res.json();
-      let guard = 0;
-      while (res.ok && data.status === "syncing" && guard < 500) {
-        guard++;
-        setProgress((p) => ({
-          ...p,
-          [id]: { done: data.done, total: data.total, imported: data.imported, phase: data.phase },
-        }));
-        res = await post({});
-        data = await res.json();
-      }
-      setProgress((p) => {
-        const next = { ...p };
-        delete next[id];
-        return next;
-      });
-      if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
-      else setNotice(t("acc.notice.scanned", { imported: data.imported ?? 0, total: data.total ?? 0 }));
-    } finally {
-      setBusy(null);
-      resumingRef.current.delete(id);
-      load();
-    }
   }
 
   async function seedDemo(id: string) {
@@ -316,10 +271,10 @@ export default function AccountsPage() {
                       </button>
                       <button
                         onClick={() => syncAccount(a.id)}
-                        disabled={busy === a.id}
+                        disabled={busy === a.id || syncing[a.id]}
                         className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"
                       >
-                        <RefreshCw size={14} className={busy === a.id ? "animate-spin" : ""} />
+                        <RefreshCw size={14} className={syncing[a.id] ? "animate-spin" : ""} />
                         {t("acc.sync")}
                       </button>
                     </>
@@ -337,7 +292,7 @@ export default function AccountsPage() {
                 <span>
                   {t("acc.lastSync")} {a.lastSyncAt ? fmtDate(a.lastSyncAt) : t("acc.never")}
                 </span>
-                {a.fullSyncAt && busy !== a.id && (
+                {a.fullSyncAt && busy !== a.id && !syncing[a.id] && (
                   <button
                     onClick={() => syncAccount(a.id, true)}
                     className="text-faint hover:text-accent transition underline-offset-2 hover:underline"

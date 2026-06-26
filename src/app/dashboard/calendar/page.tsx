@@ -21,13 +21,14 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<{ y: number; m: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState("all");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/stats");
+    const res = await fetch(`/api/stats?accountId=${encodeURIComponent(accountId)}`);
     if (res.ok) setData(await res.json());
     setLoading(false);
-  }, []);
+  }, [accountId]);
 
   useEffect(() => {
     load();
@@ -139,7 +140,19 @@ export default function CalendarPage() {
           <h1 className="text-xl font-semibold">{t("cal.title")}</h1>
           <p className="text-sm text-muted">{t("cal.subtitle")}</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            className="input-base text-sm py-1.5 cursor-pointer"
+            value={accountId}
+            onChange={(e) => setAccountId(e.target.value)}
+          >
+            <option value="all">{t("dash.allAccounts")}</option>
+            {data?.accounts.map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.label} ({a.exchange})
+              </option>
+            ))}
+          </select>
           <button onClick={goToday} className="input-base py-1.5 text-sm hover:border-border-strong">
             {t("cal.today")}
           </button>

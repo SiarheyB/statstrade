@@ -28,13 +28,14 @@ export default function AnalyticsPage() {
   const { t } = useI18n();
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accountId, setAccountId] = useState("all");
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/stats");
+    const res = await fetch(`/api/stats?accountId=${encodeURIComponent(accountId)}`);
     if (res.ok) setData(await res.json());
     setLoading(false);
-  }, []);
+  }, [accountId]);
   useEffect(() => {
     load();
   }, [load]);
@@ -107,9 +108,23 @@ export default function AnalyticsPage() {
 
   return (
     <div className="px-6 py-5 max-w-7xl mx-auto">
-      <div className="mb-5">
-        <h1 className="text-xl font-semibold">{t("an.title")}</h1>
-        <p className="text-sm text-muted">{t("an.subtitle")}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div>
+          <h1 className="text-xl font-semibold">{t("an.title")}</h1>
+          <p className="text-sm text-muted">{t("an.subtitle")}</p>
+        </div>
+        <select
+          className="input-base text-sm py-1.5 cursor-pointer"
+          value={accountId}
+          onChange={(e) => setAccountId(e.target.value)}
+        >
+          <option value="all">{t("dash.allAccounts")}</option>
+          {data?.accounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.label} ({a.exchange})
+            </option>
+          ))}
+        </select>
       </div>
 
       {loading ? (
@@ -160,7 +175,9 @@ export default function AnalyticsPage() {
           </div>
 
           <div className="card p-5">
-            <h3 className="font-medium text-sm mb-3">{t("an.holdDist")}</h3>
+            <h3 className="font-medium text-sm mb-3">
+              <Term desc={t("an.holdDistHint")}>{t("an.holdDist")}</Term>
+            </h3>
             <Histogram data={holdBins} height={220} />
           </div>
         </div>
