@@ -37,11 +37,11 @@ const LEVERAGES: { lev: number; weight: number }[] = [
 const MMR = 0.004; // maintenance margin ~0.4%
 
 const TF: Record<Timeframe, { binance: string; bybit: string; okx: string; limit: number }> = {
-  "1d": { binance: "15m", bybit: "15", okx: "15m", limit: 96 },
-  "2d": { binance: "30m", bybit: "30", okx: "30m", limit: 96 },
-  "7d": { binance: "1h", bybit: "60", okx: "1H", limit: 168 },
-  "1M": { binance: "4h", bybit: "240", okx: "4H", limit: 180 },
-  "3M": { binance: "1d", bybit: "D", okx: "1D", limit: 90 },
+  "1d": { binance: "5m", bybit: "5", okx: "5m", limit: 288 },
+  "2d": { binance: "5m", bybit: "5", okx: "5m", limit: 576 },
+  "7d": { binance: "30m", bybit: "30", okx: "30m", limit: 336 },
+  "1M": { binance: "2h", bybit: "120", okx: "2H", limit: 360 },
+  "3M": { binance: "6h", bybit: "360", okx: "6H", limit: 360 },
 };
 
 const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://statstrade.vercel.app)";
@@ -97,10 +97,20 @@ async function okxKlines(symbol: string, tf: Timeframe): Promise<Kline[]> {
   const { okx: bar, limit } = TF[tf];
   const { base, quote } = splitSymbol(symbol);
   const instId = `${base}-${quote}-SWAP`;
-  const data = (await getJson(
-    `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${bar}&limit=${Math.min(limit, 300)}`,
-  )) as { data?: string[][] };
-  return (data.data ?? [])
+  // OKX caps at 300 candles per request → page back with `after` (older than ts).
+  const rows: string[][] = [];
+  let after: string | undefined;
+  for (let page = 0; page < 6 && rows.length < limit; page++) {
+    const u = `https://www.okx.com/api/v5/market/candles?instId=${instId}&bar=${bar}&limit=300${after ? `&after=${after}` : ""}`;
+    const data = (await getJson(u)) as { data?: string[][] };
+    const chunk = data.data ?? [];
+    if (chunk.length === 0) break;
+    rows.push(...chunk);
+    after = chunk[chunk.length - 1][0]; // oldest ts in this (desc) page
+    if (chunk.length < 300) break;
+  }
+  return rows
+    .slice(0, limit)
     .map((k) => ({
       time: Number(k[0]),
       open: Number(k[1]), high: Number(k[2]), low: Number(k[3]), close: Number(k[4]),

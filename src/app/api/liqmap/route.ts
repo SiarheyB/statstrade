@@ -5,7 +5,7 @@ import { computeLiqMap, type Exchange, type Timeframe } from "@/lib/liqmap";
 export const maxDuration = 30;
 
 const EXCHANGES = new Set(["all", "binance", "bybit", "okx"]);
-const TFS = new Set(["1d", "7d", "1M"]);
+const TFS = new Set(["1d", "2d", "7d", "1M", "3M"]);
 
 // Small in-memory cache so repeated views don't re-hit the exchanges.
 const cache = new Map<string, { at: number; data: unknown }>();

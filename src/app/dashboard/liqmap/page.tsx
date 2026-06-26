@@ -13,41 +13,82 @@ type Heatmap = {
 };
 type Resp = { exchange: string; symbol: string; tf: string; heatmap: Heatmap };
 
-const EXCHANGES = ["all", "binance", "bybit", "okx"] as const;
+const EXCHANGES = ["binance", "bybit", "okx"] as const;
 const TFS = ["1d", "2d", "7d", "1M", "3M"] as const;
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
 
-const STOPS: [number, [number, number, number, number]][] = [
-  [0.0, [15, 20, 40, 0]],
-  [0.18, [45, 30, 95, 170]],
-  [0.42, [150, 40, 140, 215]],
-  [0.68, [240, 120, 40, 240]],
-  [1.0, [250, 232, 90, 255]],
+// Viridis palette (dark purple → blue → teal → green → yellow), opaque — matches
+// the CoinGlass look where the whole field is coloured, bright = more liquidity.
+const STOPS: [number, [number, number, number]][] = [
+  [0.0, [68, 1, 84]],
+  [0.25, [59, 82, 139]],
+  [0.5, [33, 145, 140]],
+  [0.75, [94, 201, 98]],
+  [1.0, [253, 231, 37]],
 ];
-function ramp(t: number): string {
+function rampRgb(t: number): [number, number, number] {
   const x = Math.max(0, Math.min(1, t));
   for (let i = 1; i < STOPS.length; i++) {
     if (x <= STOPS[i][0]) {
       const [a0, c0] = STOPS[i - 1];
       const [a1, c1] = STOPS[i];
       const f = (x - a0) / (a1 - a0 || 1);
-      const m = (j: number) => Math.round(c0[j] + (c1[j] - c0[j]) * f);
-      return `rgba(${m(0)},${m(1)},${m(2)},${(c0[3] + (c1[3] - c0[3]) * f) / 255})`;
+      return [
+        Math.round(c0[0] + (c1[0] - c0[0]) * f),
+        Math.round(c0[1] + (c1[1] - c0[1]) * f),
+        Math.round(c0[2] + (c1[2] - c0[2]) * f),
+      ];
     }
   }
-  return "rgba(250,232,90,1)";
+  return [253, 231, 37];
 }
 function fmtP(p: number): string {
   if (p >= 1000) return Math.round(p).toLocaleString("en-US");
   if (p >= 1) return p.toFixed(2);
   return p.toPrecision(4);
 }
+function fmtVal(v: number): string {
+  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
+  return String(Math.round(v));
+}
+function fmtDT(ms: number): string {
+  const d = new Date(ms);
+  const p = (x: number) => String(x).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 type View = { x0: number; x1: number; y0: number; y1: number };
 
+// Render the grid into a cols×bins offscreen canvas (row 0 = top = high price);
+// drawImage then scales it up with bilinear smoothing for the soft band look.
+function buildOffscreen(hm: Heatmap): HTMLCanvasElement {
+  const cv = document.createElement("canvas");
+  cv.width = hm.cols;
+  cv.height = hm.bins;
+  const ctx = cv.getContext("2d")!;
+  const img = ctx.createImageData(hm.cols, hm.bins);
+  for (let c = 0; c < hm.cols; c++) {
+    const col = hm.grid[c];
+    for (let b = 0; b < hm.bins; b++) {
+      const t = hm.maxVal ? Math.sqrt(col[b] / hm.maxVal) : 0;
+      const [r, g, bl] = rampRgb(t);
+      const row = hm.bins - 1 - b; // high price at top
+      const idx = (row * hm.cols + c) * 4;
+      img.data[idx] = r;
+      img.data[idx + 1] = g;
+      img.data[idx + 2] = bl;
+      img.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return cv;
+}
+
 export default function LiqMapPage() {
   const { t } = useI18n();
-  const [exchange, setExchange] = useState<string>("all");
+  const [exchange, setExchange] = useState<string>("binance");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [tf, setTf] = useState<string>("7d");
@@ -57,6 +98,8 @@ export default function LiqMapPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ x0: 0, x1: 1, y0: 0, y1: 1 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const hoverRef = useRef<{ mx: number; my: number } | null>(null);
+  const offRef = useRef<{ src: Resp; canvas: HTMLCanvasElement } | null>(null);
   const rafRef = useRef(0);
 
   useEffect(() => {
@@ -80,6 +123,7 @@ export default function LiqMapPage() {
         setData(null);
         return;
       }
+      offRef.current = null;
       setData(d);
       viewRef.current = { x0: 0, x1: 1, y0: d.heatmap.priceMin, y1: d.heatmap.priceMax };
     } catch {
@@ -92,6 +136,10 @@ export default function LiqMapPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  const PADL = 56;
+  const PADR = 64;
+  const PADB = 20;
 
   const draw = useCallback(() => {
     const cv = canvasRef.current;
@@ -106,54 +154,62 @@ export default function LiqMapPage() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0a0d13";
+    ctx.fillStyle = "#08080d";
     ctx.fillRect(0, 0, W, H);
 
-    const padR = 64;
-    const plotW = W - padR;
+    const plotX = PADL;
+    const plotW = W - PADL - PADR;
+    const plotH = H - PADB;
     const span = hm.priceMax - hm.priceMin || 1;
     const xspan = v.x1 - v.x0 || 1;
     const yspan = v.y1 - v.y0 || 1;
-    const sx = (tfrac: number) => ((tfrac - v.x0) / xspan) * plotW;
-    const sy = (p: number) => H - ((p - v.y0) / yspan) * H;
+    const sx = (tfrac: number) => plotX + ((tfrac - v.x0) / xspan) * plotW;
+    const sy = (p: number) => plotH - ((p - v.y0) / yspan) * plotH;
 
-    // Heatmap cells (culled to the visible viewport).
-    for (let c = 0; c < hm.cols; c++) {
-      const tfL = c / hm.cols;
-      const tfR = (c + 1) / hm.cols;
-      if (tfR < v.x0 || tfL > v.x1) continue;
-      const xL = sx(tfL);
-      const xR = sx(tfR);
-      const col = hm.grid[c];
-      for (let b = 0; b < hm.bins; b++) {
-        const val = col[b];
-        if (!val) continue;
-        const pL = hm.priceMin + (b / hm.bins) * span;
-        const pH = hm.priceMin + ((b + 1) / hm.bins) * span;
-        if (pH < v.y0 || pL > v.y1) continue;
-        ctx.fillStyle = ramp(Math.sqrt(val / hm.maxVal));
-        const yT = sy(pH);
-        ctx.fillRect(xL, yT, xR - xL + 0.6, sy(pL) - yT + 0.6);
-      }
+    // Heatmap via offscreen → smooth bilinear scaling of the visible window.
+    if (!offRef.current || offRef.current.src !== data) {
+      offRef.current = { src: data, canvas: buildOffscreen(hm) };
     }
+    const off = offRef.current.canvas;
+    const srcX = v.x0 * hm.cols;
+    const srcW = xspan * hm.cols;
+    const srcY = ((hm.priceMax - v.y1) / span) * hm.bins;
+    const srcH = (yspan / span) * hm.bins;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(off, srcX, srcY, srcW, srcH, plotX, 0, plotW, plotH);
 
-    // Price gridlines + labels.
+    // Price gridlines + labels (right).
     ctx.font = "10px ui-sans-serif, system-ui";
     ctx.textAlign = "left";
     for (let i = 0; i <= 6; i++) {
       const price = v.y0 + (i / 6) * yspan;
-      const y = H - (i / 6) * H;
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+      const y = plotH - (i / 6) * plotH;
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(plotW, y);
+      ctx.moveTo(plotX, y);
+      ctx.lineTo(plotX + plotW, y);
       ctx.stroke();
-      ctx.fillStyle = "#7b8499";
-      ctx.fillText(fmtP(price), plotW + 5, Math.min(H - 2, Math.max(9, y + 3)));
+      ctx.fillStyle = "#9aa3b5";
+      ctx.fillText(fmtP(price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, y + 3)));
     }
 
-    // Candlesticks.
+    // X-axis time labels.
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#7b8499";
     const n = hm.candles.length;
+    for (let i = 0; i <= 6; i++) {
+      const tfrac = v.x0 + (i / 6) * xspan;
+      const ci = Math.max(0, Math.min(n - 1, Math.floor(tfrac * n)));
+      const x = sx(tfrac);
+      if (x < plotX - 1 || x > plotX + plotW + 1) continue;
+      const d = new Date(hm.candles[ci].t);
+      const p = (z: number) => String(z).padStart(2, "0");
+      ctx.fillText(`${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`, x, H - 6);
+    }
+    ctx.textAlign = "left";
+
+    // Candlesticks.
     const cw = Math.max(1, (plotW / (xspan * n)) * 0.6);
     for (let i = 0; i < n; i++) {
       const tfc = (i + 0.5) / n;
@@ -174,18 +230,89 @@ export default function LiqMapPage() {
 
     // Current price line.
     const yp = sy(hm.price);
-    if (yp >= 0 && yp <= H) {
+    if (yp >= 0 && yp <= plotH) {
       ctx.strokeStyle = "#e6b800";
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
-      ctx.moveTo(0, yp);
-      ctx.lineTo(plotW, yp);
+      ctx.moveTo(plotX, yp);
+      ctx.lineTo(plotX + plotW, yp);
       ctx.stroke();
       ctx.setLineDash([]);
       ctx.fillStyle = "#e6b800";
-      ctx.fillText(fmtP(hm.price), plotW + 5, Math.min(H - 2, Math.max(9, yp + 3)));
+      ctx.fillText(fmtP(hm.price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, yp + 3)));
     }
-  }, [data]);
+
+    // Vertical colour scale (left).
+    const barX = 10;
+    const barW = 10;
+    for (let yy = 0; yy < plotH; yy++) {
+      const tt = 1 - yy / plotH;
+      const [r, g, b] = rampRgb(tt);
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
+      ctx.fillRect(barX, yy, barW, 1);
+    }
+    ctx.fillStyle = "#9aa3b5";
+    ctx.textAlign = "left";
+    ctx.fillText(fmtVal(hm.maxVal), barX + barW + 3, 9);
+    ctx.fillText("0", barX + barW + 3, plotH - 2);
+
+    // Crosshair + info box.
+    const hov = hoverRef.current;
+    if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
+      const tfh = v.x0 + ((hov.mx - plotX) / plotW) * xspan;
+      const priceH = v.y0 + (1 - hov.my / plotH) * yspan;
+      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.setLineDash([3, 3]);
+      ctx.beginPath();
+      ctx.moveTo(hov.mx, 0);
+      ctx.lineTo(hov.mx, plotH);
+      ctx.moveTo(plotX, hov.my);
+      ctx.lineTo(plotX + plotW, hov.my);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#cdd3df";
+      ctx.fillText(fmtP(priceH), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, hov.my + 3)));
+
+      const ci = Math.max(0, Math.min(n - 1, Math.floor(tfh * n)));
+      const colIdx = Math.max(0, Math.min(hm.cols - 1, Math.floor(tfh * hm.cols)));
+      const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / span) * hm.bins)));
+      const val = hm.grid[colIdx]?.[binIdx] ?? 0;
+      const rows: [string, string][] = [
+        [fmtDT(hm.candles[ci].t), ""],
+        [t("liq.tipPrice"), fmtP(priceH)],
+        [t("liq.tipLiq"), fmtVal(val)],
+      ];
+      const boxW = 188;
+      const boxH = 16 + rows.length * 15;
+      let bx = hov.mx + 14;
+      let by = hov.my + 14;
+      if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 14;
+      if (by + boxH > plotH) by = plotH - boxH - 4;
+      if (bx < plotX) bx = plotX + 4;
+      if (by < 0) by = 4;
+      ctx.fillStyle = "rgba(10,12,18,0.94)";
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(bx, by, boxW, boxH, 7);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = "#e6e9f0";
+      ctx.font = "12px ui-sans-serif, system-ui";
+      ctx.fillText(rows[0][0], bx + 10, by + 18);
+      ctx.font = "11px ui-sans-serif, system-ui";
+      for (let r = 1; r < rows.length; r++) {
+        const yrow = by + 18 + r * 15;
+        ctx.fillStyle = "#9aa3b5";
+        ctx.textAlign = "left";
+        ctx.fillText(rows[r][0], bx + 10, yrow);
+        ctx.fillStyle = "#e6e9f0";
+        ctx.textAlign = "right";
+        ctx.fillText(rows[r][1], bx + boxW - 10, yrow);
+        ctx.textAlign = "left";
+      }
+    }
+  }, [data, t]);
 
   const requestDraw = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -199,30 +326,33 @@ export default function LiqMapPage() {
   }, [draw, requestDraw]);
 
   function clampX(v: View) {
-    const span = Math.min(1, v.x1 - v.x0);
+    const sp = Math.min(1, v.x1 - v.x0);
     if (v.x1 - v.x0 >= 1) { v.x0 = 0; v.x1 = 1; return; }
-    if (v.x0 < 0) { v.x1 = span; v.x0 = 0; }
-    if (v.x1 > 1) { v.x0 = 1 - span; v.x1 = 1; }
+    if (v.x0 < 0) { v.x1 = sp; v.x0 = 0; }
+    if (v.x1 > 1) { v.x0 = 1 - sp; v.x1 = 1; }
   }
   function clampY(v: View, lo: number, hi: number) {
     const full = hi - lo;
-    const span = Math.min(full, v.y1 - v.y0);
+    const sp = Math.min(full, v.y1 - v.y0);
     if (v.y1 - v.y0 >= full) { v.y0 = lo; v.y1 = hi; return; }
-    if (v.y0 < lo) { v.y1 = lo + span; v.y0 = lo; }
-    if (v.y1 > hi) { v.y0 = hi - span; v.y1 = hi; }
+    if (v.y0 < lo) { v.y1 = lo + sp; v.y0 = lo; }
+    if (v.y1 > hi) { v.y0 = hi - sp; v.y1 = hi; }
+  }
+
+  function plotMetrics() {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { rect, plotX: PADL, plotW: rect.width - PADL - PADR, plotH: rect.height - PADB };
   }
 
   function onWheel(e: React.WheelEvent) {
     if (!data) return;
     e.preventDefault();
-    const cv = canvasRef.current!;
-    const rect = cv.getBoundingClientRect();
-    const plotW = rect.width - 64;
+    const { rect, plotX, plotW, plotH } = plotMetrics();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
     const v = viewRef.current;
-    const tf0 = v.x0 + (Math.min(mx, plotW) / plotW) * (v.x1 - v.x0);
-    const price = v.y0 + (1 - my / rect.height) * (v.y1 - v.y0);
+    const tf0 = v.x0 + (Math.max(0, Math.min(plotW, mx - plotX)) / plotW) * (v.x1 - v.x0);
+    const price = v.y0 + (1 - Math.max(0, Math.min(plotH, my)) / plotH) * (v.y1 - v.y0);
     const f = e.deltaY < 0 ? 1 / 1.15 : 1.15;
     v.x0 = tf0 - (tf0 - v.x0) * f;
     v.x1 = tf0 + (v.x1 - tf0) * f;
@@ -238,22 +368,28 @@ export default function LiqMapPage() {
     dragRef.current = { x: e.clientX, y: e.clientY };
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (!dragRef.current || !data) return;
-    const cv = canvasRef.current!;
-    const rect = cv.getBoundingClientRect();
-    const plotW = rect.width - 64;
-    const v = viewRef.current;
-    const dtf = ((e.clientX - dragRef.current.x) / plotW) * (v.x1 - v.x0);
-    const dp = ((e.clientY - dragRef.current.y) / rect.height) * (v.y1 - v.y0);
-    v.x0 -= dtf; v.x1 -= dtf;
-    v.y0 += dp; v.y1 += dp;
-    clampX(v);
-    clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
-    dragRef.current = { x: e.clientX, y: e.clientY };
+    if (!data) return;
+    const { rect, plotW, plotH } = plotMetrics();
+    hoverRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top };
+    if (dragRef.current) {
+      const v = viewRef.current;
+      const dtf = ((e.clientX - dragRef.current.x) / plotW) * (v.x1 - v.x0);
+      const dp = ((e.clientY - dragRef.current.y) / plotH) * (v.y1 - v.y0);
+      v.x0 -= dtf; v.x1 -= dtf;
+      v.y0 += dp; v.y1 += dp;
+      clampX(v);
+      clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
+      dragRef.current = { x: e.clientX, y: e.clientY };
+    }
     requestDraw();
   }
   function onPointerUp() {
     dragRef.current = null;
+  }
+  function onPointerLeave() {
+    dragRef.current = null;
+    hoverRef.current = null;
+    requestDraw();
   }
   function resetView() {
     if (!data) return;
@@ -288,7 +424,6 @@ export default function LiqMapPage() {
       </div>
       <p className="text-sm text-muted mt-1 mb-4">{t("liq.subtitle")}</p>
 
-      {/* Controls */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <div className="flex gap-1">
           {EXCHANGES.map((e) => (
@@ -300,7 +435,7 @@ export default function LiqMapPage() {
                 exchange === e ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
               )}
             >
-              {e === "all" ? t("liq.all") : e}
+              {e}
             </button>
           ))}
         </div>
@@ -331,16 +466,16 @@ export default function LiqMapPage() {
       {error ? (
         <div className="card p-10 text-center text-loss">{error}</div>
       ) : (
-        <div className="relative rounded-xl overflow-hidden border border-border" style={{ background: "#0a0d13" }}>
+        <div className="relative rounded-xl overflow-hidden border border-border" style={{ background: "#08080d" }}>
           <canvas
             ref={canvasRef}
-            className="w-full block touch-none cursor-grab active:cursor-grabbing"
-            style={{ height: 480 }}
+            className="w-full block touch-none cursor-crosshair"
+            style={{ height: 520 }}
             onWheel={onWheel}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={onPointerUp}
-            onPointerLeave={onPointerUp}
+            onPointerLeave={onPointerLeave}
           />
           {loading && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-faint bg-black/30">
@@ -351,15 +486,9 @@ export default function LiqMapPage() {
       )}
 
       <div className="flex items-center gap-3 mt-3 text-xs text-faint">
-        <span>{t("liq.legendLow")}</span>
-        <div
-          className="h-2 flex-1 max-w-xs rounded-full"
-          style={{ background: "linear-gradient(90deg, rgba(45,30,95,0.7), rgba(150,40,140,0.9), rgba(240,120,40,1), rgba(250,232,90,1))" }}
-        />
-        <span>{t("liq.legendHigh")}</span>
-        <span className="ml-auto">{t("liq.zoomHint")}</span>
+        <span>{t("liq.zoomHint")}</span>
+        <span className="ml-auto">{t("liq.disclaimer")}</span>
       </div>
-      <p className="text-xs text-faint mt-2">{t("liq.disclaimer")}</p>
     </div>
   );
 }
