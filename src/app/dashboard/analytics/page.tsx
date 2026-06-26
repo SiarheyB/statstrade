@@ -29,16 +29,43 @@ export default function AnalyticsPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [accountId, setAccountId] = useState("all");
+  const [accountsBal, setAccountsBal] = useState<{ id: string; capital: number | null }[]>([]);
+
+  // Стартовый капитал кривой капитала — как на дашборде: для конкретного счёта
+  // его заданный капитал, для «Все аккаунты» — сумма заданных капиталов.
+  const capital = useMemo(() => {
+    if (accountId !== "all") {
+      const a = accountsBal.find((x) => x.id === accountId);
+      return a?.capital && a.capital > 0 ? a.capital : 10000;
+    }
+    const set = accountsBal.filter((a) => a.capital != null && a.capital > 0);
+    return set.length ? set.reduce((s, a) => s + (a.capital ?? 0), 0) : 10000;
+  }, [accountsBal, accountId]);
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch(`/api/stats?accountId=${encodeURIComponent(accountId)}`);
+    const params = new URLSearchParams({
+      accountId,
+      initialCapital: String(capital),
+    });
+    const res = await fetch(`/api/stats?${params}`);
     if (res.ok) setData(await res.json());
     setLoading(false);
-  }, [accountId]);
+  }, [accountId, capital]);
   useEffect(() => {
     load();
   }, [load]);
+
+  // Загружаем заданный пользователем капитал по каждому счёту (как на дашборде).
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/accounts");
+      if (res.ok) {
+        const accs = (await res.json()) as { id: string; capital: number | null }[];
+        setAccountsBal(accs.map((a) => ({ id: a.id, capital: a.capital ?? null })));
+      }
+    })();
+  }, []);
 
   const m = data?.metrics;
   const trades = data?.trades ?? [];
