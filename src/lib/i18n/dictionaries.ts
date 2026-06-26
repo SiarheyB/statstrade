@@ -26,6 +26,7 @@ const en: Dict = {
   "nav.analytics": "Analytics",
   "nav.trades": "Trades",
   "nav.liqmap": "Liquidation map",
+  "nav.orderflow": "Order heatmap",
   "nav.service": "Service",
   "nav.exchanges": "Exchanges",
   "nav.news": "News",
@@ -57,6 +58,21 @@ const en: Dict = {
   "econcal.forecast": "Forecast",
   "econcal.previous": "Previous",
   "econcal.empty": "No events for the selected filters.",
+
+  // orderbook heatmap
+  "of.title": "Order heatmap",
+  "of.subtitle": "Live limit-order walls from the order book over time. The brighter the band, the more resting liquidity at that price.",
+  "of.empty": "No data yet — the collector is gathering order-book snapshots.",
+  "of.legendWalls": "limit-order walls (brighter = larger)",
+  "of.legendCandles": "candles",
+  "of.maxWall": "max wall",
+  "of.allExchanges": "All exchanges",
+  "of.live": "Live updates",
+  "of.filterThreshold": "Min size",
+  "of.filterBrightness": "Brightness",
+  "of.tipPrice": "Price",
+  "of.tipVol": "Liquidity",
+  "of.noDelta": "No delta data yet (collector gathering trades)",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -572,6 +588,7 @@ const ru: Dict = {
   "nav.calendar": "Календарь",
   "nav.trades": "Сделки",
   "nav.liqmap": "Карта ликвидаций",
+  "nav.orderflow": "Карта ордеров",
   "nav.service": "Сервис",
   "nav.exchanges": "Биржи",
   "nav.news": "Новости",
@@ -603,6 +620,21 @@ const ru: Dict = {
   "econcal.forecast": "Прогноз",
   "econcal.previous": "Пред.",
   "econcal.empty": "Нет событий по выбранным фильтрам.",
+
+  // orderbook heatmap
+  "of.title": "Карта ордеров",
+  "of.subtitle": "Живые «стены» лимитных ордеров из стакана во времени. Чем ярче полоса — тем больше лимитной ликвидности на этой цене.",
+  "of.empty": "Данных пока нет — collector собирает снапшоты стакана.",
+  "of.legendWalls": "стены лимитных ордеров (ярче = крупнее)",
+  "of.legendCandles": "свечи",
+  "of.maxWall": "макс. стена",
+  "of.allExchanges": "Все биржи",
+  "of.live": "Обновление в реальном времени",
+  "of.filterThreshold": "Мин. размер",
+  "of.filterBrightness": "Яркость",
+  "of.tipPrice": "Цена",
+  "of.tipVol": "Ликвидность",
+  "of.noDelta": "Данных по дельте пока нет (collector собирает сделки)",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

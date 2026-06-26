@@ -14,6 +14,7 @@ import {
   Newspaper,
   CalendarClock,
   Flame,
+  Layers,
   Wrench,
   SlidersHorizontal,
   Tags,
@@ -44,11 +45,16 @@ function isNewsRoute(pathname: string): boolean {
 
 const SERVICE_CHILDREN = [
   { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
+  { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
   { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
 ];
 
 function isServiceRoute(pathname: string): boolean {
-  return pathname.startsWith("/dashboard/liqmap") || pathname.startsWith("/dashboard/settings/risk");
+  return (
+    pathname.startsWith("/dashboard/liqmap") ||
+    pathname.startsWith("/dashboard/orderflow") ||
+    pathname.startsWith("/dashboard/settings/risk")
+  );
 }
 
 const SETTINGS_CHILDREN = [

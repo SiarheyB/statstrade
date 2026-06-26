@@ -164,7 +164,37 @@ model Fill {
   @@index([accountId, symbol])
 }
 
+// Aggregated taker-trade volume per snapshot interval — written by the collector
+// from the aggTrades stream. Drives the delta / cumulative-delta panel under the
+// orderbook heatmap. buyVol/sellVol are aggressor base volumes.
+model ObTrade {
+  id       BigInt   @id @default(autoincrement())
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3)
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+
+  @@index([symbol, exchange, t])
+}
+
 // Aggregated crypto news from external RSS sources. Global (not per-user);
+// Orderbook heatmap snapshots — written by the standalone collector service
+// (collector/), one row per non-empty price bin per snapshot. Global market
+// data (not per-user). Read by /api/orderflow to render the limit-order heatmap.
+// High-volume table: keep it lean and prune by retention (see collector).
+model ObSnapshot {
+  id       BigInt   @id @default(autoincrement())
+  symbol   String // BTCUSDT
+  exchange String // binance-futures
+  t        DateTime @db.Timestamptz(3) // snapshot timestamp (absolute instant, UTC)
+  price    Float // price-bin center
+  bidVol   Float    @default(0) // aggregated bid size in the bin (base units)
+  askVol   Float    @default(0) // aggregated ask size in the bin (base units)
+
+  @@index([symbol, exchange, t])
+}
+
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
   id          String   @id @default(cuid())
