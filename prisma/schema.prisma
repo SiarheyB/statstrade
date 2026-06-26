@@ -72,6 +72,7 @@ model ExchangeAccount {
   demoTrading Boolean  @default(false) // Bybit Demo Trading key -> use demo API host
   balance    Float?    // last fetched account balance/equity in USDT (deposit)
   balanceAt  DateTime? // when balance was last fetched
+  capital    Float?    // user-set capital for this account (Overview), overrides balance
   createdAt  DateTime  @default(now())
   lastSyncAt DateTime?
   syncStatus String    @default("idle") // idle | syncing | error

@@ -88,7 +88,7 @@ export async function POST(
         // Set the account's capital from the report's deposit so ROI / equity
         // use the real number instead of the 10000 default.
         ...(deposit != null && deposit > 0
-          ? { balance: deposit, balanceAt: new Date() }
+          ? { balance: deposit, balanceAt: new Date(), capital: deposit }
           : {}),
       },
     });

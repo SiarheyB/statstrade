@@ -108,7 +108,8 @@ export default function DashboardPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [accountsBal, setAccountsBal] = useState<{ id: string; balance: number | null }[]>([]);
+  const [accountsBal, setAccountsBal] = useState<{ id: string; capital: number | null }[]>([]);
+  const [capitalDraft, setCapitalDraft] = useState("");
   const [filters, setFilters] = useState<Filters>({
     accountId: "all",
     market: "all",
@@ -127,16 +128,39 @@ export default function DashboardPage() {
   const [exporting, setExporting] = useState<null | "png" | "pdf">(null);
   const dashRef = useRef<HTMLDivElement>(null);
 
-  // Capital = exchange balance: the selected account's balance, or the sum of
-  // all connected accounts when "all" is selected. Not user-editable.
+  // Capital is user-set per account. Editable only for a single selected account;
+  // for "all" it shows the sum of accounts that have a capital set (read-only).
+  const capEditable = filters.accountId !== "all";
+  const anyCapitalSet = accountsBal.some((a) => a.capital != null && a.capital > 0);
   const capital = useMemo(() => {
-    const sel =
-      filters.accountId === "all"
-        ? accountsBal
-        : accountsBal.filter((a) => a.id === filters.accountId);
-    const sum = sel.reduce((s, a) => s + (a.balance ?? 0), 0);
-    return sum > 0 ? sum : 10000;
+    if (filters.accountId !== "all") {
+      const a = accountsBal.find((x) => x.id === filters.accountId);
+      return a?.capital && a.capital > 0 ? a.capital : 10000;
+    }
+    const set = accountsBal.filter((a) => a.capital != null && a.capital > 0);
+    return set.length ? set.reduce((s, a) => s + (a.capital ?? 0), 0) : 10000;
   }, [accountsBal, filters.accountId]);
+
+  // Keep the input synced to the selected account's saved capital.
+  useEffect(() => {
+    if (!capEditable) return;
+    const a = accountsBal.find((x) => x.id === filters.accountId);
+    setCapitalDraft(a?.capital != null ? String(a.capital) : "");
+  }, [filters.accountId, accountsBal, capEditable]);
+
+  async function saveCapital() {
+    if (!capEditable) return;
+    const raw = capitalDraft.trim().replace(",", ".");
+    const n = raw === "" ? null : Number(raw);
+    const capVal = n != null && Number.isFinite(n) && n >= 0 ? n : null;
+    const id = filters.accountId;
+    setAccountsBal((prev) => prev.map((a) => (a.id === id ? { ...a, capital: capVal } : a)));
+    await fetch(`/api/accounts/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ capital: capVal }),
+    }).catch(() => {});
+  }
 
   async function exportDashboard(kind: "png" | "pdf") {
     if (!dashRef.current) return;
@@ -181,13 +205,13 @@ export default function DashboardPage() {
     load();
   }, [load]);
 
-  // Load per-account balances (the capital source) once on mount.
+  // Load per-account user-set capital once on mount.
   useEffect(() => {
     (async () => {
       const res = await fetch("/api/accounts");
       if (res.ok) {
-        const accs = (await res.json()) as { id: string; balance: number | null }[];
-        setAccountsBal(accs.map((a) => ({ id: a.id, balance: a.balance })));
+        const accs = (await res.json()) as { id: string; capital: number | null }[];
+        setAccountsBal(accs.map((a) => ({ id: a.id, capital: a.capital ?? null })));
       }
     })();
   }, []);
@@ -304,7 +328,25 @@ export default function DashboardPage() {
           </select>
           <div className="flex items-center gap-1.5 input-base py-1.5" title={t("dash.capitalHint")}>
             <span className="text-xs text-faint">{t("dash.capital")}</span>
-            <span className="text-sm tabular-nums font-medium">{fmtUsd(capital)}</span>
+            {capEditable ? (
+              <input
+                type="text"
+                inputMode="decimal"
+                value={capitalDraft}
+                placeholder="0"
+                maxLength={15}
+                onChange={(e) => setCapitalDraft(e.target.value.replace(/[^\d.,]/g, ""))}
+                onBlur={saveCapital}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+                className="w-24 bg-transparent text-sm tabular-nums font-medium outline-none text-right"
+              />
+            ) : (
+              <span className="text-sm tabular-nums font-medium">
+                {anyCapitalSet ? fmtUsd(capital) : "—"}
+              </span>
+            )}
           </div>
           <button
             onClick={load}

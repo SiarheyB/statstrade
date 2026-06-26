@@ -39,6 +39,7 @@ export async function GET() {
       marketType: a.marketType,
       demoTrading: a.demoTrading,
       balance: a.balance,
+      capital: a.capital,
       apiKeyMasked: a.apiKey ? maskSecret(safeDecrypt(a.apiKey)) : null,
       importedCount: a._count.importedTrades,
       lastSyncAt: a.lastSyncAt,

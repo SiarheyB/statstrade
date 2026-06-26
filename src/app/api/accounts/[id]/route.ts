@@ -11,6 +11,7 @@ async function ownAccount(userId: string, id: string) {
 const patchSchema = z.object({
   autoSync: z.boolean().optional(),
   syncIntervalMinutes: z.number().int().min(5).max(1440).optional(),
+  capital: z.number().min(0).max(1e12).nullable().optional(),
 });
 
 // Update auto-sync settings for an account.
