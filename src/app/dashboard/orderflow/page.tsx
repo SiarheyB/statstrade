@@ -439,11 +439,22 @@ export default function OrderflowPage() {
       ctx.fillStyle = "#08080d";
       ctx.fillText(fmtP(priceH), plotX + plotW + 5, hov.my + 3);
 
-      const lines = [
-        fmtTime(ms),
-        `${t("of.tipPrice")}: ${fmtP(priceH)}`,
-        `${t("of.tipVol")}: ${fmtVal(vol)} (${fmtVal(vol * priceH)} $)`,
-      ];
+      // Свеча под курсором: показываем её время (открытие) и O/H/L/C, а не
+      // «пиксельное» время/цену курсора. Стену из стакана даём отдельной строкой
+      // и пишем «—», когда снапшотов на этой цене/времени нет (а не «0»).
+      const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
+      const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
+      const wall = vol > 0 ? `${fmtVal(vol)} (${fmtVal(vol * priceH)} $)` : "—";
+      const lines = cndl
+        ? [
+            fmtTime(cndl.t),
+            `${t("of.tipWall")}: ${wall}`,
+          ]
+        : [
+            fmtTime(ms),
+            `${t("of.tipPrice")}: ${fmtP(priceH)}`,
+            `${t("of.tipWall")}: ${wall}`,
+          ];
       const boxW = 184;
       const boxH = 12 + lines.length * 15;
       let bx = hov.mx + 14;
@@ -728,19 +739,23 @@ export default function OrderflowPage() {
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
             }`}
-            title={t("of.hintClusters")}
           >
             {t("of.clusters")}
+            <span title={t("of.hintClusters")} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
           </button>
           <button
             onClick={() => setLive((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"
             }`}
-            title={t("of.hintLive")}
           >
             <span className={`h-2 w-2 rounded-full ${live ? "bg-profit animate-pulse" : "bg-faint"}`} />
             LIVE
+            <span title={t("of.hintLive")} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
           </button>
           <button
             onClick={load}
