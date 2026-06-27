@@ -39,6 +39,9 @@ yarn-error.log*
 *.db-journal
 *.sqlite
 
+# локальные личные инструкции/заметки по деплою — не коммитим
+docs/local/
+
 # vercel
 .vercel
 
