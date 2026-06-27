@@ -8,10 +8,10 @@
 
 import http from "node:http";
 import pg from "pg";
-import { createOrderBook } from "./orderbook.mjs"; // binance futures
+import { createOrderBook } from "./orderbook.mjs"; // binance futures/spot
 import { createBybitBook } from "./bybit.mjs";
 import { createOkxBook } from "./okx.mjs";
-import { createBinanceTrades } from "./trades.mjs";
+import { createTradeFeed } from "./trades.mjs";
 
 const cfg = {
   symbols: (process.env.SYMBOLS ?? "BTCUSDT").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean),
@@ -21,6 +21,7 @@ const cfg = {
   depthPct: Number(process.env.DEPTH_PCT ?? 0.02),
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),
   noiseMinNotional: Number(process.env.NOISE_MIN_NOTIONAL ?? 50000),
+  bigNotional: Number(process.env.BIG_NOTIONAL ?? 100000),
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
 };
@@ -33,17 +34,29 @@ if (!cfg.databaseUrl) {
 const pool = new pg.Pool({ connectionString: cfg.databaseUrl, max: 4 });
 const RUN_MS = Number(process.env.RUN_MS ?? 0);
 
-// Шаг бина может зависеть от символа (BTC ~$25, ETH ~$1 и т.д.). Базовый —
-// cfg.binSize для BTC; для прочих масштабируем по цене (можно переопределить
-// через BIN_SIZE_<SYMBOL>).
+// Шаг ценового бина под символ. Приоритет: ENV BIN_SIZE_<SYMBOL> → карта
+// дефолтов → запасной cfg.binSize. Дефолты подобраны под типичную цену (~4 б.п.).
+const DEFAULT_BIN = {
+  BTCUSDT: 25,
+  ETHUSDT: 1,
+  BNBUSDT: 0.5,
+  SOLUSDT: 0.1,
+  XRPUSDT: 0.0005,
+  DOGEUSDT: 0.0001,
+  ADAUSDT: 0.0005,
+  AVAXUSDT: 0.02,
+  LINKUSDT: 0.01,
+  TONUSDT: 0.005,
+};
 function binSizeFor(symbol) {
   const env = process.env[`BIN_SIZE_${symbol}`];
   if (env) return Number(env);
-  return cfg.binSize;
+  return DEFAULT_BIN[symbol] ?? cfg.binSize;
 }
 
 const FACTORY = {
-  "binance-futures": (symbol, h) => createOrderBook({ symbol, onResync: h.onResync, onError: h.onError }),
+  "binance-futures": (symbol, h) => createOrderBook({ symbol, market: "futures", onResync: h.onResync, onError: h.onError }),
+  "binance-spot": (symbol, h) => createOrderBook({ symbol, market: "spot", onResync: h.onResync, onError: h.onError }),
   "bybit-futures": (symbol, h) => createBybitBook({ symbol, onResync: h.onResync, onError: h.onError }),
   "okx-futures": (symbol, h) => createOkxBook({ symbol, onResync: h.onResync, onError: h.onError }),
 };
@@ -66,12 +79,21 @@ for (const exchange of cfg.exchanges) {
   }
 }
 
-// Лента сделок для дельты — по одному потоку Binance на каждый символ.
-const tradeFeeds = cfg.symbols.map((symbol) => ({
-  symbol,
-  exchange: "binance-futures",
-  trades: createBinanceTrades({ symbol, onError: (e) => console.error(`[trades] ${symbol} ${e.message}`) }),
-}));
+// Лента сделок (дельта + footprint + крупные ордера) — по одному потоку на
+// каждую пару (биржа × символ), как и стаканы.
+const tradeFeeds = [];
+for (const exchange of cfg.exchanges) {
+  for (const symbol of cfg.symbols) {
+    const tf = createTradeFeed({
+      exchange,
+      symbol,
+      binSize: binSizeFor(symbol),
+      bigNotional: cfg.bigNotional,
+      onError: (e) => console.error(`[trades] ${exchange}:${symbol} ${e.message}`),
+    });
+    if (tf.supported) tradeFeeds.push({ symbol, exchange, trades: tf });
+  }
+}
 
 function binSide(map, lo, hi, binSize) {
   const acc = new Map();
@@ -130,12 +152,20 @@ async function writeSnapshot() {
     }
   }
 
-  // Дельта: слить накопленные сделки в ObTrade.
+  // Дельта (ObTrade) + footprint (ObFootprint) из ленты сделок.
   const tRows = [];
+  const fpRows = [];
+  const bigRows = [];
   for (const tf of tradeFeeds) {
-    const { buyVol, sellVol } = tf.trades.drain();
-    if (buyVol === 0 && sellVol === 0) continue;
-    tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]);
+    const { buyVol, sellVol, footprint, big } = tf.trades.drain();
+    if (buyVol !== 0 || sellVol !== 0) tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]);
+    for (const lvl of footprint) {
+      if (lvl.buy === 0 && lvl.sell === 0) continue;
+      fpRows.push([tf.symbol, tf.exchange, t, lvl.price, lvl.buy, lvl.sell]);
+    }
+    for (const bt of big) {
+      bigRows.push([tf.symbol, tf.exchange, new Date(bt.t), bt.price, bt.qty, bt.side]);
+    }
   }
   if (tRows.length > 0) {
     const values = [];
@@ -154,9 +184,44 @@ async function writeSnapshot() {
       console.error(`[write] ObTrade ошибка: ${err.message}`);
     }
   }
+  if (fpRows.length > 0) {
+    const values = [];
+    const params = [];
+    fpRows.forEach((r, i) => {
+      const b = i * 6;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+      params.push(...r);
+    });
+    try {
+      await pool.query(
+        `INSERT INTO "ObFootprint" ("symbol","exchange","t","price","buyVol","sellVol") VALUES ` + values.join(","),
+        params,
+      );
+    } catch (err) {
+      console.error(`[write] ObFootprint ошибка: ${err.message}`);
+    }
+  }
+
+  if (bigRows.length > 0) {
+    const values = [];
+    const params = [];
+    bigRows.forEach((r, i) => {
+      const b = i * 6;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+      params.push(...r);
+    });
+    try {
+      await pool.query(
+        `INSERT INTO "ObBigTrade" ("symbol","exchange","t","price","qty","side") VALUES ` + values.join(","),
+        params,
+      );
+    } catch (err) {
+      console.error(`[write] ObBigTrade ошибка: ${err.message}`);
+    }
+  }
 
   const synced = feeds.filter((f) => f.book.synced).length;
-  console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} feeds=${synced}/${feeds.length}`);
+  console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} fp=${fpRows.length} big=${bigRows.length} feeds=${synced}/${feeds.length}`);
 }
 
 async function pruneOld() {
@@ -169,7 +234,15 @@ async function pruneOld() {
       `DELETE FROM "ObTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
       [String(cfg.retentionDays)],
     );
-    const n = (r1.rowCount ?? 0) + (r2.rowCount ?? 0);
+    const r3 = await pool.query(
+      `DELETE FROM "ObFootprint" WHERE "t" < NOW() - ($1 || ' days')::interval`,
+      [String(cfg.retentionDays)],
+    );
+    const r4 = await pool.query(
+      `DELETE FROM "ObBigTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
+      [String(cfg.retentionDays)],
+    );
+    const n = (r1.rowCount ?? 0) + (r2.rowCount ?? 0) + (r3.rowCount ?? 0) + (r4.rowCount ?? 0);
     if (n) console.log(`[prune] удалено ${n} старых строк`);
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);

@@ -1,0 +1,14 @@
+node_modules
+.next
+.git
+.github
+collector/node_modules
+npm-debug.log
+*.log
+.env
+.env.*
+README.md
+docs
+graphify-out
+deploy
+.DS_Store

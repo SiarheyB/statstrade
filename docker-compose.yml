@@ -20,5 +20,28 @@ services:
       timeout: 3s
       retries: 10
 
+  # Orderbook-heatmap collector. Постоянный сбор стаканов/сделок в БД.
+  # Запуск (после применения миграций приложением):  docker compose up -d collector
+  # Для долгого локального сбора — restart: unless-stopped переживёт перезагрузки.
+  collector:
+    build: ./collector
+    container_name: tradestats-collector
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradestats:tradestats@db:5432/tradestats
+      SYMBOLS: ${OB_SYMBOLS:-BTCUSDT,ETHUSDT}
+      EXCHANGES: ${OB_EXCHANGES:-binance-futures,binance-spot}
+      SNAPSHOT_MS: ${OB_SNAPSHOT_MS:-2000}
+      DEPTH_PCT: ${OB_DEPTH_PCT:-0.02}
+      NOISE_MIN_NOTIONAL: ${OB_NOISE_MIN_NOTIONAL:-50000}
+      BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
+      RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
+      PORT: 8080
+    ports:
+      - "8080:8080"
+
 volumes:
   tradestats_pg:

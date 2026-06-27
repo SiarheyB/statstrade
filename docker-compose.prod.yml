@@ -1,0 +1,81 @@
+# Прод-стек для самохостинга (мини-сервер J1900): БД + приложение + collector +
+# авто-обновление образов. Образы собираются в CI и тянутся из GHCR.
+#
+# Запуск:   docker compose -f docker-compose.prod.yml up -d
+# Логи:     docker compose -f docker-compose.prod.yml logs -f app
+# Образы лежат в GHCR (lowercase owner): ghcr.io/siarheyb/statstrade-{app,collector}
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: tradestats-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: tradestats
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradestats}
+      POSTGRES_DB: tradestats
+    volumes:
+      - tradestats_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tradestats -d tradestats"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  app:
+    image: ghcr.io/siarheyb/statstrade-app:latest
+    container_name: tradestats-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      # Внутри compose-сети БД доступна по имени сервиса `db`.
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public
+      # Авто-синхронизацию бирж «по времени» на сервере гоняет СИСТЕМНЫЙ крон
+      # хоста (см. SELF_HOSTING.md — шаг про /api/cron/sync), поэтому встроенный
+      # in-process планировщик выключен: иначе синхронизации дублировались бы.
+      ENABLE_SCHEDULER: "false"
+    ports:
+      # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
+      - "127.0.0.1:3000:3000"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  collector:
+    image: ghcr.io/siarheyb/statstrade-collector:latest
+    container_name: tradestats-collector
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public
+      SYMBOLS: ${OB_SYMBOLS:-BTCUSDT,ETHUSDT}
+      EXCHANGES: ${OB_EXCHANGES:-binance-futures,binance-spot}
+      SNAPSHOT_MS: ${OB_SNAPSHOT_MS:-2000}
+      DEPTH_PCT: ${OB_DEPTH_PCT:-0.02}
+      NOISE_MIN_NOTIONAL: ${OB_NOISE_MIN_NOTIONAL:-50000}
+      BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
+      RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
+      PORT: 8080
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  # Авто-деплой: следит за GHCR и подменяет образы app/collector на новые.
+  watchtower:
+    image: containrrr/watchtower
+    container_name: tradestats-watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Креды для приватного GHCR (создаются `docker login ghcr.io`).
+      - ${HOME}/.docker/config.json:/config.json:ro
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      WATCHTOWER_POLL_INTERVAL: "120"
+    command: ["--label-enable", "--cleanup", "--interval", "120"]
+
+volumes:
+  tradestats_pg:

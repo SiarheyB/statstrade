@@ -178,6 +178,35 @@ model ObTrade {
   @@index([symbol, exchange, t])
 }
 
+// Traded volume per price bin per snapshot — written by the collector from the
+// trade stream. Drives the footprint/cluster overlay (buy vs sell volume at each
+// price level inside a candle).
+model ObFootprint {
+  id       BigInt   @id @default(autoincrement())
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3)
+  price    Float
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+
+  @@index([symbol, exchange, t])
+}
+
+// Large market trades (taker prints above a notional threshold) — written by the
+// collector from the trade stream. Drives the "large orders" feed.
+model ObBigTrade {
+  id       BigInt   @id @default(autoincrement())
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3)
+  price    Float
+  qty      Float
+  side     String // buy | sell
+
+  @@index([symbol, exchange, t])
+}
+
 // Aggregated crypto news from external RSS sources. Global (not per-user);
 // Orderbook heatmap snapshots — written by the standalone collector service
 // (collector/), one row per non-empty price bin per snapshot. Global market

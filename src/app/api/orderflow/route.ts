@@ -1,6 +1,13 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { computeOrderflow, computeDelta, fetchOrderflowCandles } from "@/lib/orderflow";
+import {
+  computeOrderflow,
+  computeDelta,
+  computeFootprint,
+  computeBA,
+  computeBigTrades,
+  fetchOrderflowCandles,
+} from "@/lib/orderflow";
 
 export const maxDuration = 30;
 
@@ -29,12 +36,18 @@ export async function GET(req: Request) {
   const fromMs = toMs - span;
 
   try {
-    const [heatmap, candles, delta] = await Promise.all([
+    const [heatmap, candles, delta, footprint, ba, bigTrades] = await Promise.all([
       computeOrderflow(symbol, exchange, fromMs, toMs),
       fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),
-      computeDelta(symbol, fromMs, toMs),
+      computeDelta(symbol, exchange, fromMs, toMs),
+      computeFootprint(symbol, exchange, range, fromMs, toMs),
+      computeBA(symbol, exchange, fromMs, toMs),
+      computeBigTrades(symbol, exchange, fromMs, toMs),
     ]);
-    return NextResponse.json({ symbol, exchange, range, from: fromMs, to: toMs, heatmap, candles, delta });
+    return NextResponse.json({
+      symbol, exchange, range, from: fromMs, to: toMs,
+      heatmap, candles, delta, footprint, ba, bigTrades,
+    });
   } catch (err) {
     return serverError((err as Error).message);
   }

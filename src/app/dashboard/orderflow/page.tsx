@@ -13,9 +13,16 @@ type ObHeatmap = {
   maxVal: number;
   price: number;
   times: number[];
+  profileBid: number[];
+  profileAsk: number[];
+  profileMax: number;
 };
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type DeltaSeries = { times: number[]; buy: number[]; sell: number[]; delta: number[]; cvd: number[] };
+type FootprintLevel = { price: number; buy: number; sell: number };
+type Footprint = { interval: number; maxVol: number; candles: { t: number; levels: FootprintLevel[] }[] };
+type BaSeries = { times: number[]; full: number[]; near: number[] };
+type BigTrade = { t: number; price: number; qty: number; side: string; exchange: string };
 type Resp = {
   symbol: string;
   exchange: string;
@@ -25,11 +32,14 @@ type Resp = {
   heatmap: ObHeatmap | null;
   candles: Candle[];
   delta: DeltaSeries | null;
+  footprint: Footprint | null;
+  ba: BaSeries | null;
+  bigTrades: BigTrade[];
 };
 
 const RANGES = ["15m", "1h", "4h", "24h"] as const;
-const EXCHANGES = ["binance-futures", "bybit-futures", "okx-futures", "all"] as const;
-const SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
+const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
+const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
 function fmtP(p: number): string {
   if (p >= 1000) return Math.round(p).toLocaleString("en-US");
@@ -81,6 +91,8 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
 
 export default function OrderflowPage() {
   const { t } = useI18n();
+  // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
+  // после монтирования (иначе ломается гидрация).
   const [range, setRange] = useState<string>("4h");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [exchange, setExchange] = useState("binance-futures");
@@ -91,11 +103,20 @@ export default function OrderflowPage() {
   const [minPct, setMinPct] = useState(2);
   const [brightness, setBrightness] = useState(55);
   const [live, setLive] = useState(true);
+  const [clusters, setClusters] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
+  const [metaSymbols, setMetaSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
+  const [metaExchanges, setMetaExchanges] = useState<string[]>(FALLBACK_EXCHANGES);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
+  const baRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
+  // Видимая область (zoom/pan). null = автодиапазон по данным.
+  const viewRef = useRef<{ t0: number; t1: number; y0: number; y1: number } | null>(null);
+  const dragRef = useRef<{ mx: number; my: number; view: { t0: number; t1: number; y0: number; y1: number } } | null>(null);
+  const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]); // 1.0 → 0.2
   const minT = useMemo(() => minPct / 100, [minPct]);
@@ -112,6 +133,7 @@ export default function OrderflowPage() {
         return;
       }
       offRef.current = null;
+      viewRef.current = null; // сброс zoom/pan при смене диапазона/символа/биржи
       setData(d);
     } catch {
       setError("Network error");
@@ -123,6 +145,51 @@ export default function OrderflowPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Подгрузка сохранённых настроек после монтирования (один раз).
+  useEffect(() => {
+    try {
+      const s = JSON.parse(localStorage.getItem("orderflow.settings") || "{}");
+      if (typeof s.range === "string") setRange(s.range);
+      if (typeof s.symbol === "string") setSymbol(s.symbol);
+      if (typeof s.exchange === "string") setExchange(s.exchange);
+      if (typeof s.minPct === "number") setMinPct(s.minPct);
+      if (typeof s.brightness === "number") setBrightness(s.brightness);
+      if (typeof s.live === "boolean") setLive(s.live);
+      if (typeof s.clusters === "boolean") setClusters(s.clusters);
+    } catch {
+      // ignore
+    }
+    setHydrated(true);
+  }, []);
+
+  // Сохраняем настройки между сессиями (после первичной подгрузки).
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      localStorage.setItem(
+        "orderflow.settings",
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters }),
+      );
+    } catch {
+      // ignore
+    }
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters]);
+
+  // Доступные символы/биржи из реально собранных данных.
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/orderflow/meta");
+        if (!res.ok) return;
+        const m = await res.json();
+        if (Array.isArray(m.symbols) && m.symbols.length) setMetaSymbols(m.symbols);
+        if (Array.isArray(m.exchanges) && m.exchanges.length) setMetaExchanges(m.exchanges);
+      } catch {
+        // оставляем дефолты
+      }
+    })();
+  }, []);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -165,21 +232,30 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const plotX = PADL;
-    const plotW = W - PADL - PADR;
+    const PP = 76; // ширина левой панели профиля объёма
+    const plotX = PADL + PP;
+    const plotW = W - plotX - PADR;
     const plotH = H - PADB;
+    layoutRef.current = { plotX, plotW, plotH };
 
-    const t0 = data.from;
-    const t1 = data.to;
+    // Полный диапазон по данным.
+    const fullT0 = data.from;
+    const fullT1 = data.to;
+    let fYMin = hm.priceMin;
+    let fYMax = hm.priceMax;
+    for (const k of candles) {
+      if (k.l < fYMin) fYMin = k.l;
+      if (k.h > fYMax) fYMax = k.h;
+    }
+    // Видимая область: текущий view либо полный диапазон.
+    if (!viewRef.current) viewRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax };
+    const v = viewRef.current;
+    const t0 = v.t0;
+    const t1 = v.t1;
+    const yMin = v.y0;
+    const yMax = v.y1;
     const xspan = t1 - t0 || 1;
     const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
-
-    let yMin = hm.priceMin;
-    let yMax = hm.priceMax;
-    for (const k of candles) {
-      if (k.l < yMin) yMin = k.l;
-      if (k.h > yMax) yMax = k.h;
-    }
     const yspan = yMax - yMin || 1;
     const sy = (p: number) => plotH - ((p - yMin) / yspan) * plotH;
 
@@ -199,6 +275,30 @@ export default function OrderflowPage() {
       0, 0, hm.cols, hm.bins,
       hmX0, hmYTop, Math.max(1, hmX1 - hmX0), Math.max(1, hmYBot - hmYTop),
     );
+
+    // Левая панель: профиль текущей ликвидности (bid зелёный / ask красный).
+    if (hm.profileMax > 0) {
+      const pb = hm.profileBid;
+      const pa = hm.profileAsk;
+      const hmSpan = hm.priceMax - hm.priceMin || 1;
+      const binH = Math.max(1, plotH / hm.bins);
+      for (let b = 0; b < hm.bins; b++) {
+        const vol = pb[b] + pa[b];
+        if (vol <= 0) continue;
+        const priceC = hm.priceMin + ((b + 0.5) / hm.bins) * hmSpan;
+        const y = sy(priceC);
+        if (y < 0 || y > plotH) continue;
+        const len = (vol / hm.profileMax) * (PP - 6);
+        ctx.fillStyle = pb[b] >= pa[b] ? "rgba(22,199,132,0.75)" : "rgba(234,57,67,0.75)";
+        ctx.fillRect(PADL, y - binH / 2, len, Math.max(1, binH));
+      }
+      // Разделитель панели.
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
+      ctx.beginPath();
+      ctx.moveTo(plotX - 1, 0);
+      ctx.lineTo(plotX - 1, plotH);
+      ctx.stroke();
+    }
 
     // Ценовая сетка + подписи (справа).
     ctx.font = "10px ui-sans-serif, system-ui";
@@ -223,6 +323,54 @@ export default function OrderflowPage() {
       ctx.fillText(fmtTime(ms), sx(ms), H - 6);
     }
     ctx.textAlign = "left";
+
+    // Footprint-кластеры: объём сделок по ценовым уровням внутри свечи.
+    // Цвет по дельте уровня (buy>sell → зелёный, иначе красный), яркость — по объёму.
+    const fp = data.footprint;
+    if (clusters && fp && fp.maxVol > 0 && fp.candles.length) {
+      const cellW = Math.max(2, (fp.interval / xspan) * plotW * 0.9);
+      // Высота ячейки — по шагу цены футпринта (из соседних уровней) либо запасной.
+      let step = 0;
+      for (const fc of fp.candles) {
+        if (fc.levels.length > 1) {
+          const ps = fc.levels.map((l) => l.price).sort((a, b) => a - b);
+          for (let i = 1; i < ps.length; i++) { const d = ps[i] - ps[i - 1]; if (d > 0 && (step === 0 || d < step)) step = d; }
+          if (step > 0) break;
+        }
+      }
+      const cellH = step > 0 ? Math.max(1.5, (step / yspan) * plotH) : Math.max(2, plotH / 200);
+      for (const fc of fp.candles) {
+        const x = sx(fc.t + fp.interval / 2);
+        if (x < plotX - cellW || x > plotX + plotW + cellW) continue;
+        for (const lvl of fc.levels) {
+          const vol = lvl.buy + lvl.sell;
+          if (vol <= 0) continue;
+          const y = sy(lvl.price);
+          if (y < 0 || y > plotH) continue;
+          const a = Math.min(0.9, 0.15 + 0.85 * Math.sqrt(vol / fp.maxVol));
+          ctx.fillStyle = lvl.buy >= lvl.sell ? `rgba(22,199,132,${a})` : `rgba(234,57,67,${a})`;
+          ctx.fillRect(x - cellW / 2, y - cellH / 2, cellW, cellH);
+        }
+      }
+      // Числовые метки объёма — только когда свеча достаточно широкая (зум).
+      if (cellW >= 40 && cellH >= 9) {
+        ctx.font = "9px ui-sans-serif, system-ui";
+        ctx.textAlign = "center";
+        for (const fc of fp.candles) {
+          const x = sx(fc.t + fp.interval / 2);
+          if (x < plotX - cellW || x > plotX + plotW + cellW) continue;
+          for (const lvl of fc.levels) {
+            const vol = lvl.buy + lvl.sell;
+            if (vol <= 0) continue;
+            const y = sy(lvl.price);
+            if (y < 0 || y > plotH) continue;
+            ctx.fillStyle = "rgba(255,255,255,0.85)";
+            ctx.fillText(fmtVal(vol), x, y + 3);
+          }
+        }
+        ctx.textAlign = "left";
+      }
+    }
 
     // Свечи поверх.
     if (candles.length > 1) {
@@ -309,7 +457,7 @@ export default function OrderflowPage() {
       ctx.fillStyle = "#cdd3df";
       lines.forEach((ln, i) => ctx.fillText(ln, bx + 8, by + 16 + i * 15));
     }
-  }, [data, minT, gamma, t]);
+  }, [data, minT, gamma, clusters, t]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -327,7 +475,7 @@ export default function OrderflowPage() {
     ctx.fillRect(0, 0, W, H);
 
     const d = data.delta;
-    const plotX = 8;
+    const plotX = 8 + 76; // выравнивание с основным графиком (PADL + панель профиля)
     const plotW = W - plotX - 64;
     if (!d || d.delta.length === 0) {
       ctx.fillStyle = "#6b7384";
@@ -335,8 +483,8 @@ export default function OrderflowPage() {
       ctx.fillText(t("of.noDelta"), plotX, H / 2);
       return;
     }
-    const t0 = data.from;
-    const t1 = data.to;
+    const t0 = viewRef.current?.t0 ?? data.from;
+    const t1 = viewRef.current?.t1 ?? data.to;
     const xspan = t1 - t0 || 1;
     const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
 
@@ -384,23 +532,158 @@ export default function OrderflowPage() {
     ctx.fillText(`CVD ${d.cvd[n - 1] >= 0 ? "+" : "-"}${fmtVal(Math.abs(d.cvd[n - 1]))}`, plotX + plotW + 5, 12);
   }, [data, t]);
 
+  // B/A панель: доля bid во времени (полная глубина и в пределах ±1%). 0.5 = баланс.
+  const drawBA = useCallback(() => {
+    const cv = baRef.current;
+    if (!cv || !data) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = cv.clientWidth;
+    const H = cv.clientHeight;
+    cv.width = Math.round(W * dpr);
+    cv.height = Math.round(H * dpr);
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = "#0a0b10";
+    ctx.fillRect(0, 0, W, H);
+
+    const ba = data.ba;
+    const plotX = 8 + 76;
+    const plotW = W - plotX - 64;
+    if (!ba || ba.full.length === 0) {
+      ctx.fillStyle = "#6b7384";
+      ctx.font = "11px ui-sans-serif, system-ui";
+      ctx.fillText(t("of.noBa"), plotX, H / 2);
+      return;
+    }
+    const t0 = viewRef.current?.t0 ?? data.from;
+    const t1 = viewRef.current?.t1 ?? data.to;
+    const xspan = t1 - t0 || 1;
+    const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
+    const sy = (v: number) => H - 4 - v * (H - 8); // 0..1
+
+    // Зона >0.5 (бид-перевес) зелёная, <0.5 (аск) красная — заливка фона.
+    ctx.fillStyle = "rgba(22,199,132,0.06)";
+    ctx.fillRect(plotX, sy(1), plotW, sy(0.5) - sy(1));
+    ctx.fillStyle = "rgba(234,57,67,0.06)";
+    ctx.fillRect(plotX, sy(0.5), plotW, sy(0) - sy(0.5));
+    ctx.strokeStyle = "rgba(255,255,255,0.12)";
+    ctx.beginPath();
+    ctx.moveTo(plotX, sy(0.5));
+    ctx.lineTo(plotX + plotW, sy(0.5));
+    ctx.stroke();
+
+    const line = (vals: number[], color: string) => {
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < vals.length; i++) {
+        if (data.ba!.full[i] === 0.5 && data.ba!.near[i] === 0.5) continue; // пропуск пустых корзин
+        const x = sx(ba.times[i]);
+        const y = sy(vals[i]);
+        if (!started) { ctx.moveTo(x, y); started = true; }
+        else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+      ctx.lineWidth = 1;
+    };
+    line(ba.full, "#5b8def"); // полная глубина
+    line(ba.near, "#e6b800"); // ±1%
+
+    ctx.font = "10px ui-sans-serif, system-ui";
+    ctx.fillStyle = "#8a93a6";
+    ctx.fillText("B/A", plotX + 2, 12);
+    ctx.fillStyle = "#5b8def";
+    ctx.fillText("full", plotX + plotW + 5, 12);
+    ctx.fillStyle = "#e6b800";
+    ctx.fillText("±1%", plotX + plotW + 5, 24);
+  }, [data, t]);
+
   useEffect(() => {
     draw();
     drawDelta();
-    const onResize = () => { draw(); drawDelta(); };
+    drawBA();
+    const onResize = () => { draw(); drawDelta(); drawBA(); };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [draw, drawDelta]);
+  }, [draw, drawDelta, drawBA]);
+
+  const redrawAll = useCallback(() => {
+    draw();
+    drawDelta();
+    drawBA();
+  }, [draw, drawDelta, drawBA]);
 
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
-    hoverRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top };
-    draw();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    hoverRef.current = { mx, my };
+    const drag = dragRef.current;
+    const lay = layoutRef.current;
+    if (drag && lay) {
+      const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
+      const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
+      viewRef.current = {
+        t0: drag.view.t0 - dt,
+        t1: drag.view.t1 - dt,
+        y0: drag.view.y0 + dp,
+        y1: drag.view.y1 + dp,
+      };
+      redrawAll();
+    } else {
+      draw();
+    }
   }
   function onLeave() {
     hoverRef.current = null;
+    dragRef.current = null;
     draw();
   }
+  function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (viewRef.current) {
+      dragRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top, view: { ...viewRef.current } };
+    }
+  }
+  function onUp() {
+    dragRef.current = null;
+  }
+  function onDouble() {
+    viewRef.current = null; // сброс к автодиапазону
+    redrawAll();
+  }
+
+  // Колесо: zoom по цене (Y), Shift+колесо — по времени (X), вокруг курсора.
+  useEffect(() => {
+    const cv = canvasRef.current;
+    if (!cv) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!viewRef.current || !layoutRef.current) return;
+      e.preventDefault();
+      const rect = cv.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const { plotX, plotW, plotH } = layoutRef.current;
+      const v = viewRef.current;
+      const factor = e.deltaY > 0 ? 1.1 : 0.9;
+      if (e.shiftKey) {
+        const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
+        const cur = v.t0 + fx * (v.t1 - v.t0);
+        const span = (v.t1 - v.t0) * factor;
+        viewRef.current = { ...v, t0: cur - fx * span, t1: cur + (1 - fx) * span };
+      } else {
+        const fy = Math.min(1, Math.max(0, my / plotH));
+        const cur = v.y1 - fy * (v.y1 - v.y0);
+        const span = (v.y1 - v.y0) * factor;
+        viewRef.current = { ...v, y1: cur + fy * span, y0: cur - (1 - fy) * span };
+      }
+      redrawAll();
+    };
+    cv.addEventListener("wheel", onWheel, { passive: false });
+    return () => cv.removeEventListener("wheel", onWheel);
+  }, [redrawAll]);
 
   const hm = data?.heatmap ?? null;
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";
@@ -417,10 +700,11 @@ export default function OrderflowPage() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <select className={SELECT} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
-            {SYMBOLS.map((s) => <option key={s} value={s}>{s}</option>)}
+            {metaSymbols.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)}>
-            {EXCHANGES.map((x) => <option key={x} value={x}>{x === "all" ? t("of.allExchanges") : x}</option>)}
+            {metaExchanges.map((x) => <option key={x} value={x}>{x}</option>)}
+            <option value="all">{t("of.allExchanges")}</option>
           </select>
           <div className="flex gap-1 text-xs">
             {RANGES.map((r) => (
@@ -435,6 +719,15 @@ export default function OrderflowPage() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setClusters((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
+              clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
+            }`}
+            title={t("of.clusters")}
+          >
+            {t("of.clusters")}
+          </button>
           <button
             onClick={() => setLive((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
@@ -478,14 +771,42 @@ export default function OrderflowPage() {
           <div className="card p-2" style={{ background: "#0a0b10" }}>
             <canvas
               ref={canvasRef}
-              className="w-full"
+              className="w-full cursor-crosshair"
               style={{ height: 540 }}
               onMouseMove={onMove}
               onMouseLeave={onLeave}
+              onMouseDown={onDown}
+              onMouseUp={onUp}
+              onDoubleClick={onDouble}
             />
             <div className="mt-1 border-t border-border/40 pt-1">
-              <canvas ref={deltaRef} className="w-full" style={{ height: 120 }} />
+              <canvas ref={deltaRef} className="w-full" style={{ height: 110 }} />
             </div>
+            <div className="mt-1 border-t border-border/40 pt-1">
+              <canvas ref={baRef} className="w-full" style={{ height: 80 }} />
+            </div>
+          </div>
+
+          {/* Лента крупных рыночных ордеров */}
+          <div className="card p-3 mt-3">
+            <div className="text-xs font-medium text-muted mb-2">{t("of.bigTrades")}</div>
+            {(data?.bigTrades?.length ?? 0) === 0 ? (
+              <div className="text-xs text-faint">{t("of.noBig")}</div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-1 text-xs tabular-nums">
+                {data!.bigTrades.slice(0, 24).map((b, i) => (
+                  <div key={i} className="flex items-center justify-between gap-2 border-b border-border/30 py-0.5">
+                    <span className="text-faint">{fmtTime(b.t)}</span>
+                    <span className="text-faint/70 uppercase text-[10px] w-7">{b.exchange.slice(0, 3)}</span>
+                    <span className={b.side === "buy" ? "text-profit" : "text-loss"}>
+                      {b.side === "buy" ? "▲" : "▼"} {fmtP(b.price)}
+                    </span>
+                    <span className="text-fg">{b.qty.toFixed(3)}</span>
+                    <span className="text-faint">{fmtVal(b.qty * b.price)}$</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-faint">
             <span className="inline-flex items-center gap-1.5">
@@ -498,6 +819,7 @@ export default function OrderflowPage() {
               {t("of.legendCandles")}
             </span>
             <span>{t("of.maxWall")}: {fmtVal(hm.maxVal)}</span>
+            <span className="text-faint/70">{t("of.zoomHint")}</span>
           </div>
         </>
       )}

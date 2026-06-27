@@ -13,7 +13,7 @@ function toInstId(symbol) {
 // Размер контракта SWAP (ctVal) — OKX отдаёт объём в контрактах, приводим к
 // базовым единицам, чтобы агрегат с другими биржами был сопоставим.
 const CT_VAL = { BTC: 0.01, ETH: 0.1, SOL: 1, XRP: 100, DOGE: 1000 };
-function ctValFor(symbol) {
+export function ctValFor(symbol) {
   const base = symbol.toUpperCase().replace(/(USDT|USDC|USD)$/, "");
   return CT_VAL[base] ?? 1;
 }

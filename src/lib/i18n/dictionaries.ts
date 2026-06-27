@@ -73,6 +73,11 @@ const en: Dict = {
   "of.tipPrice": "Price",
   "of.tipVol": "Liquidity",
   "of.noDelta": "No delta data yet (collector gathering trades)",
+  "of.clusters": "Clusters",
+  "of.noBa": "No B/A data yet",
+  "of.bigTrades": "Large market orders",
+  "of.noBig": "No large orders yet (collector gathering trades)",
+  "of.zoomHint": "wheel = zoom price · shift+wheel = zoom time · drag = pan · dblclick = reset",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -635,6 +640,11 @@ const ru: Dict = {
   "of.tipPrice": "Цена",
   "of.tipVol": "Ликвидность",
   "of.noDelta": "Данных по дельте пока нет (collector собирает сделки)",
+  "of.clusters": "Кластеры",
+  "of.noBa": "Данных B/A пока нет",
+  "of.bigTrades": "Крупные рыночные ордера",
+  "of.noBig": "Крупных ордеров пока нет (collector собирает сделки)",
+  "of.zoomHint": "колесо = зум цены · shift+колесо = зум времени · перетаскивание = сдвиг · двойной клик = сброс",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

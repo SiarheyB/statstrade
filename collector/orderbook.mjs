@@ -1,13 +1,24 @@
-// Поддержание локального стакана Binance USDⓈ-M Futures по diff-depth стриму.
-// Корректная синхронизация по правилам Binance (snapshot + sequence + ресинк).
-// Без внешних зависимостей (глобальный WebSocket Node 24).
+// Поддержание локального стакана Binance по diff-depth стриму — для USDⓈ-M
+// Futures (market="futures") и Spot (market="spot"). Корректная синхронизация
+// по правилам Binance (snapshot + sequence + ресинк). Без внешних зависимостей.
+//
+// Различия рынков:
+//   futures: WS fstream …@depth@500ms, REST /fapi/v1/depth (limit 1000),
+//            непрерывность по pu (pu == u предыдущего).
+//   spot:    WS stream …@depth@100ms,  REST /api/v3/depth (limit 5000),
+//            непрерывность по U (U == u предыдущего + 1), поля pu нет.
 
-export function createOrderBook({ symbol, depthMs = 500, onResync, onError } = {}) {
+export function createOrderBook({ symbol, market = "futures", onResync, onError } = {}) {
   const sym = symbol.toLowerCase();
-  const WS_URL = `wss://fstream.binance.com/ws/${sym}@depth@${depthMs}ms`;
-  const REST_URL = `https://fapi.binance.com/fapi/v1/depth?symbol=${sym.toUpperCase()}&limit=1000`;
+  const isSpot = market === "spot";
+  const WS_URL = isSpot
+    ? `wss://stream.binance.com:9443/ws/${sym}@depth@100ms`
+    : `wss://fstream.binance.com/ws/${sym}@depth@500ms`;
+  const REST_URL = isSpot
+    ? `https://api.binance.com/api/v3/depth?symbol=${sym.toUpperCase()}&limit=5000`
+    : `https://fapi.binance.com/fapi/v1/depth?symbol=${sym.toUpperCase()}&limit=1000`;
 
-  const bids = new Map(); // priceStr -> qty
+  const bids = new Map();
   const asks = new Map();
 
   let ws = null;
@@ -36,17 +47,32 @@ export function createOrderBook({ symbol, depthMs = 500, onResync, onError } = {
     appliedCount++;
   }
 
-  // Правила Binance Futures 3-6. false → нужен ресинк.
+  // Применить событие к синхронизированному стакану. false → нужен ресинк.
   function handleEvent(ev) {
     if (!firstApplied) {
-      if (ev.u < snapLastUpdateId) return true; // правило 3
+      if (ev.u <= snapLastUpdateId) return true; // старое — дроп
+      if (isSpot) {
+        // Spot: первое событие должно охватывать snapLastUpdateId+1.
+        if (ev.U <= snapLastUpdateId + 1 && ev.u >= snapLastUpdateId + 1) {
+          applyEvent(ev);
+          firstApplied = true;
+          return true;
+        }
+        return ev.U > snapLastUpdateId + 1 ? false : true; // пропуск → ресинк
+      }
+      // Futures: первое событие охватывает snapLastUpdateId.
       if (ev.U <= snapLastUpdateId && ev.u >= snapLastUpdateId) {
         applyEvent(ev);
         firstApplied = true;
       }
       return true;
     }
-    if (ev.pu !== lastU) return false; // правило 5
+    // Непрерывность потока.
+    if (isSpot) {
+      if (ev.U !== lastU + 1) return false;
+    } else if (ev.pu !== lastU) {
+      return false;
+    }
     applyEvent(ev);
     return true;
   }
