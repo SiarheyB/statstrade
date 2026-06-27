@@ -655,7 +655,8 @@ export default function OrderflowPage() {
     redrawAll();
   }
 
-  // Колесо: zoom по цене (Y), Shift+колесо — по времени (X), вокруг курсора.
+  // Колесо: zoom по цене (Y). По времени (X) — Shift+колесо или горизонтальный
+  // свайп трекпада (deltaX). Всегда вокруг курсора.
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv) return;
@@ -667,8 +668,11 @@ export default function OrderflowPage() {
       const my = e.clientY - rect.top;
       const { plotX, plotW, plotH } = layoutRef.current;
       const v = viewRef.current;
-      const factor = e.deltaY > 0 ? 1.1 : 0.9;
-      if (e.shiftKey) {
+      // По времени, если зажат Shift или жест преимущественно горизонтальный.
+      const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      const delta = horizontal && !e.shiftKey ? e.deltaX : e.deltaY;
+      const factor = delta > 0 ? 1.1 : 0.9;
+      if (horizontal) {
         const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
         const cur = v.t0 + fx * (v.t1 - v.t0);
         const span = (v.t1 - v.t0) * factor;
@@ -785,6 +789,9 @@ export default function OrderflowPage() {
             <div className="mt-1 border-t border-border/40 pt-1">
               <canvas ref={baRef} className="w-full" style={{ height: 80 }} />
             </div>
+          </div>
+          <div className="mt-1 text-[11px] text-faint">
+            Колесо — масштаб по цене · Shift+колесо или свайп вбок — по времени · перетаскивание — сдвиг · двойной клик — сброс
           </div>
 
           {/* Лента крупных рыночных ордеров */}

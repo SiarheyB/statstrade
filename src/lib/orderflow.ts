@@ -122,12 +122,12 @@ export function buildOrderflowHeatmap(
 
 export type OfCandle = { t: number; o: number; h: number; l: number; c: number };
 
-// Интервал свечей под диапазон просмотра.
+// Интервал свечей = выбранный таймфрейм (Binance klines interval).
 const CANDLE_INTERVAL: Record<string, string> = {
-  "15m": "1m",
-  "1h": "1m",
-  "4h": "5m",
-  "24h": "30m",
+  "15m": "15m",
+  "1h": "1h",
+  "4h": "4h",
+  "24h": "1d",
 };
 
 // Свечи для наложения поверх heatmap. Пока только Binance USDⓈ-M Futures
@@ -221,12 +221,12 @@ export type FootprintLevel = { price: number; buy: number; sell: number };
 export type FootprintCandle = { t: number; levels: FootprintLevel[] };
 export type Footprint = { interval: number; maxVol: number; candles: FootprintCandle[] };
 
-// Длительность свечи под диапазон (мс) — совпадает с CANDLE_INTERVAL.
+// Длительность свечи (мс) = выбранный таймфрейм — совпадает с CANDLE_INTERVAL.
 const CANDLE_MS: Record<string, number> = {
-  "15m": 60_000,
-  "1h": 60_000,
-  "4h": 300_000,
-  "24h": 1_800_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "24h": 24 * 60 * 60_000,
 };
 
 // Footprint-кластеры: объём покупок/продаж по ценовым уровням внутри свечи.
