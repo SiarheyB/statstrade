@@ -38,8 +38,14 @@ export function buildOrderflowHeatmap(
   const xspan = toMs - fromMs || 1;
   const colOf = (t: number) => Math.max(0, Math.min(cols - 1, Math.floor(((t - fromMs) / xspan) * cols)));
 
-  let pMin = Math.min(...rows.map((r) => r.price));
-  let pMax = Math.max(...rows.map((r) => r.price));
+  // Проходим циклом, а не Math.min(...rows.map(...)) — на больших массивах
+  // снапшотов распыление аргументов переполняет стек (Maximum call stack size).
+  let pMin = Infinity;
+  let pMax = -Infinity;
+  for (const r of rows) {
+    if (r.price < pMin) pMin = r.price;
+    if (r.price > pMax) pMax = r.price;
+  }
   const pad = (pMax - pMin) * 0.02 || pMax * 0.005;
   pMin -= pad;
   pMax += pad;
@@ -76,7 +82,11 @@ export function buildOrderflowHeatmap(
 
   // Текущая цена и профиль стакана — из последнего снапшота (окно ~5с, чтобы
   // в режиме «все биржи» захватить свежие данные каждой площадки).
-  const lastT = Math.max(...rows.map((r) => r.t.getTime()));
+  let lastT = -Infinity;
+  for (const r of rows) {
+    const ts = r.t.getTime();
+    if (ts > lastT) lastT = ts;
+  }
   const lastRows = rows.filter((r) => r.t.getTime() >= lastT - 5000);
   const price = lastRows.length
     ? lastRows.reduce((s, r) => s + r.price, 0) / lastRows.length
