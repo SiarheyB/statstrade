@@ -27,6 +27,43 @@ const TF_MS: Record<string, number> = {
 // чтобы кластеры/footprint у свечи читались без зума (как в ClusterBtc).
 const CANDLES_IN_WINDOW = 40;
 
+type Payload = {
+  symbol: string;
+  exchange: string;
+  range: string;
+  from: number;
+  to: number;
+  heatmap: Awaited<ReturnType<typeof computeOrderflow>>;
+  candles: Awaited<ReturnType<typeof fetchOrderflowCandles>>;
+  delta: Awaited<ReturnType<typeof computeDelta>>;
+  footprint: Awaited<ReturnType<typeof computeFootprint>>;
+  ba: Awaited<ReturnType<typeof computeBA>>;
+  bigTrades: Awaited<ReturnType<typeof computeBigTrades>>;
+};
+
+// Кэш ответа на короткий срок + дедупликация «в полёте». Запросы стакана —
+// тяжёлые SQL-агрегации по миллионам строк, а LIVE опрашивает эндпоинт каждые
+// несколько секунд. Без этого параллельные/частые поллы исчерпывали пул
+// соединений Prisma (Timed out fetching a connection). Теперь одинаковые запросы
+// в пределах TTL переиспользуют результат, а наложившиеся — общий промис.
+const TTL_MS = 4000;
+const cache = new Map<string, { at: number; data: Payload }>();
+const inflight = new Map<string, Promise<Payload>>();
+
+async function buildPayload(symbol: string, exchange: string, range: string, tf: number): Promise<Payload> {
+  const toMs = Date.now();
+  const fromMs = toMs - tf * CANDLES_IN_WINDOW;
+  const [heatmap, candles, delta, footprint, ba, bigTrades] = await Promise.all([
+    computeOrderflow(symbol, exchange, fromMs, toMs),
+    fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),
+    computeDelta(symbol, exchange, fromMs, toMs),
+    computeFootprint(symbol, exchange, range, fromMs, toMs),
+    computeBA(symbol, exchange, fromMs, toMs),
+    computeBigTrades(symbol, exchange, fromMs, toMs),
+  ]);
+  return { symbol, exchange, range, from: fromMs, to: toMs, heatmap, candles, delta, footprint, ba, bigTrades };
+}
+
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
@@ -40,22 +77,19 @@ export async function GET(req: Request) {
   if (!tf) return badRequest("Неизвестный таймфрейм");
   if (symbol.length < 5 || symbol.length > 20) return badRequest("Некорректный символ");
 
-  const toMs = Date.now();
-  const fromMs = toMs - tf * CANDLES_IN_WINDOW;
+  const key = `${symbol}|${exchange}|${range}`;
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
 
   try {
-    const [heatmap, candles, delta, footprint, ba, bigTrades] = await Promise.all([
-      computeOrderflow(symbol, exchange, fromMs, toMs),
-      fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),
-      computeDelta(symbol, exchange, fromMs, toMs),
-      computeFootprint(symbol, exchange, range, fromMs, toMs),
-      computeBA(symbol, exchange, fromMs, toMs),
-      computeBigTrades(symbol, exchange, fromMs, toMs),
-    ]);
-    return NextResponse.json({
-      symbol, exchange, range, from: fromMs, to: toMs,
-      heatmap, candles, delta, footprint, ba, bigTrades,
-    });
+    let p = inflight.get(key);
+    if (!p) {
+      p = buildPayload(symbol, exchange, range, tf).finally(() => inflight.delete(key));
+      inflight.set(key, p);
+    }
+    const data = await p;
+    cache.set(key, { at: Date.now(), data });
+    return NextResponse.json(data);
   } catch (err) {
     return serverError((err as Error).message);
   }
