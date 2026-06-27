@@ -31,7 +31,10 @@ services:
     env_file: .env
     environment:
       # Внутри compose-сети БД доступна по имени сервиса `db`.
-      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public
+      # connection_limit/pool_timeout — больше пула Prisma и дольше ожидание
+      # соединения: карта ордеров шлёт по нескольку тяжёлых SQL-агрегаций за
+      # запрос, дефолтных 9 соединений не хватало (Timed out fetching a connection).
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public&connection_limit=20&pool_timeout=20
       # Авто-синхронизацию бирж «по времени» на сервере гоняет СИСТЕМНЫЙ крон
       # хоста (см. SELF_HOSTING.md — шаг про /api/cron/sync), поэтому встроенный
       # in-process планировщик выключен: иначе синхронизации дублировались бы.
