@@ -352,9 +352,9 @@ export default function OrderflowPage() {
       // большой, поэтому «сырой» уровень = доли пикселя и сливается. Агрегируем
       // уровни в ПИКСЕЛЬНЫЕ строки фиксированной высоты — кластер читаем при любом
       // зуме/масштабе. Высота строки растёт, когда колонка широкая (больше места).
-      const rowPx = colW >= 90 ? 7 : colW >= 48 ? 5 : 4;
-      const maxBarW = Math.max(3, colW * 0.55); // профиль занимает правую часть колонки
-      const showNums = colW >= 80 && rowPx >= 7;
+      const rowPx = colW >= 90 ? 10 : colW >= 48 ? 8 : 6;
+      const maxBarW = Math.max(4, colW * 0.85); // профиль занимает почти всю правую часть колонки
+      const showNums = colW >= 80 && rowPx >= 8;
       if (showNums) ctx.font = "9px ui-sans-serif, system-ui";
       for (const fc of fp.candles) {
         const x0 = sx(fc.t + fp.interval / 2); // ось свечи
@@ -394,7 +394,7 @@ export default function OrderflowPage() {
     if (candles.length > 1) {
       const stepMs = candles[1].t - candles[0].t;
       const cw = clusters
-        ? Math.max(1.5, (stepMs / xspan) * plotW * 0.32)
+        ? Math.max(1.5, (stepMs / xspan) * plotW * 0.16)
         : Math.max(1, (stepMs / xspan) * plotW * 0.7);
       for (const k of candles) {
         const x = sx(k.t + stepMs / 2);

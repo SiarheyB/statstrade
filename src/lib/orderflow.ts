@@ -293,7 +293,7 @@ export async function computeOrderflow(
   // Агрегация прямо в Postgres: вместо переноса миллионов сырых строк снапшотов
   // в Node, БД сама сворачивает их в сетку (колонка времени × ценовой уровень).
   // Это снимает основную нагрузку (перенос данных рос со временем накопления).
-  const bins = opts.bins ?? 160;
+  const bins = opts.bins ?? 110; // меньше бинов → полосы лимиток выше и заметнее
   const cols = opts.cols ?? 240;
   const xspan = toMs - fromMs || 1;
   const from = new Date(fromMs);
