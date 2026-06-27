@@ -77,7 +77,15 @@ const en: Dict = {
   "of.noBa": "No B/A data yet",
   "of.bigTrades": "Large market orders",
   "of.noBig": "No large orders yet (collector gathering trades)",
-  "of.zoomHint": "wheel = zoom price · shift+wheel = zoom time · drag = pan · dblclick = reset",
+  "of.zoomHint": "wheel = zoom price · shift+wheel or sideways swipe = zoom time · drag = pan · dblclick = reset",
+  "of.hintSymbol": "Trading pair shown on the heatmap.",
+  "of.hintExchange": "Exchange whose order book is shown. “All exchanges” aggregates liquidity across venues.",
+  "of.hintTimeframe": "Candle timeframe. The window holds ~100 candles of this size, so 15m draws 15-minute candles, 1h — hourly, etc.",
+  "of.hintClusters": "Clusters (footprint): buy/sell volume by price level inside each candle — shows where trades actually executed.",
+  "of.hintLive": "Auto-refresh: pulls fresh order-book snapshots every few seconds.",
+  "of.hintMinSize": "Hides liquidity walls smaller than this share of the largest wall — filters out noise so only big walls remain.",
+  "of.hintBrightness": "Display brightness of the heatmap — does not change the data, only how vivid the walls look.",
+  "of.hintRefresh": "Reload data now.",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -644,7 +652,15 @@ const ru: Dict = {
   "of.noBa": "Данных B/A пока нет",
   "of.bigTrades": "Крупные рыночные ордера",
   "of.noBig": "Крупных ордеров пока нет (collector собирает сделки)",
-  "of.zoomHint": "колесо = зум цены · shift+колесо = зум времени · перетаскивание = сдвиг · двойной клик = сброс",
+  "of.zoomHint": "колесо = зум цены · shift+колесо или свайп вбок = зум времени · перетаскивание = сдвиг · двойной клик = сброс",
+  "of.hintSymbol": "Торговая пара, отображаемая на карте.",
+  "of.hintExchange": "Биржа, чей стакан показан. «Все биржи» — агрегированная ликвидность по всем площадкам.",
+  "of.hintTimeframe": "Таймфрейм свечи. В окне помещается ~100 свечей этого размера: 15m рисует 15-минутные свечи, 1h — часовые и т.д.",
+  "of.hintClusters": "Кластеры (footprint): объём покупок/продаж по ценовым уровням внутри свечи — видно, где реально проходили сделки.",
+  "of.hintLive": "Автообновление: подтягивает свежие снапшоты стакана каждые несколько секунд.",
+  "of.hintMinSize": "Скрывает стены ликвидности мельче этой доли от самой крупной стены — отсекает шум, остаются только крупные стены.",
+  "of.hintBrightness": "Яркость отображения карты — не меняет данные, только насыщенность свечения стен.",
+  "of.hintRefresh": "Перезагрузить данные сейчас.",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

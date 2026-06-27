@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layers, RefreshCw } from "lucide-react";
+import { Layers, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
 type ObHeatmap = {
@@ -703,14 +703,14 @@ export default function OrderflowPage() {
           <p className="text-sm text-muted">{t("of.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={SELECT} value={symbol} onChange={(e) => setSymbol(e.target.value)}>
+          <select className={SELECT} value={symbol} onChange={(e) => setSymbol(e.target.value)} title={t("of.hintSymbol")}>
             {metaSymbols.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
-          <select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)}>
+          <select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)} title={t("of.hintExchange")}>
             {metaExchanges.map((x) => <option key={x} value={x}>{x}</option>)}
             <option value="all">{t("of.allExchanges")}</option>
           </select>
-          <div className="flex gap-1 text-xs">
+          <div className="flex gap-1 text-xs" title={t("of.hintTimeframe")}>
             {RANGES.map((r) => (
               <button
                 key={r}
@@ -728,7 +728,7 @@ export default function OrderflowPage() {
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
             }`}
-            title={t("of.clusters")}
+            title={t("of.hintClusters")}
           >
             {t("of.clusters")}
           </button>
@@ -737,7 +737,7 @@ export default function OrderflowPage() {
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"
             }`}
-            title={t("of.live")}
+            title={t("of.hintLive")}
           >
             <span className={`h-2 w-2 rounded-full ${live ? "bg-profit animate-pulse" : "bg-faint"}`} />
             LIVE
@@ -745,7 +745,7 @@ export default function OrderflowPage() {
           <button
             onClick={load}
             className="inline-flex items-center gap-1.5 input-base py-1.5 hover:border-border-strong transition"
-            title={t("dash.refresh")}
+            title={t("of.hintRefresh")}
           >
             <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
           </button>
@@ -754,12 +754,18 @@ export default function OrderflowPage() {
 
       {/* Слайдеры фильтрации */}
       <div className="flex flex-wrap items-center gap-6 mb-3 text-xs text-muted">
-        <label className="flex items-center gap-2">
-          <span className="w-28">{t("of.filterThreshold")}: {minPct}%</span>
+        <label className="flex items-center gap-2" title={t("of.hintMinSize")}>
+          <span className="w-28 inline-flex items-center gap-1">
+            {t("of.filterThreshold")}: {minPct}%
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
           <input type="range" min={0} max={40} value={minPct} onChange={(e) => setMinPct(Number(e.target.value))} className="accent-accent w-40" />
         </label>
-        <label className="flex items-center gap-2">
-          <span className="w-28">{t("of.filterBrightness")}: {brightness}%</span>
+        <label className="flex items-center gap-2" title={t("of.hintBrightness")}>
+          <span className="w-28 inline-flex items-center gap-1">
+            {t("of.filterBrightness")}: {brightness}%
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
           <input type="range" min={0} max={100} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="accent-accent w-40" />
         </label>
       </div>
@@ -790,9 +796,7 @@ export default function OrderflowPage() {
               <canvas ref={baRef} className="w-full" style={{ height: 80 }} />
             </div>
           </div>
-          <div className="mt-1 text-[11px] text-faint">
-            Колесо — масштаб по цене · Shift+колесо или свайп вбок — по времени · перетаскивание — сдвиг · двойной клик — сброс
-          </div>
+          <div className="mt-1 text-[11px] text-faint">{t("of.zoomHint")}</div>
 
           {/* Лента крупных рыночных ордеров */}
           <div className="card p-3 mt-3">
