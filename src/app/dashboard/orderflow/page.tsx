@@ -57,6 +57,16 @@ function fmtTime(ms: number): string {
   const p = (z: number) => String(z).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+// Дата + время для подсказки свечи.
+function fmtDateTime(ms: number): string {
+  const d = new Date(ms);
+  const p = (z: number) => String(z).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// Базовый актив пары (BTCUSDT → BTC) для подписи объёма лимиток.
+function baseAsset(symbol: string): string {
+  return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
+}
 
 // Heatmap лимитных ордеров в стиле ClusterBtc/Bookmap: тёмный фон, «стены»
 // рисуются как светлые горизонтальные полосы, яркость = объём лимиток на уровне.
@@ -104,6 +114,8 @@ export default function OrderflowPage() {
   const [brightness, setBrightness] = useState(55);
   const [live, setLive] = useState(true);
   const [clusters, setClusters] = useState(true);
+  // Показывать ли heatmap «истории лимитных ордеров» поверх свечей.
+  const [showLiq, setShowLiq] = useState(true);
   const [hydrated, setHydrated] = useState(false);
   const [metaSymbols, setMetaSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [metaExchanges, setMetaExchanges] = useState<string[]>(FALLBACK_EXCHANGES);
@@ -157,6 +169,7 @@ export default function OrderflowPage() {
       if (typeof s.brightness === "number") setBrightness(s.brightness);
       if (typeof s.live === "boolean") setLive(s.live);
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
+      if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
     } catch {
       // ignore
     }
@@ -169,12 +182,12 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq]);
 
   // Доступные символы/биржи из реально собранных данных.
   useEffect(() => {
@@ -260,21 +273,25 @@ export default function OrderflowPage() {
     const sy = (p: number) => plotH - ((p - yMin) / yspan) * plotH;
 
     // Heatmap (offscreen, перестраивается при смене данных/слайдеров).
-    const key = `${data.from}:${data.to}:${minT}:${gamma}`;
-    if (!offRef.current || offRef.current.key !== key) {
-      offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma) };
+    // Рисуем только если включена «История лимитных ордеров».
+    if (showLiq) {
+      const key = `${data.from}:${data.to}:${minT}:${gamma}`;
+      if (!offRef.current || offRef.current.key !== key) {
+        offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma) };
+      }
+      const hmX0 = sx(hm.times[0] ?? t0);
+      const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
+      const hmYTop = sy(hm.priceMax);
+      const hmYBot = sy(hm.priceMin);
+      // Без сглаживания — «стены» чёткие (как в ClusterBtc), а не размытые полосы.
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(
+        offRef.current.canvas,
+        0, 0, hm.cols, hm.bins,
+        hmX0, hmYTop, Math.max(1, hmX1 - hmX0), Math.max(1, hmYBot - hmYTop),
+      );
+      ctx.imageSmoothingEnabled = true;
     }
-    const hmX0 = sx(hm.times[0] ?? t0);
-    const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
-    const hmYTop = sy(hm.priceMax);
-    const hmYBot = sy(hm.priceMin);
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(
-      offRef.current.canvas,
-      0, 0, hm.cols, hm.bins,
-      hmX0, hmYTop, Math.max(1, hmX1 - hmX0), Math.max(1, hmYBot - hmYTop),
-    );
 
     // Левая панель: профиль текущей ликвидности (bid зелёный / ask красный).
     if (hm.profileMax > 0) {
@@ -324,61 +341,64 @@ export default function OrderflowPage() {
     }
     ctx.textAlign = "left";
 
-    // Footprint-кластеры: объём сделок по ценовым уровням внутри свечи.
-    // Цвет по дельте уровня (buy>sell → зелёный, иначе красный), яркость — по объёму.
+    // Footprint-кластеры (как в ClusterBtc): у каждой свечи СПРАВА от её оси —
+    // горизонтальная гистограмма объёмов по ценовым уровням. Длина бара = объём
+    // (нормирован по самому объёмному уровню этой свечи, чтобы профиль всегда был
+    // читаем), цвет по дельте уровня (buy≥sell → зелёный, иначе красный).
     const fp = data.footprint;
+    const colW = fp ? (fp.interval / xspan) * plotW : 0;
     if (clusters && fp && fp.maxVol > 0 && fp.candles.length) {
-      const cellW = Math.max(2, (fp.interval / xspan) * plotW * 0.9);
-      // Высота ячейки — по шагу цены футпринта (из соседних уровней) либо запасной.
-      let step = 0;
+      // Ключевой момент детализации: цены футпринта мелкие, а диапазон по экрану
+      // большой, поэтому «сырой» уровень = доли пикселя и сливается. Агрегируем
+      // уровни в ПИКСЕЛЬНЫЕ строки фиксированной высоты — кластер читаем при любом
+      // зуме/масштабе. Высота строки растёт, когда колонка широкая (больше места).
+      const rowPx = colW >= 90 ? 7 : colW >= 48 ? 5 : 4;
+      const maxBarW = Math.max(3, colW * 0.55); // профиль занимает правую часть колонки
+      const showNums = colW >= 80 && rowPx >= 7;
+      if (showNums) ctx.font = "9px ui-sans-serif, system-ui";
       for (const fc of fp.candles) {
-        if (fc.levels.length > 1) {
-          const ps = fc.levels.map((l) => l.price).sort((a, b) => a - b);
-          for (let i = 1; i < ps.length; i++) { const d = ps[i] - ps[i - 1]; if (d > 0 && (step === 0 || d < step)) step = d; }
-          if (step > 0) break;
-        }
-      }
-      const cellH = step > 0 ? Math.max(1.5, (step / yspan) * plotH) : Math.max(2, plotH / 200);
-      for (const fc of fp.candles) {
-        const x = sx(fc.t + fp.interval / 2);
-        if (x < plotX - cellW || x > plotX + plotW + cellW) continue;
+        const x0 = sx(fc.t + fp.interval / 2); // ось свечи
+        if (x0 < plotX - colW || x0 > plotX + plotW + colW) continue;
+        // Складываем уровни в строки по пиксельной координате.
+        const rows = new Map<number, { buy: number; sell: number }>();
         for (const lvl of fc.levels) {
-          const vol = lvl.buy + lvl.sell;
-          if (vol <= 0) continue;
+          if (lvl.buy + lvl.sell <= 0) continue;
           const y = sy(lvl.price);
-          if (y < 0 || y > plotH) continue;
-          const a = Math.min(0.9, 0.15 + 0.85 * Math.sqrt(vol / fp.maxVol));
-          ctx.fillStyle = lvl.buy >= lvl.sell ? `rgba(22,199,132,${a})` : `rgba(234,57,67,${a})`;
-          ctx.fillRect(x - cellW / 2, y - cellH / 2, cellW, cellH);
+          if (y < -rowPx || y > plotH + rowPx) continue;
+          const ri = Math.floor(y / rowPx);
+          const r = rows.get(ri) ?? { buy: 0, sell: 0 };
+          r.buy += lvl.buy; r.sell += lvl.sell;
+          rows.set(ri, r);
         }
-      }
-      // Числовые метки объёма — только когда свеча достаточно широкая (зум).
-      if (cellW >= 40 && cellH >= 9) {
-        ctx.font = "9px ui-sans-serif, system-ui";
-        ctx.textAlign = "center";
-        for (const fc of fp.candles) {
-          const x = sx(fc.t + fp.interval / 2);
-          if (x < plotX - cellW || x > plotX + plotW + cellW) continue;
-          for (const lvl of fc.levels) {
-            const vol = lvl.buy + lvl.sell;
-            if (vol <= 0) continue;
-            const y = sy(lvl.price);
-            if (y < 0 || y > plotH) continue;
-            ctx.fillStyle = "rgba(255,255,255,0.85)";
-            ctx.fillText(fmtVal(vol), x, y + 3);
+        let cMax = 0;
+        for (const r of rows.values()) { const v = r.buy + r.sell; if (v > cMax) cMax = v; }
+        if (cMax <= 0) continue;
+        for (const [ri, r] of rows) {
+          const vol = r.buy + r.sell;
+          const len = Math.max(1, (vol / cMax) * maxBarW);
+          const y = ri * rowPx;
+          ctx.fillStyle = r.buy >= r.sell ? "rgba(22,199,132,0.92)" : "rgba(234,57,67,0.92)";
+          ctx.fillRect(x0 + 1, y, len, Math.max(1, rowPx - 0.6));
+          if (showNums && len >= 22) {
+            ctx.fillStyle = "#e8edf5";
+            ctx.textAlign = "left";
+            ctx.fillText(fmtVal(vol), x0 + len + 3, y + rowPx - 1);
           }
         }
-        ctx.textAlign = "left";
       }
+      ctx.textAlign = "left";
     }
 
-    // Свечи поверх.
+    // Свечи поверх. При включённых кластерах тело свечи рисуем СЛЕВА от её оси,
+    // а гистограмму кластеров — справа (как в ClusterBtc), чтобы они не наезжали.
     if (candles.length > 1) {
       const stepMs = candles[1].t - candles[0].t;
-      const cw = Math.max(1, (stepMs / xspan) * plotW * 0.7);
+      const cw = clusters
+        ? Math.max(1.5, (stepMs / xspan) * plotW * 0.32)
+        : Math.max(1, (stepMs / xspan) * plotW * 0.7);
       for (const k of candles) {
         const x = sx(k.t + stepMs / 2);
-        if (x < plotX - 2 || x > plotX + plotW + 2) continue;
+        if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
         const up = k.c >= k.o;
         ctx.strokeStyle = up ? "#16c784" : "#ea3943";
         ctx.fillStyle = up ? "#16c784" : "#ea3943";
@@ -388,7 +408,8 @@ export default function OrderflowPage() {
         ctx.stroke();
         const yo = sy(k.o);
         const yc = sy(k.c);
-        ctx.fillRect(x - cw / 2, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
+        const bodyX = clusters ? x - cw - 1 : x - cw / 2; // тело слева от оси при кластерах
+        ctx.fillRect(bodyX, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
       }
     }
 
@@ -439,22 +460,17 @@ export default function OrderflowPage() {
       ctx.fillStyle = "#08080d";
       ctx.fillText(fmtP(priceH), plotX + plotW + 5, hov.my + 3);
 
-      // Свеча под курсором: показываем её время (открытие) и O/H/L/C, а не
-      // «пиксельное» время/цену курсора. Стену из стакана даём отдельной строкой
-      // и пишем «—», когда снапшотов на этой цене/времени нет (а не «0»).
+      // Наведение на «стену» лимитных ордеров → подсказка про лимитный ордер и
+      // объём монет на уровне. Иначе (пустое место / свеча) — только дата+время.
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
-      const wall = vol > 0 ? `${fmtVal(vol)} (${fmtVal(vol * priceH)} $)` : "—";
-      const lines = cndl
+      const base = baseAsset(data.symbol);
+      const lines = showLiq && vol > 0
         ? [
-            fmtTime(cndl.t),
-            `${t("of.tipWall")}: ${wall}`,
+            t("of.tipLimitOrder"),
+            `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
           ]
-        : [
-            fmtTime(ms),
-            `${t("of.tipPrice")}: ${fmtP(priceH)}`,
-            `${t("of.tipWall")}: ${wall}`,
-          ];
+        : [fmtDateTime(cndl ? cndl.t : ms)];
       const boxW = 184;
       const boxH = 12 + lines.length * 15;
       let bx = hov.mx + 14;
@@ -468,7 +484,7 @@ export default function OrderflowPage() {
       ctx.fillStyle = "#cdd3df";
       lines.forEach((ln, i) => ctx.fillText(ln, bx + 8, by + 16 + i * 15));
     }
-  }, [data, minT, gamma, clusters, t]);
+  }, [data, minT, gamma, clusters, showLiq, t]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -734,6 +750,18 @@ export default function OrderflowPage() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setShowLiq((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
+              showLiq ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
+            }`}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showLiq ? "bg-accent border-accent" : "border-border-strong"}`} />
+            {t("of.showLiq")}
+            <span title={t("of.hintShowLiq")} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
           <button
             onClick={() => setClusters((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${

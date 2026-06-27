@@ -23,8 +23,9 @@ const TF_MS: Record<string, number> = {
   "24h": 24 * 60 * 60_000,
 };
 
-// Сколько свечей таймфрейма помещаем в окно.
-const CANDLES_IN_WINDOW = 100;
+// Сколько свечей таймфрейма помещаем в окно. ~40 — колонки достаточно широкие,
+// чтобы кластеры/footprint у свечи читались без зума (как в ClusterBtc).
+const CANDLES_IN_WINDOW = 40;
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
