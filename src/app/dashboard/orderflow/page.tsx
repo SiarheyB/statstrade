@@ -393,9 +393,14 @@ export default function OrderflowPage() {
     // а гистограмму кластеров — справа (как в ClusterBtc), чтобы они не наезжали.
     if (candles.length > 1) {
       const stepMs = candles[1].t - candles[0].t;
+      // Тень (фитиль) — тонкая линия, тело — ровно в 3 раза шире тени.
+      const wickW = clusters
+        ? Math.min(3, Math.max(1, (stepMs / xspan) * plotW * 0.05))
+        : 1;
       const cw = clusters
-        ? Math.max(1.5, (stepMs / xspan) * plotW * 0.16)
+        ? wickW * 3
         : Math.max(1, (stepMs / xspan) * plotW * 0.7);
+      ctx.lineWidth = wickW;
       for (const k of candles) {
         const x = sx(k.t + stepMs / 2);
         if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
@@ -411,6 +416,7 @@ export default function OrderflowPage() {
         const bodyX = clusters ? x - cw - 1 : x - cw / 2; // тело слева от оси при кластерах
         ctx.fillRect(bodyX, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
       }
+      ctx.lineWidth = 1;
     }
 
     // Линия текущей цены.
