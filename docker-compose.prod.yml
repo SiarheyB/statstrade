@@ -9,6 +9,16 @@ services:
     image: postgres:16-alpine
     container_name: tradestats-db
     restart: unless-stopped
+    # Слабый 4-ядерный сервер делят db+app+collector. Без ограничения одна
+    # агрегация карты ордеров поднимала параллельные воркеры и выжирала все ядра
+    # (db до ~550% CPU), подтормаживая коллектор и приложение. Ограничиваем число
+    # параллельных воркеров на запрос, чтобы машина оставалась отзывчивой.
+    command:
+      - postgres
+      - -c
+      - max_parallel_workers_per_gather=1
+      - -c
+      - max_parallel_workers=2
     environment:
       POSTGRES_USER: tradestats
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradestats}

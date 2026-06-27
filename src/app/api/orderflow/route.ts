@@ -46,7 +46,7 @@ type Payload = {
 // несколько секунд. Без этого параллельные/частые поллы исчерпывали пул
 // соединений Prisma (Timed out fetching a connection). Теперь одинаковые запросы
 // в пределах TTL переиспользуют результат, а наложившиеся — общий промис.
-const TTL_MS = 4000;
+const TTL_MS = 12000;
 const cache = new Map<string, { at: number; data: Payload }>();
 const inflight = new Map<string, Promise<Payload>>();
 
