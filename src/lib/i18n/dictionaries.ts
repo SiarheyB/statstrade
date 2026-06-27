@@ -171,6 +171,12 @@ const en: Dict = {
   "landing.f5.text": "Keys are encrypted with AES-256-GCM. Read-only access — no withdrawals.",
   "landing.f6.title": "Multi-account",
   "landing.f6.text": "Several exchanges and accounts in one dashboard, with filters and combined stats.",
+  "landing.f7.title": "Risk manager",
+  "landing.f7.text": "Daily loss limits, per-trade risk and trade caps per account, tracked in real time with warnings before you break your rules.",
+  "landing.f8.title": "Liquidation map",
+  "landing.f8.text": "A CoinGlass-style heatmap of liquidation levels across exchanges, overlaid on price — see where the liquidity sits.",
+  "landing.f9.title": "Order-flow clusters",
+  "landing.f9.text": "Footprint charts, buy/sell delta, CVD and an order-book heatmap to read aggressive flow and spot absorption.",
 
   // auth
   "auth.login.title": "Sign in",
@@ -748,6 +754,12 @@ const ru: Dict = {
   "landing.f5.text": "Ключи шифруются AES-256-GCM. Нужны только права на чтение — без вывода средств.",
   "landing.f6.title": "Мультиаккаунт",
   "landing.f6.text": "Несколько бирж и аккаунтов в одном дашборде, с фильтрами и сводной статистикой.",
+  "landing.f7.title": "Риск-менеджер",
+  "landing.f7.text": "Дневной лимит убытка, риск на сделку и лимит сделок по каждому аккаунту — отслеживаются в реальном времени с предупреждениями, прежде чем вы нарушите свои правила.",
+  "landing.f8.title": "Карта ликвидаций",
+  "landing.f8.text": "Тепловая карта уровней ликвидаций по биржам в стиле CoinGlass, наложенная на цену — видно, где сосредоточена ликвидность.",
+  "landing.f9.title": "Кластеры (order flow)",
+  "landing.f9.text": "Футпринт-графики, дельта покупок/продаж, CVD и теплокарта стакана — чтобы читать агрессивный поток и находить поглощения.",
 
   "auth.login.title": "Вход",
   "auth.login.subtitle": "Войдите в свой аккаунт",

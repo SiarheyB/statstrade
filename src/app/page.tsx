@@ -12,6 +12,9 @@ import {
   TrendingUp,
   LineChart,
   Wallet,
+  ShieldAlert,
+  Flame,
+  Layers,
 } from "lucide-react";
 
 export default async function Home() {
@@ -27,6 +30,9 @@ export default async function Home() {
     { icon: TrendingUp, title: t("landing.f4.title"), text: t("landing.f4.text") },
     { icon: ShieldCheck, title: t("landing.f5.title"), text: t("landing.f5.text") },
     { icon: Wallet, title: t("landing.f6.title"), text: t("landing.f6.text") },
+    { icon: ShieldAlert, title: t("landing.f7.title"), text: t("landing.f7.text") },
+    { icon: Flame, title: t("landing.f8.title"), text: t("landing.f8.text") },
+    { icon: Layers, title: t("landing.f9.title"), text: t("landing.f9.text") },
   ];
 
   return (
