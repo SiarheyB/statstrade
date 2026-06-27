@@ -129,6 +129,8 @@ export default function OrderflowPage() {
   const viewRef = useRef<{ t0: number; t1: number; y0: number; y1: number } | null>(null);
   const dragRef = useRef<{ mx: number; my: number; view: { t0: number; t1: number; y0: number; y1: number } } | null>(null);
   const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
+  // Полные границы данных + шаг свечи — для ограничения зума.
+  const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]); // 1.0 → 0.2
   const minT = useMemo(() => minPct / 100, [minPct]);
@@ -260,6 +262,9 @@ export default function OrderflowPage() {
       if (k.l < fYMin) fYMin = k.l;
       if (k.h > fYMax) fYMax = k.h;
     }
+    // Полные границы + шаг свечи — для ограничения зума в onWheel.
+    const candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
+    boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
     // Видимая область: текущий view либо полный диапазон.
     if (!viewRef.current) viewRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax };
     const v = viewRef.current;
@@ -352,10 +357,19 @@ export default function OrderflowPage() {
       // большой, поэтому «сырой» уровень = доли пикселя и сливается. Агрегируем
       // уровни в ПИКСЕЛЬНЫЕ строки фиксированной высоты — кластер читаем при любом
       // зуме/масштабе. Высота строки растёт, когда колонка широкая (больше места).
-      const rowPx = colW >= 90 ? 10 : colW >= 48 ? 8 : 6;
-      const maxBarW = Math.max(4, colW * 0.85); // профиль занимает почти всю правую часть колонки
-      const showNums = colW >= 80 && rowPx >= 8;
-      if (showNums) ctx.font = "9px ui-sans-serif, system-ui";
+      const rowPx = colW >= 80 ? 12 : colW >= 50 ? 10 : colW >= 32 ? 8 : 6;
+      // Бары не должны доходить до следующей свечи: оставляем зазор ≥3× тени
+      // перед её телом (тело = 3× тени, рисуется слева от оси следующей свечи).
+      const wickW = Math.min(3, Math.max(1, colW * 0.05));
+      const maxBarW = Math.max(4, colW - wickW * 3 - wickW * 3 - 2);
+      // Числа объёма показываем, когда строка достаточно высокая для текста.
+      const showNums = rowPx >= 8;
+      const fontPx = Math.min(11, Math.max(7, rowPx - 1));
+      if (showNums) {
+        ctx.font = `${fontPx}px ui-sans-serif, system-ui`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+      }
       for (const fc of fp.candles) {
         const x0 = sx(fc.t + fp.interval / 2); // ось свечи
         if (x0 < plotX - colW || x0 > plotX + plotW + colW) continue;
@@ -377,16 +391,21 @@ export default function OrderflowPage() {
           const vol = r.buy + r.sell;
           const len = Math.max(1, (vol / cMax) * maxBarW);
           const y = ri * rowPx;
-          ctx.fillStyle = r.buy >= r.sell ? "rgba(22,199,132,0.92)" : "rgba(234,57,67,0.92)";
+          ctx.fillStyle = r.buy >= r.sell ? "rgba(15,136,90,0.6)" : "rgba(160,39,46,0.6)"; // на 3 тона темнее, более прозрачные
           ctx.fillRect(x0 + 1, y, len, Math.max(1, rowPx - 0.6));
-          if (showNums && len >= 22) {
-            ctx.fillStyle = "#e8edf5";
-            ctx.textAlign = "left";
-            ctx.fillText(fmtVal(vol), x0 + len + 3, y + rowPx - 1);
+          // Число объёма — поверх самого бара (если влезает по длине).
+          if (showNums) {
+            const label = fmtVal(vol);
+            const w = ctx.measureText(label).width;
+            if (len >= w + 6) {
+              ctx.fillStyle = "#f0f4fa";
+              ctx.fillText(label, x0 + 4, y + rowPx / 2);
+            }
           }
         }
       }
       ctx.textAlign = "left";
+      ctx.textBaseline = "alphabetic";
     }
 
     // Свечи поверх. При включённых кластерах тело свечи рисуем СЛЕВА от её оси,
@@ -405,8 +424,8 @@ export default function OrderflowPage() {
         const x = sx(k.t + stepMs / 2);
         if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
         const up = k.c >= k.o;
-        ctx.strokeStyle = up ? "#16c784" : "#ea3943";
-        ctx.fillStyle = up ? "#16c784" : "#ea3943";
+        ctx.strokeStyle = up ? "#13af74" : "#ce323b"; // на 1 тон темнее
+        ctx.fillStyle = up ? "#13af74" : "#ce323b";
         ctx.beginPath();
         ctx.moveTo(x, sy(k.h));
         ctx.lineTo(x, sy(k.l));
@@ -688,8 +707,10 @@ export default function OrderflowPage() {
     redrawAll();
   }
 
-  // Колесо: zoom по цене (Y). По времени (X) — Shift+колесо или горизонтальный
-  // свайп трекпада (deltaX). Всегда вокруг курсора.
+  // Колесо/свайп: пропорциональный zoom ОБЕИХ осей (время X и цена Y) одним
+  // коэффициентом вокруг курсора — как в ClusterBtc. Величину зума берём из
+  // доминирующего направления жеста (deltaY у мыши, deltaX/Y у трекпада).
+  // Shift+колесо — только по времени (X), точечная подстройка ширины.
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv) return;
@@ -701,21 +722,33 @@ export default function OrderflowPage() {
       const my = e.clientY - rect.top;
       const { plotX, plotW, plotH } = layoutRef.current;
       const v = viewRef.current;
-      // По времени, если зажат Shift или жест преимущественно горизонтальный.
-      const horizontal = e.shiftKey || Math.abs(e.deltaX) > Math.abs(e.deltaY);
-      const delta = horizontal && !e.shiftKey ? e.deltaX : e.deltaY;
+      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
       const factor = delta > 0 ? 1.1 : 0.9;
-      if (horizontal) {
-        const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
-        const cur = v.t0 + fx * (v.t1 - v.t0);
-        const span = (v.t1 - v.t0) * factor;
-        viewRef.current = { ...v, t0: cur - fx * span, t1: cur + (1 - fx) * span };
-      } else {
-        const fy = Math.min(1, Math.max(0, my / plotH));
-        const cur = v.y1 - fy * (v.y1 - v.y0);
-        const span = (v.y1 - v.y0) * factor;
-        viewRef.current = { ...v, y1: cur + fy * span, y0: cur - (1 - fy) * span };
+      const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
+      const fy = Math.min(1, Math.max(0, my / plotH));
+      const b = boundsRef.current;
+      // Ограничения зума: не отдалить шире загруженного окна и не приблизить
+      // ближе предела. Предел приближения на 30% «дальше» (минимальный размер
+      // окна больше в 1.30× — т.е. максимальное увеличение на 30% меньше).
+      const ZOOM_IN_LIMIT = 5;
+      // Отдаление можно немного больше полного окна — для «воздуха» по краям.
+      const ZOOM_OUT_LIMIT = 2;
+      const maxTSpan = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
+      const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
+      const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
+      const minPSpan = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
+      const clamp = (val: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, val));
+
+      // Время (X) — всегда; цена (Y) — кроме Shift (тогда только ширина).
+      const tcur = v.t0 + fx * (v.t1 - v.t0);
+      const tspan = clamp((v.t1 - v.t0) * factor, minTSpan, maxTSpan);
+      let next = { ...v, t0: tcur - fx * tspan, t1: tcur + (1 - fx) * tspan };
+      if (!e.shiftKey) {
+        const pcur = v.y1 - fy * (v.y1 - v.y0);
+        const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);
+        next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
       }
+      viewRef.current = next;
       redrawAll();
     };
     cv.addEventListener("wheel", onWheel, { passive: false });
