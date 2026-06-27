@@ -21,11 +21,21 @@ const TF_MS: Record<string, number> = {
   "1h": 60 * 60_000,
   "4h": 4 * 60 * 60_000,
   "24h": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
 };
 
-// Сколько свечей таймфрейма помещаем в окно. ~40 — колонки достаточно широкие,
-// чтобы кластеры/footprint у свечи читались без зума (как в ClusterBtc).
-const CANDLES_IN_WINDOW = 40;
+// Сколько свечей таймфрейма помещаем в окно — по таймфрейму (как в ClusterBtc,
+// где свечей на графике много). Детали кластеров смотрят приближением (зум).
+// Стоимость запроса heatmap ограничена данными коллектора (~7 дней), а не
+// размером окна, поэтому на больших ТФ счётчик можно держать высоким.
+const CANDLES_IN_WINDOW: Record<string, number> = {
+  "15m": 120,
+  "1h": 110,
+  "4h": 100,
+  "24h": 90,
+  "1w": 60,
+};
+const DEFAULT_CANDLES = 100;
 
 type Payload = {
   symbol: string;
@@ -52,7 +62,7 @@ const inflight = new Map<string, Promise<Payload>>();
 
 async function buildPayload(symbol: string, exchange: string, range: string, tf: number): Promise<Payload> {
   const toMs = Date.now();
-  const fromMs = toMs - tf * CANDLES_IN_WINDOW;
+  const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
   const [heatmap, candles, delta, footprint, ba, bigTrades] = await Promise.all([
     computeOrderflow(symbol, exchange, fromMs, toMs),
     fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),

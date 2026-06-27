@@ -29,6 +29,7 @@ const CANDLE_INTERVAL: Record<string, string> = {
   "1h": "1h",
   "4h": "4h",
   "24h": "1d",
+  "1w": "1w",
 };
 
 // Свечи для наложения поверх heatmap. Пока только Binance USDⓈ-M Futures
@@ -128,6 +129,7 @@ const CANDLE_MS: Record<string, number> = {
   "1h": 60 * 60_000,
   "4h": 4 * 60 * 60_000,
   "24h": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
 };
 
 // Footprint-кластеры: объём покупок/продаж по ценовым уровням внутри свечи.

@@ -37,7 +37,7 @@ type Resp = {
   bigTrades: BigTrade[];
 };
 
-const RANGES = ["15m", "1h", "4h", "24h"] as const;
+const RANGES = ["15m", "1h", "4h", "24h", "1w"] as const;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
@@ -813,19 +813,14 @@ export default function OrderflowPage() {
             {metaExchanges.map((x) => <option key={x} value={x}>{x}</option>)}
             <option value="all">{t("of.allExchanges")}</option>
           </select>
-          <div className="flex gap-1 text-xs" title={t("of.hintTimeframe")}>
-            {RANGES.map((r) => (
-              <button
-                key={r}
-                onClick={() => setRange(r)}
-                className={`px-2.5 py-1.5 rounded-md transition ${
-                  range === r ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
-                }`}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
+          <select
+            className={SELECT}
+            value={range}
+            onChange={(e) => setRange(e.target.value)}
+            title={t("of.hintTimeframe")}
+          >
+            {RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
           <button
             onClick={() => setShowLiq((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
