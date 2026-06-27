@@ -176,6 +176,7 @@ model ObTrade {
   sellVol  Float    @default(0)
 
   @@index([symbol, exchange, t])
+  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
 // Traded volume per price bin per snapshot — written by the collector from the
@@ -191,6 +192,7 @@ model ObFootprint {
   sellVol  Float    @default(0)
 
   @@index([symbol, exchange, t])
+  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
 // Large market trades (taker prints above a notional threshold) — written by the
@@ -222,6 +224,7 @@ model ObSnapshot {
   askVol   Float    @default(0) // aggregated ask size in the bin (base units)
 
   @@index([symbol, exchange, t])
+  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.

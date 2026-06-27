@@ -4,6 +4,7 @@
 // (bid+ask) на ценовом уровне. «Стены» крупных игроков светятся и гаснут.
 
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 export type ObHeatmap = {
   priceMin: number;
@@ -19,106 +20,6 @@ export type ObHeatmap = {
   profileAsk: number[];
   profileMax: number;
 };
-
-type Row = { t: Date; price: number; bidVol: number; askVol: number; exchange?: string };
-
-// Собрать грид из строк снапшотов. Колонки — равномерные корзины времени в
-// [fromMs, toMs], бины — ценовые уровни. Значение ячейки = средняя по снапшотам
-// ликвидность (bid+ask); при нескольких биржах их средние суммируются, чтобы
-// колонки совпадали по времени и агрегат отражал совокупный стакан.
-export function buildOrderflowHeatmap(
-  rows: Row[],
-  fromMs: number,
-  toMs: number,
-  opts: { bins?: number; cols?: number } = {},
-): ObHeatmap | null {
-  if (rows.length === 0) return null;
-  const bins = opts.bins ?? 160;
-  const cols = opts.cols ?? 240;
-  const xspan = toMs - fromMs || 1;
-  const colOf = (t: number) => Math.max(0, Math.min(cols - 1, Math.floor(((t - fromMs) / xspan) * cols)));
-
-  // Проходим циклом, а не Math.min(...rows.map(...)) — на больших массивах
-  // снапшотов распыление аргументов переполняет стек (Maximum call stack size).
-  let pMin = Infinity;
-  let pMax = -Infinity;
-  for (const r of rows) {
-    if (r.price < pMin) pMin = r.price;
-    if (r.price > pMax) pMax = r.price;
-  }
-  const pad = (pMax - pMin) * 0.02 || pMax * 0.005;
-  pMin -= pad;
-  pMax += pad;
-  const span = pMax - pMin || 1;
-  const binOf = (p: number) => Math.max(0, Math.min(bins - 1, Math.floor(((p - pMin) / span) * bins)));
-
-  const grid: number[][] = Array.from({ length: cols }, () => new Array(bins).fill(0));
-  // Для усреднения: число различных снапшотов (exchange|t) в колонке и набор бирж.
-  const instants: Set<string>[] = Array.from({ length: cols }, () => new Set());
-  const exchangesInCol: Set<string>[] = Array.from({ length: cols }, () => new Set());
-
-  for (const r of rows) {
-    const ts = r.t.getTime();
-    const c = colOf(ts);
-    const b = binOf(r.price);
-    grid[c][b] += r.bidVol + r.askVol;
-    const ex = r.exchange ?? "_";
-    instants[c].add(`${ex}|${ts}`);
-    exchangesInCol[c].add(ex);
-  }
-  for (let c = 0; c < cols; c++) {
-    const n = instants[c].size || 1;
-    const exCount = exchangesInCol[c].size || 1;
-    // sum/n = средняя по всем снапшотам; ×exCount ≈ сумма средних по биржам.
-    const k = exCount / n;
-    for (let b = 0; b < bins; b++) grid[c][b] *= k;
-  }
-
-  let maxVal = 0;
-  for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
-
-  // Таймстемп каждой колонки — центр корзины.
-  const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
-
-  // Текущая цена и профиль стакана — из последнего снапшота (окно ~5с, чтобы
-  // в режиме «все биржи» захватить свежие данные каждой площадки).
-  let lastT = -Infinity;
-  for (const r of rows) {
-    const ts = r.t.getTime();
-    if (ts > lastT) lastT = ts;
-  }
-  const lastRows = rows.filter((r) => r.t.getTime() >= lastT - 5000);
-  const price = lastRows.length
-    ? lastRows.reduce((s, r) => s + r.price, 0) / lastRows.length
-    : rows[rows.length - 1].price;
-
-  // Профиль текущей ликвидности: берём по самому свежему t каждой биржи, чтобы
-  // не дублировать уровни из нескольких снапшотов.
-  const latestPerEx = new Map<string, number>();
-  for (const r of lastRows) {
-    const ex = r.exchange ?? "_";
-    const ts = r.t.getTime();
-    if (ts > (latestPerEx.get(ex) ?? 0)) latestPerEx.set(ex, ts);
-  }
-  const profileBid = new Array(bins).fill(0);
-  const profileAsk = new Array(bins).fill(0);
-  for (const r of lastRows) {
-    if (r.t.getTime() !== latestPerEx.get(r.exchange ?? "_")) continue;
-    const b = binOf(r.price);
-    profileBid[b] += r.bidVol;
-    profileAsk[b] += r.askVol;
-  }
-  let profileMax = 0;
-  for (let b = 0; b < bins; b++) {
-    const v = profileBid[b] + profileAsk[b];
-    if (v > profileMax) profileMax = v;
-  }
-
-  return {
-    priceMin: pMin, priceMax: pMax, bins, cols, grid, maxVal, price, times,
-    profileBid, profileAsk, profileMax,
-  };
-}
 
 export type OfCandle = { t: number; o: number; h: number; l: number; c: number };
 
@@ -289,63 +190,72 @@ export async function computeBA(
   toMs: number,
   cols = 240,
 ): Promise<BaSeries | null> {
-  const where = {
-    symbol,
-    t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    ...(exchange === "all" ? {} : { exchange }),
-  };
-  const rows = await prisma.obSnapshot.findMany({
-    where,
-    select: { t: true, exchange: true, price: true, bidVol: true, askVol: true },
-    orderBy: { t: "asc" },
-  });
+  // Всё считаем в Postgres (CTE), чтобы не тянуть сырые строки снапшотов:
+  //  snap — агрегаты по снапшоту (exchange,t): суммы bid/ask и границы стакана;
+  //  m    — mid между верхним bid и нижним ask;
+  //  nr   — bid/ask в пределах ±1% от mid (пере-join к снапшоту по exchange,t);
+  //  финал — суммы по колонкам времени.
+  const xspan = toMs - fromMs || 1;
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const colExpr = Prisma.sql`floor((extract(epoch from m.t) * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+
+  const rows = await prisma.$queryRaw<
+    { col: number; full_bid: number; full_ask: number; near_bid: number; near_ask: number }[]
+  >`
+    WITH snap AS (
+      SELECT "exchange" AS ex, "t" AS t,
+             SUM("bidVol") AS bid_all,
+             SUM("askVol") AS ask_all,
+             MAX("price") FILTER (WHERE "bidVol" > 0) AS max_bid,
+             MIN("price") FILTER (WHERE "askVol" > 0) AS min_ask
+      FROM "ObSnapshot"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+      GROUP BY "exchange", "t"
+    ),
+    m AS (
+      SELECT ex, t, bid_all, ask_all,
+             CASE WHEN max_bid IS NOT NULL AND min_ask IS NOT NULL
+                  THEN (max_bid + min_ask) / 2 ELSE NULL END AS mid
+      FROM snap
+    ),
+    nr AS (
+      SELECT m.ex AS ex, m.t AS t,
+             SUM(o."bidVol") AS near_bid,
+             SUM(o."askVol") AS near_ask
+      FROM m
+      JOIN "ObSnapshot" o
+        ON o."symbol" = ${symbol} AND o."exchange" = m.ex AND o."t" = m.t
+       AND o."price" BETWEEN m.mid * 0.99 AND m.mid * 1.01
+      WHERE m.mid IS NOT NULL
+      GROUP BY m.ex, m.t
+    )
+    SELECT ${colExpr}::int AS col,
+           SUM(m.bid_all)::float8 AS full_bid,
+           SUM(m.ask_all)::float8 AS full_ask,
+           COALESCE(SUM(nr.near_bid), 0)::float8 AS near_bid,
+           COALESCE(SUM(nr.near_ask), 0)::float8 AS near_ask
+    FROM m LEFT JOIN nr ON nr.ex = m.ex AND nr.t = m.t
+    GROUP BY col
+  `;
   if (rows.length === 0) return null;
 
-  // Группируем по снапшоту (exchange|t).
-  const snaps = new Map<string, typeof rows>();
+  const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
+  const fullBid = new Array(cols).fill(0);
+  const fullAsk = new Array(cols).fill(0);
+  const nearBid = new Array(cols).fill(0);
+  const nearAsk = new Array(cols).fill(0);
   for (const r of rows) {
-    const k = `${r.exchange}|${r.t.getTime()}`;
-    const arr = snaps.get(k) ?? [];
-    arr.push(r);
-    snaps.set(k, arr);
+    const c = clampCol(r.col);
+    fullBid[c] += r.full_bid;
+    fullAsk[c] += r.full_ask;
+    nearBid[c] += r.near_bid;
+    nearAsk[c] += r.near_ask;
   }
-
-  const xspan = toMs - fromMs || 1;
-  const colOf = (t: number) => Math.max(0, Math.min(cols - 1, Math.floor(((t - fromMs) / xspan) * cols)));
-  const fullSum = new Array(cols).fill(0).map(() => ({ bid: 0, ask: 0, n: 0 }));
-  const nearSum = new Array(cols).fill(0).map(() => ({ bid: 0, ask: 0 }));
-
-  for (const [k, arr] of snaps) {
-    const ts = Number(k.split("|")[1]);
-    const c = colOf(ts);
-    let maxBid = 0;
-    let minAsk = Infinity;
-    let bidAll = 0;
-    let askAll = 0;
-    for (const r of arr) {
-      bidAll += r.bidVol;
-      askAll += r.askVol;
-      if (r.bidVol > 0 && r.price > maxBid) maxBid = r.price;
-      if (r.askVol > 0 && r.price < minAsk) minAsk = r.price;
-    }
-    const mid = maxBid > 0 && minAsk < Infinity ? (maxBid + minAsk) / 2 : 0;
-    fullSum[c].bid += bidAll;
-    fullSum[c].ask += askAll;
-    fullSum[c].n += 1;
-    if (mid > 0) {
-      const lo = mid * 0.99;
-      const hi = mid * 1.01;
-      for (const r of arr) {
-        if (r.price < lo || r.price > hi) continue;
-        nearSum[c].bid += r.bidVol;
-        nearSum[c].ask += r.askVol;
-      }
-    }
-  }
-
   const ratio = (b: number, a: number) => (b + a > 0 ? b / (b + a) : 0.5);
-  const full = fullSum.map((s) => ratio(s.bid, s.ask));
-  const near = nearSum.map((s) => ratio(s.bid, s.ask));
+  const full = fullBid.map((b, i) => ratio(b, fullAsk[i]));
+  const near = nearBid.map((b, i) => ratio(b, nearAsk[i]));
   const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
   return { times, full, near };
 }
@@ -380,15 +290,98 @@ export async function computeOrderflow(
   toMs: number,
   opts: { bins?: number; cols?: number } = {},
 ): Promise<ObHeatmap | null> {
-  const where = {
-    symbol,
-    t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    ...(exchange === "all" ? {} : { exchange }),
+  // Агрегация прямо в Postgres: вместо переноса миллионов сырых строк снапшотов
+  // в Node, БД сама сворачивает их в сетку (колонка времени × ценовой уровень).
+  // Это снимает основную нагрузку (перенос данных рос со временем накопления).
+  const bins = opts.bins ?? 160;
+  const cols = opts.cols ?? 240;
+  const xspan = toMs - fromMs || 1;
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+
+  // Сумма ликвидности (bid+ask) по (колонка времени, ценовой уровень).
+  const cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
+    SELECT ${colExpr}::int AS col, "price" AS price, SUM("bidVol" + "askVol")::float8 AS vol
+    FROM "ObSnapshot"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+    GROUP BY col, "price"
+  `;
+  if (cells.length === 0) return null;
+
+  // Для усреднения по колонке: число различных снапшотов (exchange|t) и число бирж.
+  const colStats = await prisma.$queryRaw<{ col: number; n: number; ex: number }[]>`
+    SELECT ${colExpr}::int AS col,
+           COUNT(DISTINCT ("exchange" || '|' || extract(epoch from "t")))::int AS n,
+           COUNT(DISTINCT "exchange")::int AS ex
+    FROM "ObSnapshot"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+    GROUP BY col
+  `;
+  const kByCol = new Map<number, number>();
+  for (const s of colStats) kByCol.set(s.col, (s.ex || 1) / (s.n || 1));
+
+  let pMin = Infinity;
+  let pMax = -Infinity;
+  for (const c of cells) {
+    if (c.price < pMin) pMin = c.price;
+    if (c.price > pMax) pMax = c.price;
+  }
+  const pad = (pMax - pMin) * 0.02 || pMax * 0.005;
+  pMin -= pad;
+  pMax += pad;
+  const span = pMax - pMin || 1;
+  const binOf = (p: number) => Math.max(0, Math.min(bins - 1, Math.floor(((p - pMin) / span) * bins)));
+  const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
+
+  const grid: number[][] = Array.from({ length: cols }, () => new Array(bins).fill(0));
+  for (const cell of cells) {
+    grid[clampCol(cell.col)][binOf(cell.price)] += cell.vol * (kByCol.get(cell.col) ?? 0);
+  }
+  let maxVal = 0;
+  for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
+  const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
+
+  // Профиль текущего стакана: самый свежий снапшот каждой биржи (окно ~5с).
+  const lastRows = await prisma.$queryRaw<
+    { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[]
+  >`
+    SELECT "t", "exchange", "price", "bidVol", "askVol"
+    FROM "ObSnapshot"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+      AND "t" >= (
+        SELECT MAX("t") FROM "ObSnapshot"
+        WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+      ) - interval '5 seconds'
+  `;
+  const profileBid = new Array(bins).fill(0);
+  const profileAsk = new Array(bins).fill(0);
+  let price: number;
+  if (lastRows.length) {
+    price = lastRows.reduce((s, r) => s + r.price, 0) / lastRows.length;
+    const latestPerEx = new Map<string, number>();
+    for (const r of lastRows) {
+      const ts = r.t.getTime();
+      if (ts > (latestPerEx.get(r.exchange) ?? 0)) latestPerEx.set(r.exchange, ts);
+    }
+    for (const r of lastRows) {
+      if (r.t.getTime() !== latestPerEx.get(r.exchange)) continue;
+      const b = binOf(r.price);
+      profileBid[b] += r.bidVol;
+      profileAsk[b] += r.askVol;
+    }
+  } else {
+    price = (pMin + pMax) / 2;
+  }
+  let profileMax = 0;
+  for (let b = 0; b < bins; b++) {
+    const v = profileBid[b] + profileAsk[b];
+    if (v > profileMax) profileMax = v;
+  }
+
+  return {
+    priceMin: pMin, priceMax: pMax, bins, cols, grid, maxVal, price, times,
+    profileBid, profileAsk, profileMax,
   };
-  const rows = await prisma.obSnapshot.findMany({
-    where,
-    select: { t: true, price: true, bidVol: true, askVol: true, exchange: true },
-    orderBy: { t: "asc" },
-  });
-  return buildOrderflowHeatmap(rows, fromMs, toMs, opts);
 }
