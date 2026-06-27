@@ -296,6 +296,40 @@ export default function OrderflowPage() {
         hmX0, hmYTop, Math.max(1, hmX1 - hmX0), Math.max(1, hmYBot - hmYTop),
       );
       ctx.imageSmoothingEnabled = true;
+
+      // Подписи объёма на крупных «стенах» лимиток — при достаточном зуме.
+      // Помечаем вертикальные локальные максимумы (центр стены), чтобы не
+      // дублировать число на каждом бине одной полосы. Текст тёмный — полосы светлые.
+      if (hm.maxVal > 0) {
+        const colSpanMs = ((hm.times[1] ?? t0) - (hm.times[0] ?? t0)) || xspan / hm.cols;
+        const cellW = (colSpanMs / xspan) * plotW;
+        const priceStep = (hm.priceMax - hm.priceMin) / hm.bins;
+        const cellH = (priceStep / yspan) * plotH;
+        if (cellW >= 14 && cellH >= 7) {
+          ctx.font = `${Math.min(11, Math.max(7, cellH - 2))}px ui-sans-serif, system-ui`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          for (let c = 0; c < hm.cols; c++) {
+            const x = sx(hm.times[c]);
+            if (x < plotX - cellW || x > plotX + plotW + cellW) continue;
+            const col = hm.grid[c];
+            for (let b = 0; b < hm.bins; b++) {
+              const val = col[b];
+              if (val / hm.maxVal < 0.45) continue;
+              // Локальный максимум по цене И по времени → одна подпись на «стену».
+              if ((b > 0 && col[b - 1] > val) || (b < hm.bins - 1 && col[b + 1] > val)) continue;
+              if ((hm.grid[c - 1]?.[b] ?? 0) > val || (hm.grid[c + 1]?.[b] ?? 0) > val) continue;
+              const price = hm.priceMin + ((b + 0.5) / hm.bins) * (hm.priceMax - hm.priceMin);
+              const y = sy(price);
+              if (y < 0 || y > plotH) continue;
+              ctx.fillStyle = "#0a0b10";
+              ctx.fillText(fmtVal(val), x, y);
+            }
+          }
+          ctx.textAlign = "left";
+          ctx.textBaseline = "alphabetic";
+        }
+      }
     }
 
     // Левая панель: профиль текущей ликвидности (bid зелёный / ask красный).
