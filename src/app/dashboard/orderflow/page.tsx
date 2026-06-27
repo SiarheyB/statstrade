@@ -315,7 +315,7 @@ export default function OrderflowPage() {
             const col = hm.grid[c];
             for (let b = 0; b < hm.bins; b++) {
               const val = col[b];
-              if (val / hm.maxVal < 0.45) continue;
+              if (val / hm.maxVal < 0.2) continue;
               // Локальный максимум по цене И по времени → одна подпись на «стену».
               if ((b > 0 && col[b - 1] > val) || (b < hm.bins - 1 && col[b + 1] > val)) continue;
               if ((hm.grid[c - 1]?.[b] ?? 0) > val || (hm.grid[c + 1]?.[b] ?? 0) > val) continue;
@@ -524,7 +524,10 @@ export default function OrderflowPage() {
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
       const base = baseAsset(data.symbol);
-      const lines = showLiq && vol > 0
+      // Стену показываем только если она реально отрисована — т.е. выше порога
+      // «Мин. размер» (minT). Иначе на «пустом» месте всплывала ложная подсказка.
+      const hasWall = showLiq && hm.maxVal > 0 && vol / hm.maxVal >= minT;
+      const lines = hasWall
         ? [
             t("of.tipLimitOrder"),
             `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
