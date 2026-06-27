@@ -75,6 +75,9 @@ services:
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_POLL_INTERVAL: "120"
+      # Свежий Docker-демон требует API >= 1.40; без этого watchtower стучится
+      # по устаревшей 1.25 и падает в цикл рестарта ("client version is too old").
+      DOCKER_API_VERSION: "1.44"
     command: ["--label-enable", "--cleanup", "--interval", "120"]
 
 volumes:
