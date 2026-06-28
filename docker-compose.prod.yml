@@ -49,6 +49,9 @@ services:
       # хоста (см. SELF_HOSTING.md — шаг про /api/cron/sync), поэтому встроенный
       # in-process планировщик выключен: иначе синхронизации дублировались бы.
       ENABLE_SCHEDULER: "false"
+      # Внутри compose-сети collector доступен по имени сервиса. Переопределить
+      # можно в .env. COLLECTOR_METRICS_TOKEN/ADMIN_EMAILS задаются в .env.
+      COLLECTOR_URL: ${COLLECTOR_URL:-http://collector:8080}
     ports:
       # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
       - "127.0.0.1:3000:3000"
@@ -72,6 +75,11 @@ services:
       BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
       RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
       PORT: 8080
+      # Bearer-токен для защищённого GET /metrics — его опрашивает админ-панель
+      # приложения (раздел «Карта ордеров»). Должен совпадать с COLLECTOR_METRICS_TOKEN
+      # у сервиса app. Если пусто — /metrics закрыт (404), раздел работает на
+      # агрегатах Postgres без live-статуса фидов.
+      COLLECTOR_METRICS_TOKEN: ${COLLECTOR_METRICS_TOKEN:-}
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 
