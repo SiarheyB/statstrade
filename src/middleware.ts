@@ -20,8 +20,10 @@ export async function middleware(req: NextRequest) {
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const valid = await isValidSession(token);
 
-  // Protect the dashboard.
-  if (pathname.startsWith("/dashboard")) {
+  // Protect the dashboard and admin area (the admin-role check is enforced in
+  // the /admin layout & API since it needs ADMIN_EMAILS; here we only require a
+  // valid session).
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/admin")) {
     if (!valid) {
       const url = req.nextUrl.clone();
       url.pathname = "/login";
@@ -42,5 +44,5 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/login", "/register"],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register"],
 };

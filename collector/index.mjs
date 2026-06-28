@@ -24,6 +24,7 @@ const cfg = {
   bigNotional: Number(process.env.BIG_NOTIONAL ?? 100000),
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
+  metricsToken: process.env.COLLECTOR_METRICS_TOKEN ?? "",
 };
 
 if (!cfg.databaseUrl) {
@@ -106,6 +107,19 @@ function binSide(map, lo, hi, binSize) {
   return acc;
 }
 
+// Накопительные метрики наполнения — отдаются через /metrics для админ-панели
+// Next.js (раздел «Карта ордеров»). Ключ — `${exchange}:${symbol}`.
+const startedAt = Date.now();
+const metrics = new Map(); // tag -> { obRows, obLastBins, deltaRows, fpRows, bigRows, lastWriteAt, writeErrors }
+function metricFor(tag) {
+  let m = metrics.get(tag);
+  if (!m) {
+    m = { obRows: 0, obLastBins: 0, deltaRows: 0, fpRows: 0, bigRows: 0, lastWriteAt: null, writeErrors: 0 };
+    metrics.set(tag, m);
+  }
+  return m;
+}
+
 function rowsForFeed(feed, t) {
   const { book, binSize } = feed;
   if (!book.synced) return [];
@@ -131,7 +145,14 @@ function rowsForFeed(feed, t) {
 async function writeSnapshot() {
   const t = new Date();
   const rows = [];
-  for (const feed of feeds) rows.push(...rowsForFeed(feed, t));
+  for (const feed of feeds) {
+    const r = rowsForFeed(feed, t);
+    const m = metricFor(`${feed.exchange}:${feed.symbol}`);
+    m.obRows += r.length;
+    m.obLastBins = r.length;
+    m.lastWriteAt = t.toISOString();
+    rows.push(...r);
+  }
 
   if (rows.length > 0) {
     const values = [];
@@ -158,13 +179,16 @@ async function writeSnapshot() {
   const bigRows = [];
   for (const tf of tradeFeeds) {
     const { buyVol, sellVol, footprint, big } = tf.trades.drain();
-    if (buyVol !== 0 || sellVol !== 0) tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]);
+    const m = metricFor(`${tf.exchange}:${tf.symbol}`);
+    if (buyVol !== 0 || sellVol !== 0) { tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]); m.deltaRows += 1; }
     for (const lvl of footprint) {
       if (lvl.buy === 0 && lvl.sell === 0) continue;
       fpRows.push([tf.symbol, tf.exchange, t, lvl.price, lvl.buy, lvl.sell]);
+      m.fpRows += 1;
     }
     for (const bt of big) {
       bigRows.push([tf.symbol, tf.exchange, new Date(bt.t), bt.price, bt.qty, bt.side]);
+      m.bigRows += 1;
     }
   }
   if (tRows.length > 0) {
@@ -251,11 +275,53 @@ async function pruneOld() {
 
 // Healthcheck для платформы хостинга.
 const server = http.createServer((req, res) => {
-  if (req.url === "/health" || req.url === "/") {
+  const url = (req.url ?? "").split("?")[0];
+  if (url === "/health" || url === "/") {
     const status = feeds.map((f) => ({ feed: `${f.exchange}:${f.symbol}`, synced: f.book.synced, ...f.book.stats }));
     const healthy = feeds.some((f) => f.book.synced);
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ healthy, feeds: status }));
+  } else if (url === "/metrics") {
+    // Защищённый эндпоинт для админ-панели Next.js (раздел «Карта ордеров»).
+    // Bearer-токен COLLECTOR_METRICS_TOKEN. Если токен не задан — 404 (закрыто).
+    const auth = req.headers["authorization"] ?? "";
+    if (!cfg.metricsToken || auth !== `Bearer ${cfg.metricsToken}`) {
+      res.writeHead(cfg.metricsToken ? 401 : 404);
+      res.end();
+      return;
+    }
+    const now = Date.now();
+    const feedMetrics = feeds.map((f) => {
+      const tag = `${f.exchange}:${f.symbol}`;
+      const m = metricFor(tag);
+      const lastWriteAgoMs = m.lastWriteAt ? now - Date.parse(m.lastWriteAt) : null;
+      return {
+        feed: tag,
+        exchange: f.exchange,
+        symbol: f.symbol,
+        synced: f.book.synced,
+        binSize: f.binSize,
+        ...f.book.stats, // resyncCount, appliedCount, bidLevels, askLevels
+        obRows: m.obRows,
+        obLastBins: m.obLastBins,
+        deltaRows: m.deltaRows,
+        fpRows: m.fpRows,
+        bigRows: m.bigRows,
+        lastWriteAt: m.lastWriteAt,
+        lastWriteAgoMs,
+      };
+    });
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      healthy: feeds.some((f) => f.book.synced),
+      uptimeMs: now - startedAt,
+      snapshotMs: cfg.snapshotMs,
+      depthPct: cfg.depthPct,
+      retentionDays: cfg.retentionDays,
+      noiseMinNotional: cfg.noiseMinNotional,
+      bigNotional: cfg.bigNotional,
+      feeds: feedMetrics,
+    }));
   } else {
     res.writeHead(404);
     res.end();

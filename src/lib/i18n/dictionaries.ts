@@ -35,6 +35,7 @@ const en: Dict = {
   "nav.tradeSettings": "Trade settings",
   "nav.risk": "Risk manager",
   "nav.settings": "Settings",
+  "nav.admin": "Admin",
   "nav.logout": "Log out",
   // news
   "news.title": "News",
@@ -620,6 +621,7 @@ const ru: Dict = {
   "nav.tradeSettings": "Настройки сделок",
   "nav.risk": "Риск-менеджер",
   "nav.settings": "Настройки",
+  "nav.admin": "Админка",
   "nav.logout": "Выйти",
   // news
   "news.title": "Новости",

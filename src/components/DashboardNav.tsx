@@ -23,6 +23,7 @@ import {
   Menu,
   X,
   LogOut,
+  ShieldCheck,
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
@@ -69,7 +70,7 @@ function isSettingsRoute(pathname: string): boolean {
   return pathname.startsWith("/dashboard/settings") || pathname.startsWith("/dashboard/accounts");
 }
 
-export default function DashboardNav({ email }: { email: string }) {
+export default function DashboardNav({ email, isAdmin = false }: { email: string; isAdmin?: boolean }) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
@@ -224,6 +225,16 @@ export default function DashboardNav({ email }: { email: string }) {
 
       <div className="p-3 border-t border-border shrink-0">
         <div className="px-3 py-2 text-xs text-faint truncate">{email}</div>
+        {isAdmin && (
+          <Link
+            href="/admin"
+            onClick={onNavigate}
+            className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
+          >
+            <ShieldCheck size={18} />
+            {t("nav.admin")}
+          </Link>
+        )}
         <button
           onClick={() => {
             onNavigate();
