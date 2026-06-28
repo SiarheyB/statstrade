@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Trash2, KeyRound } from "lucide-react";
 import clsx from "clsx";
@@ -82,11 +83,11 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               {filtered.map((r) => (
                 <tr key={r.id} className="border-b border-border/50 last:border-0 hover:bg-surface-2/50">
                   <td className="px-5 py-2.5 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5">
+                    <Link href={`/admin/users/${r.id}`} className="inline-flex items-center gap-1.5 hover:text-accent transition">
                       {r.isAdmin && <ShieldCheck size={14} className="text-accent" />}
                       {r.email}
                       {r.google && <span className="text-[10px] text-faint">G</span>}
-                    </span>
+                    </Link>
                   </td>
                   <td className="px-3 py-2.5 text-muted">{r.name ?? "—"}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{r.accounts}</td>
