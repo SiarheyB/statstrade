@@ -1,6 +1,15 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { Users, Plug, AlertTriangle, Layers } from "lucide-react";
+import { getFeedFreshness } from "@/lib/admin";
+import { Users, Plug, AlertTriangle, Layers, Activity } from "lucide-react";
+
+function lagLabel(lagMs: number): string {
+  if (!isFinite(lagMs)) return "нет данных";
+  const s = Math.round(lagMs / 1000);
+  if (s < 60) return `${s} с`;
+  if (s < 3600) return `${Math.round(s / 60)} мин`;
+  return `${Math.round(s / 3600)} ч`;
+}
 
 export const dynamic = "force-dynamic";
 
@@ -28,10 +37,40 @@ export default async function AdminOverviewPage() {
     prisma.obSnapshot.findMany({ distinct: ["symbol", "exchange"], select: { symbol: true } }),
   ]);
 
+  const freshness = await getFeedFreshness();
+  const staleFeeds = freshness.filter((f) => f.stale);
+
   return (
     <div className="p-6 md:p-8 max-w-6xl">
       <h1 className="text-2xl font-semibold tracking-tight">Обзор</h1>
       <p className="mt-1 text-sm text-muted">Сводка по системе TradeStats.</p>
+
+      {/* Алерт по карте ордеров: фиды, которые перестали наполняться. */}
+      {freshness.length > 0 && (
+        staleFeeds.length > 0 ? (
+          <Link
+            href="/admin/collector"
+            className="mt-6 card p-4 border-loss/40 flex items-start gap-3 text-sm hover:border-loss/60 transition"
+          >
+            <AlertTriangle size={18} className="text-loss shrink-0 mt-0.5" />
+            <div>
+              <div className="font-medium text-loss">
+                Карта ордеров: {staleFeeds.length} из {freshness.length} фид(ов) не наполняются
+              </div>
+              <div className="mt-1 text-muted">
+                {staleFeeds
+                  .map((f) => `${f.symbol}·${f.exchange} (${lagLabel(f.lagMs)} назад)`)
+                  .join(", ")}
+              </div>
+            </div>
+          </Link>
+        ) : (
+          <div className="mt-6 card p-4 border-profit/30 flex items-center gap-3 text-sm">
+            <Activity size={18} className="text-profit shrink-0" />
+            <span>Карта ордеров: все {freshness.length} фид(ов) наполняются исправно.</span>
+          </div>
+        )
+      )}
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Stat label="Пользователи" value={users} hint={`+${newWeek} за 7 дн · +${newMonth} за 30 дн`} />

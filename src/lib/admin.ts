@@ -35,6 +35,27 @@ export function notFound() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
+// Порог свежести фида карты ордеров: collector пишет снимок раз в ~2 c, поэтому
+// отсутствие записей дольше этого считаем «фид отстал/упал».
+export const FEED_STALE_MS = 90_000;
+
+export type FeedFreshness = { symbol: string; exchange: string; lastT: Date | null; lagMs: number; stale: boolean };
+
+// Свежесть каждого фида ObSnapshot (для алертов на «Обзоре» и странице collector).
+export async function getFeedFreshness(): Promise<FeedFreshness[]> {
+  const rows = await prisma.$queryRaw<{ symbol: string; exchange: string; last_t: Date | null }[]>`
+    SELECT symbol, exchange, max(t) AS last_t
+    FROM "ObSnapshot"
+    GROUP BY symbol, exchange
+    ORDER BY symbol, exchange
+  `;
+  const now = Date.now();
+  return rows.map((r) => {
+    const lagMs = r.last_t ? now - new Date(r.last_t).getTime() : Infinity;
+    return { symbol: r.symbol, exchange: r.exchange, lastT: r.last_t, lagMs, stale: lagMs > FEED_STALE_MS };
+  });
+}
+
 // Запись действия админа в аудит-лог (append-only, см. /admin/audit). Ошибка
 // записи не должна валить само действие — логируем и продолжаем.
 export async function recordAudit(

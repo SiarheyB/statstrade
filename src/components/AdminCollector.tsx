@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, CircleCheck, CircleX, RefreshCw, Clock } from "lucide-react";
+import { Activity, CircleCheck, CircleX, RefreshCw, Clock, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+
+// Порог свежести (мс): дольше — фид считается отставшим. Совпадает с серверным
+// FEED_STALE_MS (src/lib/admin.ts).
+const STALE_MS = 90_000;
 
 // Раздел «Карта ордеров» админ-панели. Опрашивает /api/admin/collector раз в
 // несколько секунд и показывает: статус collector-сервиса, скорость наполнения,
@@ -59,7 +63,7 @@ type Payload = {
 function agoLabel(ts: string | null, now: number): { text: string; stale: boolean } {
   if (!ts) return { text: "—", stale: true };
   const sec = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
-  const stale = sec > 30;
+  const stale = sec * 1000 > STALE_MS;
   if (sec < 60) return { text: `${sec} с назад`, stale };
   if (sec < 3600) return { text: `${Math.round(sec / 60)} мин назад`, stale };
   return { text: `${Math.round(sec / 3600)} ч назад`, stale };
@@ -133,9 +137,27 @@ export default function AdminCollector() {
 
   const col = data?.collector;
   const online = col?.ok && col.data?.healthy;
+  const staleFeeds = (data?.feeds ?? []).filter((f) => {
+    const lag = f.last_t ? now - Date.parse(f.last_t) : Infinity;
+    return lag > STALE_MS;
+  });
 
   return (
     <div className="mt-6 space-y-6">
+      {/* Сводный алерт: фиды, переставшие наполняться. */}
+      {staleFeeds.length > 0 && (
+        <div className="card p-4 border-loss/40 flex items-start gap-3 text-sm">
+          <AlertTriangle size={18} className="text-loss shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium text-loss">
+              {staleFeeds.length} из {data!.feeds.length} фид(ов) не наполняются дольше {Math.round(STALE_MS / 1000)} с
+            </div>
+            <div className="mt-1 text-muted">
+              {staleFeeds.map((f) => `${f.symbol}·${f.exchange}`).join(", ")}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Статус collector-сервиса */}
       <div
         className={clsx(
