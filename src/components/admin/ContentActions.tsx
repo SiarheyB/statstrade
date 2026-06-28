@@ -4,9 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw } from "lucide-react";
 import clsx from "clsx";
+import { useI18n } from "@/lib/i18n/provider";
 
 export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -21,7 +23,7 @@ export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
       });
       const json = await res.json();
       if (!res.ok) {
-        setMsg(json.error ?? "Ошибка");
+        setMsg(json.error ?? t("admin.content.error"));
       } else {
         const added = (json.results ?? []).reduce(
           (s: number, r: { added?: number; upserted?: number }) => s + (r.added ?? r.upserted ?? 0),
@@ -45,7 +47,7 @@ export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
         disabled={busy}
         className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-muted hover:text-accent hover:bg-surface-2 transition disabled:opacity-50"
       >
-        <RefreshCw size={13} className={clsx(busy && "animate-spin")} /> обновить
+        <RefreshCw size={13} className={clsx(busy && "animate-spin")} /> {t("admin.content.refresh")}
       </button>
     </span>
   );

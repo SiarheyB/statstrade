@@ -5,21 +5,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Newspaper, Database, ScrollText, ArrowLeft, Menu, X } from "lucide-react";
 import clsx from "clsx";
+import { useI18n } from "@/lib/i18n/provider";
 
 // Навигация админ-панели. Раздел отделён от пользовательского дашборда: своя
 // шапка, доступ только администраторам (см. admin/layout.tsx).
 const LINKS = [
-  { href: "/admin", label: "Обзор", icon: LayoutDashboard, exact: true },
-  { href: "/admin/collector", label: "Карта ордеров", icon: Layers },
-  { href: "/admin/users", label: "Пользователи", icon: Users },
-  { href: "/admin/accounts", label: "Аккаунты бирж", icon: Plug },
-  { href: "/admin/content", label: "Контент-фиды", icon: Newspaper },
-  { href: "/admin/system", label: "Здоровье БД", icon: Database },
-  { href: "/admin/audit", label: "Аудит действий", icon: ScrollText },
+  { href: "/admin", key: "admin.nav.overview", icon: LayoutDashboard, exact: true },
+  { href: "/admin/collector", key: "admin.nav.collector", icon: Layers },
+  { href: "/admin/users", key: "admin.nav.users", icon: Users },
+  { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
+  { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
+  { href: "/admin/system", key: "admin.nav.system", icon: Database },
+  { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },
 ];
 
 export default function AdminNav({ email }: { email: string }) {
   const pathname = usePathname();
+  const { t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const isActive = (href: string, exact?: boolean) =>
@@ -31,7 +33,7 @@ export default function AdminNav({ email }: { email: string }) {
         <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
           <ShieldCheck size={18} />
         </span>
-        Админка
+        {t("admin.title")}
       </div>
 
       <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
@@ -48,7 +50,7 @@ export default function AdminNav({ email }: { email: string }) {
             )}
           >
             <l.icon size={18} />
-            {l.label}
+            {t(l.key)}
           </Link>
         ))}
       </nav>
@@ -61,7 +63,7 @@ export default function AdminNav({ email }: { email: string }) {
           className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition"
         >
           <ArrowLeft size={18} />
-          К приложению
+          {t("admin.backToApp")}
         </Link>
       </div>
     </>
@@ -81,7 +83,7 @@ export default function AdminNav({ email }: { email: string }) {
           <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-accent/15 text-accent">
             <ShieldCheck size={15} />
           </span>
-          Админка
+          {t("admin.title")}
         </span>
       </div>
 

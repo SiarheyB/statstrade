@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CircleCheck, CircleX, RefreshCw, Clock, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+import { useI18n } from "@/lib/i18n/provider";
+
+type T = (key: string, vars?: Record<string, string | number>) => string;
 
 // Порог свежести (мс): дольше — фид считается отставшим. Совпадает с серверным
 // FEED_STALE_MS (src/lib/admin.ts).
@@ -60,24 +63,25 @@ type Payload = {
   preview: { symbol: string; exchange: string; t: string | null; bins: PreviewBin[] } | null;
 };
 
-function agoLabel(ts: string | null, now: number): { text: string; stale: boolean } {
-  if (!ts) return { text: "—", stale: true };
+function agoLabel(ts: string | null, now: number, t: T): { text: string; stale: boolean } {
+  if (!ts) return { text: t("admin.dash"), stale: true };
   const sec = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
   const stale = sec * 1000 > STALE_MS;
-  if (sec < 60) return { text: `${sec} с назад`, stale };
-  if (sec < 3600) return { text: `${Math.round(sec / 60)} мин назад`, stale };
-  return { text: `${Math.round(sec / 3600)} ч назад`, stale };
+  if (sec < 60) return { text: t("admin.lag.secAgo", { n: sec }), stale };
+  if (sec < 3600) return { text: t("admin.lag.minAgo", { n: Math.round(sec / 60) }), stale };
+  return { text: t("admin.lag.hourAgo", { n: Math.round(sec / 3600) }), stale };
 }
 
-function fmtUptime(ms: number): string {
+function fmtUptime(ms: number, t: T): string {
   const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}с`;
-  if (s < 3600) return `${Math.floor(s / 60)}м ${s % 60}с`;
-  const h = Math.floor(s / 3600);
-  return `${h}ч ${Math.floor((s % 3600) / 60)}м`;
+  if (s < 60) return t("admin.lag.sec", { n: s });
+  if (s < 3600) return t("admin.lag.min", { n: Math.floor(s / 60) });
+  return t("admin.lag.hour", { n: Math.round((s / 3600) * 10) / 10 });
 }
 
 export default function AdminCollector() {
+  const { t, locale } = useI18n();
+  const nf = locale === "ru" ? "ru-RU" : "en-US";
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null); // "symbol|exchange"
@@ -132,7 +136,7 @@ export default function AdminCollector() {
   }, [data]);
 
   if (!data && !error) {
-    return <div className="mt-6 text-sm text-muted">Загрузка…</div>;
+    return <div className="mt-6 text-sm text-muted">{t("admin.loading")}</div>;
   }
 
   const col = data?.collector;
@@ -150,7 +154,11 @@ export default function AdminCollector() {
           <AlertTriangle size={18} className="text-loss shrink-0 mt-0.5" />
           <div>
             <div className="font-medium text-loss">
-              {staleFeeds.length} из {data!.feeds.length} фид(ов) не наполняются дольше {Math.round(STALE_MS / 1000)} с
+              {t("admin.collector.staleBanner", {
+                n: staleFeeds.length,
+                total: data!.feeds.length,
+                sec: Math.round(STALE_MS / 1000),
+              })}
             </div>
             <div className="mt-1 text-muted">
               {staleFeeds.map((f) => `${f.symbol}·${f.exchange}`).join(", ")}
@@ -171,46 +179,51 @@ export default function AdminCollector() {
           ) : (
             <CircleX size={18} className="text-loss" />
           )}
-          Collector: {online ? "онлайн" : col?.ok ? "нет синхронизированных фидов" : "недоступен"}
+          {t("admin.collector.status")}{" "}
+          {online
+            ? t("admin.collector.online")
+            : col?.ok
+              ? t("admin.collector.noSynced")
+              : t("admin.collector.unavailable")}
         </span>
         {col?.ok && col.data && (
           <>
-            <span className="text-muted">аптайм {fmtUptime(col.data.uptimeMs)}</span>
-            <span className="text-muted">снимок каждые {col.data.snapshotMs} мс</span>
-            <span className="text-muted">глубина ±{(col.data.depthPct * 100).toFixed(1)}%</span>
-            <span className="text-muted">retention {col.data.retentionDays} дн</span>
+            <span className="text-muted">{t("admin.collector.uptime", { v: fmtUptime(col.data.uptimeMs, t) })}</span>
+            <span className="text-muted">{t("admin.collector.snapshotEvery", { ms: col.data.snapshotMs })}</span>
+            <span className="text-muted">{t("admin.collector.depth", { pct: (col.data.depthPct * 100).toFixed(1) })}</span>
+            <span className="text-muted">{t("admin.collector.retention", { days: col.data.retentionDays })}</span>
           </>
         )}
         {!col?.ok && <span className="text-faint">{col?.error}</span>}
-        {error && <span className="text-loss">ошибка опроса: {error}</span>}
+        {error && <span className="text-loss">{t("admin.collector.pollError", { e: error })}</span>}
         <span className="ml-auto flex items-center gap-1 text-faint text-xs">
-          <RefreshCw size={12} className="animate-spin [animation-duration:3s]" /> live
+          <RefreshCw size={12} className="animate-spin [animation-duration:3s]" /> {t("admin.collector.live")}
         </span>
       </div>
 
       {/* Скорость наполнения (снимков/мин, последний час) */}
       <div className="card p-5">
         <div className="flex items-center gap-2 text-sm font-medium">
-          <Activity size={16} className="text-accent" /> Скорость наполнения · снимков/мин (час)
+          <Activity size={16} className="text-accent" /> {t("admin.collector.fillRate")}
         </div>
-        <Sparkbars data={chart} />
+        <Sparkbars data={chart} t={t} nf={nf} />
       </div>
 
       {/* Фиды: статус + свежесть */}
       <div className="card overflow-hidden">
-        <div className="px-5 py-3 text-sm font-medium border-b border-border">Фиды (symbol × exchange)</div>
+        <div className="px-5 py-3 text-sm font-medium border-b border-border">{t("admin.collector.feeds")}</div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
-                <th className="px-5 py-2 font-medium">Фид</th>
-                <th className="px-3 py-2 font-medium">Статус</th>
-                <th className="px-3 py-2 font-medium text-right">Уровни bid/ask</th>
-                <th className="px-3 py-2 font-medium text-right">Ресинки</th>
-                <th className="px-3 py-2 font-medium text-right">Бинов в снимке</th>
-                <th className="px-3 py-2 font-medium text-right">Строк/мин</th>
-                <th className="px-3 py-2 font-medium text-right">Всего строк</th>
-                <th className="px-3 py-2 font-medium">Последняя запись</th>
+                <th className="px-5 py-2 font-medium">{t("admin.collector.th.feed")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.collector.th.status")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.levels")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.resyncs")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.bins")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.rowsMin")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.total")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.collector.th.lastWrite")}</th>
                 <th className="px-5 py-2"></th>
               </tr>
             </thead>
@@ -218,7 +231,7 @@ export default function AdminCollector() {
               {data!.feeds.map((f) => {
                 const key = `${f.symbol}|${f.exchange}`;
                 const cf = cFeedMap.get(key);
-                const fresh = agoLabel(f.last_t, now);
+                const fresh = agoLabel(f.last_t, now, t);
                 const isSel = selected === key || (!selected && data!.preview?.symbol === f.symbol && data!.preview?.exchange === f.exchange);
                 return (
                   <tr key={key} className="border-b border-border/50 last:border-0 hover:bg-surface-2/50">
@@ -228,21 +241,21 @@ export default function AdminCollector() {
                     <td className="px-3 py-2.5">
                       {cf ? (
                         cf.synced ? (
-                          <span className="inline-flex items-center gap-1 text-profit"><CircleCheck size={14} /> synced</span>
+                          <span className="inline-flex items-center gap-1 text-profit"><CircleCheck size={14} /> {t("admin.collector.synced")}</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-loss"><CircleX size={14} /> desync</span>
+                          <span className="inline-flex items-center gap-1 text-loss"><CircleX size={14} /> {t("admin.collector.desync")}</span>
                         )
                       ) : (
-                        <span className="text-faint">—</span>
+                        <span className="text-faint">{t("admin.dash")}</span>
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted">
-                      {cf ? `${cf.bidLevels ?? "—"}/${cf.askLevels ?? "—"}` : "—"}
+                      {cf ? `${cf.bidLevels ?? "—"}/${cf.askLevels ?? "—"}` : t("admin.dash")}
                     </td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{cf?.resyncCount ?? "—"}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{cf?.obLastBins ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{cf?.resyncCount ?? t("admin.dash")}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{cf?.obLastBins ?? t("admin.dash")}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums">{f.last_min}</td>
-                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{f.total.toLocaleString("ru-RU")}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{f.total.toLocaleString(nf)}</td>
                     <td className="px-3 py-2.5 whitespace-nowrap">
                       <span className={clsx("inline-flex items-center gap-1", fresh.stale ? "text-loss" : "text-muted")}>
                         <Clock size={13} /> {fresh.text}
@@ -256,7 +269,7 @@ export default function AdminCollector() {
                           isSel ? "bg-accent/15 text-accent" : "text-muted hover:bg-surface-2",
                         )}
                       >
-                        превью
+                        {t("admin.collector.preview")}
                       </button>
                     </td>
                   </tr>
@@ -265,7 +278,7 @@ export default function AdminCollector() {
               {data!.feeds.length === 0 && (
                 <tr>
                   <td colSpan={9} className="px-5 py-8 text-center text-muted">
-                    Нет данных в ObSnapshot. Collector ещё ничего не записал.
+                    {t("admin.collector.empty")}
                   </td>
                 </tr>
               )}
@@ -278,7 +291,7 @@ export default function AdminCollector() {
         {/* Live-превью последнего снимка стакана */}
         <div className="card p-5">
           <div className="flex items-center justify-between">
-            <div className="text-sm font-medium">Live-превью снимка</div>
+            <div className="text-sm font-medium">{t("admin.collector.previewTitle")}</div>
             {data!.preview && (
               <div className="text-xs text-faint">
                 {data!.preview.symbol} · {data!.preview.exchange}
@@ -288,23 +301,29 @@ export default function AdminCollector() {
           {data!.preview && data!.preview.bins.length > 0 ? (
             <DepthPreview bins={data!.preview.bins} />
           ) : (
-            <div className="mt-6 text-sm text-muted">Нет бинов в последнем снимке.</div>
+            <div className="mt-6 text-sm text-muted">{t("admin.collector.previewEmpty")}</div>
           )}
         </div>
 
         {/* Остальные таблицы карты ордеров */}
         <div className="card p-5">
-          <div className="text-sm font-medium">Сопутствующие потоки (за минуту)</div>
+          <div className="text-sm font-medium">{t("admin.collector.related")}</div>
           <div className="mt-4 space-y-3">
-            {data!.tableStats.map((t) => {
-              const fresh = agoLabel(t.last_t, now);
+            {data!.tableStats.map((ts) => {
+              const fresh = agoLabel(ts.last_t, now, t);
               const label =
-                t.tbl === "ObTrade" ? "Дельта (ObTrade)" : t.tbl === "ObFootprint" ? "Футпринт (ObFootprint)" : "Крупные ордера (ObBigTrade)";
+                ts.tbl === "ObTrade"
+                  ? t("admin.collector.delta")
+                  : ts.tbl === "ObFootprint"
+                    ? t("admin.collector.footprint")
+                    : t("admin.collector.big");
               return (
-                <div key={t.tbl} className="flex items-center justify-between text-sm">
+                <div key={ts.tbl} className="flex items-center justify-between text-sm">
                   <span className="text-muted">{label}</span>
                   <span className="flex items-center gap-4">
-                    <span className="tabular-nums">{t.last_min} /мин</span>
+                    <span className="tabular-nums">
+                      {ts.last_min} {t("admin.collector.perMin")}
+                    </span>
                     <span className={clsx("text-xs flex items-center gap-1", fresh.stale ? "text-loss" : "text-faint")}>
                       <Clock size={12} /> {fresh.text}
                     </span>
@@ -320,15 +339,15 @@ export default function AdminCollector() {
 }
 
 // Простой бар-график без зависимостей.
-function Sparkbars({ data }: { data: { minute: number; c: number }[] }) {
-  if (data.length === 0) return <div className="mt-4 text-sm text-muted">Нет записей за последний час.</div>;
+function Sparkbars({ data, t, nf }: { data: { minute: number; c: number }[]; t: T; nf: string }) {
+  if (data.length === 0) return <div className="mt-4 text-sm text-muted">{t("admin.collector.noHour")}</div>;
   const max = Math.max(...data.map((d) => d.c), 1);
   return (
     <div className="mt-4 flex items-end gap-px h-24">
       {data.map((d) => (
         <div
           key={d.minute}
-          title={`${new Date(d.minute).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })} · ${d.c}`}
+          title={`${new Date(d.minute).toLocaleTimeString(nf, { hour: "2-digit", minute: "2-digit" })} · ${d.c}`}
           className="flex-1 min-w-px bg-accent/60 rounded-t-sm"
           style={{ height: `${Math.max(2, (d.c / max) * 100)}%` }}
         />

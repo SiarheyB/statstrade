@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ShieldCheck, Trash2, KeyRound } from "lucide-react";
 import clsx from "clsx";
+import { useI18n } from "@/lib/i18n/provider";
 
 type Row = {
   id: string;
@@ -20,6 +21,8 @@ type Row = {
 
 export default function UsersTable({ rows }: { rows: Row[] }) {
   const router = useRouter();
+  const { t, locale } = useI18n();
+  const nf = locale === "ru" ? "ru-RU" : "en-US";
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
 
@@ -28,7 +31,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
   );
 
   async function reset2fa(r: Row) {
-    if (!confirm(`Сбросить 2FA для ${r.email}?`)) return;
+    if (!confirm(t("admin.users.confirmReset2fa", { email: r.email }))) return;
     setBusy(r.id);
     try {
       const res = await fetch("/api/admin/users", {
@@ -37,7 +40,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
         body: JSON.stringify({ id: r.id, action: "reset2fa" }),
       });
       const json = await res.json();
-      if (!res.ok) alert(json.error ?? "Ошибка");
+      if (!res.ok) alert(json.error ?? t("admin.users.error"));
       else router.refresh();
     } finally {
       setBusy(null);
@@ -45,12 +48,12 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
   }
 
   async function remove(r: Row) {
-    if (!confirm(`Удалить пользователя ${r.email}? Будут удалены все его аккаунты и данные.`)) return;
+    if (!confirm(t("admin.users.confirmDelete", { email: r.email }))) return;
     setBusy(r.id);
     try {
       const res = await fetch(`/api/admin/users?id=${r.id}`, { method: "DELETE" });
       const json = await res.json();
-      if (!res.ok) alert(json.error ?? "Ошибка");
+      if (!res.ok) alert(json.error ?? t("admin.users.error"));
       else router.refresh();
     } finally {
       setBusy(null);
@@ -62,7 +65,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
       <input
         value={q}
         onChange={(e) => setQ(e.target.value)}
-        placeholder="Поиск по email или имени…"
+        placeholder={t("admin.users.search")}
         className="w-full max-w-sm mb-4 px-3 py-2 rounded-lg bg-surface border border-border text-sm focus:outline-none focus-visible:ring-2 ring-accent"
       />
       <div className="card overflow-hidden">
@@ -70,12 +73,12 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
-                <th className="px-5 py-2 font-medium">Email</th>
-                <th className="px-3 py-2 font-medium">Имя</th>
-                <th className="px-3 py-2 font-medium text-right">Аккаунты</th>
-                <th className="px-3 py-2 font-medium text-right">Аннотации</th>
-                <th className="px-3 py-2 font-medium">2FA</th>
-                <th className="px-3 py-2 font-medium">Регистрация</th>
+                <th className="px-5 py-2 font-medium">{t("admin.users.th.email")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.name")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.accounts")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.annotations")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.2fa")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.registered")}</th>
                 <th className="px-5 py-2"></th>
               </tr>
             </thead>
@@ -94,13 +97,13 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{r.annotations}</td>
                   <td className="px-3 py-2.5">
                     {r.twoFactorEnabled ? (
-                      <span className="inline-flex items-center gap-1 text-profit text-xs"><KeyRound size={12} /> вкл</span>
+                      <span className="inline-flex items-center gap-1 text-profit text-xs"><KeyRound size={12} /> {t("admin.users.2faOn")}</span>
                     ) : (
-                      <span className="text-faint text-xs">—</span>
+                      <span className="text-faint text-xs">{t("admin.dash")}</span>
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-muted whitespace-nowrap">
-                    {new Date(r.createdAt).toLocaleDateString("ru-RU")}
+                    {new Date(r.createdAt).toLocaleDateString(nf)}
                   </td>
                   <td className="px-5 py-2.5 text-right whitespace-nowrap">
                     <div className="inline-flex gap-1">
@@ -108,22 +111,22 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                         <button
                           onClick={() => reset2fa(r)}
                           disabled={busy === r.id}
-                          title="Сбросить 2FA"
+                          title={t("admin.users.reset2faTitle")}
                           className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-muted hover:text-fg hover:bg-surface-2 transition disabled:opacity-50"
                         >
-                          <KeyRound size={13} /> 2FA
+                          <KeyRound size={13} /> {t("admin.users.reset2fa")}
                         </button>
                       )}
                       <button
                         onClick={() => remove(r)}
                         disabled={busy === r.id || r.isAdmin}
-                        title={r.isAdmin ? "Нельзя удалить администратора" : "Удалить"}
+                        title={r.isAdmin ? t("admin.users.deleteAdminTitle") : t("admin.users.deleteTitle")}
                         className={clsx(
                           "inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md transition",
                           r.isAdmin ? "text-faint cursor-not-allowed" : "text-muted hover:text-loss hover:bg-surface-2",
                         )}
                       >
-                        <Trash2 size={13} /> удалить
+                        <Trash2 size={13} /> {t("admin.users.delete")}
                       </button>
                     </div>
                   </td>
@@ -131,7 +134,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-muted">Никого не найдено.</td>
+                  <td colSpan={7} className="px-5 py-8 text-center text-muted">{t("admin.users.none")}</td>
                 </tr>
               )}
             </tbody>

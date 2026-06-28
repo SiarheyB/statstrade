@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { RefreshCw, RotateCcw, AlertTriangle } from "lucide-react";
 import clsx from "clsx";
+import { useI18n } from "@/lib/i18n/provider";
 
 type Row = {
   id: string;
@@ -29,6 +30,8 @@ const STATUS_STYLE: Record<string, string> = {
 
 export default function AccountsTable({ rows }: { rows: Row[] }) {
   const router = useRouter();
+  const { t, locale } = useI18n();
+  const nf = locale === "ru" ? "ru-RU" : "en-US";
   const [busy, setBusy] = useState<string | null>(null);
 
   async function act(id: string, action: "reset" | "sync") {
@@ -40,7 +43,7 @@ export default function AccountsTable({ rows }: { rows: Row[] }) {
         body: JSON.stringify({ id, action }),
       });
       const json = await res.json();
-      if (!res.ok) alert(json.error ?? "Ошибка");
+      if (!res.ok) alert(json.error ?? t("admin.accounts.error"));
       else router.refresh();
     } finally {
       setBusy(null);
@@ -53,13 +56,13 @@ export default function AccountsTable({ rows }: { rows: Row[] }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
-              <th className="px-5 py-2 font-medium">Пользователь</th>
-              <th className="px-3 py-2 font-medium">Биржа / метка</th>
-              <th className="px-3 py-2 font-medium">Источник</th>
-              <th className="px-3 py-2 font-medium">Статус</th>
-              <th className="px-3 py-2 font-medium text-right">Fills / импорт</th>
-              <th className="px-3 py-2 font-medium">Авто-синк</th>
-              <th className="px-3 py-2 font-medium">Послед. синк</th>
+              <th className="px-5 py-2 font-medium">{t("admin.accounts.th.user")}</th>
+              <th className="px-3 py-2 font-medium">{t("admin.accounts.th.exchange")}</th>
+              <th className="px-3 py-2 font-medium">{t("admin.accounts.th.source")}</th>
+              <th className="px-3 py-2 font-medium">{t("admin.accounts.th.status")}</th>
+              <th className="px-3 py-2 font-medium text-right">{t("admin.accounts.th.fills")}</th>
+              <th className="px-3 py-2 font-medium">{t("admin.accounts.th.autoSync")}</th>
+              <th className="px-3 py-2 font-medium">{t("admin.accounts.th.lastSync")}</th>
               <th className="px-5 py-2"></th>
             </tr>
           </thead>
@@ -85,17 +88,17 @@ export default function AccountsTable({ rows }: { rows: Row[] }) {
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-muted">
-                  {r.fills.toLocaleString("ru-RU")} / {r.importedTrades.toLocaleString("ru-RU")}
+                  {r.fills.toLocaleString(nf)} / {r.importedTrades.toLocaleString(nf)}
                 </td>
                 <td className="px-3 py-2.5">
                   {r.autoSync ? (
-                    <span className="text-profit text-xs">вкл · {r.syncIntervalMinutes}м</span>
+                    <span className="text-profit text-xs">{t("admin.accounts.autoOn", { min: r.syncIntervalMinutes })}</span>
                   ) : (
-                    <span className="text-faint text-xs">—</span>
+                    <span className="text-faint text-xs">{t("admin.dash")}</span>
                   )}
                 </td>
                 <td className="px-3 py-2.5 text-muted whitespace-nowrap text-xs">
-                  {r.lastSyncAt ? new Date(r.lastSyncAt).toLocaleString("ru-RU") : "—"}
+                  {r.lastSyncAt ? new Date(r.lastSyncAt).toLocaleString(nf) : t("admin.dash")}
                 </td>
                 <td className="px-5 py-2.5 text-right whitespace-nowrap">
                   <div className="inline-flex gap-1">
@@ -103,20 +106,20 @@ export default function AccountsTable({ rows }: { rows: Row[] }) {
                       <button
                         onClick={() => act(r.id, "sync")}
                         disabled={busy !== null}
-                        title="Запустить синхронизацию (один чанк)"
+                        title={t("admin.accounts.syncTitle")}
                         className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-muted hover:text-accent hover:bg-surface-2 transition disabled:opacity-50"
                       >
-                        <RefreshCw size={13} className={clsx(busy === r.id + "sync" && "animate-spin")} /> синк
+                        <RefreshCw size={13} className={clsx(busy === r.id + "sync" && "animate-spin")} /> {t("admin.accounts.sync")}
                       </button>
                     )}
                     {r.syncStatus === "syncing" && (
                       <button
                         onClick={() => act(r.id, "reset")}
                         disabled={busy !== null}
-                        title="Сбросить зависший статус в idle"
+                        title={t("admin.accounts.resetTitle")}
                         className="inline-flex items-center gap-1 text-xs px-2 py-1 rounded-md text-muted hover:text-fg hover:bg-surface-2 transition disabled:opacity-50"
                       >
-                        <RotateCcw size={13} /> сброс
+                        <RotateCcw size={13} /> {t("admin.accounts.reset")}
                       </button>
                     )}
                   </div>
@@ -125,7 +128,7 @@ export default function AccountsTable({ rows }: { rows: Row[] }) {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-5 py-8 text-center text-muted">Аккаунтов нет.</td>
+                <td colSpan={8} className="px-5 py-8 text-center text-muted">{t("admin.accounts.none")}</td>
               </tr>
             )}
           </tbody>

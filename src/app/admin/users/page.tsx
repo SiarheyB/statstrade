@@ -1,10 +1,12 @@
 import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
+import { getServerT } from "@/lib/i18n/server";
 import UsersTable from "@/components/admin/UsersTable";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminUsersPage() {
+  const { t } = await getServerT();
   const users = await prisma.user.findMany({
     orderBy: { createdAt: "desc" },
     select: {
@@ -32,8 +34,8 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Пользователи</h1>
-      <p className="mt-1 text-sm text-muted">Всего: {rows.length}.</p>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("admin.users.title")}</h1>
+      <p className="mt-1 text-sm text-muted">{t("admin.users.total", { n: rows.length })}</p>
       <UsersTable rows={rows} />
     </div>
   );

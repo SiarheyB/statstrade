@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { getServerT } from "@/lib/i18n/server";
 import { Database } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -13,6 +14,8 @@ function fmtBytes(n: number): string {
 }
 
 export default async function AdminSystemPage() {
+  const { t, locale } = await getServerT();
+  const nf = locale === "ru" ? "ru-RU" : "en-US";
   // Размеры таблиц и приблизительное число строк (из статистики Postgres).
   let tables: TableRow[] = [];
   let dbSize = 0;
@@ -34,9 +37,9 @@ export default async function AdminSystemPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-5xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Здоровье БД</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("admin.system.title")}</h1>
       <p className="mt-1 text-sm text-muted flex items-center gap-2">
-        <Database size={15} /> Суммарный размер таблиц: <span className="font-medium text-fg">{fmtBytes(dbSize)}</span>
+        <Database size={15} /> {t("admin.system.totalSize")} <span className="font-medium text-fg">{fmtBytes(dbSize)}</span>
       </p>
 
       {error && <div className="mt-6 card p-4 border-loss/30 text-sm text-loss">{error}</div>}
@@ -46,23 +49,23 @@ export default async function AdminSystemPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
-                <th className="px-5 py-2 font-medium">Таблица</th>
-                <th className="px-3 py-2 font-medium text-right">Строк (~)</th>
-                <th className="px-3 py-2 font-medium text-right">Размер</th>
-                <th className="px-5 py-2 font-medium w-40">Доля</th>
+                <th className="px-5 py-2 font-medium">{t("admin.system.th.table")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.rows")}</th>
+                <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.size")}</th>
+                <th className="px-5 py-2 font-medium w-40">{t("admin.system.th.share")}</th>
               </tr>
             </thead>
             <tbody>
-              {tables.map((t) => (
-                <tr key={t.table} className="border-b border-border/50 last:border-0 hover:bg-surface-2/50">
-                  <td className="px-5 py-2.5 font-medium">{t.table}</td>
+              {tables.map((row) => (
+                <tr key={row.table} className="border-b border-border/50 last:border-0 hover:bg-surface-2/50">
+                  <td className="px-5 py-2.5 font-medium">{row.table}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">
-                    {t.rows < 0 ? "—" : t.rows.toLocaleString("ru-RU")}
+                    {row.rows < 0 ? t("admin.dash") : row.rows.toLocaleString(nf)}
                   </td>
-                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtBytes(t.bytes)}</td>
+                  <td className="px-3 py-2.5 text-right tabular-nums">{fmtBytes(row.bytes)}</td>
                   <td className="px-5 py-2.5">
                     <div className="h-2 rounded-full bg-surface-2 overflow-hidden">
-                      <div className="h-full bg-accent/60" style={{ width: `${(t.bytes / maxBytes) * 100}%` }} />
+                      <div className="h-full bg-accent/60" style={{ width: `${(row.bytes / maxBytes) * 100}%` }} />
                     </div>
                   </td>
                 </tr>
@@ -71,10 +74,7 @@ export default async function AdminSystemPage() {
           </table>
         </div>
       </div>
-      <p className="mt-3 text-xs text-faint">
-        Число строк — приблизительное (из статистики планировщика Postgres). High-volume таблицы карты ордеров (Ob*)
-        чистятся по retention в collector-сервисе.
-      </p>
+      <p className="mt-3 text-xs text-faint">{t("admin.system.note")}</p>
     </div>
   );
 }

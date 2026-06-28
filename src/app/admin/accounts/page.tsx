@@ -1,9 +1,11 @@
 import { prisma } from "@/lib/db";
+import { getServerT } from "@/lib/i18n/server";
 import AccountsTable from "@/components/admin/AccountsTable";
 
 export const dynamic = "force-dynamic";
 
 export default async function AdminAccountsPage() {
+  const { t } = await getServerT();
   const accounts = await prisma.exchangeAccount.findMany({
     orderBy: { createdAt: "desc" },
     select: {
@@ -40,8 +42,8 @@ export default async function AdminAccountsPage() {
 
   return (
     <div className="p-6 md:p-8 max-w-6xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Аккаунты бирж</h1>
-      <p className="mt-1 text-sm text-muted">Всего: {rows.length}.</p>
+      <h1 className="text-2xl font-semibold tracking-tight">{t("admin.accounts.title")}</h1>
+      <p className="mt-1 text-sm text-muted">{t("admin.accounts.total", { n: rows.length })}</p>
       <AccountsTable rows={rows} />
     </div>
   );
