@@ -3,15 +3,19 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, ArrowLeft, Menu, X } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Newspaper, Database, ScrollText, ArrowLeft, Menu, X } from "lucide-react";
 import clsx from "clsx";
 
 // Навигация админ-панели. Раздел отделён от пользовательского дашборда: своя
-// шапка, доступ только администраторам (см. admin/layout.tsx). Реализованы
-// «Обзор» и «Карта ордеров»; остальные разделы добавляются по мере готовности.
+// шапка, доступ только администраторам (см. admin/layout.tsx).
 const LINKS = [
   { href: "/admin", label: "Обзор", icon: LayoutDashboard, exact: true },
   { href: "/admin/collector", label: "Карта ордеров", icon: Layers },
+  { href: "/admin/users", label: "Пользователи", icon: Users },
+  { href: "/admin/accounts", label: "Аккаунты бирж", icon: Plug },
+  { href: "/admin/content", label: "Контент-фиды", icon: Newspaper },
+  { href: "/admin/system", label: "Здоровье БД", icon: Database },
+  { href: "/admin/audit", label: "Аудит действий", icon: ScrollText },
 ];
 
 export default function AdminNav({ email }: { email: string }) {

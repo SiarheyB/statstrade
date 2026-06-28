@@ -1,0 +1,40 @@
+import { prisma } from "@/lib/db";
+import { isAdminEmail } from "@/lib/admin";
+import UsersTable from "@/components/admin/UsersTable";
+
+export const dynamic = "force-dynamic";
+
+export default async function AdminUsersPage() {
+  const users = await prisma.user.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      createdAt: true,
+      twoFactorEnabled: true,
+      googleId: true,
+      _count: { select: { accounts: true, annotations: true } },
+    },
+  });
+
+  const rows = users.map((u) => ({
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    createdAt: u.createdAt.toISOString(),
+    twoFactorEnabled: u.twoFactorEnabled,
+    google: !!u.googleId,
+    accounts: u._count.accounts,
+    annotations: u._count.annotations,
+    isAdmin: isAdminEmail(u.email),
+  }));
+
+  return (
+    <div className="p-6 md:p-8 max-w-6xl">
+      <h1 className="text-2xl font-semibold tracking-tight">Пользователи</h1>
+      <p className="mt-1 text-sm text-muted">Всего: {rows.length}.</p>
+      <UsersTable rows={rows} />
+    </div>
+  );
+}

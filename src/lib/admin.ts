@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "./auth";
+import { prisma } from "./db";
 
 // Список администраторов задаётся через ENV (без миграции БД): ADMIN_EMAILS —
 // e-mail'ы через запятую. Сравнение нечувствительно к регистру.
@@ -32,4 +33,28 @@ export async function getAdminSession(): Promise<SessionPayload | null> {
 // раскрывать наличие раздела не-админам.
 export function notFound() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
+}
+
+// Запись действия админа в аудит-лог (append-only, см. /admin/audit). Ошибка
+// записи не должна валить само действие — логируем и продолжаем.
+export async function recordAudit(
+  actor: SessionPayload,
+  action: string,
+  opts: { targetType?: string; targetId?: string; targetLabel?: string; detail?: string } = {},
+): Promise<void> {
+  try {
+    await prisma.adminAudit.create({
+      data: {
+        actorId: actor.userId,
+        actorEmail: actor.email,
+        action,
+        targetType: opts.targetType,
+        targetId: opts.targetId,
+        targetLabel: opts.targetLabel,
+        detail: opts.detail,
+      },
+    });
+  } catch (err) {
+    console.error("[audit] не удалось записать:", (err as Error).message);
+  }
 }

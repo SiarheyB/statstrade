@@ -33,6 +33,24 @@ model User {
   annotations  TradeAnnotation[]
 }
 
+// Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
+// Admins are defined by ADMIN_EMAILS (no role column), so the actor is stored by
+// id + email snapshot. Append-only; surfaced in /admin/audit.
+model AdminAudit {
+  id          String   @id @default(cuid())
+  actorId     String // admin user id
+  actorEmail  String // snapshot of admin email at action time
+  action      String // e.g. user.delete | account.sync | account.reset | user.reset2fa | content.refresh
+  targetType  String? // user | account | content
+  targetId    String? // affected entity id (when applicable)
+  targetLabel String? // human-readable target (email / exchange label / feed)
+  detail      String? // optional extra context
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action])
+}
+
 // Manual, user-supplied annotations attached to a reconstructed round-trip
 // trade. Trades have no DB row of their own, so they are referenced by a
 // stable composite key (account + symbol + market + entry timestamp).

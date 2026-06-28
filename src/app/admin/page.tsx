@@ -56,20 +56,18 @@ export default async function AdminOverviewPage() {
             </div>
           </div>
         </Link>
-        <div className="card p-5 flex items-start gap-4 opacity-60">
-          <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-surface-2 text-muted shrink-0">
+        <Link
+          href="/admin/users"
+          className="card p-5 hover:border-accent/40 transition flex items-start gap-4"
+        >
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent/15 text-accent shrink-0">
             <Users size={20} />
           </span>
           <div>
-            <div className="font-medium flex items-center gap-2">
-              Пользователи и аккаунты
-              <span className="text-[10px] uppercase tracking-wide rounded bg-surface-2 px-1.5 py-0.5 text-faint">
-                скоро
-              </span>
-            </div>
-            <div className="mt-1 text-sm text-muted">Управление пользователями и синхронизацией.</div>
+            <div className="font-medium">Пользователи и аккаунты</div>
+            <div className="mt-1 text-sm text-muted">Управление пользователями и синхронизацией бирж.</div>
           </div>
-        </div>
+        </Link>
       </div>
 
       {syncErrors > 0 && (
