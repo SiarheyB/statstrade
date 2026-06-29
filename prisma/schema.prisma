@@ -245,6 +245,40 @@ model ObSnapshot {
   @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
+// Предагрегация снапшотов стакана в минутные бакеты × ценовой уровень. Пишется
+// коллектором (накапливает снапшоты за минуту в памяти и сбрасывает завершённый
+// бакет одним upsert). Источник для heatmap-сетки и панели B/A: вместо скана
+// ~40М сырых строк ObSnapshot на каждый запрос читаем ~в 30 раз меньше строк.
+// volSum/bidSum/askSum — суммы по всем снапшотам бакета на этом уровне; делитель
+// (число снапшотов в бакете) хранится в ObRollupBucket. Прунится по ретеншну.
+model ObSnapshotRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало минутного бакета (UTC)
+  price    Float // ценовой бин
+  volSum   Float    @default(0) // Σ(bidVol+askVol) по снапшотам бакета
+  bidSum   Float    @default(0) // Σ bidVol
+  askSum   Float    @default(0) // Σ askVol
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+}
+
+// Метаданные минутного бакета: сколько снапшотов в него попало (делитель для
+// усреднения «высоты стен») и Σ mid (для B/A-зоны ±1%). Маленькая таблица —
+// один ряд на (symbol,exchange,минута).
+model ObRollupBucket {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3)
+  snaps    Int      @default(0) // число снапшотов фида в бакете
+  midSum   Float    @default(0) // Σ mid по снапшотам (avg mid = midSum/snaps)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+}
+
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
   id          String   @id @default(cuid())
