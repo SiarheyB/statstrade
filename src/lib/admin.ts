@@ -42,18 +42,27 @@ export const FEED_STALE_MS = 90_000;
 export type FeedFreshness = { symbol: string; exchange: string; lastT: Date | null; lagMs: number; stale: boolean };
 
 // Свежесть каждого фида ObSnapshot (для алертов на «Обзоре» и странице collector).
+//
+// Список фидов берём из маленькой ObRollupBucket (а НЕ сканируем сырую
+// ObSnapshot — на разросшейся таблице GROUP BY вешал страницу /admin). Время
+// последнего снапшота для каждого фида — точечный max(t) по индексу
+// (symbol,exchange,t): мгновенно при любом размере таблицы.
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
-  const rows = await prisma.$queryRaw<{ symbol: string; exchange: string; last_t: Date | null }[]>`
-    SELECT symbol, exchange, max(t) AS last_t
-    FROM "ObSnapshot"
-    GROUP BY symbol, exchange
-    ORDER BY symbol, exchange
+  const feeds = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+    SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
   `;
   const now = Date.now();
-  return rows.map((r) => {
-    const lagMs = r.last_t ? now - new Date(r.last_t).getTime() : Infinity;
-    return { symbol: r.symbol, exchange: r.exchange, lastT: r.last_t, lagMs, stale: lagMs > FEED_STALE_MS };
-  });
+  const out: FeedFreshness[] = [];
+  for (const f of feeds) {
+    const r = await prisma.$queryRaw<{ last_t: Date | null }[]>`
+      SELECT max(t) AS last_t FROM "ObSnapshot"
+      WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+    `;
+    const lastT = r[0]?.last_t ?? null;
+    const lagMs = lastT ? now - new Date(lastT).getTime() : Infinity;
+    out.push({ symbol: f.symbol, exchange: f.exchange, lastT, lagMs, stale: lagMs > FEED_STALE_MS });
+  }
+  return out;
 }
 
 // Запись действия админа в аудит-лог (append-only, см. /admin/audit). Ошибка

@@ -32,16 +32,17 @@ export default async function AdminOverviewPage() {
   const weekAgo = new Date(Date.now() - 7 * 86400_000);
   const monthAgo = new Date(Date.now() - 30 * 86400_000);
 
-  const [users, newWeek, newMonth, accounts, syncErrors, fills, obFeeds] = await Promise.all([
+  const [users, newWeek, newMonth, accounts, syncErrors, fills] = await Promise.all([
     prisma.user.count(),
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.user.count({ where: { createdAt: { gte: monthAgo } } }),
     prisma.exchangeAccount.count(),
     prisma.exchangeAccount.count({ where: { syncStatus: "error" } }),
     prisma.fill.count(),
-    prisma.obSnapshot.findMany({ distinct: ["symbol", "exchange"], select: { symbol: true } }),
   ]);
 
+  // Число фидов берём из freshness (он же — из маленькой rollup-таблицы), чтобы
+  // не делать distinct-скан по разросшейся ObSnapshot (вешал страницу).
   const freshness = await getFeedFreshness();
   const staleFeeds = freshness.filter((f) => f.stale);
 
@@ -90,7 +91,7 @@ export default async function AdminOverviewPage() {
         <Stat label={t("admin.overview.stat.fills")} value={fills.toLocaleString(nf)} />
         <Stat
           label={t("admin.overview.stat.feeds")}
-          value={obFeeds.length}
+          value={freshness.length}
           hint={t("admin.overview.stat.feedsHint")}
         />
       </div>
