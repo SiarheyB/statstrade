@@ -533,18 +533,30 @@ export default function OrderflowPage() {
             `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
           ]
         : [fmtDateTime(cndl ? cndl.t : ms)];
-      const boxW = 184;
-      const boxH = 12 + lines.length * 15;
-      let bx = hov.mx + 14;
-      let by = hov.my + 14;
-      if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 14;
-      if (by + boxH > plotH) by = hov.my - boxH - 14;
-      ctx.fillStyle = "rgba(16,18,26,0.95)";
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      // Крупный читаемый шрифт тултипа (по умолчанию canvas брал остаточные 10px,
+      // на больших мониторах это было слишком мелко). Размер бокса считаем по
+      // реальной ширине текста, чтобы строки не обрезались.
+      const tipPx = 14;
+      const lineH = 20;
+      const padX = 12;
+      const padY = 10;
+      ctx.font = `${tipPx}px ui-sans-serif, system-ui`;
+      let textW = 0;
+      for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
+      const boxW = Math.ceil(textW) + padX * 2;
+      const boxH = padY * 2 + lines.length * lineH;
+      let bx = hov.mx + 16;
+      let by = hov.my + 16;
+      if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 16;
+      if (by + boxH > plotH) by = hov.my - boxH - 16;
+      ctx.fillStyle = "rgba(16,18,26,0.96)";
+      ctx.strokeStyle = "rgba(255,255,255,0.18)";
       ctx.fillRect(bx, by, boxW, boxH);
       ctx.strokeRect(bx, by, boxW, boxH);
-      ctx.fillStyle = "#cdd3df";
-      lines.forEach((ln, i) => ctx.fillText(ln, bx + 8, by + 16 + i * 15));
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#e6eaf2";
+      lines.forEach((ln, i) => ctx.fillText(ln, bx + padX, by + padY + lineH / 2 + i * lineH));
+      ctx.textBaseline = "alphabetic";
     }
   }, [data, minT, gamma, clusters, showLiq, t]);
 
@@ -796,7 +808,7 @@ export default function OrderflowPage() {
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";
 
   return (
-    <div className="px-6 py-5 max-w-7xl mx-auto">
+    <div className="px-6 py-5 w-full">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
@@ -896,7 +908,7 @@ export default function OrderflowPage() {
             <canvas
               ref={canvasRef}
               className="w-full cursor-crosshair"
-              style={{ height: 540 }}
+              style={{ height: "min(72vh, 720px)" }}
               onMouseMove={onMove}
               onMouseLeave={onLeave}
               onMouseDown={onDown}

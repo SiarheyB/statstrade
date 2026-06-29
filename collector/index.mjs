@@ -122,10 +122,10 @@ function metricFor(tag) {
 
 function rowsForFeed(feed, t) {
   const { book, binSize } = feed;
-  if (!book.synced) return [];
+  if (!book.synced) return { rows: [], mid: null };
   const bb = book.bestBid();
   const ba = book.bestAsk();
-  if (!bb || !ba) return [];
+  if (!bb || !ba) return { rows: [], mid: null };
   const mid = (bb.price + ba.price) / 2;
   const lo = mid * (1 - cfg.depthPct);
   const hi = mid * (1 + cfg.depthPct);
@@ -139,20 +139,92 @@ function rowsForFeed(feed, t) {
     if ((bidVol + askVol) * c < cfg.noiseMinNotional) continue;
     out.push([feed.symbol, feed.exchange, t, c, bidVol, askVol]);
   }
-  return out;
+  return { rows: out, mid };
+}
+
+// Накопитель минутных rollup-бакетов. Снапшоты копятся в памяти и сбрасываются в
+// БД, когда минута завершилась (см. flushRollup). Ключ бакета — `${symbol}|${exchange}|${bucketMs}`.
+const rollup = new Map(); // key -> { symbol, exchange, bucketMs, snaps, midSum, prices: Map<price,{vol,bid,ask}> }
+
+function accumulateRollup(symbol, exchange, t, rows, mid) {
+  if (mid == null || rows.length === 0) return;
+  const bucketMs = Math.floor(t.getTime() / 60_000) * 60_000;
+  const key = `${symbol}|${exchange}|${bucketMs}`;
+  let e = rollup.get(key);
+  if (!e) {
+    e = { symbol, exchange, bucketMs, snaps: 0, midSum: 0, prices: new Map() };
+    rollup.set(key, e);
+  }
+  e.snaps += 1;
+  e.midSum += mid;
+  for (const r of rows) {
+    const price = r[3];
+    const bid = r[4];
+    const ask = r[5];
+    const cell = e.prices.get(price) ?? { vol: 0, bid: 0, ask: 0 };
+    cell.vol += bid + ask;
+    cell.bid += bid;
+    cell.ask += ask;
+    e.prices.set(price, cell);
+  }
+}
+
+// Сбрасываем в БД все бакеты, чья минута уже завершилась (bucketMs < текущей
+// минуты). Upsert (ON CONFLICT) — на случай рестарта коллектора посреди минуты.
+async function flushRollup(now) {
+  const curBucket = Math.floor(now.getTime() / 60_000) * 60_000;
+  for (const [key, e] of rollup) {
+    if (e.bucketMs >= curBucket) continue;
+    rollup.delete(key);
+    if (e.snaps === 0 || e.prices.size === 0) continue;
+    const bucket = new Date(e.bucketMs);
+    try {
+      await pool.query(
+        `INSERT INTO "ObRollupBucket" ("symbol","exchange","bucket","snaps","midSum")
+         VALUES ($1,$2,$3,$4,$5)
+         ON CONFLICT ("symbol","exchange","bucket")
+         DO UPDATE SET "snaps" = "ObRollupBucket"."snaps" + EXCLUDED."snaps",
+                       "midSum" = "ObRollupBucket"."midSum" + EXCLUDED."midSum"`,
+        [e.symbol, e.exchange, bucket, e.snaps, e.midSum],
+      );
+      const values = [];
+      const params = [];
+      let i = 0;
+      for (const [price, cell] of e.prices) {
+        const b = i * 7;
+        values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7})`);
+        params.push(e.symbol, e.exchange, bucket, price, cell.vol, cell.bid, cell.ask);
+        i += 1;
+      }
+      await pool.query(
+        `INSERT INTO "ObSnapshotRollup" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
+         VALUES ${values.join(",")}
+         ON CONFLICT ("symbol","exchange","bucket","price")
+         DO UPDATE SET "volSum" = "ObSnapshotRollup"."volSum" + EXCLUDED."volSum",
+                       "bidSum" = "ObSnapshotRollup"."bidSum" + EXCLUDED."bidSum",
+                       "askSum" = "ObSnapshotRollup"."askSum" + EXCLUDED."askSum"`,
+        params,
+      );
+    } catch (err) {
+      console.error(`[rollup] flush ошибка ${key}: ${err.message}`);
+    }
+  }
 }
 
 async function writeSnapshot() {
   const t = new Date();
   const rows = [];
   for (const feed of feeds) {
-    const r = rowsForFeed(feed, t);
+    const { rows: r, mid } = rowsForFeed(feed, t);
     const m = metricFor(`${feed.exchange}:${feed.symbol}`);
     m.obRows += r.length;
     m.obLastBins = r.length;
     m.lastWriteAt = t.toISOString();
     rows.push(...r);
+    accumulateRollup(feed.symbol, feed.exchange, t, r, mid);
   }
+  // Сбрасываем завершённые минутные бакеты в rollup-таблицы (не блокирует запись
+  // сырых снапшотов — flush идёт после основного INSERT ниже).
 
   if (rows.length > 0) {
     const values = [];
@@ -244,6 +316,8 @@ async function writeSnapshot() {
     }
   }
 
+  await flushRollup(t);
+
   const synced = feeds.filter((f) => f.book.synced).length;
   console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} fp=${fpRows.length} big=${bigRows.length} feeds=${synced}/${feeds.length}`);
 }
@@ -266,7 +340,17 @@ async function pruneOld() {
       `DELETE FROM "ObBigTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
       [String(cfg.retentionDays)],
     );
-    const n = (r1.rowCount ?? 0) + (r2.rowCount ?? 0) + (r3.rowCount ?? 0) + (r4.rowCount ?? 0);
+    const r5 = await pool.query(
+      `DELETE FROM "ObSnapshotRollup" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
+      [String(cfg.retentionDays)],
+    );
+    const r6 = await pool.query(
+      `DELETE FROM "ObRollupBucket" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
+      [String(cfg.retentionDays)],
+    );
+    const n =
+      (r1.rowCount ?? 0) + (r2.rowCount ?? 0) + (r3.rowCount ?? 0) +
+      (r4.rowCount ?? 0) + (r5.rowCount ?? 0) + (r6.rowCount ?? 0);
     if (n) console.log(`[prune] удалено ${n} старых строк`);
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);
@@ -335,6 +419,42 @@ console.log(
 );
 for (const f of feeds) f.book.connect();
 for (const tf of tradeFeeds) tf.trades.connect();
+
+// Одноразовый бэкафилл rollup из сырой истории ObSnapshot — чтобы при первом
+// запуске новой версии heatmap сразу показывал всю историю (а не только минуты
+// после рестарта). Выполняется только если rollup пуст; INSERT…SELECT целиком в
+// Postgres (без переноса строк в Node). mid для исторических бакетов оцениваем
+// как VWAP бакета (живые данные пишут точный mid).
+async function backfillRollup() {
+  try {
+    const exists = await pool.query(`SELECT 1 FROM "ObSnapshotRollup" LIMIT 1`);
+    if (exists.rowCount > 0) return;
+    console.log("[rollup] бэкафилл из ObSnapshot…");
+    await pool.query(`
+      INSERT INTO "ObSnapshotRollup" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
+      SELECT "symbol","exchange",
+             to_timestamp(floor(extract(epoch from "t") / 60) * 60),
+             "price", SUM("bidVol" + "askVol"), SUM("bidVol"), SUM("askVol")
+      FROM "ObSnapshot"
+      GROUP BY "symbol","exchange", to_timestamp(floor(extract(epoch from "t") / 60) * 60), "price"
+      ON CONFLICT DO NOTHING
+    `);
+    await pool.query(`
+      INSERT INTO "ObRollupBucket" ("symbol","exchange","bucket","snaps","midSum")
+      SELECT "symbol","exchange",
+             to_timestamp(floor(extract(epoch from "t") / 60) * 60),
+             COUNT(DISTINCT "t"),
+             COUNT(DISTINCT "t") * (SUM("price" * ("bidVol" + "askVol")) / NULLIF(SUM("bidVol" + "askVol"), 0))
+      FROM "ObSnapshot"
+      GROUP BY "symbol","exchange", to_timestamp(floor(extract(epoch from "t") / 60) * 60)
+      ON CONFLICT DO NOTHING
+    `);
+    console.log("[rollup] бэкафилл завершён");
+  } catch (err) {
+    console.error(`[rollup] бэкафилл ошибка: ${err.message}`);
+  }
+}
+setTimeout(backfillRollup, 5_000);
 
 const writeTimer = setInterval(writeSnapshot, cfg.snapshotMs);
 const pruneTimer = setInterval(pruneOld, 3600_000);

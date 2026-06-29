@@ -185,7 +185,62 @@ export type BaSeries = {
 
 // Дисбаланс bid/ask во времени (B/A панель). Для каждого снапшота оцениваем mid
 // (между верхним bid-уровнем и нижним ask-уровнем) и считаем долю bid-объёма.
+//
+// Быстрый путь — из rollup-таблиц (join двух маленьких агрегатов вместо self-join
+// по миллионам сырых снапшотов). Если rollup ещё пуст (свежий деплой), падаем на
+// сырой путь computeBARaw.
 export async function computeBA(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  cols = 240,
+): Promise<BaSeries | null> {
+  const xspan = toMs - fromMs || 1;
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+  const exR = exchange === "all" ? Prisma.empty : Prisma.sql`AND r."exchange" = ${exchange}`;
+  const colExpr = Prisma.sql`floor((extract(epoch from r."bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+  const nearLo = Prisma.sql`(b."midSum" / b."snaps") * 0.99`;
+  const nearHi = Prisma.sql`(b."midSum" / b."snaps") * 1.01`;
+
+  const rows = await prisma.$queryRaw<
+    { col: number; full_bid: number; full_ask: number; near_bid: number; near_ask: number }[]
+  >`
+    SELECT ${colExpr}::int AS col,
+           SUM(r."bidSum")::float8 AS full_bid,
+           SUM(r."askSum")::float8 AS full_ask,
+           COALESCE(SUM(r."bidSum") FILTER (WHERE b."snaps" > 0 AND r."price" BETWEEN ${nearLo} AND ${nearHi}), 0)::float8 AS near_bid,
+           COALESCE(SUM(r."askSum") FILTER (WHERE b."snaps" > 0 AND r."price" BETWEEN ${nearLo} AND ${nearHi}), 0)::float8 AS near_ask
+    FROM "ObSnapshotRollup" r
+    JOIN "ObRollupBucket" b
+      ON b."symbol" = r."symbol" AND b."exchange" = r."exchange" AND b."bucket" = r."bucket"
+    WHERE r."symbol" = ${symbol} AND r."bucket" >= ${from} AND r."bucket" <= ${to} ${exR}
+    GROUP BY col
+  `;
+  if (rows.length === 0) return computeBARaw(symbol, exchange, fromMs, toMs, cols);
+
+  const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
+  const fullBid = new Array(cols).fill(0);
+  const fullAsk = new Array(cols).fill(0);
+  const nearBid = new Array(cols).fill(0);
+  const nearAsk = new Array(cols).fill(0);
+  for (const r of rows) {
+    const c = clampCol(r.col);
+    fullBid[c] += r.full_bid;
+    fullAsk[c] += r.full_ask;
+    nearBid[c] += r.near_bid;
+    nearAsk[c] += r.near_ask;
+  }
+  const ratio = (b: number, a: number) => (b + a > 0 ? b / (b + a) : 0.5);
+  const full = fullBid.map((b, i) => ratio(b, fullAsk[i]));
+  const near = nearBid.map((b, i) => ratio(b, nearAsk[i]));
+  const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
+  return { times, full, near };
+}
+
+// Сырой fallback B/A (по ObSnapshot) — используется, пока rollup не наполнен.
+async function computeBARaw(
   symbol: string,
   exchange: string,
   fromMs: number,
@@ -303,24 +358,42 @@ export async function computeOrderflow(
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
   const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
 
-  // Сумма ликвидности (bid+ask) по (колонка времени, ценовой уровень).
-  const cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
-    SELECT ${colExpr}::int AS col, "price" AS price, SUM("bidVol" + "askVol")::float8 AS vol
-    FROM "ObSnapshot"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+  // Быстрый путь — из rollup (минутные бакеты): сумма ликвидности по (колонка,
+  // уровень) + число снапшотов/бирж на колонку. Если rollup ещё пуст (свежий
+  // деплой), считаем по сырой таблице ObSnapshot (legacy-путь ниже).
+  const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+  let cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
+    SELECT ${colExprR}::int AS col, "price" AS price, SUM("volSum")::float8 AS vol
+    FROM "ObSnapshotRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
     GROUP BY col, "price"
   `;
-  if (cells.length === 0) return null;
-
-  // Для усреднения по колонке: число различных снапшотов (exchange|t) и число бирж.
-  const colStats = await prisma.$queryRaw<{ col: number; n: number; ex: number }[]>`
-    SELECT ${colExpr}::int AS col,
-           COUNT(DISTINCT ("exchange" || '|' || extract(epoch from "t")))::int AS n,
-           COUNT(DISTINCT "exchange")::int AS ex
-    FROM "ObSnapshot"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
-    GROUP BY col
-  `;
+  let colStats: { col: number; n: number; ex: number }[];
+  if (cells.length > 0) {
+    colStats = await prisma.$queryRaw<{ col: number; n: number; ex: number }[]>`
+      SELECT ${colExprR}::int AS col, SUM("snaps")::int AS n, COUNT(DISTINCT "exchange")::int AS ex
+      FROM "ObRollupBucket"
+      WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
+      GROUP BY col
+    `;
+  } else {
+    // Legacy fallback: сырые снапшоты.
+    cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
+      SELECT ${colExpr}::int AS col, "price" AS price, SUM("bidVol" + "askVol")::float8 AS vol
+      FROM "ObSnapshot"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+      GROUP BY col, "price"
+    `;
+    if (cells.length === 0) return null;
+    colStats = await prisma.$queryRaw<{ col: number; n: number; ex: number }[]>`
+      SELECT ${colExpr}::int AS col,
+             COUNT(DISTINCT ("exchange" || '|' || extract(epoch from "t")))::int AS n,
+             COUNT(DISTINCT "exchange")::int AS ex
+      FROM "ObSnapshot"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+      GROUP BY col
+    `;
+  }
   const kByCol = new Map<number, number>();
   for (const s of colStats) kByCol.set(s.col, (s.ex || 1) / (s.n || 1));
 
