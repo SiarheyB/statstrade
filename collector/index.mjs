@@ -19,7 +19,13 @@ const cfg = {
   binSize: Number(process.env.BIN_SIZE ?? 25),
   snapshotMs: Number(process.env.SNAPSHOT_MS ?? 2000),
   depthPct: Number(process.env.DEPTH_PCT ?? 0.02),
+  // Раздельный ретеншн: сырые таблицы (ObSnapshot/ObTrade/ObFootprint/ObBigTrade)
+  // нужны лишь для живого профиля стакана (последние секунды) и как fallback —
+  // их держим коротко. История heatmap/B-A живёт в компактном rollup, его храним
+  // дольше. RETENTION_DAYS остаётся дефолтом для обоих ради совместимости.
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),
+  rawRetentionDays: Number(process.env.RAW_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 7),
+  rollupRetentionDays: Number(process.env.ROLLUP_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 7),
   noiseMinNotional: Number(process.env.NOISE_MIN_NOTIONAL ?? 50000),
   bigNotional: Number(process.env.BIG_NOTIONAL ?? 100000),
   databaseUrl: process.env.DATABASE_URL,
@@ -324,29 +330,33 @@ async function writeSnapshot() {
 
 async function pruneOld() {
   try {
+    // Сырые таблицы — короткий ретеншн (нужны лишь живому профилю + fallback).
+    const raw = String(cfg.rawRetentionDays);
     const r1 = await pool.query(
       `DELETE FROM "ObSnapshot" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [raw],
     );
     const r2 = await pool.query(
       `DELETE FROM "ObTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [raw],
     );
     const r3 = await pool.query(
       `DELETE FROM "ObFootprint" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [raw],
     );
     const r4 = await pool.query(
       `DELETE FROM "ObBigTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [raw],
     );
+    // Rollup — длинный ретеншн (компактная история heatmap/B-A).
+    const rollupDays = String(cfg.rollupRetentionDays);
     const r5 = await pool.query(
       `DELETE FROM "ObSnapshotRollup" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [rollupDays],
     );
     const r6 = await pool.query(
       `DELETE FROM "ObRollupBucket" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
+      [rollupDays],
     );
     const n =
       (r1.rowCount ?? 0) + (r2.rowCount ?? 0) + (r3.rowCount ?? 0) +
@@ -401,7 +411,9 @@ const server = http.createServer((req, res) => {
       uptimeMs: now - startedAt,
       snapshotMs: cfg.snapshotMs,
       depthPct: cfg.depthPct,
-      retentionDays: cfg.retentionDays,
+      retentionDays: cfg.retentionDays, // оставлено для обратной совместимости админ-панели
+      rawRetentionDays: cfg.rawRetentionDays,
+      rollupRetentionDays: cfg.rollupRetentionDays,
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
       feeds: feedMetrics,
@@ -415,7 +427,8 @@ server.listen(cfg.port, () => console.log(`[health] http://0.0.0.0:${cfg.port}/h
 
 console.log(
   `[start] collector feeds=${feeds.length} (${feeds.map((f) => `${f.exchange}:${f.symbol}`).join(", ")}) ` +
-    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% retention=${cfg.retentionDays}d`,
+    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% ` +
+    `retention(raw=${cfg.rawRetentionDays}d rollup=${cfg.rollupRetentionDays}d)`,
 );
 for (const f of feeds) f.book.connect();
 for (const tf of tradeFeeds) tf.trades.connect();
