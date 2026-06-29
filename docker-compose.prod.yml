@@ -73,7 +73,12 @@ services:
       DEPTH_PCT: ${OB_DEPTH_PCT:-0.02}
       NOISE_MIN_NOTIONAL: ${OB_NOISE_MIN_NOTIONAL:-50000}
       BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
+      # Раздельный ретеншн: сырые снапшоты нужны лишь живому профилю стакана
+      # (последние секунды) — держим коротко; история heatmap/B-A живёт в
+      # компактном rollup — храним дольше. RETENTION_DAYS — общий дефолт/фолбэк.
       RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
+      RAW_RETENTION_DAYS: ${OB_RAW_RETENTION_DAYS:-2}
+      ROLLUP_RETENTION_DAYS: ${OB_ROLLUP_RETENTION_DAYS:-14}
       PORT: 8080
       # Bearer-токен для защищённого GET /metrics — его опрашивает админ-панель
       # приложения (раздел «Карта ордеров»). Должен совпадать с COLLECTOR_METRICS_TOKEN
