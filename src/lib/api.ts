@@ -37,3 +37,20 @@ export function badRequest(message: string, details?: unknown) {
 export function serverError(message: string) {
   return NextResponse.json({ error: message }, { status: 500 });
 }
+
+// Cache-Control for user-independent GET responses (news, calendar, liqmap …).
+// `public` + `s-maxage` lets a shared cache (Cloudflare edge / any CDN) serve
+// the same payload to everyone for `maxAgeSec`, then keep serving the stale copy
+// for `swrSec` while it revalidates in the background. Browsers aren't trusted
+// to hold it (`max-age=0`) so a manual refresh always re-checks. Only attach to
+// 2xx responses — never to the 401 from `unauthorized()`.
+//
+// NOTE: these endpoints are auth-gated but return PUBLIC market data. A
+// Cloudflare Cache Rule that ignores the session cookie is what actually
+// activates edge caching (see docs/local/OPTIMIZATION.md). That makes the
+// payload reachable by anon requests too — fine here, the data isn't private.
+export function sharedCacheHeaders(maxAgeSec: number, swrSec: number): HeadersInit {
+  return {
+    "Cache-Control": `public, max-age=0, s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`,
+  };
+}

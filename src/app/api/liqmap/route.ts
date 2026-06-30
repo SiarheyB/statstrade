@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, sharedCacheHeaders } from "@/lib/api";
 import { computeLiqMap, type Exchange, type Timeframe } from "@/lib/liqmap";
+
+// Liquidation map is the same for every user; cache 60s at the edge.
+const CACHE = sharedCacheHeaders(60, 120);
 
 export const maxDuration = 30;
 
@@ -26,14 +29,14 @@ export async function GET(req: Request) {
 
   const key = `${exchange}:${symbol}:${tf}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
+  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data, { headers: CACHE });
 
   try {
     const heatmap = await computeLiqMap(exchange as Exchange | "all", symbol, tf as Timeframe);
     if (!heatmap) return badRequest("Нет данных по этому символу/бирже");
     const data = { exchange, symbol, tf, heatmap };
     cache.set(key, { at: Date.now(), data });
-    return NextResponse.json(data);
+    return NextResponse.json(data, { headers: CACHE });
   } catch (err) {
     return serverError((err as Error).message);
   }

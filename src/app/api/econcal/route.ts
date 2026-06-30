@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, serverError, sharedCacheHeaders } from "@/lib/api";
 import { getCalendar } from "@/lib/econcal";
 
 // A cold refresh pulls three weekly JSON feeds and upserts them.
 export const maxDuration = 60;
+
+// Same calendar for everyone (per filter params in the URL); cache 5 min.
+const CACHE = sharedCacheHeaders(300, 1800);
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -26,7 +29,8 @@ export async function GET(req: Request) {
       impacts: impacts ? impacts.split(",").filter(Boolean) : undefined,
       category: category && category !== "all" ? category : undefined,
     });
-    return NextResponse.json(data);
+    // A manual refresh must hit origin, not a stale edge copy.
+    return NextResponse.json(data, force ? undefined : { headers: CACHE });
   } catch (err) {
     return serverError((err as Error).message);
   }
