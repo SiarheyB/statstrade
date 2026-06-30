@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { verifyPassword, createSessionCookie, createPendingCookie } from "@/lib/auth";
 import { badRequest, serverError } from "@/lib/api";
+import { kickUserSync } from "@/lib/sync";
 
 const schema = z.object({
   email: z.string().email("Некорректный email").max(254),
@@ -36,6 +37,7 @@ export async function POST(req: Request) {
     }
 
     await createSessionCookie({ userId: user.id, email: user.email });
+    kickUserSync(user.id); // freshen accounts on return, fire-and-forget
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {
     return serverError((err as Error).message);

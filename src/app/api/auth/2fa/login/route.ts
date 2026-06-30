@@ -9,6 +9,7 @@ import {
 import { decrypt } from "@/lib/crypto";
 import { verifyTotp } from "@/lib/totp";
 import { badRequest, serverError } from "@/lib/api";
+import { kickUserSync } from "@/lib/sync";
 
 const schema = z.object({ code: z.string().min(6).max(7) });
 
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
 
     await clearPendingCookie();
     await createSessionCookie({ userId: user.id, email: user.email });
+    kickUserSync(user.id); // freshen accounts on return, fire-and-forget
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {
     return serverError((err as Error).message);

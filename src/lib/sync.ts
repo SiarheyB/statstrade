@@ -594,6 +594,53 @@ export async function syncChunk(
 
 // Advance one chunk for each due auto-sync account (used by the cron endpoint).
 // Sequential to respect per-exchange rate limits.
+// In-process lock so background drivers (cron, login-kick) never run two
+// chunks for the same account at once. The app is a single long-running
+// container, so one shared Set is enough; user-driven manual sync (serial from
+// the client) keeps calling syncChunk directly.
+const inflight = new Set<string>();
+async function syncChunkGuarded(accountId: string): Promise<boolean> {
+  if (inflight.has(accountId)) return false;
+  inflight.add(accountId);
+  try {
+    await syncChunk(accountId);
+    return true;
+  } finally {
+    inflight.delete(accountId);
+  }
+}
+
+// Fire-and-forget: when a user returns (login), freshen their auto-sync accounts
+// right away instead of waiting up to a cron tick. Best-effort, bounded, and
+// guarded so it never collides with the cron. Active user → base interval, no
+// idle backoff.
+export function kickUserSync(userId: string): void {
+  void (async () => {
+    const accounts = await prisma.exchangeAccount.findMany({
+      where: { userId, autoSync: true },
+    });
+    const now = Date.now();
+    const due = accounts.filter(
+      (a) =>
+        a.syncStatus === "syncing" ||
+        !a.lastSyncAt ||
+        now - a.lastSyncAt.getTime() >= a.syncIntervalMinutes * 60_000,
+    );
+    let next = 0;
+    const worker = async () => {
+      while (next < due.length) {
+        const a = due[next++];
+        try {
+          await syncChunkGuarded(a.id);
+        } catch {
+          /* best-effort */
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(2, due.length) }, worker));
+  })().catch(() => {});
+}
+
 // Multiplier on a user's auto-sync interval based on how long since they were
 // last seen. Active users keep their configured cadence; idle ones back off so
 // the cron queue stays small at scale. NULL = never tracked yet → treat active.
@@ -640,8 +687,7 @@ export async function runDueSyncs(): Promise<{
     while (next < due.length) {
       const a = due[next++];
       try {
-        await syncChunk(a.id);
-        advanced.push(a.id);
+        if (await syncChunkGuarded(a.id)) advanced.push(a.id);
       } catch {
         failed.push(a.id);
       }
