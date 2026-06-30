@@ -1,6 +1,7 @@
 import type { Exchange } from "ccxt";
 import { prisma } from "./db";
 import { decrypt } from "./crypto";
+import { bumpStatsVersion } from "./statsCache";
 import {
   createExchange,
   fetchBalanceUsdt,
@@ -436,6 +437,8 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
       if (typeof ex.close === "function") await ex.close().catch(() => {});
     }
   }
+
+  if (imported > account.syncImported) bumpStatsVersion(account.userId);
 
   if (cursor >= total) {
     const hardFail = errors.length > 0 && imported === 0;

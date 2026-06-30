@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 import {
   parseOptions,
   DEFAULT_ENTRY_POINTS,
@@ -73,6 +74,7 @@ export async function PUT(req: Request) {
         patternOptions: JSON.stringify(patternOptions),
       },
     });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({ entryPointOptions, entryTypeOptions, mistakeOptions, patternOptions });
   } catch (err) {
     return serverError((err as Error).message);

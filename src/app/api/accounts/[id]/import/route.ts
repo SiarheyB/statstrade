@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
 import type { MtFormat } from "@/lib/mt/types";
@@ -92,6 +93,7 @@ export async function POST(
           : {}),
       },
     });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({
       imported: res.count,
       skipped: rows.length - res.count,
@@ -134,6 +136,7 @@ export async function DELETE(
     const res = await prisma.importedTrade.deleteMany({
       where: { accountId: id, importBatch: latest.importBatch },
     });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({ deleted: res.count });
   } catch (err) {
     return serverError((err as Error).message);

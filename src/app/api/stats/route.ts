@@ -12,6 +12,7 @@ import {
   DEFAULT_PATTERNS,
 } from "@/lib/annotations";
 import { canonSymbol } from "@/lib/format";
+import { getCached, setCached, statsVersion } from "@/lib/statsCache";
 import type { Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
@@ -29,6 +30,17 @@ export async function GET(req: Request) {
   const mistake = url.searchParams.get("mistake") ?? "all";
   const pattern = url.searchParams.get("pattern") ?? "all";
   const initialCapital = Number(url.searchParams.get("initialCapital") ?? "10000");
+
+  // Cache key: user + their current data version + all filter params. A write
+  // bumps the version, so cached entries are abandoned without explicit purge.
+  const cacheKey = JSON.stringify([
+    user.userId,
+    statsVersion(user.userId),
+    accountId, market, symbol, from, to, entryPoint, entryType, mistake, pattern,
+    initialCapital,
+  ]);
+  const cached = getCached<unknown>(cacheKey);
+  if (cached !== undefined) return NextResponse.json(cached);
 
   try {
     // Restrict to accounts owned by this user.
@@ -208,7 +220,7 @@ export async function GET(req: Request) {
       exitTime: t.exitTime.toISOString(),
     }));
 
-    return NextResponse.json({
+    const payload = {
       metrics,
       trades: serializedTrades,
       fillCount: fills.length,
@@ -218,7 +230,9 @@ export async function GET(req: Request) {
       entryTypeOptions: parseOptions(userRow?.entryTypeOptions, DEFAULT_ENTRY_TYPES),
       mistakeOptions: parseOptions(userRow?.mistakeOptions, DEFAULT_MISTAKES),
       patternOptions: parseOptions(userRow?.patternOptions, DEFAULT_PATTERNS),
-    });
+    };
+    setCached(cacheKey, payload);
+    return NextResponse.json(payload);
   } catch (err) {
     return serverError((err as Error).message);
   }

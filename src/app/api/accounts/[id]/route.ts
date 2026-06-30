@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 
 // Ensure the account belongs to the current user.
 async function ownAccount(userId: string, id: string) {
@@ -42,6 +43,7 @@ export async function PATCH(
     data: parsed.data,
     select: { autoSync: true, syncIntervalMinutes: true },
   });
+  bumpStatsVersion(user.userId);
   return NextResponse.json(updated);
 }
 
@@ -57,5 +59,6 @@ export async function DELETE(
   if (!account) return badRequest("Аккаунт не найден");
 
   await prisma.exchangeAccount.delete({ where: { id } });
+  bumpStatsVersion(user.userId);
   return NextResponse.json({ ok: true });
 }

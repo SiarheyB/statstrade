@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { encrypt, decrypt, maskSecret } from "@/lib/crypto";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchanges";
 
 const SOURCES = ["exchange", "mt4", "mt5", "manual"] as const;
@@ -109,6 +110,7 @@ export async function POST(req: Request) {
 
   try {
     const account = await prisma.exchangeAccount.create({ data: createData });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({ id: account.id });
   } catch (err) {
     // FK violation = the session points at a user that no longer exists.

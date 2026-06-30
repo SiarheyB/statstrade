@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 import { seedDemoData } from "@/lib/demo";
 
 // Seed synthetic fills for this account so the dashboard can be explored
@@ -24,6 +25,7 @@ export async function POST(
       where: { id },
       data: { lastSyncAt: new Date(), syncStatus: "idle", syncError: null },
     });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({ imported: count });
   } catch (err) {
     return serverError((err as Error).message);

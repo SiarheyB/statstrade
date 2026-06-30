@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { bumpStatsVersion } from "@/lib/statsCache";
 
 const schema = z.object({
   tradeKey: z.string().min(1).max(200),
@@ -46,6 +47,7 @@ export async function PUT(req: Request) {
       create: { userId: user.userId, tradeKey, ...data },
       update: data,
     });
+    bumpStatsVersion(user.userId);
     return NextResponse.json({
       tradeKey: result.tradeKey,
       entryPoint: result.entryPoint,
