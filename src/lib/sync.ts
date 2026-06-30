@@ -609,14 +609,28 @@ export async function runDueSyncs(): Promise<{
 
   const advanced: string[] = [];
   const failed: string[] = [];
-  for (const a of due) {
-    try {
-      await syncChunk(a.id);
-      advanced.push(a.id);
-    } catch {
-      failed.push(a.id);
+
+  // Bounded parallelism: process several accounts at once instead of strictly
+  // sequentially, so one minute of cron can drain a much larger due-queue.
+  // Capped low (default 4) — the box has 4 cores shared with db+collector and
+  // exchanges rate-limit per IP, so going wider hurts more than it helps.
+  // Override with SYNC_CONCURRENCY.
+  const concurrency = Math.max(1, Number(process.env.SYNC_CONCURRENCY ?? "4") || 4);
+  let next = 0;
+  async function worker() {
+    while (next < due.length) {
+      const a = due[next++];
+      try {
+        await syncChunk(a.id);
+        advanced.push(a.id);
+      } catch {
+        failed.push(a.id);
+      }
     }
   }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, due.length) }, () => worker()),
+  );
   return { due: due.length, advanced, failed };
 }
 
