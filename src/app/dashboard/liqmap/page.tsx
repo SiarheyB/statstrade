@@ -398,7 +398,7 @@ export default function LiqMapPage() {
   }
 
   return (
-    <div className="px-6 py-5 max-w-6xl mx-auto">
+    <div className="px-6 py-5 h-screen flex flex-col">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Flame size={20} className="text-accent" />
@@ -466,11 +466,10 @@ export default function LiqMapPage() {
       {error ? (
         <div className="card p-10 text-center text-loss">{error}</div>
       ) : (
-        <div className="relative rounded-xl overflow-hidden border border-border" style={{ background: "#08080d" }}>
+        <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-border" style={{ background: "#08080d" }}>
           <canvas
             ref={canvasRef}
-            className="w-full block touch-none cursor-crosshair"
-            style={{ height: 520 }}
+            className="w-full h-full block touch-none cursor-crosshair"
             onWheel={onWheel}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
@@ -485,7 +484,7 @@ export default function LiqMapPage() {
         </div>
       )}
 
-      <div className="flex items-center gap-3 mt-3 text-xs text-faint">
+      <div className="flex items-center gap-3 mt-3 text-xs text-faint shrink-0">
         <span>{t("liq.zoomHint")}</span>
         <span className="ml-auto">{t("liq.disclaimer")}</span>
       </div>
