@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import clsx from "clsx";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import { useI18n } from "@/lib/i18n/provider";
@@ -425,20 +424,17 @@ export default function LiqMapPage() {
       <p className="text-sm text-muted mt-1 mb-4">{t("liq.subtitle")}</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="flex gap-1">
+        <select
+          value={exchange}
+          onChange={(e) => setExchange(e.target.value)}
+          className="input-base text-sm rounded-lg px-3 py-1.5 cursor-pointer hover:border-border-strong"
+        >
           {EXCHANGES.map((e) => (
-            <button
-              key={e}
-              onClick={() => setExchange(e)}
-              className={clsx(
-                "px-3 py-1.5 rounded-lg text-sm transition capitalize",
-                exchange === e ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
-              )}
-            >
-              {e}
-            </button>
+            <option key={e} value={e}>
+              {e.charAt(0).toUpperCase() + e.slice(1)}
+            </option>
           ))}
-        </div>
+        </select>
         <SearchSelect
           value={symbol}
           options={symbols}
@@ -447,20 +443,17 @@ export default function LiqMapPage() {
           placeholder={t("trades.searchSymbol")}
           onChange={(v) => setSymbol(v)}
         />
-        <div className="flex gap-1 ml-auto">
+        <select
+          value={tf}
+          onChange={(e) => setTf(e.target.value)}
+          className="input-base text-sm rounded-lg px-3 py-1.5 ml-auto cursor-pointer hover:border-border-strong"
+        >
           {TFS.map((f) => (
-            <button
-              key={f}
-              onClick={() => setTf(f)}
-              className={clsx(
-                "px-3 py-1.5 rounded-lg text-sm transition",
-                tf === f ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
-              )}
-            >
+            <option key={f} value={f}>
               {t(`liq.tf.${f}`)}
-            </button>
+            </option>
           ))}
-        </div>
+        </select>
       </div>
 
       {error ? (
