@@ -594,17 +594,36 @@ export async function syncChunk(
 
 // Advance one chunk for each due auto-sync account (used by the cron endpoint).
 // Sequential to respect per-exchange rate limits.
+// Multiplier on a user's auto-sync interval based on how long since they were
+// last seen. Active users keep their configured cadence; idle ones back off so
+// the cron queue stays small at scale. NULL = never tracked yet → treat active.
+function idleBackoff(lastSeenAt: Date | null, now: number): number {
+  if (!lastSeenAt) return 1;
+  const days = (now - lastSeenAt.getTime()) / 86_400_000;
+  if (days < 2) return 1;
+  if (days < 7) return 4;
+  if (days < 30) return 12;
+  return 24;
+}
+
 export async function runDueSyncs(): Promise<{
   due: number;
   advanced: string[];
   failed: string[];
 }> {
   const now = Date.now();
-  const accounts = await prisma.exchangeAccount.findMany({ where: { autoSync: true } });
+  const accounts = await prisma.exchangeAccount.findMany({
+    where: { autoSync: true },
+    include: { user: { select: { lastSeenAt: true } } },
+  });
   const due = accounts.filter((a) => {
     if (a.syncStatus === "syncing") return true; // keep advancing an active scan
     if (!a.lastSyncAt) return true;
-    return now - a.lastSyncAt.getTime() >= a.syncIntervalMinutes * 60_000;
+    // Adaptive backoff: idle users sync far less often. NULL lastSeenAt (legacy
+    // users not yet tracked) is treated as active (×1) so nothing slows down
+    // until the user is actually seen.
+    const interval = a.syncIntervalMinutes * idleBackoff(a.user.lastSeenAt, now) * 60_000;
+    return now - a.lastSyncAt.getTime() >= interval;
   });
 
   const advanced: string[] = [];

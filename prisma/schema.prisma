@@ -20,6 +20,9 @@ model User {
   googleId  String?           @unique // Google "sub" when linked to a Google account
   name      String?
   createdAt DateTime          @default(now())
+  // Last time the user was seen on an authenticated request (throttled write,
+  // ~once/hour). Drives adaptive auto-sync backoff: idle users sync less often.
+  lastSeenAt DateTime?
   // JSON arrays of user-configurable dropdown options for trade annotations.
   entryPointOptions String?
   entryTypeOptions  String?
