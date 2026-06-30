@@ -6,7 +6,7 @@ export const maxDuration = 20;
 // All tradable USDT perpetual symbols (from Binance futures), cached for an hour.
 let cache: { at: number; symbols: string[] } | null = null;
 const TTL_MS = 60 * 60 * 1000;
-const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://statstrade.vercel.app)";
+const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)";
 
 export async function GET() {
   const user = await getAuthUser();

@@ -44,7 +44,7 @@ const TF: Record<Timeframe, { binance: string; bybit: string; okx: string; limit
   "3M": { binance: "6h", bybit: "360", okx: "6H", limit: 360 },
 };
 
-const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://statstrade.vercel.app)";
+const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)";
 
 function splitSymbol(symbol: string): { base: string; quote: string } {
   const s = symbol.toUpperCase();

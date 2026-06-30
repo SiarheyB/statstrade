@@ -25,7 +25,7 @@ export function asLang(value: string | null | undefined): Lang {
 const REFRESH_MS = 15 * 60 * 1000;
 const FETCH_THROTTLE_MS = 60 * 1000;
 const UA =
-  "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://statstrade.vercel.app)";
+  "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)";
 
 type ParsedItem = {
   title: string;

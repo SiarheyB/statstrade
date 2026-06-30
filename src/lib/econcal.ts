@@ -10,7 +10,7 @@ const FEEDS = ["https://nfs.faireconomy.media/ff_calendar_thisweek.json"];
 
 const REFRESH_MS = 30 * 60 * 1000; // refresh at most every 30 min
 const FETCH_THROTTLE_MS = 60 * 1000;
-const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://statstrade.vercel.app)";
+const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)";
 
 // The feed's "country" field actually holds a currency code.
 const CURRENCY_COUNTRY: Record<string, { country: string; iso: string }> = {
