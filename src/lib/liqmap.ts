@@ -36,13 +36,15 @@ const LEVERAGES: { lev: number; weight: number }[] = [
 ];
 const MMR = 0.004; // maintenance margin ~0.4%
 
-// ~2x more candles than before for the same time window (finer interval).
+// Same candle interval as the timeframe implies, but ~2x more history fetched
+// (capped at 1000 — Bybit's per-request limit). The chart shows the recent
+// window by default and scrolls left into the older bars.
 const TF: Record<Timeframe, { binance: string; bybit: string; okx: string; limit: number }> = {
-  "1d": { binance: "3m", bybit: "3", okx: "3m", limit: 480 },
-  "2d": { binance: "3m", bybit: "3", okx: "3m", limit: 960 },
-  "7d": { binance: "15m", bybit: "15", okx: "15m", limit: 672 },
-  "1M": { binance: "1h", bybit: "60", okx: "1H", limit: 720 },
-  "3M": { binance: "4h", bybit: "240", okx: "4H", limit: 540 },
+  "1d": { binance: "5m", bybit: "5", okx: "5m", limit: 576 },
+  "2d": { binance: "5m", bybit: "5", okx: "5m", limit: 1000 },
+  "7d": { binance: "30m", bybit: "30", okx: "30m", limit: 672 },
+  "1M": { binance: "2h", bybit: "120", okx: "2H", limit: 720 },
+  "3M": { binance: "6h", bybit: "360", okx: "6H", limit: 720 },
 };
 
 const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)";

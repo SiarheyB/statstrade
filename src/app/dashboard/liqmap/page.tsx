@@ -13,6 +13,9 @@ type Heatmap = {
 type Resp = { exchange: string; symbol: string; tf: string; heatmap: Heatmap };
 
 const EXCHANGES = ["binance", "bybit", "okx"] as const;
+// We fetch ~2x history; show the recent half by default (same density as before),
+// older bars are reachable by dragging the chart left.
+const DEFAULT_X0 = 0.5;
 const TFS = ["1d", "2d", "7d", "1M", "3M"] as const;
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
 
@@ -124,7 +127,7 @@ export default function LiqMapPage() {
       }
       offRef.current = null;
       setData(d);
-      viewRef.current = { x0: 0, x1: 1, y0: d.heatmap.priceMin, y1: d.heatmap.priceMax };
+      viewRef.current = { x0: DEFAULT_X0, x1: 1, y0: d.heatmap.priceMin, y1: d.heatmap.priceMax };
     } catch {
       setError("Network error");
     } finally {
@@ -392,7 +395,7 @@ export default function LiqMapPage() {
   }
   function resetView() {
     if (!data) return;
-    viewRef.current = { x0: 0, x1: 1, y0: data.heatmap.priceMin, y1: data.heatmap.priceMax };
+    viewRef.current = { x0: DEFAULT_X0, x1: 1, y0: data.heatmap.priceMin, y1: data.heatmap.priceMax };
     requestDraw();
   }
 
