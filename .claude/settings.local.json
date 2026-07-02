@@ -47,5 +47,9 @@
       "Bash(git rm *)",
       "Bash(git add *)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "@21st-dev/magic"
+  ],
+  "enableAllProjectMcpServers": true
 }
