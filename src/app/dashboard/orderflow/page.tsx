@@ -127,7 +127,8 @@ export default function OrderflowPage() {
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
   // Видимая область (zoom/pan). null = автодиапазон по данным.
   const viewRef = useRef<{ t0: number; t1: number; y0: number; y1: number } | null>(null);
-  const dragRef = useRef<{ mx: number; my: number; view: { t0: number; t1: number; y0: number; y1: number } } | null>(null);
+  // mode: pan (внутри графика), zoomY (правая ценовая шкала), zoomX (нижняя шкала времени).
+  const dragRef = useRef<{ mx: number; my: number; mode: "pan" | "zoomX" | "zoomY"; view: { t0: number; t1: number; y0: number; y1: number } } | null>(null);
   const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
   // Полные границы данных + шаг свечи — для ограничения зума.
   const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
@@ -724,16 +725,42 @@ export default function OrderflowPage() {
     const drag = dragRef.current;
     const lay = layoutRef.current;
     if (drag && lay) {
-      const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
-      const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
-      viewRef.current = {
-        t0: drag.view.t0 - dt,
-        t1: drag.view.t1 - dt,
-        y0: drag.view.y0 + dp,
-        y1: drag.view.y1 + dp,
-      };
+      if (drag.mode === "zoomY") {
+        // Ценовая шкала: тянем вверх → приближаем (выше), вниз → отдаляем. Якорь — центр.
+        const f = Math.exp((my - drag.my) * 0.006);
+        const cy = (drag.view.y0 + drag.view.y1) / 2;
+        const b = boundsRef.current;
+        const minP = b ? (b.y1 - b.y0) * 0.05 * 5 : 0;
+        const maxP = b ? (b.y1 - b.y0) * 2 : Infinity;
+        const span = Math.min(maxP, Math.max(minP, (drag.view.y1 - drag.view.y0) * f));
+        viewRef.current = { ...drag.view, y0: cy - span / 2, y1: cy + span / 2 };
+      } else if (drag.mode === "zoomX") {
+        // Шкала времени: тянем вправо → приближаем (шире), влево → отдаляем. Якорь — центр.
+        const f = Math.exp(-(mx - drag.mx) * 0.006);
+        const cx = (drag.view.t0 + drag.view.t1) / 2;
+        const b = boundsRef.current;
+        const minT = b ? b.step * 3 * 5 : 0;
+        const maxT = b ? (b.t1 - b.t0) * 2 : Infinity;
+        const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
+        viewRef.current = { ...drag.view, t0: cx - span / 2, t1: cx + span / 2 };
+      } else {
+        const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
+        const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
+        viewRef.current = {
+          t0: drag.view.t0 - dt,
+          t1: drag.view.t1 - dt,
+          y0: drag.view.y0 + dp,
+          y1: drag.view.y1 + dp,
+        };
+      }
       redrawAll();
     } else {
+      const lay2 = layoutRef.current;
+      const cv = canvasRef.current;
+      if (lay2 && cv) {
+        cv.style.cursor =
+          mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "crosshair";
+      }
       draw();
     }
   }
@@ -745,7 +772,12 @@ export default function OrderflowPage() {
   function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     if (viewRef.current) {
-      dragRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top, view: { ...viewRef.current } };
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const lay = layoutRef.current;
+      const mode: "pan" | "zoomX" | "zoomY" =
+        lay && mx >= lay.plotX + lay.plotW ? "zoomY" : lay && my >= lay.plotH - 8 ? "zoomX" : "pan";
+      dragRef.current = { mx, my, mode, view: { ...viewRef.current } };
     }
   }
   function onUp() {

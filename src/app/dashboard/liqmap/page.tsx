@@ -100,6 +100,9 @@ export default function LiqMapPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ x0: 0, x1: 1, y0: 0, y1: 1 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // Drag mode: over the right price axis → vertical (price) zoom; over the
+  // bottom time axis → horizontal (time) zoom; inside the plot → pan.
+  const dragModeRef = useRef<"pan" | "zoomX" | "zoomY">("pan");
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
   const offRef = useRef<{ src: Resp; canvas: HTMLCanvasElement } | null>(null);
   const rafRef = useRef(0);
@@ -365,23 +368,60 @@ export default function LiqMapPage() {
     requestDraw();
   }
 
+  // Which axis (if any) a pointer at (mx,my) is over — drives the drag mode and
+  // the cursor. Right gutter = price axis, bottom strip = time axis.
+  function axisAt(mx: number, my: number, plotW: number, plotH: number): "pan" | "zoomX" | "zoomY" {
+    if (mx >= PADL + plotW) return "zoomY"; // right price axis
+    if (my >= plotH - 8) return "zoomX"; // bottom time axis (slightly enlarged hit zone)
+    return "pan";
+  }
+
   function onPointerDown(e: React.PointerEvent) {
+    const { rect, plotW, plotH } = plotMetrics();
+    dragModeRef.current = axisAt(e.clientX - rect.left, e.clientY - rect.top, plotW, plotH);
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     dragRef.current = { x: e.clientX, y: e.clientY };
   }
   function onPointerMove(e: React.PointerEvent) {
     if (!data) return;
     const { rect, plotW, plotH } = plotMetrics();
-    hoverRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top };
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    hoverRef.current = { mx, my };
     if (dragRef.current) {
       const v = viewRef.current;
-      const dtf = ((e.clientX - dragRef.current.x) / plotW) * (v.x1 - v.x0);
-      const dp = ((e.clientY - dragRef.current.y) / plotH) * (v.y1 - v.y0);
-      v.x0 -= dtf; v.x1 -= dtf;
-      v.y0 += dp; v.y1 += dp;
-      clampX(v);
-      clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
+      const dx = e.clientX - dragRef.current.x;
+      const dy = e.clientY - dragRef.current.y;
+      const mode = dragModeRef.current;
+      if (mode === "zoomY") {
+        // Price axis: drag up → zoom in (taller), down → zoom out. Anchor at center.
+        const f = Math.exp(dy * 0.006);
+        const cy = (v.y0 + v.y1) / 2;
+        v.y0 = cy - (cy - v.y0) * f;
+        v.y1 = cy + (v.y1 - cy) * f;
+        clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
+      } else if (mode === "zoomX") {
+        // Time axis: drag right → zoom in (wider), left → zoom out. Anchor at center.
+        const f = Math.exp(-dx * 0.006);
+        const cx = (v.x0 + v.x1) / 2;
+        v.x0 = cx - (cx - v.x0) * f;
+        v.x1 = cx + (v.x1 - cx) * f;
+        clampX(v);
+      } else {
+        const dtf = (dx / plotW) * (v.x1 - v.x0);
+        const dp = (dy / plotH) * (v.y1 - v.y0);
+        v.x0 -= dtf; v.x1 -= dtf;
+        v.y0 += dp; v.y1 += dp;
+        clampX(v);
+        clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
+      }
       dragRef.current = { x: e.clientX, y: e.clientY };
+    } else {
+      const cv = canvasRef.current;
+      if (cv) {
+        const m = axisAt(mx, my, plotW, plotH);
+        cv.style.cursor = m === "zoomY" ? "ns-resize" : m === "zoomX" ? "ew-resize" : "crosshair";
+      }
     }
     requestDraw();
   }
@@ -449,7 +489,7 @@ export default function LiqMapPage() {
         <select
           value={tf}
           onChange={(e) => setTf(e.target.value)}
-          className="input-base text-sm rounded-lg px-3 py-1.5 ml-auto cursor-pointer hover:border-border-strong"
+          className="input-base text-sm rounded-lg px-3 py-1.5 cursor-pointer hover:border-border-strong"
         >
           {TFS.map((f) => (
             <option key={f} value={f}>
