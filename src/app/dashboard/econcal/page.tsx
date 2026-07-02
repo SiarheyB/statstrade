@@ -29,6 +29,22 @@ const IMPACT_DOT: Record<string, string> = {
   high: "bg-loss", medium: "bg-warn", low: "bg-faint", holiday: "bg-accent",
 };
 
+// Categories are derived in code (lib/econcal.ts categoryFor) and stored in
+// English. The stored value stays the filter value; here we only localize the
+// label shown in the dropdown.
+const CATEGORY_RU: Record<string, string> = {
+  Employment: "Занятость",
+  Inflation: "Инфляция",
+  "Interest Rate": "Ставки",
+  GDP: "ВВП",
+  "PMI / Industry": "PMI / Промышленность",
+  Consumer: "Потребление",
+  Trade: "Торговля",
+  Housing: "Недвижимость",
+  Sentiment: "Настроения",
+  Other: "Прочее",
+};
+
 // Monday 00:00 of the week containing `base`, shifted by `offsetWeeks`.
 function weekStart(offsetWeeks: number): Date {
   const d = new Date();
@@ -48,6 +64,8 @@ export default function EconCalPage() {
   const [curFilter, setCurFilter] = useState<Set<string>>(new Set());
   const [impFilter, setImpFilter] = useState<Set<string>>(new Set());
   const [category, setCategory] = useState("all");
+  // Day scope: today (default), tomorrow, or the whole fetched week.
+  const [scope, setScope] = useState<"today" | "tomorrow" | "week">("today");
 
   // Current week only (the free feed serves just this week).
   const range = useMemo(() => {
@@ -93,11 +111,22 @@ export default function EconCalPage() {
     setter(next);
   };
 
+  // Local Y-M-D id so "today"/"tomorrow" match the user's timezone.
+  const localDayId = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const { todayId, tomorrowId } = useMemo(() => {
+    const today = new Date();
+    const tmr = new Date();
+    tmr.setDate(tmr.getDate() + 1);
+    return { todayId: localDayId(today), tomorrowId: localDayId(tmr) };
+  }, []);
+
   const shown = events.filter(
     (e) =>
       (curFilter.size === 0 || curFilter.has(e.currency)) &&
       (impFilter.size === 0 || impFilter.has(e.impact)) &&
-      (category === "all" || e.category === category),
+      (category === "all" || e.category === category) &&
+      (scope === "week" ||
+        localDayId(new Date(e.time)) === (scope === "today" ? todayId : tomorrowId)),
   );
 
   // Group by calendar day (local).
@@ -142,6 +171,22 @@ export default function EconCalPage() {
         <span className="font-medium tabular-nums">{weekLabel}</span>
       </div>
 
+      {/* Day scope: today (default) / tomorrow / whole week */}
+      <div className="flex items-center gap-1 mb-3">
+        {(["today", "tomorrow", "week"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setScope(s)}
+            className={clsx(
+              "px-3 py-1.5 rounded-lg text-sm transition",
+              scope === s ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
+            )}
+          >
+            {t(s === "week" ? "econcal.thisWeek" : `econcal.${s}`)}
+          </button>
+        ))}
+      </div>
+
       {/* Filters */}
       <div className="space-y-2 mb-5">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -178,7 +223,7 @@ export default function EconCalPage() {
           >
             <option value="all">{t("econcal.allTypes")}</option>
             {categories.map((c) => (
-              <option key={c} value={c}>{c}</option>
+              <option key={c} value={c}>{locale === "ru" ? CATEGORY_RU[c] ?? c : c}</option>
             ))}
           </select>
         </div>
