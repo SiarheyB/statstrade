@@ -39,18 +39,22 @@ export function serverError(message: string) {
 }
 
 // Cache-Control for user-independent GET responses (news, calendar, liqmap …).
-// `public` + `s-maxage` lets a shared cache (Cloudflare edge / any CDN) serve
-// the same payload to everyone for `maxAgeSec`, then keep serving the stale copy
-// for `swrSec` while it revalidates in the background. Browsers aren't trusted
-// to hold it (`max-age=0`) so a manual refresh always re-checks. Only attach to
-// 2xx responses — never to the 401 from `unauthorized()`.
+// `public` lets a shared cache (Cloudflare edge / any CDN) and the browser hold
+// the same payload for `maxAgeSec`, then keep serving the stale copy for
+// `swrSec` while it revalidates in the background. Only attach to 2xx responses
+// — never to the 401 from `unauthorized()`.
+//
+// NB: do NOT use `max-age=0` here — Cloudflare reads that as "no-cache" and
+// returns cf-cache-status: BYPASS, defeating the edge cache. A short positive
+// max-age is fine; manual refresh in the UI hits `?refresh=1`, which skips this
+// header entirely and goes to origin.
 //
 // NOTE: these endpoints are auth-gated but return PUBLIC market data. A
-// Cloudflare Cache Rule that ignores the session cookie is what actually
-// activates edge caching (see docs/local/OPTIMIZATION.md). That makes the
-// payload reachable by anon requests too — fine here, the data isn't private.
+// Cloudflare Cache Rule marking these paths "Eligible for cache" is what
+// activates edge caching (see docs/local/OPTIMIZATION.md). The default cache key
+// already ignores cookies, so the same cached copy is shared across users.
 export function sharedCacheHeaders(maxAgeSec: number, swrSec: number): HeadersInit {
   return {
-    "Cache-Control": `public, max-age=0, s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`,
+    "Cache-Control": `public, max-age=${maxAgeSec}, s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`,
   };
 }
