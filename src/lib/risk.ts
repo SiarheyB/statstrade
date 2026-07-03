@@ -165,19 +165,41 @@ export function computeAccountRisk(
 
   const limits: LimitStatus[] = [];
 
-  // Stops today (losing trades closed today).
+  // Stops today — NET of take-profits. A win offsets prior stops by its size:
+  // if 1R (risk-per-trade) is configured, we sum today's R-multiples (loss = −1R,
+  // a +3R take cancels 3 stops), and "used" is the net drawdown in R (a net
+  // profit shows 0 stops used). Without a 1R setting we fall back to a 1:1 net
+  // count (losses − wins). This is what the trader means by "учитывать стопы и
+  // тейки": two stops then one take should not trip the limit.
   if (profile.maxStopsPerDay && profile.maxStopsPerDay > 0) {
     const dayStart = periodStart("day", now);
-    const stops = trades.filter(
-      (t) => t.exitTime.getTime() >= dayStart && t.result === "loss",
-    ).length;
+    const today = trades.filter((t) => t.exitTime.getTime() >= dayStart);
+    const rAmount = riskPerTradeAmount(profile, balance);
+
+    let used: number;
+    if (rAmount && rAmount > 0) {
+      // Net drawdown in R: losses add, wins subtract (by their R-multiple).
+      let netR = 0;
+      for (const t of today) netR += t.netPnl / rAmount;
+      used = -netR;
+    } else {
+      // No 1R configured → net count: each stop +1, each take −1.
+      let net = 0;
+      for (const t of today) {
+        if (t.result === "loss") net += 1;
+        else if (t.result === "win") net -= 1;
+      }
+      used = net;
+    }
+    used = Math.max(0, used); // in profit → 0 stops used, never negative
+
     limits.push({
       key: "stops",
       unit: "count",
-      used: stops,
+      used,
       limit: profile.maxStopsPerDay,
-      pct: stops / profile.maxStopsPerDay,
-      state: stateFor(stops, profile.maxStopsPerDay),
+      pct: used / profile.maxStopsPerDay,
+      state: stateFor(used, profile.maxStopsPerDay),
     });
   }
 
