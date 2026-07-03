@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
-import { reconstructTrades } from "@/lib/analytics/positions";
+import { ensureAccountTrades } from "@/lib/analytics/materialize";
 import { computeMetrics } from "@/lib/analytics/metrics";
-import type { RoundTripTrade, TradeSide } from "@/lib/analytics/types";
+import type { RoundTripTrade, TradeResult, TradeSide } from "@/lib/analytics/types";
 import {
   parseOptions,
   DEFAULT_ENTRY_POINTS,
@@ -37,13 +37,19 @@ async function buildBase(
   market: string,
 ): Promise<BaseData> {
   // Restrict to accounts owned by this user.
-  const accounts = await prisma.exchangeAccount.findMany({
+  const accountRows = await prisma.exchangeAccount.findMany({
     where: { userId },
-    select: { id: true, label: true, exchange: true, balance: true },
+    select: { id: true, label: true, exchange: true, balance: true, tradesRebuiltAt: true },
   });
+  // Бэкафилл материализованных сделок для аккаунтов, где он ещё не выполнялся
+  // (первый запрос после деплоя / legacy). Одноразово на аккаунт.
+  await ensureAccountTrades(accountRows);
+  const accounts = accountRows.map(({ id, label, exchange, balance }) => ({
+    id, label, exchange, balance,
+  }));
   const ownedIds = new Set(accounts.map((a) => a.id));
 
-  const where: Prisma.FillWhereInput = {
+  const where: Prisma.TradeWhereInput = {
     account: { userId },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) {
@@ -53,40 +59,45 @@ async function buildBase(
   else if (market === "futures") where.market = { in: ["swap", "future"] };
   // Symbol is filtered post-merge by canonical form (so "BTC/USDT" and
   // "BTCUSDT" collapse to one), not via the raw-symbol SQL where.
-  // Note: date range is applied to reconstructed trades (by exit time) later,
-  // not to fills — otherwise positions opened before the range get truncated.
 
-  // Crypto fills (reconstructed) vs. forex imported trades (taken as-is). The
-  // market filter routes between them: spot/futures = crypto only, forex =
-  // imported only, all = both.
+  // Материализованные крипто-сделки (Trade) vs. forex imported trades (taken
+  // as-is). The market filter routes between them: spot/futures = crypto only,
+  // forex = imported only, all = both.
   const includeCrypto = market !== "forex";
   const includeImported = market === "all" || market === "forex";
 
-  // select ровно под FillInput: без него Prisma тянет все колонки (id, cost,
-  // orderId, createdAt…) — на десятках тысяч филлов это лишние мегабайты.
-  const fills = includeCrypto
-    ? await prisma.fill.findMany({
-        where,
-        orderBy: { timestamp: "asc" },
-        select: {
-          symbol: true,
-          base: true,
-          quote: true,
-          market: true,
-          side: true,
-          price: true,
-          amount: true,
-          fee: true,
-          feeCurrency: true,
-          realizedPnl: true,
-          timestamp: true,
-          exchange: true,
-          accountId: true,
-        },
-      })
+  const tradeRows = includeCrypto
+    ? await prisma.trade.findMany({ where, orderBy: { exitTime: "asc" } })
     : [];
+  const cryptoTrades: RoundTripTrade[] = tradeRows.map((r) => ({
+    id: r.id,
+    symbol: r.symbol,
+    base: r.base,
+    quote: r.quote,
+    market: r.market,
+    exchange: r.exchange,
+    accountId: r.accountId,
+    side: r.side as TradeSide,
+    entryTime: r.entryTime,
+    exitTime: r.exitTime,
+    durationMs: r.exitTime.getTime() - r.entryTime.getTime(),
+    qty: r.qty,
+    entryPrice: r.entryPrice,
+    exitPrice: r.exitPrice,
+    grossPnl: r.grossPnl,
+    fees: r.fees,
+    netPnl: r.netPnl,
+    returnPct: r.returnPct,
+    fillCount: r.fillCount,
+    result: r.result as TradeResult,
+  }));
 
-  const cryptoTrades = reconstructTrades(fills);
+  // Счётчик филлов для шапки («N trades · M fills») — лёгкий COUNT по индексу.
+  const fillWhere: Prisma.FillWhereInput = { account: { userId } };
+  if (accountId !== "all" && ownedIds.has(accountId)) fillWhere.accountId = accountId;
+  if (market === "spot") fillWhere.market = "spot";
+  else if (market === "futures") fillWhere.market = { in: ["swap", "future"] };
+  const fillCount = includeCrypto ? await prisma.fill.count({ where: fillWhere }) : 0;
 
   // Imported (forex / MetaTrader) closed round-trips — money taken as-is.
   const importedWhere: Prisma.ImportedTradeWhereInput = {
@@ -159,14 +170,14 @@ async function buildBase(
 
   const allSymbols = Array.from(
     new Set([
-      ...fills.map((f) => canonSymbol(f.symbol)),
+      ...cryptoTrades.map((t) => canonSymbol(t.symbol)),
       ...importedRows.map((r) => canonSymbol(r.symbol)),
     ]),
   ).sort();
 
   return {
     trades,
-    fillCount: fills.length,
+    fillCount,
     symbols: allSymbols,
     accounts,
     entryPointOptions: parseOptions(userRow?.entryPointOptions, DEFAULT_ENTRY_POINTS),

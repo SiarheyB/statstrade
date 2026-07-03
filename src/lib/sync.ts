@@ -2,6 +2,7 @@ import type { Exchange } from "ccxt";
 import { prisma } from "./db";
 import { decrypt } from "./crypto";
 import { bumpStatsVersion } from "./statsCache";
+import { rebuildTradeGroups } from "./analytics/materialize";
 import {
   createExchange,
   fetchBalanceUsdt,
@@ -751,5 +752,15 @@ export async function persistFills(
 
   if (rows.length === 0) return 0;
   const res = await prisma.fill.createMany({ data: rows, skipDuplicates: true });
+  if (res.count > 0) {
+    // Инкрементная материализация: пересобрать сделки только затронутых групп
+    // (symbol+market). Обычно это одна группа — вызов идёт по-символьно.
+    const groups = [
+      ...new Map(
+        rows.map((r) => [`${r.symbol}|${r.market}`, { symbol: r.symbol, market: r.market }]),
+      ).values(),
+    ];
+    await rebuildTradeGroups(accountId, groups);
+  }
   return res.count;
 }

@@ -113,10 +113,48 @@ model ExchangeAccount {
   syncTotal    Int       @default(0) // total tasks in the active scan
   syncImported Int       @default(0) // fills imported so far in the active scan
   fullSyncAt   DateTime? // when the last full (all-pairs) scan completed
+  // Когда материализованные сделки (Trade) в последний раз пересобраны целиком
+  // для этого аккаунта. NULL = ещё ни разу → /api/stats пересоберёт при первом
+  // обращении (бэкафилл после деплоя / legacy-аккаунты).
+  tradesRebuiltAt DateTime?
   fills          Fill[]
   importedTrades ImportedTrade[]
+  trades         Trade[]
 
   @@index([userId])
+}
+
+// Материализованный round-trip (закрытая сделка), реконструированный из филлов.
+// Пересобирается ИНКРЕМЕНТНО: после вставки новых филлов пересчитываются только
+// затронутые группы (account+symbol+market) — см. lib/analytics/materialize.ts.
+// Раньше /api/stats реконструировал сделки из всех филлов юзера на каждый
+// cache-miss; теперь это обычный индексированный SELECT.
+model Trade {
+  // Стабильный ключ = accountId:symbol:market:entryMs — совпадает с
+  // TradeAnnotation.tradeKey, аннотации клеятся по нему.
+  id         String          @id
+  accountId  String
+  account    ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol     String
+  base       String
+  quote      String
+  market     String // spot | swap | future
+  exchange   String
+  side       String // long | short
+  entryTime  DateTime
+  exitTime   DateTime
+  qty        Float // peak position size (base)
+  entryPrice Float // average entry
+  exitPrice  Float // average exit
+  grossPnl   Float
+  fees       Float
+  netPnl     Float
+  returnPct  Float
+  fillCount  Int
+  result     String // win | loss | breakeven
+
+  @@index([accountId, exitTime])
+  @@index([accountId, symbol, market])
 }
 
 // A closed round-trip imported from a MetaTrader 4/5 report (or entered

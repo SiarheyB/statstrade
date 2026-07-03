@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { reconstructTrades } from "./analytics/positions";
+import { rebuildAccountTrades } from "./analytics/materialize";
 import type { FillInput } from "./analytics/types";
 import {
   parseOptions,
@@ -163,6 +164,8 @@ export async function seedDemoData(
 
   const rows = generateDemoFills(accountId, exchange);
   await prisma.fill.createMany({ data: rows });
+  // Массовая замена филлов → полная пересборка материализованных сделок.
+  await rebuildAccountTrades(accountId);
 
   // Reconstruct trades from the generated fills and attach random annotations,
   // so the demo also populates the ТВХ / тип-входа columns.
