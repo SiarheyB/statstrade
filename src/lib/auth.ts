@@ -4,6 +4,7 @@
 import bcrypt from "bcrypt";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { prisma } from "./db";
 
 const COOKIE_NAME = "ts_session";
 const PENDING_COOKIE = "ts_2fa_pending";
@@ -32,8 +33,39 @@ export async function verifyPassword(
   return bcrypt.compare(password, hash);
 }
 
-export async function signSession(payload: SessionPayload): Promise<string> {
-  return new SignJWT({ ...payload })
+// --- Отзыв сессий через версию токена ---
+// В JWT кладётся claim `v` = User.tokenVersion на момент выдачи. При проверке
+// версия сверяется с текущей в БД (кэш ~60с, чтобы не ходить в БД на каждый
+// запрос): после инкремента (смена пароля) все старые cookie отмирают в течение
+// минуты. Токены, выданные до этой фичи (без `v`), считаются v=0 — совместимы,
+// пока у юзера tokenVersion=0.
+const VERSION_CACHE_MS = 60_000;
+const versionCache = new Map<string, { v: number; at: number }>();
+
+async function currentTokenVersion(userId: string): Promise<number> {
+  const hit = versionCache.get(userId);
+  const now = Date.now();
+  if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+  const row = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { tokenVersion: true },
+  });
+  const v = row?.tokenVersion ?? 0;
+  versionCache.set(userId, { v, at: now });
+  return v;
+}
+
+// Сбросить кэш после инкремента tokenVersion, чтобы отзыв сработал сразу
+// (в этом же процессе), а не через минуту.
+export function invalidateTokenVersionCache(userId: string): void {
+  versionCache.delete(userId);
+}
+
+export async function signSession(
+  payload: SessionPayload,
+  tokenVersion = 0,
+): Promise<string> {
+  return new SignJWT({ ...payload, v: tokenVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE_SECONDS}s`)
@@ -46,6 +78,8 @@ export async function verifySession(
   try {
     const { payload } = await jwtVerify(token, getSecret());
     if (typeof payload.userId === "string" && typeof payload.email === "string") {
+      const v = typeof payload.v === "number" ? payload.v : 0;
+      if (v !== (await currentTokenVersion(payload.userId))) return null;
       return { userId: payload.userId, email: payload.email };
     }
     return null;
@@ -55,8 +89,11 @@ export async function verifySession(
 }
 
 // Set the session cookie (call from a Server Action / Route Handler).
-export async function createSessionCookie(payload: SessionPayload) {
-  const token = await signSession(payload);
+export async function createSessionCookie(
+  payload: SessionPayload,
+  tokenVersion = 0,
+) {
+  const token = await signSession(payload, tokenVersion);
   const store = await cookies();
   store.set(COOKIE_NAME, token, {
     httpOnly: true,

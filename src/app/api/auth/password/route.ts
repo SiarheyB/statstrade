@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { hashPassword, verifyPassword } from "@/lib/auth";
+import { hashPassword, verifyPassword, createSessionCookie, invalidateTokenVersionCache } from "@/lib/auth";
 
 const schema = z.object({
   currentPassword: z.string().max(200).optional(),
@@ -52,10 +52,21 @@ export async function PUT(req: Request) {
       }
     }
 
-    await prisma.user.update({
+    // Инкремент tokenVersion отзывает ВСЕ выданные ранее сессии (украденные
+    // cookie умирают); текущей сессии тут же выдаётся cookie с новой версией.
+    const updated = await prisma.user.update({
       where: { id: user.userId },
-      data: { password: await hashPassword(parsed.data.newPassword) },
+      data: {
+        password: await hashPassword(parsed.data.newPassword),
+        tokenVersion: { increment: 1 },
+      },
+      select: { tokenVersion: true },
     });
+    invalidateTokenVersionCache(user.userId);
+    await createSessionCookie(
+      { userId: user.userId, email: user.email },
+      updated.tokenVersion,
+    );
     return NextResponse.json({ hasPassword: true });
   } catch (err) {
     return serverError((err as Error).message);

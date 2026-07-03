@@ -28,6 +28,9 @@ type OpenTrade = {
   fillCount: number;
   exitNotional: number; // sum(closePrice * closeQty)
   exitQty: number; // sum(closeQty)
+  exchangePnl: number; // Σ realizedPnl закрывающих филлов (когда биржа его отдаёт)
+  closeFills: number; // число закрывающих филлов
+  pnlFills: number; // из них с непустым realizedPnl
 };
 
 function classify(netPnl: number): TradeResult {
@@ -42,7 +45,13 @@ function finalize(
 ): void {
   const qty = open.maxQty;
   const fees = open.fees;
-  const grossPnl = open.grossPnl;
+  // Фьючерсы: если КАЖДЫЙ закрывающий филл принёс биржевой realizedPnl, берём
+  // его сумму вместо ценовой модели — она сходится с биржей до цента (учтены
+  // округления, ADL, ликвидации). Иначе (спот, частичные данные) — ценовая
+  // модель как раньше.
+  const useExchangePnl =
+    open.market !== "spot" && open.closeFills > 0 && open.pnlFills === open.closeFills;
+  const grossPnl = useExchangePnl ? open.exchangePnl : open.grossPnl;
   const netPnl = grossPnl - fees;
   const exitPrice = open.exitQty > 0 ? open.exitNotional / open.exitQty : avgEntry;
   const costBasis = avgEntry * qty;
@@ -110,6 +119,9 @@ export function reconstructTrades(fills: FillInput[]): RoundTripTrade[] {
       fillCount: 1,
       exitNotional: 0,
       exitQty: 0,
+      exchangePnl: 0,
+      closeFills: 0,
+      pnlFills: 0,
     });
 
     for (const fill of groupFills) {
@@ -155,6 +167,11 @@ export function reconstructTrades(fills: FillInput[]): RoundTripTrade[] {
         open.exitTime = fill.timestamp;
         open.exitNotional += fill.price * closeQty;
         open.exitQty += closeQty;
+        open.closeFills += 1;
+        if (fill.realizedPnl != null) {
+          open.exchangePnl += fill.realizedPnl;
+          open.pnlFills += 1;
+        }
       }
 
       const newPos = pos + signed;

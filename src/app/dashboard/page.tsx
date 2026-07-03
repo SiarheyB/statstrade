@@ -5,8 +5,7 @@ import Link from "next/link";
 import { RefreshCw, Plug, Database, CalendarRange } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
-import { EquityChart, DailyPnlChart, BreakdownChart } from "@/components/charts";
-import PnlHeatmap from "@/components/PnlHeatmap";
+import { EquityChart, DailyPnlChart, BreakdownChart, PnlHeatmap } from "@/components/charts.lazy";
 import SearchSelect from "@/components/SearchSelect";
 import RiskBanner from "@/components/RiskBanner";
 import {

@@ -78,6 +78,7 @@ async function buildBase(
           amount: true,
           fee: true,
           feeCurrency: true,
+          realizedPnl: true,
           timestamp: true,
           exchange: true,
           accountId: true,

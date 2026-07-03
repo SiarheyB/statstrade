@@ -9,6 +9,9 @@ export type FillInput = {
   amount: number;
   fee: number;
   feeCurrency: string | null;
+  // Биржевой realized PnL этого филла (фьючерсы: учитывает округления биржи,
+  // ADL, ликвидации). null = биржа/старый синк его не отдали.
+  realizedPnl?: number | null;
   timestamp: Date;
   exchange: string;
   accountId: string;

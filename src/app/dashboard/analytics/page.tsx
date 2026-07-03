@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
-import { EquityChart, DrawdownChart, Histogram } from "@/components/charts";
+import { EquityChart, DrawdownChart, Histogram } from "@/components/charts.lazy";
 import { Term } from "@/components/Term";
 import { fmtRatio } from "@/lib/format";
 

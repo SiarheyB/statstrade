@@ -52,7 +52,7 @@ export async function POST(req: Request) {
     }
 
     await clearPendingCookie();
-    await createSessionCookie({ userId: user.id, email: user.email });
+    await createSessionCookie({ userId: user.id, email: user.email }, user.tokenVersion);
     kickUserSync(user.id); // freshen accounts on return, fire-and-forget
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {

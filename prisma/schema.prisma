@@ -32,6 +32,9 @@ model User {
   // encrypted at rest; only active once the user confirms a code.
   twoFactorEnabled  Boolean @default(false)
   twoFactorSecret   String?
+  // Версия сессионного токена: JWT с меньшей версией недействителен. Инкремент
+  // при смене пароля отзывает все выданные ранее cookie (см. lib/auth.ts).
+  tokenVersion      Int     @default(0)
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
 }

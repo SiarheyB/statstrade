@@ -11,6 +11,10 @@ const schema = z.object({
   password: z.string().min(1, "Введите пароль").max(200),
 });
 
+// Фиктивный hash для выравнивания времени ответа: bcrypt.compare выполняется и
+// для несуществующего email, иначе быстрый ответ выдаёт, что аккаунта нет.
+const DUMMY_HASH = "$2b$10$C6UzMDM.H6dfI/f/IKcEeO7ZLpFvbrAhIcNRLougKUX1nOTNW/PC2";
+
 export async function POST(req: Request) {
   // Rate-limit против брутфорса: 10 попыток входа с одного IP за 10 минут.
   const rl = rateLimit(`login:${clientIp(req)}`, 10, 10 * 60_000);
@@ -29,9 +33,15 @@ export async function POST(req: Request) {
   }
   const { email, password } = parsed.data;
 
+  // Второй ключ лимита — по email: распределённый брутфорс одного аккаунта с
+  // многих IP всё равно упирается в 20 попыток в час.
+  const rlEmail = rateLimit(`login:email:${email.toLowerCase()}`, 20, 60 * 60_000);
+  if (!rlEmail.ok) return tooManyRequests(rlEmail.retryAfterSec);
+
   try {
     const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !user.password || !(await verifyPassword(password, user.password))) {
+    const ok = await verifyPassword(password, user?.password ?? DUMMY_HASH);
+    if (!user || !user.password || !ok) {
       return badRequest("Неверный email или пароль");
     }
 
@@ -41,7 +51,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ twoFactorRequired: true });
     }
 
-    await createSessionCookie({ userId: user.id, email: user.email });
+    await createSessionCookie({ userId: user.id, email: user.email }, user.tokenVersion);
     kickUserSync(user.id); // freshen accounts on return, fire-and-forget
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {

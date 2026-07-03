@@ -50,7 +50,7 @@ export async function POST(req: Request) {
       data: { email, password: await hashPassword(password), name: name ?? null },
     });
 
-    await createSessionCookie({ userId: user.id, email: user.email });
+    await createSessionCookie({ userId: user.id, email: user.email }, user.tokenVersion);
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {
     return serverError((err as Error).message);

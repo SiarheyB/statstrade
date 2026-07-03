@@ -1,7 +1,8 @@
 "use client";
 
-import { toPng } from "html-to-image";
-import { jsPDF } from "jspdf";
+// html-to-image и jspdf (крупные либы) грузятся динамически внутри nodeToPng /
+// nodeToPdf — только в момент экспорта, а не в общем чанке страницы: CSV-экспорт
+// и сама страница сделок их не тянут.
 
 const CAPTURE_BG = "#0b0e13";
 
@@ -29,6 +30,7 @@ export function downloadCsv(
 // --- Image / PDF (rasterized DOM — handles Cyrillic without font embedding) ---
 
 async function capture(node: HTMLElement): Promise<string> {
+  const { toPng } = await import("html-to-image");
   return toPng(node, {
     pixelRatio: 2,
     backgroundColor: CAPTURE_BG,
@@ -50,6 +52,7 @@ export async function nodeToPdf(
   orientation: "p" | "l" = "p",
 ): Promise<void> {
   const dataUrl = await capture(node);
+  const { jsPDF } = await import("jspdf");
   const pdf = new jsPDF({ orientation, unit: "mm", format: "a4" });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
