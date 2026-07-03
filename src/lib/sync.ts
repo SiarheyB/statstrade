@@ -3,6 +3,7 @@ import { prisma } from "./db";
 import { decrypt } from "./crypto";
 import { bumpStatsVersion } from "./statsCache";
 import { rebuildTradeGroups } from "./analytics/materialize";
+import { convertUnknownFees } from "./feeConvert";
 import {
   createExchange,
   fetchBalanceUsdt,
@@ -719,6 +720,11 @@ export async function persistFills(
   fills: NormalizedFill[],
 ): Promise<number> {
   if (fills.length === 0) return 0;
+
+  // Комиссии в фи-токенах (BNB и т.п.) конвертируем в котируемую валюту один
+  // раз при записи — иначе аналитика считает их нулём. Best-effort: без курса
+  // филл сохраняется как есть.
+  await convertUnknownFees(fills);
 
   // Dedupe within the batch; cross-batch/historical dupes are rejected by the
   // @@unique([accountId, tradeId, symbol]) constraint via skipDuplicates, so we
