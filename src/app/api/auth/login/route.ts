@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { verifyPassword, createSessionCookie, createPendingCookie } from "@/lib/auth";
-import { badRequest, serverError } from "@/lib/api";
+import { badRequest, serverError, tooManyRequests } from "@/lib/api";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { kickUserSync } from "@/lib/sync";
 
 const schema = z.object({
@@ -11,6 +12,10 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
+  // Rate-limit против брутфорса: 10 попыток входа с одного IP за 10 минут.
+  const rl = rateLimit(`login:${clientIp(req)}`, 10, 10 * 60_000);
+  if (!rl.ok) return tooManyRequests(rl.retryAfterSec);
+
   let body: unknown;
   try {
     body = await req.json();

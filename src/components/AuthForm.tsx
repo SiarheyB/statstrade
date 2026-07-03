@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { BarChart3 } from "lucide-react";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
+import TurnstileWidget from "@/components/TurnstileWidget";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
@@ -17,8 +18,12 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const [loading, setLoading] = useState(false);
   const [twoFactor, setTwoFactor] = useState(false);
   const [code, setCode] = useState("");
+  // Honeypot (заполняют только боты) и токен капчи.
+  const [website, setWebsite] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
 
   const isRegister = mode === "register";
+  const turnstileOn = !!process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -29,7 +34,9 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          isRegister ? { email, password, name } : { email, password },
+          isRegister
+            ? { email, password, name, website, turnstileToken }
+            : { email, password },
         ),
       });
       const data = await res.json();
@@ -169,6 +176,19 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             </form>
           ) : (
           <form onSubmit={onSubmit} className="space-y-3">
+            {/* Honeypot: скрыт от людей, видят только боты. Заполнен → отказ. */}
+            {isRegister && (
+              <input
+                type="text"
+                name="website"
+                tabIndex={-1}
+                autoComplete="off"
+                aria-hidden="true"
+                value={website}
+                onChange={(e) => setWebsite(e.target.value)}
+                style={{ position: "absolute", left: "-9999px", width: 1, height: 1, opacity: 0 }}
+              />
+            )}
             {isRegister && (
               <div>
                 <label className="block text-xs text-muted mb-1">{t("auth.name")}</label>
@@ -207,6 +227,8 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               />
             </div>
 
+            {isRegister && <TurnstileWidget onToken={setTurnstileToken} />}
+
             {error && (
               <div className="text-sm text-loss bg-loss/10 border border-loss/30 rounded-lg px-3 py-2">
                 {error}
@@ -215,7 +237,7 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || (isRegister && turnstileOn && !turnstileToken)}
               className="w-full py-2.5 rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition disabled:opacity-50"
             >
               {loading

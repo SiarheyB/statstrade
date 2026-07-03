@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createSessionCookie, createPendingCookie } from "@/lib/auth";
 import { verifyGoogleCredential, GoogleAuthError } from "@/lib/google";
-import { badRequest, serverError } from "@/lib/api";
+import { badRequest, serverError, tooManyRequests } from "@/lib/api";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { kickUserSync } from "@/lib/sync";
 
 const schema = z.object({ credential: z.string().min(10).max(4096) });
@@ -11,6 +12,9 @@ const schema = z.object({ credential: z.string().min(10).max(4096) });
 // Sign in / sign up with Google. The client (Google Identity Services) returns a
 // signed id_token; we verify it server-side, then find or create the user.
 export async function POST(req: Request) {
+  const rl = rateLimit(`google:${clientIp(req)}`, 20, 10 * 60_000);
+  if (!rl.ok) return tooManyRequests(rl.retryAfterSec);
+
   let body: unknown;
   try {
     body = await req.json();

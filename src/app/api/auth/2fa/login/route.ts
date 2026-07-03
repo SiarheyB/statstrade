@@ -8,7 +8,8 @@ import {
 } from "@/lib/auth";
 import { decrypt } from "@/lib/crypto";
 import { verifyTotp } from "@/lib/totp";
-import { badRequest, serverError } from "@/lib/api";
+import { badRequest, serverError, tooManyRequests } from "@/lib/api";
+import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { kickUserSync } from "@/lib/sync";
 
 const schema = z.object({ code: z.string().min(6).max(7) });
@@ -17,6 +18,10 @@ const schema = z.object({ code: z.string().min(6).max(7) });
 // already accepted (proven by the short-lived pending cookie), then issue the
 // real session.
 export async function POST(req: Request) {
+  // Rate-limit против брутфорса TOTP-кода: 8 попыток с IP за 10 минут.
+  const rl = rateLimit(`2fa:${clientIp(req)}`, 8, 10 * 60_000);
+  if (!rl.ok) return tooManyRequests(rl.retryAfterSec);
+
   let body: unknown;
   try {
     body = await req.json();

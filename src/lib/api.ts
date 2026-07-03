@@ -38,6 +38,14 @@ export function serverError(message: string) {
   return NextResponse.json({ error: message }, { status: 500 });
 }
 
+// 429 для превышения rate-limit (регистрация/вход). Retry-After — в секундах.
+export function tooManyRequests(retryAfterSec: number) {
+  return NextResponse.json(
+    { error: "Слишком много попыток, попробуйте позже" },
+    { status: 429, headers: { "Retry-After": String(retryAfterSec) } },
+  );
+}
+
 // Cache-Control for user-independent GET responses (news, calendar, liqmap …).
 // `public` lets a shared cache (Cloudflare edge / any CDN) and the browser hold
 // the same payload for `maxAgeSec`, then keep serving the stale copy for
