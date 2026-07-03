@@ -10,11 +10,14 @@ export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   try {
+    // ВАЖНО: distinct берём из маленькой rollup-таблицы (одна строка на
+    // symbol×exchange×минута), а НЕ из сырого ObSnapshot (~десятки млн строк) —
+    // Prisma-distinct без orderBy тянул бы строки в Node и падал по памяти (502).
+    // DISTINCT по ведущим колонкам PK (symbol,exchange,bucket) идёт по индексу.
     const [rows, cfg] = await Promise.all([
-      prisma.obSnapshot.findMany({
-        distinct: ["symbol", "exchange"],
-        select: { symbol: true, exchange: true },
-      }),
+      prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+        SELECT DISTINCT symbol, exchange FROM "ObRollupBucket"
+      `,
       prisma.collectorConfig.findMany({ select: { symbol: true, minCoins: true } }),
     ]);
     const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();

@@ -8,7 +8,12 @@
 // across replicas; if the app is ever scaled out, move this to Redis.
 
 const TTL_MS = 60_000;
-const MAX_ENTRIES = 2000;
+// Каждый payload — это все сделки юзера (могут быть мегабайты), так что держим
+// НЕмного записей, иначе кэш выедает память app-контейнера (был OOM при 2000).
+const MAX_ENTRIES = 120;
+// Не кэшировать слишком крупные ответы (активные трейдеры с десятками тысяч
+// сделок): один такой payload может весить десятки МБ. Порог по числу сделок.
+const MAX_TRADES_TO_CACHE = 8000;
 
 type Entry = { at: number; value: unknown };
 const store = new Map<string, Entry>();
@@ -35,6 +40,10 @@ export function getCached<T>(key: string): T | undefined {
 }
 
 export function setCached(key: string, value: unknown): void {
+  // Skip caching very large payloads (huge accounts) — they dominate memory and
+  // are re-derived cheaply enough on the rare hit.
+  const trades = (value as { trades?: unknown[] } | null)?.trades;
+  if (Array.isArray(trades) && trades.length > MAX_TRADES_TO_CACHE) return;
   // Cheap bound: drop the oldest insertion when full (Map preserves order).
   if (store.size >= MAX_ENTRIES) {
     const oldest = store.keys().next().value;
