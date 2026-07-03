@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -15,15 +15,37 @@ const LINKS = [
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
+  { href: "/admin/support", key: "admin.nav.support", icon: Headset },
   { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
   { href: "/admin/system", key: "admin.nav.system", icon: Database },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },
 ];
 
+const SUPPORT_POLL_MS = 30_000;
+
 export default function AdminNav({ email }: { email: string }) {
   const pathname = usePathname();
   const { t } = useI18n();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/admin/support/unread");
+        if (res.ok && alive) setUnread((await res.json()).count ?? 0);
+      } catch {
+        // тихо игнорируем
+      }
+    };
+    poll();
+    const iv = setInterval(poll, SUPPORT_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, []);
 
   const isActive = (href: string, exact?: boolean) =>
     exact ? pathname === href : pathname.startsWith(href);
@@ -50,7 +72,14 @@ export default function AdminNav({ email }: { email: string }) {
                 : "text-muted hover:text-fg hover:bg-surface-2",
             )}
           >
-            <l.icon size={18} />
+            <span className="relative inline-flex">
+              <l.icon size={18} />
+              {l.href === "/admin/support" && unread > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-loss text-white text-[9px] font-semibold leading-[15px] text-center">
+                  {unread > 99 ? "99+" : unread}
+                </span>
+              )}
+            </span>
             {t(l.key)}
           </Link>
         ))}

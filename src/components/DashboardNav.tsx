@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -27,6 +27,11 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
+import SupportButton from "@/components/SupportButton";
+
+// Опрос числа непрочитанных сообщений поддержки — только для админов, только
+// для колокольчика в меню (лёгкий эндпоинт, не полный список).
+const SUPPORT_POLL_MS = 30_000;
 
 const LINKS = [
   { href: "/dashboard", key: "nav.overview", icon: LayoutDashboard },
@@ -78,6 +83,26 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [newsOpen, setNewsOpen] = useState(() => isNewsRoute(pathname));
   const [serviceOpen, setServiceOpen] = useState(() => isServiceRoute(pathname));
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [supportUnread, setSupportUnread] = useState(0);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/admin/support/unread");
+        if (res.ok && alive) setSupportUnread((await res.json()).count ?? 0);
+      } catch {
+        // тихо игнорируем — это лишь индикатор
+      }
+    };
+    poll();
+    const iv = setInterval(poll, SUPPORT_POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [isAdmin]);
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -231,10 +256,18 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
             onClick={onNavigate}
             className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
           >
-            <ShieldCheck size={18} />
+            <span className="relative inline-flex">
+              <ShieldCheck size={18} />
+              {supportUnread > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-loss text-white text-[9px] font-semibold leading-[15px] text-center">
+                  {supportUnread > 99 ? "99+" : supportUnread}
+                </span>
+              )}
+            </span>
             {t("nav.admin")}
           </Link>
         )}
+        <SupportButton onOpen={onNavigate} />
         <button
           onClick={() => {
             onNavigate();

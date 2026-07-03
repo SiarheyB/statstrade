@@ -1,0 +1,180 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { LifeBuoy, X, Send } from "lucide-react";
+import { useI18n } from "@/lib/i18n/provider";
+
+type Msg = { id: string; authorRole: string; message: string; createdAt: string };
+
+const POLL_MS = 30_000;
+
+// Кнопка «Поддержка» в меню + модалка-переписка (тред с админом). Читает и
+// шлёт в /api/support; точка-индикатор — есть ли непрочитанный ответ админа.
+export default function SupportButton({ onOpen }: { onOpen?: () => void }) {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [hasUnread, setHasUnread] = useState(false);
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Точка-индикатор непрочитанного ответа, опрос раз в 30с (лёгкий эндпоинт).
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/support/unread");
+        if (res.ok && alive) setHasUnread(((await res.json()).count ?? 0) > 0);
+      } catch {
+        // тихо игнорируем
+      }
+    };
+    poll();
+    const iv = setInterval(poll, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/support");
+      if (res.ok) setMessages((await res.json()).messages ?? []);
+      setHasUnread(false); // открытие треда отмечает ответы прочитанными на сервере
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  function openModal() {
+    onOpen?.();
+    setOpen(true);
+    load();
+  }
+  function close() {
+    setOpen(false);
+    setError(null);
+  }
+
+  useEffect(() => {
+    if (open) listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
+  }, [open, messages]);
+
+  async function send() {
+    const message = text.trim();
+    if (!message) return;
+    setSending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+      if (res.ok) {
+        setText("");
+        await load();
+      } else {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error ?? t("support.error"));
+      }
+    } catch {
+      setError(t("support.error"));
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+
+  return (
+    <>
+      <button
+        onClick={openModal}
+        className="relative flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
+      >
+        <span className="relative inline-flex">
+          <LifeBuoy size={18} />
+          {hasUnread && <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-accent" />}
+        </span>
+        {t("nav.support")}
+      </button>
+
+      {open && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-black/50" onClick={close} />
+          <div className="relative w-full max-w-md card p-0 flex flex-col" style={{ maxHeight: "80vh" }}>
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
+              <h2 className="text-lg font-semibold flex items-center gap-2">
+                <LifeBuoy size={18} className="text-accent" />
+                {t("support.title")}
+              </h2>
+              <button onClick={close} className="text-faint hover:text-fg" aria-label="close">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div ref={listRef} className="flex-1 overflow-y-auto px-5 py-4 space-y-2 min-h-[200px]">
+              {loading ? (
+                <div className="text-sm text-faint">{t("common.loading")}</div>
+              ) : messages.length === 0 ? (
+                <div className="text-sm text-muted">{t("support.subtitle")}</div>
+              ) : (
+                messages.map((m) => {
+                  const mine = m.authorRole === "user";
+                  return (
+                    <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[80%] rounded-xl px-3 py-2 text-sm whitespace-pre-wrap break-words ${
+                          mine ? "bg-accent text-white" : "bg-surface-2 text-fg"
+                        }`}
+                      >
+                        {!mine && <div className="text-[10px] font-medium text-accent mb-0.5">{t("support.team")}</div>}
+                        {m.message}
+                        <div className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-faint"}`}>{fmt(m.createdAt)}</div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="p-3 border-t border-border shrink-0">
+              {error && <div className="mb-2 text-sm text-loss">{error}</div>}
+              <div className="flex items-end gap-2">
+                <textarea
+                  rows={2}
+                  maxLength={4000}
+                  className="input-base flex-1 resize-none"
+                  placeholder={t("support.placeholder")}
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      send();
+                    }
+                  }}
+                />
+                <button
+                  onClick={send}
+                  disabled={sending || text.trim().length === 0}
+                  className="p-2.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition disabled:opacity-50 shrink-0"
+                  title={t("support.send")}
+                >
+                  <Send size={16} />
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
