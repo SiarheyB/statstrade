@@ -11,6 +11,13 @@ export const dynamic = "force-dynamic";
 //     resync, темп записи; деградирует мягко, если сервис недоступен.
 //  2) агрегаты по факту записи в Postgres (таблицы Ob*) — скорость наполнения,
 //     свежесть (lag) и live-превью последнего снимка стакана.
+//
+// Все частые агрегаты считаются ТОЧЕЧНО по каждому фиду через индекс
+// (symbol, exchange, t) — мгновенно при любом размере таблиц. Раньше здесь был
+// GROUP BY по всей ObSnapshot (десятки млн строк): на слабом сервере скан
+// держал запрос дольше таймаута туннеля, и админка получала 502.
+// Единственный по-настоящему тяжёлый показатель — count(*) на фид — вынесен в
+// отдельный кэш с длинным TTL.
 
 type FeedRow = {
   symbol: string;
@@ -45,9 +52,52 @@ async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; e
   }
 }
 
-// Тяжёлые агрегаты (полный скан ObSnapshot ~десятки млн строк) кэшируем в памяти
-// на 10с: админка опрашивает раз в 3с, без кэша это гоняло бы полный скан на
-// каждый опрос. Превью и live-метрики коллектора считаем свежими на каждый запрос.
+// Список фидов — из маленькой ObRollupBucket (не сканируем сырые таблицы).
+// Фолбэк, пока rollup пуст (свежий деплой): DISTINCT по снапшотам за сутки —
+// партиции ограничивают скан одним-двумя днями.
+async function listFeeds(): Promise<{ symbol: string; exchange: string }[]> {
+  const fromRollup = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+    SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
+  `;
+  if (fromRollup.length > 0) return fromRollup;
+  return prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+    SELECT DISTINCT symbol, exchange FROM "ObSnapshot"
+    WHERE t > now() - interval '24 hours'
+    ORDER BY symbol, exchange
+  `;
+}
+
+// --- Тотальные счётчики (count(*) на фид) — единственный тяжёлый агрегат.
+// Индексный подсчёт миллионов записей занимает секунды, поэтому TTL длинный.
+const TOTALS_TTL_MS = 10 * 60_000;
+let totalsCache: { at: number; data: Map<string, { total: number; oldest: Date | null }> } | null = null;
+let totalsInflight: Promise<Map<string, { total: number; oldest: Date | null }>> | null = null;
+
+async function getTotals(
+  feeds: { symbol: string; exchange: string }[],
+): Promise<Map<string, { total: number; oldest: Date | null }>> {
+  if (totalsCache && Date.now() - totalsCache.at < TOTALS_TTL_MS) return totalsCache.data;
+  if (totalsInflight) return totalsInflight;
+  totalsInflight = (async () => {
+    const map = new Map<string, { total: number; oldest: Date | null }>();
+    // Последовательно, чтобы не занимать несколько соединений тяжёлыми COUNT.
+    for (const f of feeds) {
+      const [row] = await prisma.$queryRaw<{ total: number; oldest: Date | null }[]>`
+        SELECT count(*)::int AS total, min(t) AS oldest
+        FROM "ObSnapshot" WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+      `;
+      map.set(`${f.symbol}|${f.exchange}`, { total: row?.total ?? 0, oldest: row?.oldest ?? null });
+    }
+    totalsCache = { at: Date.now(), data: map };
+    return map;
+  })().finally(() => {
+    totalsInflight = null;
+  });
+  return totalsInflight;
+}
+
+// --- Быстрые агрегаты (индексные точечные запросы) — кэш на 10с, чтобы
+// несколько вкладок админки не дублировали работу.
 type HeavyStats = {
   feeds: FeedRow[];
   series: SeriesRow[];
@@ -60,41 +110,86 @@ let heavyInflight: Promise<HeavyStats> | null = null;
 
 async function getHeavyStats(): Promise<HeavyStats> {
   if (heavyCache && Date.now() - heavyCache.at < HEAVY_TTL_MS) return heavyCache.data;
-  if (heavyInflight) return heavyInflight; // не запускать несколько сканов параллельно
+  if (heavyInflight) return heavyInflight; // не запускать несколько сборов параллельно
   heavyInflight = (async () => {
-    const [feeds, series, tableStats, collector] = await Promise.all([
-      prisma.$queryRaw<FeedRow[]>`
-        SELECT symbol, exchange,
-          count(*)::int AS total,
-          count(*) FILTER (WHERE t > now() - interval '1 minute')::int AS last_min,
-          count(*) FILTER (WHERE t > now() - interval '1 hour')::int AS last_hour,
-          max(t) AS last_t, min(t) AS oldest_t
+    const feedList = await listFeeds();
+    const totals = await getTotals(feedList);
+
+    // Свежесть/темп на фид: max(t) и счётчики за минуту/час — range-скан по
+    // индексу (symbol, exchange, t), читает только последние записи фида.
+    const feeds: FeedRow[] = [];
+    for (const f of feedList) {
+      const [row] = await prisma.$queryRaw<
+        { last_min: number; last_hour: number; last_t: Date | null }[]
+      >`
+        SELECT
+          (SELECT count(*)::int FROM "ObSnapshot"
+            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+              AND t > now() - interval '1 minute') AS last_min,
+          (SELECT count(*)::int FROM "ObSnapshot"
+            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+              AND t > now() - interval '1 hour') AS last_hour,
+          (SELECT max(t) FROM "ObSnapshot"
+            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}) AS last_t
+      `;
+      const tot = totals.get(`${f.symbol}|${f.exchange}`);
+      feeds.push({
+        symbol: f.symbol,
+        exchange: f.exchange,
+        total: tot?.total ?? 0,
+        last_min: row?.last_min ?? 0,
+        last_hour: row?.last_hour ?? 0,
+        last_t: row?.last_t ?? null,
+        oldest_t: tot?.oldest ?? null,
+      });
+    }
+
+    // Скорость наполнения за час: по каждому фиду через индекс, агрегация по
+    // биржам — в JS (строк «минута × биржа» максимум 60 × фиды).
+    const seriesMap = new Map<string, SeriesRow>();
+    for (const f of feedList) {
+      const rows = await prisma.$queryRaw<{ minute: Date; c: number }[]>`
+        SELECT date_trunc('minute', t) AS minute, count(*)::int AS c
         FROM "ObSnapshot"
-        GROUP BY symbol, exchange
-        ORDER BY symbol, exchange
-      `,
-      prisma.$queryRaw<SeriesRow[]>`
-        SELECT exchange, date_trunc('minute', t) AS minute, count(*)::int AS c
-        FROM "ObSnapshot"
-        WHERE t > now() - interval '60 minutes'
-        GROUP BY exchange, minute
-        ORDER BY minute
-      `,
-      prisma.$queryRaw<{ tbl: string; last_min: number; last_t: Date | null }[]>`
-        SELECT 'ObTrade' AS tbl,
-          count(*) FILTER (WHERE t > now() - interval '1 minute')::int AS last_min,
-          max(t) AS last_t FROM "ObTrade"
-        UNION ALL
-        SELECT 'ObFootprint',
-          count(*) FILTER (WHERE t > now() - interval '1 minute')::int,
-          max(t) FROM "ObFootprint"
-        UNION ALL
-        SELECT 'ObBigTrade',
-          count(*) FILTER (WHERE t > now() - interval '1 minute')::int,
-          max(t) FROM "ObBigTrade"
-      `,
-      fetchCollectorMetrics(),
-    ]);
+        WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+          AND t > now() - interval '60 minutes'
+        GROUP BY minute
+      `;
+      for (const r of rows) {
+        const key = `${f.exchange}|${r.minute.getTime()}`;
+        const cur = seriesMap.get(key);
+        if (cur) cur.c += r.c;
+        else seriesMap.set(key, { exchange: f.exchange, minute: r.minute, c: r.c });
+      }
+    }
+    const series = [...seriesMap.values()].sort(
+      (a, b) => a.minute.getTime() - b.minute.getTime(),
+    );
+
+    // Сопутствующие потоки: max(t)/строк-за-минуту тоже точечно на фид.
+    const tableStats: { tbl: string; last_min: number; last_t: Date | null }[] = [];
+    for (const tbl of ["ObTrade", "ObFootprint", "ObBigTrade"] as const) {
+      let lastMin = 0;
+      let lastT: Date | null = null;
+      for (const f of feedList) {
+        const [row] = await prisma.$queryRawUnsafe<
+          { last_min: number; last_t: Date | null }[]
+        >(
+          `SELECT
+             (SELECT count(*)::int FROM "${tbl}"
+               WHERE symbol = $1 AND exchange = $2 AND t > now() - interval '1 minute') AS last_min,
+             (SELECT max(t) FROM "${tbl}"
+               WHERE symbol = $1 AND exchange = $2) AS last_t`,
+          f.symbol,
+          f.exchange,
+        );
+        lastMin += row?.last_min ?? 0;
+        if (row?.last_t && (!lastT || row.last_t > lastT)) lastT = row.last_t;
+      }
+      tableStats.push({ tbl, last_min: lastMin, last_t: lastT });
+    }
+
+    const collector = await fetchCollectorMetrics();
     const data: HeavyStats = { feeds, series, tableStats, collector };
     heavyCache = { at: Date.now(), data };
     return data;
