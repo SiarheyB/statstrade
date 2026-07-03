@@ -38,6 +38,10 @@ type Resp = {
 };
 
 const RANGES = ["15m", "1h", "4h", "24h", "1w"] as const;
+// Сколько свечей показываем ПО УМОЛЧАНИЮ (недавние). Данных грузится больше —
+// остальное открывается прокруткой влево (история, как в ClusterBtc).
+const VISIBLE_CANDLES: Record<string, number> = { "15m": 120, "1h": 110, "4h": 100, "24h": 90, "1w": 60 };
+const DEFAULT_VISIBLE = 100;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
@@ -277,8 +281,26 @@ export default function OrderflowPage() {
     // Полные границы + шаг свечи — для ограничения зума в onWheel.
     const candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
-    // Видимая область: текущий view либо полный диапазон.
-    if (!viewRef.current) viewRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax };
+    // Видимая область: текущий view либо, по умолчанию, недавние ~VISIBLE свечей
+    // (влево прокручивается вся загруженная история). Диапазон цены — по видимому
+    // окну, а не по всей истории, иначе свежие свечи сожмутся в полоску.
+    if (!viewRef.current) {
+      const visible = VISIBLE_CANDLES[range] ?? DEFAULT_VISIBLE;
+      const t0 = Math.max(fullT0, fullT1 - visible * candleStep);
+      let vy0 = Infinity;
+      let vy1 = -Infinity;
+      for (const k of candles) {
+        if (k.t < t0) continue;
+        if (k.l < vy0) vy0 = k.l;
+        if (k.h > vy1) vy1 = k.h;
+      }
+      if (!Number.isFinite(vy0) || !Number.isFinite(vy1)) {
+        vy0 = fYMin;
+        vy1 = fYMax;
+      }
+      const pad = (vy1 - vy0) * 0.04 || vy1 * 0.01;
+      viewRef.current = { t0, t1: fullT1, y0: vy0 - pad, y1: vy1 + pad };
+    }
     const v = viewRef.current;
     const t0 = v.t0;
     const t1 = v.t1;
@@ -570,7 +592,7 @@ export default function OrderflowPage() {
       lines.forEach((ln, i) => ctx.fillText(ln, bx + padX, by + padY + lineH / 2 + i * lineH));
       ctx.textBaseline = "alphabetic";
     }
-  }, [data, minT, gamma, clusters, showLiq, t]);
+  }, [data, minT, gamma, clusters, showLiq, t, range]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
