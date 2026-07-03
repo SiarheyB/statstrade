@@ -312,6 +312,22 @@ model SupportMessage {
   @@index([userId, authorRole, readAt])
 }
 
+// Серверные ошибки (500-е из API-роутов через serverError(), и необработанные
+// исключения через Next.js instrumentation onRequestError). readAt = когда
+// прочитано в админке (NULL = новое → бейдж на "Admin"). Ручное удаление —
+// автоочистки нет.
+model ErrorLog {
+  id        String    @id @default(cuid())
+  message   String
+  path      String? // маршрут, если известен (из onRequestError)
+  stack     String? // усечённый стек, если известен
+  createdAt DateTime  @default(now())
+  readAt    DateTime? // NULL = новая, непрочитанная
+
+  @@index([readAt, createdAt])
+  @@index([createdAt])
+}
+
 // Вкл/выкл биржи для синхронизации аккаунтов (тумблер в админ-панели). Нет
 // строки → биржа считается включённой (дефолт). Влияет только на то, какие
 // биржи пользователь может подключить; карты ордеров/ликвидаций не затрагивает.

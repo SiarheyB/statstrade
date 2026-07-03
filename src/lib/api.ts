@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "./auth";
 import { prisma } from "./db";
+import { logError } from "./errorLog";
 
 // Throttle lastSeenAt writes: at most once per user per hour. Kept in-process
 // (long-running container) so we avoid a DB read/write on every request — the
@@ -35,6 +36,7 @@ export function badRequest(message: string, details?: unknown) {
 }
 
 export function serverError(message: string) {
+  logError(message);
   return NextResponse.json({ error: message }, { status: 500 });
 }
 

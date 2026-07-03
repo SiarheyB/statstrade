@@ -84,14 +84,19 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [serviceOpen, setServiceOpen] = useState(() => isServiceRoute(pathname));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [supportUnread, setSupportUnread] = useState(0);
+  const [errorsUnread, setErrorsUnread] = useState(0);
 
   useEffect(() => {
     if (!isAdmin) return;
     let alive = true;
     const poll = async () => {
       try {
-        const res = await fetch("/api/admin/support/unread");
-        if (res.ok && alive) setSupportUnread((await res.json()).count ?? 0);
+        const [s, e] = await Promise.all([
+          fetch("/api/admin/support/unread"),
+          fetch("/api/admin/errors/unread"),
+        ]);
+        if (s.ok && alive) setSupportUnread((await s.json()).count ?? 0);
+        if (e.ok && alive) setErrorsUnread((await e.json()).count ?? 0);
       } catch {
         // тихо игнорируем — это лишь индикатор
       }
@@ -258,9 +263,9 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           >
             <span className="relative inline-flex">
               <ShieldCheck size={18} />
-              {supportUnread > 0 && (
+              {supportUnread + errorsUnread > 0 && (
                 <span className="absolute -top-1.5 -right-1.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-loss text-white text-[9px] font-semibold leading-[15px] text-center">
-                  {supportUnread > 99 ? "99+" : supportUnread}
+                  {supportUnread + errorsUnread > 99 ? "99+" : supportUnread + errorsUnread}
                 </span>
               )}
             </span>
