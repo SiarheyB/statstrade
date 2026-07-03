@@ -45,17 +45,24 @@ async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; e
   }
 }
 
-export async function GET(req: Request) {
-  const session = await getAdminSession();
-  if (!session) return notFound();
+// Тяжёлые агрегаты (полный скан ObSnapshot ~десятки млн строк) кэшируем в памяти
+// на 10с: админка опрашивает раз в 3с, без кэша это гоняло бы полный скан на
+// каждый опрос. Превью и live-метрики коллектора считаем свежими на каждый запрос.
+type HeavyStats = {
+  feeds: FeedRow[];
+  series: SeriesRow[];
+  tableStats: { tbl: string; last_min: number; last_t: Date | null }[];
+  collector: Awaited<ReturnType<typeof fetchCollectorMetrics>>;
+};
+const HEAVY_TTL_MS = 10_000;
+let heavyCache: { at: number; data: HeavyStats } | null = null;
+let heavyInflight: Promise<HeavyStats> | null = null;
 
-  const url = new URL(req.url);
-  const previewSymbol = url.searchParams.get("symbol");
-  const previewExchange = url.searchParams.get("exchange");
-
-  try {
+async function getHeavyStats(): Promise<HeavyStats> {
+  if (heavyCache && Date.now() - heavyCache.at < HEAVY_TTL_MS) return heavyCache.data;
+  if (heavyInflight) return heavyInflight; // не запускать несколько сканов параллельно
+  heavyInflight = (async () => {
     const [feeds, series, tableStats, collector] = await Promise.all([
-      // Свежесть и объёмы по каждому фиду (symbol × exchange) из ObSnapshot.
       prisma.$queryRaw<FeedRow[]>`
         SELECT symbol, exchange,
           count(*)::int AS total,
@@ -66,7 +73,6 @@ export async function GET(req: Request) {
         GROUP BY symbol, exchange
         ORDER BY symbol, exchange
       `,
-      // Темп наполнения: снимков в минуту по биржам за последний час.
       prisma.$queryRaw<SeriesRow[]>`
         SELECT exchange, date_trunc('minute', t) AS minute, count(*)::int AS c
         FROM "ObSnapshot"
@@ -74,7 +80,6 @@ export async function GET(req: Request) {
         GROUP BY exchange, minute
         ORDER BY minute
       `,
-      // Счётчики остальных таблиц карты ордеров за последнюю минуту + свежесть.
       prisma.$queryRaw<{ tbl: string; last_min: number; last_t: Date | null }[]>`
         SELECT 'ObTrade' AS tbl,
           count(*) FILTER (WHERE t > now() - interval '1 minute')::int AS last_min,
@@ -90,6 +95,25 @@ export async function GET(req: Request) {
       `,
       fetchCollectorMetrics(),
     ]);
+    const data: HeavyStats = { feeds, series, tableStats, collector };
+    heavyCache = { at: Date.now(), data };
+    return data;
+  })().finally(() => {
+    heavyInflight = null;
+  });
+  return heavyInflight;
+}
+
+export async function GET(req: Request) {
+  const session = await getAdminSession();
+  if (!session) return notFound();
+
+  const url = new URL(req.url);
+  const previewSymbol = url.searchParams.get("symbol");
+  const previewExchange = url.searchParams.get("exchange");
+
+  try {
+    const { feeds, series, tableStats, collector } = await getHeavyStats();
 
     // Live-превью: последний снимок выбранного (или первого) фида.
     let preview: { symbol: string; exchange: string; t: Date | null; bins: PreviewRow[] } | null = null;
