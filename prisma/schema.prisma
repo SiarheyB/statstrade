@@ -328,6 +328,21 @@ model ErrorLog {
   @@index([createdAt])
 }
 
+// Кошелёк для донатов (кнопка «Донат» в меню пользователя). Редактируется в
+// админ-панели: можно добавлять новые сети/адреса, отключать без удаления.
+model DonateWallet {
+  id        String   @id @default(cuid())
+  network   String // отображаемое имя сети, напр. "TRC20 (Tron)"
+  coin      String // напр. "USDT"
+  address   String
+  enabled   Boolean  @default(true)
+  sortOrder Int      @default(0) // порядок показа пользователю
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([enabled, sortOrder])
+}
+
 // Вкл/выкл биржи для синхронизации аккаунтов (тумблер в админ-панели). Нет
 // строки → биржа считается включённой (дефолт). Влияет только на то, какие
 // биржи пользователь может подключить; карты ордеров/ликвидаций не затрагивает.

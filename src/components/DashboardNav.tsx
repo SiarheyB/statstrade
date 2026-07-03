@@ -28,6 +28,7 @@ import {
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import SupportButton from "@/components/SupportButton";
+import DonateButton from "@/components/DonateButton";
 
 // Опрос числа непрочитанных сообщений поддержки — только для админов, только
 // для колокольчика в меню (лёгкий эндпоинт, не полный список).
@@ -273,6 +274,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           </Link>
         )}
         <SupportButton onOpen={onNavigate} />
+        <DonateButton onOpen={onNavigate} />
         <button
           onClick={() => {
             onNavigate();
