@@ -3,16 +3,13 @@ import { runDueSyncs } from "@/lib/sync";
 
 export const maxDuration = 60;
 
-// Token-protected endpoint for external cron platforms (Vercel Cron, system
-// cron, etc.). Accepts the secret via "Authorization: Bearer <secret>" header
-// or "?secret=" query param.
+// Token-protected endpoint for external cron platforms (system cron etc.).
+// Secret only via "Authorization: Bearer <secret>" — query-параметр убран,
+// чтобы секрет не оседал в логах прокси/туннеля.
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  const header = req.headers.get("authorization");
-  if (header === `Bearer ${secret}`) return true;
-  const url = new URL(req.url);
-  return url.searchParams.get("secret") === secret;
+  return req.headers.get("authorization") === `Bearer ${secret}`;
 }
 
 async function handle(req: Request) {

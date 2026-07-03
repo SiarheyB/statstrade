@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests } from "@/lib/api";
+import { rateLimit } from "@/lib/ratelimit";
 import { decrypt } from "@/lib/crypto";
 import { verifyTotp } from "@/lib/totp";
 
@@ -12,6 +13,10 @@ const schema = z.object({ code: z.string().min(6).max(7) });
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+
+  // Не более 5 попыток подтверждения кода за 15 минут на пользователя.
+  const rl = rateLimit(`2fa:confirm:${user.userId}`, 5, 15 * 60_000);
+  if (!rl.ok) return tooManyRequests(rl.retryAfterSec);
 
   let body: unknown;
   try {

@@ -35,9 +35,11 @@ export function badRequest(message: string, details?: unknown) {
   return NextResponse.json({ error: message, details }, { status: 400 });
 }
 
+// Полное сообщение — только в лог ошибок (админка); клиенту всегда generic,
+// чтобы не светить внутренности (Prisma/ccxt/пути) наружу.
 export function serverError(message: string) {
   logError(message);
-  return NextResponse.json({ error: message }, { status: 500 });
+  return NextResponse.json({ error: "Внутренняя ошибка сервера" }, { status: 500 });
 }
 
 // 429 для превышения rate-limit (регистрация/вход). Retry-After — в секундах.

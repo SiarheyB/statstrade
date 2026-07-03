@@ -1,4 +1,7 @@
-import bcrypt from "bcryptjs";
+// Нативный bcrypt (C++): хэширование идёт в libuv thread pool, не блокируя
+// event loop единственного app-процесса (bcryptjs на чистом JS блокировал его
+// на ~150–300 мс на слабом CPU).
+import bcrypt from "bcrypt";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 

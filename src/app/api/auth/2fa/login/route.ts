@@ -35,6 +35,11 @@ export async function POST(req: Request) {
     const userId = await getPendingUserId();
     if (!userId) return badRequest("Сессия подтверждения истекла, войдите снова");
 
+    // Второй ключ лимита — по аккаунту: распределённый перебор со многих IP
+    // всё равно упирается в 8 попыток за 10 минут на пользователя.
+    const rlUser = rateLimit(`2fa:user:${userId}`, 8, 10 * 60_000);
+    if (!rlUser.ok) return tooManyRequests(rlUser.retryAfterSec);
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
       await clearPendingCookie();
