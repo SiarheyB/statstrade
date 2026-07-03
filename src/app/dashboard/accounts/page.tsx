@@ -42,12 +42,18 @@ type Account = {
 
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
 
-const EXCHANGES = [
+type ExchangeOpt = { id: string; name: string; needsPassphrase: boolean; supportsDemo: boolean };
+
+// MetaTrader — отдельный источник (файловый импорт), всегда доступен.
+const MT_SOURCES: ExchangeOpt[] = [
+  { id: "mt4", name: "MetaTrader 4", needsPassphrase: false, supportsDemo: false },
+  { id: "mt5", name: "MetaTrader 5", needsPassphrase: false, supportsDemo: false },
+];
+// Фолбэк, пока не загрузился список включённых бирж из /api/exchanges.
+const FALLBACK_CCXT: ExchangeOpt[] = [
   { id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: true },
   { id: "bybit", name: "Bybit", needsPassphrase: false, supportsDemo: true },
   { id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: true },
-  { id: "mt4", name: "MetaTrader 4", needsPassphrase: false, supportsDemo: false },
-  { id: "mt5", name: "MetaTrader 5", needsPassphrase: false, supportsDemo: false },
 ];
 
 const ACCOUNT_CURRENCIES = ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"];
@@ -377,6 +383,7 @@ function AccountForm({
   onCreated: () => void;
 }) {
   const { t } = useI18n();
+  const [ccxtOpts, setCcxtOpts] = useState<ExchangeOpt[]>(FALLBACK_CCXT);
   const [exchange, setExchange] = useState("binance");
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
@@ -392,6 +399,26 @@ function AccountForm({
   const [previewing, setPreviewing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Включённые биржи (из /api/exchanges) + MetaTrader.
+  const EXCHANGES: ExchangeOpt[] = [...ccxtOpts, ...MT_SOURCES];
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await fetch("/api/exchanges");
+      if (!res.ok || !alive) return;
+      const d = await res.json();
+      if (!Array.isArray(d.exchanges) || d.exchanges.length === 0) return;
+      setCcxtOpts(d.exchanges);
+      // Если текущий выбор пропал из включённых — переключаемся на первую доступную.
+      const ids = [...d.exchanges.map((e: ExchangeOpt) => e.id), ...MT_SOURCES.map((m) => m.id)];
+      setExchange((prev) => (ids.includes(prev) ? prev : d.exchanges[0]?.id ?? "binance"));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   const isMt = isMtSource(exchange);
   const needsPassphrase = EXCHANGES.find((e) => e.id === exchange)?.needsPassphrase;

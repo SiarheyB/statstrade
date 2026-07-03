@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Newspaper, Database, ScrollText, ArrowLeft, Menu, X } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -14,6 +14,7 @@ const LINKS = [
   { href: "/admin/collector", key: "admin.nav.collector", icon: Layers },
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
+  { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
   { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
   { href: "/admin/system", key: "admin.nav.system", icon: Database },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },

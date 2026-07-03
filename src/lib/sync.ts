@@ -34,6 +34,15 @@ const REQUIRES_SYMBOL: Record<ExchangeId, boolean> = {
   binance: true,
   bybit: false,
   okx: false,
+  // Новые биржи: по умолчанию тянем сделки одним проходом (fetchMyTrades без
+  // символа). Если у биржи нет «all trades» endpoint — ccxt бросит ошибку, синк
+  // останется не фатальным; тогда конкретную биржу переводим в true (per-symbol).
+  kraken: false,
+  kucoin: false,
+  bitget: false,
+  gate: false,
+  mexc: false,
+  htx: false,
 };
 
 // Quote currencies whose spot pairs a full scan enumerates (per-symbol exchanges).

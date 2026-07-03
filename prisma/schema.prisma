@@ -292,6 +292,18 @@ model CollectorConfig {
   updatedAt DateTime @updatedAt
 }
 
+// Вкл/выкл биржи для синхронизации аккаунтов (тумблер в админ-панели). Нет
+// строки → биржа считается включённой (дефолт). Влияет только на то, какие
+// биржи пользователь может подключить; карты ордеров/ликвидаций не затрагивает.
+model ExchangeToggle {
+  exchange    String   @id // ccxt id: binance | bybit | okx | kraken | ...
+  enabled     Boolean  @default(true)
+  // Разрешён ли демо/testnet-счёт для этой биржи. NULL = взять статичный дефолт
+  // (SUPPORTED_EXCHANGES[id].supportsDemo). Админ может переопределить.
+  demoEnabled Boolean?
+  updatedAt   DateTime @updatedAt
+}
+
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
   id          String   @id @default(cuid())

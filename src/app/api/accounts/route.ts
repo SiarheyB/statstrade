@@ -5,6 +5,7 @@ import { encrypt, decrypt, maskSecret } from "@/lib/crypto";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchanges";
+import { isExchangeEnabled } from "@/lib/exchangeToggle";
 
 const SOURCES = ["exchange", "mt4", "mt5", "manual"] as const;
 
@@ -81,6 +82,7 @@ export async function POST(req: Request) {
   let createData;
   if (data.source === "exchange") {
     if (!isExchangeId(data.exchange)) return badRequest("Неподдерживаемая биржа");
+    if (!(await isExchangeEnabled(data.exchange))) return badRequest("Эта биржа сейчас отключена");
     if (!data.apiKey || !data.apiSecret) return badRequest("Введите API key и secret");
     if (SUPPORTED_EXCHANGES[data.exchange].needsPassphrase && !data.passphrase) {
       return badRequest("Для OKX требуется passphrase");
