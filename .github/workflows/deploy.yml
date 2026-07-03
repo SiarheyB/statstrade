@@ -42,9 +42,11 @@ jobs:
           tags: |
             ${{ env.APP_IMAGE }}:latest
             ${{ env.APP_IMAGE }}:${{ github.sha }}
-          # Google Sign-In (опционально): задайте секрет NEXT_PUBLIC_GOOGLE_CLIENT_ID
+          # NEXT_PUBLIC_* вшиваются в бандл при сборке → передаём из секретов.
+          # Google Sign-In и Turnstile (капча) — оба опциональны.
           build-args: |
             NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ secrets.NEXT_PUBLIC_GOOGLE_CLIENT_ID }}
+            NEXT_PUBLIC_TURNSTILE_SITE_KEY=${{ secrets.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

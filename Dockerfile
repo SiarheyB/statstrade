@@ -19,6 +19,9 @@ RUN npm ci
 COPY . .
 ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=""
 ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+# Cloudflare Turnstile site key (публичный, капча на регистрации). Пусто — выключена.
+ARG NEXT_PUBLIC_TURNSTILE_SITE_KEY=""
+ENV NEXT_PUBLIC_TURNSTILE_SITE_KEY=$NEXT_PUBLIC_TURNSTILE_SITE_KEY
 # Собираем БЕЗ `npm run build` (там есть migrate deploy, который требует БД).
 RUN npx prisma generate && npx next build
 
