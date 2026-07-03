@@ -188,6 +188,10 @@ model Fill {
 // Aggregated taker-trade volume per snapshot interval — written by the collector
 // from the aggTrades stream. Drives the delta / cumulative-delta panel under the
 // orderbook heatmap. buyVol/sellVol are aggressor base volumes.
+// NB: в БД таблица партиционирована по дням (PARTITION BY RANGE (t), см.
+// миграцию partition_ob_tables) и НЕ имеет PK — @id здесь только для типизации
+// клиента Prisma. Дневные партиции создаёт collector (ob_ensure_partitions),
+// чистка = DROP партиции (ob_drop_partitions_before) вместо DELETE.
 model ObTrade {
   id       BigInt   @id @default(autoincrement())
   symbol   String
@@ -196,13 +200,13 @@ model ObTrade {
   buyVol   Float    @default(0)
   sellVol  Float    @default(0)
 
-  @@index([symbol, exchange, t])
-  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
+  @@index([symbol, exchange, t]) // выборка exchange="all" идёт по префиксу symbol
 }
 
 // Traded volume per price bin per snapshot — written by the collector from the
 // trade stream. Drives the footprint/cluster overlay (buy vs sell volume at each
 // price level inside a candle).
+// NB: партиционирована по дням, без PK в БД (см. ObTrade / partition_ob_tables).
 model ObFootprint {
   id       BigInt   @id @default(autoincrement())
   symbol   String
@@ -213,11 +217,11 @@ model ObFootprint {
   sellVol  Float    @default(0)
 
   @@index([symbol, exchange, t])
-  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
 // Large market trades (taker prints above a notional threshold) — written by the
 // collector from the trade stream. Drives the "large orders" feed.
+// NB: партиционирована по дням, без PK в БД (см. ObTrade / partition_ob_tables).
 model ObBigTrade {
   id       BigInt   @id @default(autoincrement())
   symbol   String
@@ -235,6 +239,7 @@ model ObBigTrade {
 // (collector/), one row per non-empty price bin per snapshot. Global market
 // data (not per-user). Read by /api/orderflow to render the limit-order heatmap.
 // High-volume table: keep it lean and prune by retention (see collector).
+// NB: партиционирована по дням, без PK в БД (см. ObTrade / partition_ob_tables).
 model ObSnapshot {
   id       BigInt   @id @default(autoincrement())
   symbol   String // BTCUSDT
@@ -245,7 +250,6 @@ model ObSnapshot {
   askVol   Float    @default(0) // aggregated ask size in the bin (base units)
 
   @@index([symbol, exchange, t])
-  @@index([symbol, t]) // выборка по всем биржам (exchange="all")
 }
 
 // Предагрегация снапшотов стакана в минутные бакеты × ценовой уровень. Пишется

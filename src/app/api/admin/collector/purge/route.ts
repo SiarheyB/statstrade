@@ -28,7 +28,17 @@ export async function POST(req: Request) {
   const before = new Date(parsed.data.before);
 
   try {
-    // t-таблицы и bucket-таблицы. $executeRaw для единообразия и скорости.
+    // Партиционированные t-таблицы: целые дни до `before` сбрасываем DROP'ом
+    // партиций (мгновенно, без bloat'а), остаток внутри граничного дня — DELETE.
+    const partitioned = ["ObSnapshot", "ObTrade", "ObFootprint", "ObBigTrade"] as const;
+    let droppedPartitions = 0;
+    for (const tbl of partitioned) {
+      const r = await prisma.$queryRawUnsafe<{ n: number }[]>(
+        `SELECT ob_drop_partitions_before('${tbl}', $1) AS n`,
+        before,
+      );
+      droppedPartitions += r[0]?.n ?? 0;
+    }
     const [snap, trade, foot, big, rollup, bucket] = await Promise.all([
       prisma.$executeRaw`DELETE FROM "ObSnapshot" WHERE "t" < ${before}`,
       prisma.$executeRaw`DELETE FROM "ObTrade" WHERE "t" < ${before}`,
@@ -37,11 +47,11 @@ export async function POST(req: Request) {
       prisma.$executeRaw`DELETE FROM "ObSnapshotRollup" WHERE "bucket" < ${before}`,
       prisma.$executeRaw`DELETE FROM "ObRollupBucket" WHERE "bucket" < ${before}`,
     ]);
-    const deleted = { snap, trade, foot, big, rollup, bucket };
+    const deleted = { snap, trade, foot, big, rollup, bucket, droppedPartitions };
     const total = snap + trade + foot + big + rollup + bucket;
     await recordAudit(session, "collector.purge", {
       targetType: "orderflow-history",
-      detail: `before=${before.toISOString()} deleted=${total}`,
+      detail: `before=${before.toISOString()} deleted=${total} partitions=${droppedPartitions}`,
     });
     return NextResponse.json({ ok: true, before: before.toISOString(), deleted, total });
   } catch (err) {

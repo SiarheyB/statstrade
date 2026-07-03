@@ -80,7 +80,9 @@ export type DeltaSeries = {
 };
 
 // Дельта/кумулятивная дельта из ленты сделок (ObTrade). Корзины времени
-// совпадают по сетке с heatmap (cols). Берём binance-futures как референс.
+// совпадают по сетке с heatmap (cols). Агрегация прямо в Postgres: раньше сюда
+// переносились все сырые строки за окно (сотни тысяч при широком таймфрейме),
+// хотя дальше они просто суммировались по корзинам.
 export async function computeDelta(
   symbol: string,
   exchange: string,
@@ -88,25 +90,26 @@ export async function computeDelta(
   toMs: number,
   cols = 240,
 ): Promise<DeltaSeries | null> {
-  const rows = await prisma.obTrade.findMany({
-    where: {
-      symbol,
-      ...(exchange === "all" ? {} : { exchange }),
-      t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    },
-    select: { t: true, buyVol: true, sellVol: true },
-    orderBy: { t: "asc" },
-  });
+  const xspan = toMs - fromMs || 1;
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+  const rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+    SELECT ${colExpr}::int AS col,
+           SUM("buyVol")::float8 AS buy,
+           SUM("sellVol")::float8 AS sell
+    FROM "ObTrade"
+    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+    GROUP BY col
+  `;
   if (rows.length === 0) return null;
 
-  const xspan = toMs - fromMs || 1;
-  const colOf = (t: number) => Math.max(0, Math.min(cols - 1, Math.floor(((t - fromMs) / xspan) * cols)));
+  const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
   const buy = new Array(cols).fill(0);
   const sell = new Array(cols).fill(0);
   for (const r of rows) {
-    const c = colOf(r.t.getTime());
-    buy[c] += r.buyVol;
-    sell[c] += r.sellVol;
+    const c = clampCol(r.col);
+    buy[c] += r.buy;
+    sell[c] += r.sell;
   }
   const delta = buy.map((b, i) => b - sell[i]);
   const cvd: number[] = [];
@@ -142,37 +145,35 @@ export async function computeFootprint(
   toMs: number,
 ): Promise<Footprint | null> {
   const interval = CANDLE_MS[range] ?? 60_000;
-  const rows = await prisma.obFootprint.findMany({
-    where: {
-      symbol,
-      ...(exchange === "all" ? {} : { exchange }),
-      t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    },
-    select: { t: true, price: true, buyVol: true, sellVol: true },
-    orderBy: { t: "asc" },
-  });
+  // Группировка по свече (время открытия) и цене — в Postgres, вместо переноса
+  // всех сырых строк за окно в Node (уровни × снапшоты — быстро растёт).
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const rows = await prisma.$queryRaw<
+    { bucket: bigint; price: number; buy: number; sell: number }[]
+  >`
+    SELECT (floor(extract(epoch from "t") * 1000 / ${interval}) * ${interval})::int8 AS bucket,
+           "price" AS price,
+           SUM("buyVol")::float8 AS buy,
+           SUM("sellVol")::float8 AS sell
+    FROM "ObFootprint"
+    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+    GROUP BY bucket, "price"
+    ORDER BY bucket
+  `;
   if (rows.length === 0) return null;
 
-  // Группируем по свече (по времени открытия) и цене.
-  const byCandle = new Map<number, Map<number, { buy: number; sell: number }>>();
-  for (const r of rows) {
-    const bucket = Math.floor(r.t.getTime() / interval) * interval;
-    let lvls = byCandle.get(bucket);
-    if (!lvls) { lvls = new Map(); byCandle.set(bucket, lvls); }
-    const cell = lvls.get(r.price) ?? { buy: 0, sell: 0 };
-    cell.buy += r.buyVol;
-    cell.sell += r.sellVol;
-    lvls.set(r.price, cell);
-  }
-
   let maxVol = 0;
-  const candles: FootprintCandle[] = [...byCandle.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([t, lvls]) => {
-      const levels: FootprintLevel[] = [...lvls.entries()].map(([price, c]) => ({ price, buy: c.buy, sell: c.sell }));
-      for (const l of levels) { const v = l.buy + l.sell; if (v > maxVol) maxVol = v; }
-      return { t, levels };
-    });
+  const byCandle = new Map<number, FootprintLevel[]>();
+  for (const r of rows) {
+    if (r.buy === 0 && r.sell === 0) continue;
+    const t = Number(r.bucket);
+    let levels = byCandle.get(t);
+    if (!levels) { levels = []; byCandle.set(t, levels); }
+    levels.push({ price: r.price, buy: r.buy, sell: r.sell });
+    const v = r.buy + r.sell;
+    if (v > maxVol) maxVol = v;
+  }
+  const candles: FootprintCandle[] = [...byCandle.entries()].map(([t, levels]) => ({ t, levels }));
 
   return { interval, maxVol, candles };
 }

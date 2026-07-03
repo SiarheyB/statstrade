@@ -347,17 +347,25 @@ async function writeSnapshot() {
   console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} fp=${fpRows.length} big=${bigRows.length} feeds=${synced}/${feeds.length}`);
 }
 
-// Авточистка ТОЛЬКО сырых ObSnapshot — они тяжёлые (каждый снапшот × уровень).
+// Обслуживание дневных партиций (таблицы Ob* партиционированы по t, см.
+// миграцию partition_ob_tables): создаём партиции на неделю вперёд и чистим
+// ретеншн ТОЛЬКО сырых ObSnapshot — они тяжёлые (каждый снапшот × уровень).
+// Чистка = мгновенный DROP партиции вместо DELETE (ноль bloat'а на SSD).
 // Rollup, сделки, футпринт и крупные сделки — это «история» карты ордеров: её
 // храним полностью и чистим вручную из админ-панели (по периодам). См.
 // /api/admin/collector/purge.
+const PARTITIONED_TABLES = ["ObSnapshot", "ObTrade", "ObFootprint", "ObBigTrade"];
 async function pruneOld() {
   try {
+    for (const tbl of PARTITIONED_TABLES) {
+      await pool.query(`SELECT ob_ensure_partitions($1, 7)`, [tbl]);
+    }
     const r1 = await pool.query(
-      `DELETE FROM "ObSnapshot" WHERE "t" < NOW() - ($1 || ' days')::interval`,
+      `SELECT ob_drop_partitions_before('ObSnapshot', NOW() - ($1 || ' days')::interval) AS n`,
       [String(cfg.retentionDays)],
     );
-    if (r1.rowCount) console.log(`[prune] ObSnapshot: удалено ${r1.rowCount} сырых строк (история хранится до ручной очистки)`);
+    const n = r1.rows[0]?.n ?? 0;
+    if (n) console.log(`[prune] ObSnapshot: сброшено ${n} дневных партиций (ретеншн ${cfg.retentionDays}д; история остальных таблиц — до ручной очистки)`);
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);
   }
