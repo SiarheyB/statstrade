@@ -10,13 +10,19 @@ export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   try {
-    const rows = await prisma.obSnapshot.findMany({
-      distinct: ["symbol", "exchange"],
-      select: { symbol: true, exchange: true },
-    });
+    const [rows, cfg] = await Promise.all([
+      prisma.obSnapshot.findMany({
+        distinct: ["symbol", "exchange"],
+        select: { symbol: true, exchange: true },
+      }),
+      prisma.collectorConfig.findMany({ select: { symbol: true, minCoins: true } }),
+    ]);
     const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();
     const exchanges = Array.from(new Set(rows.map((r) => r.exchange))).sort();
-    return NextResponse.json({ symbols, exchanges });
+    // Пороги «только крупные лимитки» по символу (для подписи под фильтром).
+    const minCoins: Record<string, number> = {};
+    for (const c of cfg) minCoins[c.symbol] = c.minCoins;
+    return NextResponse.json({ symbols, exchanges, minCoins });
   } catch (err) {
     return serverError((err as Error).message);
   }

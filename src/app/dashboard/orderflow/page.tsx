@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layers, RefreshCw, HelpCircle } from "lucide-react";
+import { Layers, RefreshCw, HelpCircle, Filter } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
 type ObHeatmap = {
@@ -40,6 +40,14 @@ type Resp = {
 const RANGES = ["15m", "1h", "4h", "24h", "1w"] as const;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
+
+// Порог «только крупные лимитки» в монетах базового актива. Показываем его в UI
+// рядом с Яркостью. Значения — дефолты коллектора (позже придут из настроек в БД).
+const BIG_LIMIT_COINS: Record<string, number> = { BTCUSDT: 500, ETHUSDT: 5000 };
+const DEFAULT_BIG_LIMIT_COINS = 500;
+function bigLimitFor(symbol: string): number {
+  return BIG_LIMIT_COINS[symbol.toUpperCase()] ?? DEFAULT_BIG_LIMIT_COINS;
+}
 
 function fmtP(p: number): string {
   if (p >= 1000) return Math.round(p).toLocaleString("en-US");
@@ -119,6 +127,8 @@ export default function OrderflowPage() {
   const [hydrated, setHydrated] = useState(false);
   const [metaSymbols, setMetaSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [metaExchanges, setMetaExchanges] = useState<string[]>(FALLBACK_EXCHANGES);
+  // Живые пороги «крупных лимиток» из CollectorConfig (fallback — bigLimitFor).
+  const [metaMinCoins, setMetaMinCoins] = useState<Record<string, number>>({});
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -201,6 +211,7 @@ export default function OrderflowPage() {
         const m = await res.json();
         if (Array.isArray(m.symbols) && m.symbols.length) setMetaSymbols(m.symbols);
         if (Array.isArray(m.exchanges) && m.exchanges.length) setMetaExchanges(m.exchanges);
+        if (m.minCoins && typeof m.minCoins === "object") setMetaMinCoins(m.minCoins);
       } catch {
         // оставляем дефолты
       }
@@ -926,6 +937,10 @@ export default function OrderflowPage() {
           </span>
           <input type="range" min={0} max={100} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="accent-accent w-40" />
         </label>
+        <span className="text-faint/80 inline-flex items-center gap-1.5">
+          <Filter size={12} className="shrink-0" />
+          {t("of.onlyBigLimits", { n: (metaMinCoins[symbol.toUpperCase()] ?? bigLimitFor(symbol)).toLocaleString("en-US"), coin: baseAsset(symbol) })}
+        </span>
       </div>
 
       {error && <div className="card p-4 text-sm text-loss border-loss/30 mb-5">{error}</div>}
@@ -958,22 +973,38 @@ export default function OrderflowPage() {
 
           {/* Лента крупных рыночных ордеров */}
           <div className="card p-3 mt-3">
-            <div className="text-xs font-medium text-muted mb-2">{t("of.bigTrades")}</div>
+            <div className="text-xs font-medium text-muted">{t("of.bigTrades")}</div>
+            <div className="text-[11px] text-faint mb-2">{t("of.bigTradesHint")}</div>
             {(data?.bigTrades?.length ?? 0) === 0 ? (
               <div className="text-xs text-faint">{t("of.noBig")}</div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-x-6 gap-y-1 text-xs tabular-nums">
-                {data!.bigTrades.slice(0, 24).map((b, i) => (
-                  <div key={i} className="flex items-center justify-between gap-2 border-b border-border/30 py-0.5">
-                    <span className="text-faint">{fmtTime(b.t)}</span>
-                    <span className="text-faint/70 uppercase text-[10px] w-7">{b.exchange.slice(0, 3)}</span>
-                    <span className={b.side === "buy" ? "text-profit" : "text-loss"}>
-                      {b.side === "buy" ? "▲" : "▼"} {fmtP(b.price)}
-                    </span>
-                    <span className="text-fg">{b.qty.toFixed(3)}</span>
-                    <span className="text-faint">{fmtVal(b.qty * b.price)}$</span>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs tabular-nums">
+                  <thead>
+                    <tr className="text-faint text-left border-b border-border/50">
+                      <th className="font-medium py-1 pr-3">{t("of.thTime")}</th>
+                      <th className="font-medium py-1 pr-3">{t("of.thExchange")}</th>
+                      <th className="font-medium py-1 pr-3">{t("of.thSide")}</th>
+                      <th className="font-medium py-1 pr-3 text-right">{t("of.thPrice")}</th>
+                      <th className="font-medium py-1 pr-3 text-right">{t("of.thSize")}, {baseAsset(symbol)}</th>
+                      <th className="font-medium py-1 text-right">{t("of.thValue")}, $</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data!.bigTrades.slice(0, 24).map((b, i) => (
+                      <tr key={i} className="border-b border-border/20">
+                        <td className="text-faint py-0.5 pr-3">{fmtTime(b.t)}</td>
+                        <td className="text-faint/80 py-0.5 pr-3">{b.exchange}</td>
+                        <td className={`py-0.5 pr-3 ${b.side === "buy" ? "text-profit" : "text-loss"}`}>
+                          {b.side === "buy" ? "▲ " : "▼ "}{b.side === "buy" ? t("of.sideBuy") : t("of.sideSell")}
+                        </td>
+                        <td className="text-fg py-0.5 pr-3 text-right">{fmtP(b.price)}</td>
+                        <td className="text-fg py-0.5 pr-3 text-right">{b.qty.toFixed(3)}</td>
+                        <td className="text-faint py-0.5 text-right">{fmtVal(b.qty * b.price)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>

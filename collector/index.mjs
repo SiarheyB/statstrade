@@ -55,6 +55,27 @@ function binSizeFor(symbol) {
   return DEFAULT_BIN[symbol] ?? cfg.binSize;
 }
 
+// Порог «только крупные лимитки» в монетах базового актива, по символу. Читается
+// из таблицы CollectorConfig (редактируется в админ-панели) и обновляется каждые
+// ~30с — без редеплоя. Фолбэк — встроенные дефолты; для символов, у которых
+// порога нет, действует прежний шумовой фильтр по нотионалу ($).
+const DEFAULT_MIN_COINS = { BTCUSDT: 500, ETHUSDT: 5000 };
+let minCoinsMap = new Map(Object.entries(DEFAULT_MIN_COINS));
+function minCoinsFor(symbol) {
+  const v = minCoinsMap.get(symbol);
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+async function loadCollectorConfig() {
+  try {
+    const r = await pool.query(`SELECT "symbol", "minCoins" FROM "CollectorConfig"`);
+    const m = new Map(Object.entries(DEFAULT_MIN_COINS));
+    for (const row of r.rows) m.set(String(row.symbol).toUpperCase(), Number(row.minCoins));
+    minCoinsMap = m;
+  } catch (err) {
+    console.error(`[config] загрузка CollectorConfig: ${err.message}`);
+  }
+}
+
 const FACTORY = {
   "binance-futures": (symbol, h) => createOrderBook({ symbol, market: "futures", onResync: h.onResync, onError: h.onError }),
   "binance-spot": (symbol, h) => createOrderBook({ symbol, market: "spot", onResync: h.onResync, onError: h.onError }),
@@ -136,7 +157,11 @@ function rowsForFeed(feed, t) {
   for (const c of centers) {
     const bidVol = bidBins.get(c) ?? 0;
     const askVol = askBins.get(c) ?? 0;
-    if ((bidVol + askVol) * c < cfg.noiseMinNotional) continue;
+    const totalCoins = bidVol + askVol;
+    // «Только крупные лимитки»: для символов с порогом в монетах фильтруем по нему
+    // (напр. ≥500 BTC), иначе — прежний фильтр шума по нотионалу ($).
+    const minCoins = minCoinsFor(feed.symbol);
+    if (minCoins != null ? totalCoins < minCoins : totalCoins * c < cfg.noiseMinNotional) continue;
     out.push([feed.symbol, feed.exchange, t, c, bidVol, askVol]);
   }
   return { rows: out, mid };
@@ -322,36 +347,17 @@ async function writeSnapshot() {
   console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} fp=${fpRows.length} big=${bigRows.length} feeds=${synced}/${feeds.length}`);
 }
 
+// Авточистка ТОЛЬКО сырых ObSnapshot — они тяжёлые (каждый снапшот × уровень).
+// Rollup, сделки, футпринт и крупные сделки — это «история» карты ордеров: её
+// храним полностью и чистим вручную из админ-панели (по периодам). См.
+// /api/admin/collector/purge.
 async function pruneOld() {
   try {
     const r1 = await pool.query(
       `DELETE FROM "ObSnapshot" WHERE "t" < NOW() - ($1 || ' days')::interval`,
       [String(cfg.retentionDays)],
     );
-    const r2 = await pool.query(
-      `DELETE FROM "ObTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
-    );
-    const r3 = await pool.query(
-      `DELETE FROM "ObFootprint" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
-    );
-    const r4 = await pool.query(
-      `DELETE FROM "ObBigTrade" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
-    );
-    const r5 = await pool.query(
-      `DELETE FROM "ObSnapshotRollup" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
-    );
-    const r6 = await pool.query(
-      `DELETE FROM "ObRollupBucket" WHERE "bucket" < NOW() - ($1 || ' days')::interval`,
-      [String(cfg.retentionDays)],
-    );
-    const n =
-      (r1.rowCount ?? 0) + (r2.rowCount ?? 0) + (r3.rowCount ?? 0) +
-      (r4.rowCount ?? 0) + (r5.rowCount ?? 0) + (r6.rowCount ?? 0);
-    if (n) console.log(`[prune] удалено ${n} старых строк`);
+    if (r1.rowCount) console.log(`[prune] ObSnapshot: удалено ${r1.rowCount} сырых строк (история хранится до ручной очистки)`);
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);
   }
@@ -404,6 +410,7 @@ const server = http.createServer((req, res) => {
       retentionDays: cfg.retentionDays,
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
+      minCoins: Object.fromEntries(minCoinsMap),
       feeds: feedMetrics,
     }));
   } else {
@@ -456,6 +463,10 @@ async function backfillRollup() {
 }
 setTimeout(backfillRollup, 5_000);
 
+// Пороги «крупных лимиток» — читаем сразу и обновляем каждые 30с (правки из админки).
+loadCollectorConfig();
+const configTimer = setInterval(loadCollectorConfig, 30_000);
+
 const writeTimer = setInterval(writeSnapshot, cfg.snapshotMs);
 const pruneTimer = setInterval(pruneOld, 3600_000);
 setTimeout(pruneOld, 10_000);
@@ -463,6 +474,7 @@ setTimeout(pruneOld, 10_000);
 async function shutdown() {
   clearInterval(writeTimer);
   clearInterval(pruneTimer);
+  clearInterval(configTimer);
   for (const f of feeds) f.book.close();
   for (const tf of tradeFeeds) tf.trades.close();
   server.close();

@@ -282,6 +282,16 @@ model ObRollupBucket {
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
 }
 
+// Editable collector settings (read by the collector every ~30s, edited in the
+// admin panel — no redeploy). One row per symbol: minCoins = keep only limit
+// levels whose resting size (bid+ask) is at least this many base coins. Bigger
+// threshold = only large walls stored = far less data / disk.
+model CollectorConfig {
+  symbol    String   @id // "BTCUSDT", "ETHUSDT", …
+  minCoins  Float // minimum resting size (base coins) to record a level
+  updatedAt DateTime @updatedAt
+}
+
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
   id          String   @id @default(cuid())
