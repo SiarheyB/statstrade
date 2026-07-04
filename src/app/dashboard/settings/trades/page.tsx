@@ -71,6 +71,13 @@ export default function TradeSettingsPage() {
         <div className="text-sm text-faint">{t("common.loading")}</div>
       ) : (
         <div className="space-y-5">
+          {/* Порядок секций = порядок разметки сделки: паттерн → ТВХ → тип входа → ошибки. */}
+          <ListEditor
+            title={t("settings.patterns")}
+            hint={t("settings.patternsHint")}
+            items={patterns}
+            onChange={setPatterns}
+          />
           <ListEditor
             title={t("settings.entryPoints")}
             hint={t("settings.entryPointsHint")}
@@ -88,12 +95,6 @@ export default function TradeSettingsPage() {
             hint={t("settings.mistakesHint")}
             items={mistakes}
             onChange={setMistakes}
-          />
-          <ListEditor
-            title={t("settings.patterns")}
-            hint={t("settings.patternsHint")}
-            items={patterns}
-            onChange={setPatterns}
           />
 
           {error && (

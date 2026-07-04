@@ -1,7 +1,11 @@
 // Shared constants and helpers for manual trade annotations.
 // Kept free of server-only imports so it can be used on the client too.
 
-export const DEFAULT_ENTRY_POINTS = ["Пробой", "Ложный пробой", "Ретест"];
+export const DEFAULT_ENTRY_POINTS = [
+  "Нет реакции на ложный пробой",
+  "Наторговка",
+  "Ретест",
+];
 export const DEFAULT_ENTRY_TYPES = ["Консервативный", "Агрессивный"];
 export const DEFAULT_MISTAKES = [
   "Сделка не по алгоритму",
