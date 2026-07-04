@@ -547,10 +547,16 @@ export default function OrderflowPage() {
       // говорил, что лимиток нет.
       const hmX0 = sx(hm.times[0] ?? t0);
       const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
+      // Курсор должен реально попадать в отрисованную область heatmap по X и Y —
+      // иначе Math.min/max ниже "прижимают" индекс к крайней колонке/бину, и
+      // подсказка про стену всплывала даже далеко за пределами картинки.
+      const insideHeatmap =
+        hov.mx >= Math.min(hmX0, hmX1) && hov.mx <= Math.max(hmX0, hmX1) &&
+        priceH >= hm.priceMin && priceH <= hm.priceMax;
       const colIdx = Math.max(0, Math.min(hm.cols - 1,
         Math.floor(((hov.mx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
-      const vol = hm.grid[colIdx]?.[binIdx] ?? 0;
+      const vol = insideHeatmap ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
 
       ctx.fillStyle = "#e6b800";
       ctx.fillRect(plotX + plotW, hov.my - 7, PADR, 14);
@@ -564,7 +570,7 @@ export default function OrderflowPage() {
       const base = baseAsset(data.symbol);
       // Стену показываем только если она реально отрисована — т.е. выше порога
       // «Мин. размер» (minT). Иначе на «пустом» месте всплывала ложная подсказка.
-      const hasWall = showLiq && hm.maxVal > 0 && vol / hm.maxVal >= minT;
+      const hasWall = showLiq && insideHeatmap && hm.maxVal > 0 && vol / hm.maxVal >= minT;
       const lines = hasWall
         ? [
             t("of.tipLimitOrder"),

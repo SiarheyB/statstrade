@@ -82,6 +82,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                 <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.annotations")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.2fa")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.registered")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.lastActive")}</th>
                 <th className="px-5 py-2"></th>
               </tr>
             </thead>
@@ -122,6 +123,9 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                   <td className="px-3 py-2.5 text-muted whitespace-nowrap">
                     {new Date(r.createdAt).toLocaleDateString(nf)}
                   </td>
+                  <td className="px-3 py-2.5 text-muted whitespace-nowrap">
+                    {r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleString(nf) : t("admin.dash")}
+                  </td>
                   <td className="px-5 py-2.5 text-right whitespace-nowrap">
                     <div className="inline-flex gap-1">
                       {r.twoFactorEnabled && (
@@ -151,7 +155,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="px-5 py-8 text-center text-muted">{t("admin.users.none")}</td>
+                  <td colSpan={8} className="px-5 py-8 text-center text-muted">{t("admin.users.none")}</td>
                 </tr>
               )}
             </tbody>

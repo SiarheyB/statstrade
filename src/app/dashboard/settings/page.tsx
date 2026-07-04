@@ -4,6 +4,7 @@ import LocaleMenu from "@/components/LocaleMenu";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
 import GoogleLinkSettings from "@/components/GoogleLinkSettings";
+import DeleteAccount from "@/components/DeleteAccount";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function GeneralSettingsPage() {
@@ -27,6 +28,7 @@ export default function GeneralSettingsPage() {
       <ChangePassword />
       <GoogleLinkSettings />
       <TwoFactorSettings />
+      <DeleteAccount />
     </div>
   );
 }

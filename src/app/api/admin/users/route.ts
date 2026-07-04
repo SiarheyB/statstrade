@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAdminSession, isAdminEmail, notFound, recordAudit } from "@/lib/admin";
 import { badRequest, serverError } from "@/lib/api";
+import { deleteUserCascade } from "@/lib/deleteUser";
 
 export const dynamic = "force-dynamic";
 
@@ -52,7 +53,7 @@ export async function DELETE(req: Request) {
     if (target.id === session.userId) return badRequest("Нельзя удалить свой аккаунт");
     if (isAdminEmail(target.email)) return badRequest("Нельзя удалить администратора");
 
-    await prisma.user.delete({ where: { id } });
+    await deleteUserCascade(id);
     await recordAudit(session, "user.delete", { targetType: "user", targetId: id, targetLabel: target.email });
     return NextResponse.json({ ok: true });
   } catch (err) {
