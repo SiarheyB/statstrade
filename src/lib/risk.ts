@@ -191,7 +191,11 @@ export function computeAccountRisk(
       }
       used = net;
     }
-    used = Math.max(0, used); // in profit → 0 stops used, never negative
+    // Стопы — счётчик, показываем целыми и консервативно: частично «съеденный»
+    // стоп (0.96R) считается использованным целиком. Эпсилон — чтобы ровные
+    // значения (3.0000001 из-за float) не округлялись лишний раз вверх.
+    // В плюсе → 0 использованных стопов, никогда не отрицательно.
+    used = Math.max(0, Math.ceil(used - 1e-9));
 
     limits.push({
       key: "stops",
