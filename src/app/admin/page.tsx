@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
-import { getFeedFreshness } from "@/lib/admin";
+import { getFeedFreshness, ONLINE_THRESHOLD_MS } from "@/lib/admin";
 import { getServerT } from "@/lib/i18n/server";
 import { Users, Plug, AlertTriangle, Layers, Activity } from "lucide-react";
 
@@ -16,11 +16,28 @@ function lagLabel(lagMs: number, t: T): string {
   return t("admin.lag.hourAgo", { n: Math.round(s / 3600) });
 }
 
-function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+function Stat({
+  label,
+  value,
+  hint,
+  side,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+  // Дополнительный показатель справа (например «онлайн» у пользователей).
+  side?: { label: string; value: string | number };
+}) {
   return (
     <div className="card p-5">
-      <div className="text-xs uppercase tracking-wide text-faint">{label}</div>
-      <div className="mt-2 text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-xs uppercase tracking-wide text-faint">{label}</div>
+        {side && <div className="text-xs uppercase tracking-wide text-profit/80">{side.label}</div>}
+      </div>
+      <div className="mt-2 flex items-end justify-between gap-3">
+        <div className="text-3xl font-semibold tabular-nums tracking-tight">{value}</div>
+        {side && <div className="text-2xl font-semibold tabular-nums tracking-tight text-profit">{side.value}</div>}
+      </div>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </div>
   );
@@ -32,8 +49,9 @@ export default async function AdminOverviewPage() {
   const weekAgo = new Date(Date.now() - 7 * 86400_000);
   const monthAgo = new Date(Date.now() - 30 * 86400_000);
 
-  const [users, newWeek, newMonth, accounts, syncErrors, fills] = await Promise.all([
+  const [users, online, newWeek, newMonth, accounts, syncErrors, fills] = await Promise.all([
     prisma.user.count(),
+    prisma.user.count({ where: { lastSeenAt: { gte: new Date(Date.now() - ONLINE_THRESHOLD_MS) } } }),
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.user.count({ where: { createdAt: { gte: monthAgo } } }),
     prisma.exchangeAccount.count(),
@@ -80,6 +98,7 @@ export default async function AdminOverviewPage() {
         <Stat
           label={t("admin.overview.stat.users")}
           value={users}
+          side={{ label: t("admin.overview.stat.online"), value: online }}
           hint={t("admin.overview.newUsersHint", { week: newWeek, month: newMonth })}
         />
         <Stat label={t("admin.overview.stat.accounts")} value={accounts} />

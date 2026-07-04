@@ -144,6 +144,20 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trade.id]);
 
+  // Пока реальные свечи грузятся — НЕ показываем схематичную заглушку (она
+  // выглядела как «непонятные свечи»); вместо этого плейсхолдер «Загрузка…».
+  if (loading) {
+    return (
+      <div
+        style={{ height: H }}
+        className="w-full flex items-center justify-center gap-2 text-xs text-faint"
+      >
+        <span className="h-3 w-3 rounded-full border-2 border-faint/40 border-t-accent animate-spin" />
+        {t("trades.chart.loading")}
+      </div>
+    );
+  }
+
   const candles = real && data ? data : schematic;
   const sl = trade.stopLoss ?? null;
   const exitColor = trade.netPnl >= 0 ? PROFIT : LOSS;

@@ -3,10 +3,11 @@ import { getSession, type SessionPayload } from "./auth";
 import { prisma } from "./db";
 import { logError } from "./errorLog";
 
-// Throttle lastSeenAt writes: at most once per user per hour. Kept in-process
-// (long-running container) so we avoid a DB read/write on every request — the
-// signal only needs hour-granularity for adaptive sync backoff.
-const SEEN_THROTTLE_MS = 60 * 60 * 1000;
+// Throttle lastSeenAt writes: at most once per user per 5 minutes. Kept
+// in-process (long-running container) so we avoid a DB write on every request.
+// 5-минутная гранулярность нужна статусу «онлайн» в админке (порог 10 мин);
+// для адаптивного бэкоффа синка точность неважна.
+const SEEN_THROTTLE_MS = 5 * 60 * 1000;
 const lastSeenWrites = new Map<string, number>();
 
 function touchLastSeen(userId: string): void {

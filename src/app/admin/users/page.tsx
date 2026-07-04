@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import { isAdminEmail } from "@/lib/admin";
+import { isAdminEmail, ONLINE_THRESHOLD_MS } from "@/lib/admin";
 import { getServerT } from "@/lib/i18n/server";
 import UsersTable from "@/components/admin/UsersTable";
 
@@ -14,6 +14,7 @@ export default async function AdminUsersPage() {
       email: true,
       name: true,
       createdAt: true,
+      lastSeenAt: true,
       twoFactorEnabled: true,
       googleId: true,
       _count: { select: { accounts: true, annotations: true } },
@@ -25,6 +26,8 @@ export default async function AdminUsersPage() {
     email: u.email,
     name: u.name,
     createdAt: u.createdAt.toISOString(),
+    online: !!u.lastSeenAt && Date.now() - u.lastSeenAt.getTime() < ONLINE_THRESHOLD_MS,
+    lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
     twoFactorEnabled: u.twoFactorEnabled,
     google: !!u.googleId,
     accounts: u._count.accounts,

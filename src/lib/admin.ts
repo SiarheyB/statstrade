@@ -35,6 +35,10 @@ export function notFound() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
+// Порог «пользователь онлайн»: lastSeenAt свежее 10 минут (записывается с
+// шагом ~5 мин, см. lib/api.ts touchLastSeen).
+export const ONLINE_THRESHOLD_MS = 10 * 60_000;
+
 // Порог свежести фида карты ордеров: collector пишет снимок раз в ~2 c, поэтому
 // отсутствие записей дольше этого считаем «фид отстал/упал».
 export const FEED_STALE_MS = 90_000;

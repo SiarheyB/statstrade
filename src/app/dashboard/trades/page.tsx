@@ -331,16 +331,16 @@ export default function TradesPage() {
               <thead>
                 <tr className="text-xs text-muted border-b border-border">
                   <Th />
-                  <Th>{t("trades.col.symbol")}</Th>
-                  <Th>{t("trades.col.side")}</Th>
-                  <Th>{t("trades.col.market")}</Th>
-                  <Th sortable onClick={() => toggleSort("exitTime")} active={sortKey === "exitTime"}>{t("trades.col.close")}</Th>
-                  <Th sortable onClick={() => toggleSort("durationMs")} active={sortKey === "durationMs"}>{t("trades.col.duration")}</Th>
-                  <Th right>{t("trades.col.qty")}</Th>
-                  <Th right>{t("trades.col.entry")}</Th>
-                  <Th right>{t("trades.col.exit")}</Th>
+                  <Th><Term desc={t("trades.colDesc.symbol")}>{t("trades.col.symbol")}</Term></Th>
+                  <Th><Term desc={t("trades.colDesc.side")}>{t("trades.col.side")}</Term></Th>
+                  <Th><Term desc={t("trades.colDesc.market")}>{t("trades.col.market")}</Term></Th>
+                  <Th sortable onClick={() => toggleSort("exitTime")} active={sortKey === "exitTime"}><Term desc={t("trades.colDesc.close")}>{t("trades.col.close")}</Term></Th>
+                  <Th sortable onClick={() => toggleSort("durationMs")} active={sortKey === "durationMs"}><Term desc={t("trades.colDesc.duration")}>{t("trades.col.duration")}</Term></Th>
+                  <Th right><Term desc={t("trades.colDesc.qty")}>{t("trades.col.qty")}</Term></Th>
+                  <Th right><Term desc={t("trades.colDesc.entry")}>{t("trades.col.entry")}</Term></Th>
+                  <Th right><Term desc={t("trades.colDesc.exit")}>{t("trades.col.exit")}</Term></Th>
                   <Th right sortable onClick={() => toggleSort("returnPct")} active={sortKey === "returnPct"}><Term name="Return">{t("trades.col.return")}</Term></Th>
-                  <Th right sortable onClick={() => toggleSort("netPnl")} active={sortKey === "netPnl"}>{t("trades.col.netPnl")}</Th>
+                  <Th right sortable onClick={() => toggleSort("netPnl")} active={sortKey === "netPnl"}><Term desc={t("trades.colDesc.netPnl")}>{t("trades.col.netPnl")}</Term></Th>
                   <Th right sortable onClick={() => toggleSort("fees")} active={sortKey === "fees"}><Term name="Fees">{t("trades.col.fees")}</Term></Th>
                   <Th right><Term name="RR">{t("trades.col.rr")}</Term></Th>
                 </tr>

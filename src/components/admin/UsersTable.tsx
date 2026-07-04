@@ -12,6 +12,8 @@ type Row = {
   email: string;
   name: string | null;
   createdAt: string;
+  online: boolean;
+  lastSeenAt: string | null;
   twoFactorEnabled: boolean;
   google: boolean;
   accounts: number;
@@ -75,6 +77,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
                 <th className="px-5 py-2 font-medium">{t("admin.users.th.email")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.name")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.status")}</th>
                 <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.accounts")}</th>
                 <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.annotations")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.2fa")}</th>
@@ -93,6 +96,20 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                     </Link>
                   </td>
                   <td className="px-3 py-2.5 text-muted">{r.name ?? "—"}</td>
+                  <td
+                    className="px-3 py-2.5 whitespace-nowrap"
+                    title={r.lastSeenAt ? new Date(r.lastSeenAt).toLocaleString(nf) : undefined}
+                  >
+                    {r.online ? (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-profit">
+                        <span className="h-1.5 w-1.5 rounded-full bg-profit" /> {t("admin.users.online")}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-xs text-faint">
+                        <span className="h-1.5 w-1.5 rounded-full bg-faint/50" /> {t("admin.users.offline")}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{r.accounts}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{r.annotations}</td>
                   <td className="px-3 py-2.5">

@@ -39,7 +39,12 @@ export function Term({
       {pos && (
         <span
           className="pointer-events-none fixed z-50 block max-w-xs rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-fg shadow-lg"
-          style={{ left: pos.x + 14, top: pos.y + 14 }}
+          style={{
+            // Прижимаем к краям вьюпорта: max-w-xs = 320px + отступ, иначе у
+            // крайних колонок (RR) тултип уходил за правый край экрана.
+            left: Math.max(8, Math.min(pos.x + 14, window.innerWidth - 336)),
+            top: Math.min(pos.y + 14, window.innerHeight - 120),
+          }}
         >
           {header && <span className="mb-0.5 block font-medium text-accent">{header}</span>}
           {description}
