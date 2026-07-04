@@ -115,9 +115,9 @@ export default function OrderflowPage() {
   const { t } = useI18n();
   // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
   // после монтирования (иначе ломается гидрация).
-  const [range, setRange] = useState<string>("4h");
+  const [range, setRange] = useState<string>("24h");
   const [symbol, setSymbol] = useState("BTCUSDT");
-  const [exchange, setExchange] = useState("binance-futures");
+  const [exchange, setExchange] = useState("binance-spot");
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +181,9 @@ export default function OrderflowPage() {
       const s = JSON.parse(localStorage.getItem("orderflow.settings") || "{}");
       if (typeof s.range === "string") setRange(s.range);
       if (typeof s.symbol === "string") setSymbol(s.symbol);
-      if (typeof s.exchange === "string") setExchange(s.exchange);
+      // Вариант «все биржи» убран из меню; сохранённое ранее "all" сбрасываем
+      // на дефолт, чтобы не остался невыбираемый пункт.
+      if (typeof s.exchange === "string" && s.exchange !== "all") setExchange(s.exchange);
       if (typeof s.minPct === "number") setMinPct(s.minPct);
       if (typeof s.brightness === "number") setBrightness(s.brightness);
       if (typeof s.live === "boolean") setLive(s.live);
@@ -890,7 +892,6 @@ export default function OrderflowPage() {
           </select>
           <select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)} title={t("of.hintExchange")}>
             {metaExchanges.map((x) => <option key={x} value={x}>{x}</option>)}
-            <option value="all">{t("of.allExchanges")}</option>
           </select>
           <select
             className={SELECT}
@@ -918,6 +919,7 @@ export default function OrderflowPage() {
               clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
             }`}
           >
+            <span className={`h-3 w-3 rounded-sm border ${clusters ? "bg-accent border-accent" : "border-border-strong"}`} />
             {t("of.clusters")}
             <span title={t("of.hintClusters")} className="inline-flex cursor-help">
               <HelpCircle size={12} className="text-faint shrink-0" />
