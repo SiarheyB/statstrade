@@ -332,9 +332,15 @@ model ObRollupBucket {
 // levels whose resting size (bid+ask) is at least this many base coins. Bigger
 // threshold = only large walls stored = far less data / disk.
 model CollectorConfig {
-  symbol    String   @id // "BTCUSDT", "ETHUSDT", …
+  symbol    String // "BTCUSDT", "ETHUSDT", …
+  market    String   @default("spot") // spot | futures — свой порог на каждый рынок
   minCoins  Float // minimum resting size (base coins) to record a level
+  // «Отбирать всё»: писать ВСЕ уровни стакана без порога (minCoins игнорируется,
+  // шумовой фильтр по нотионалу тоже). Внимание: объём данных сильно растёт.
+  collectAll Boolean @default(false)
   updatedAt DateTime @updatedAt
+
+  @@id([symbol, market])
 }
 
 // Обращение в поддержку (тикет). Один вопрос = один тикет: пользователь создаёт

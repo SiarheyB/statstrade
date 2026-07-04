@@ -963,10 +963,19 @@ export default function OrderflowPage() {
           </span>
           <input type="range" min={0} max={100} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="accent-accent w-40" />
         </label>
-        <span className="text-faint/80 inline-flex items-center gap-1.5">
-          <Filter size={12} className="shrink-0" />
-          {t("of.onlyBigLimits", { n: (metaMinCoins[symbol.toUpperCase()] ?? bigLimitFor(symbol)).toLocaleString("en-US"), coin: baseAsset(symbol) })}
-        </span>
+        {(() => {
+          // Порог выбранного рынка; 0 = режим «отбирать всё» → подпись не нужна.
+          const thr =
+            metaMinCoins[`${symbol.toUpperCase()}|${exchange.endsWith("-futures") ? "futures" : "spot"}`] ??
+            bigLimitFor(symbol);
+          if (thr === 0) return null;
+          return (
+            <span className="text-faint/80 inline-flex items-center gap-1.5">
+              <Filter size={12} className="shrink-0" />
+              {t("of.onlyBigLimits", { n: thr.toLocaleString("en-US"), coin: baseAsset(symbol) })}
+            </span>
+          );
+        })()}
       </div>
 
       {error && <div className="card p-4 text-sm text-loss border-loss/30 mb-5">{error}</div>}

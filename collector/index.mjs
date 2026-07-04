@@ -59,17 +59,29 @@ function binSizeFor(symbol) {
 // из таблицы CollectorConfig (редактируется в админ-панели) и обновляется каждые
 // ~30с — без редеплоя. Фолбэк — встроенные дефолты; для символов, у которых
 // порога нет, действует прежний шумовой фильтр по нотионалу ($).
-const DEFAULT_MIN_COINS = { BTCUSDT: 500, ETHUSDT: 5000 };
+// Пороги раздельные по рынку: ключ — `${SYMBOL}|${market}` (spot | futures).
+// Рынок фида выводится из имени биржи: "*-futures" → futures, иначе spot.
+const DEFAULT_MIN_COINS = {
+  "BTCUSDT|spot": 500, "BTCUSDT|futures": 500,
+  "ETHUSDT|spot": 5000, "ETHUSDT|futures": 5000,
+};
+const marketOf = (exchange) => (String(exchange).endsWith("-futures") ? "futures" : "spot");
 let minCoinsMap = new Map(Object.entries(DEFAULT_MIN_COINS));
-function minCoinsFor(symbol) {
-  const v = minCoinsMap.get(symbol);
+// Возвращает: "all" (писать все уровни без фильтров) | число (порог в монетах)
+// | null (порога нет → шумовой фильтр по нотионалу).
+function minCoinsFor(symbol, exchange) {
+  const v = minCoinsMap.get(`${symbol}|${marketOf(exchange)}`);
+  if (v === "all") return "all";
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 async function loadCollectorConfig() {
   try {
-    const r = await pool.query(`SELECT "symbol", "minCoins" FROM "CollectorConfig"`);
+    const r = await pool.query(`SELECT "symbol", "market", "minCoins", "collectAll" FROM "CollectorConfig"`);
     const m = new Map(Object.entries(DEFAULT_MIN_COINS));
-    for (const row of r.rows) m.set(String(row.symbol).toUpperCase(), Number(row.minCoins));
+    for (const row of r.rows) {
+      const key = `${String(row.symbol).toUpperCase()}|${row.market === "futures" ? "futures" : "spot"}`;
+      m.set(key, row.collectAll ? "all" : Number(row.minCoins));
+    }
     minCoinsMap = m;
   } catch (err) {
     console.error(`[config] загрузка CollectorConfig: ${err.message}`);
@@ -159,9 +171,12 @@ function rowsForFeed(feed, t) {
     const askVol = askBins.get(c) ?? 0;
     const totalCoins = bidVol + askVol;
     // «Только крупные лимитки»: для символов с порогом в монетах фильтруем по нему
-    // (напр. ≥500 BTC), иначе — прежний фильтр шума по нотионалу ($).
-    const minCoins = minCoinsFor(feed.symbol);
-    if (minCoins != null ? totalCoins < minCoins : totalCoins * c < cfg.noiseMinNotional) continue;
+    // (напр. ≥500 BTC), порог свой на рынок (spot/futures); "all" — писать все
+    // уровни без фильтров; иначе — прежний фильтр шума по нотионалу ($).
+    const minCoins = minCoinsFor(feed.symbol, feed.exchange);
+    if (minCoins !== "all") {
+      if (minCoins != null ? totalCoins < minCoins : totalCoins * c < cfg.noiseMinNotional) continue;
+    }
     out.push([feed.symbol, feed.exchange, t, c, bidVol, askVol]);
   }
   return { rows: out, mid };

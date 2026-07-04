@@ -6,7 +6,8 @@ import { Save, Trash2, Plus, AlertTriangle } from "lucide-react";
 // Внутренняя админ-панель (RU) — пороги «только крупные лимитки» и ручная
 // очистка истории карты ордеров. Пишет в /api/admin/collector/config и /purge.
 
-type Item = { symbol: string; minCoins: number; updatedAt?: string };
+type Market = "spot" | "futures";
+type Item = { symbol: string; market: Market; minCoins: number; collectAll?: boolean; updatedAt?: string };
 
 const baseAsset = (s: string) => s.toUpperCase().replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || s;
 
@@ -32,7 +33,7 @@ export default function AdminCollectorConfig() {
 
   const setRow = (i: number, patch: Partial<Item>) =>
     setItems((xs) => xs.map((x, j) => (j === i ? { ...x, ...patch } : x)));
-  const addRow = () => setItems((xs) => [...xs, { symbol: "", minCoins: 0 }]);
+  const addRow = () => setItems((xs) => [...xs, { symbol: "", market: "spot", minCoins: 0, collectAll: false }]);
 
   async function save() {
     setSaving(true);
@@ -40,8 +41,13 @@ export default function AdminCollectorConfig() {
     try {
       const payload = {
         items: items
-          .filter((x) => x.symbol.trim() && x.minCoins > 0)
-          .map((x) => ({ symbol: x.symbol.trim().toUpperCase(), minCoins: Number(x.minCoins) })),
+          .filter((x) => x.symbol.trim() && (x.collectAll || x.minCoins > 0))
+          .map((x) => ({
+            symbol: x.symbol.trim().toUpperCase(),
+            market: x.market,
+            collectAll: !!x.collectAll,
+            minCoins: Number(x.minCoins) || 0,
+          })),
       };
       const res = await fetch("/api/admin/collector/config", {
         method: "PUT",
@@ -59,8 +65,13 @@ export default function AdminCollectorConfig() {
     }
   }
 
-  async function removeRow(symbol: string) {
-    if (symbol) await fetch(`/api/admin/collector/config?symbol=${encodeURIComponent(symbol)}`, { method: "DELETE" });
+  async function removeRow(symbol: string, market: Market) {
+    if (symbol) {
+      await fetch(
+        `/api/admin/collector/config?symbol=${encodeURIComponent(symbol)}&market=${market}`,
+        { method: "DELETE" },
+      );
+    }
     await load();
   }
 
@@ -74,33 +85,56 @@ export default function AdminCollectorConfig() {
           не меньше порога — в монетах базового актива. Больше порог → меньше данных и нагрузки на диск.
           Читается коллектором каждые ~30&nbsp;с, редеплой не нужен.
         </p>
-        <div className="mt-4 card p-4 max-w-xl">
-          <div className="grid grid-cols-[1fr_1fr_auto] gap-2 text-xs text-faint mb-1">
+        <div className="mt-4 card p-4 max-w-2xl">
+          <div className="grid grid-cols-[1fr_110px_1fr_90px_auto] gap-2 text-xs text-faint mb-1">
             <span>Символ</span>
+            <span>Рынок</span>
             <span>Мин. размер (монет)</span>
+            <span>Все</span>
             <span />
           </div>
           {items.map((it, i) => (
-            <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-center mb-2">
+            <div key={i} className="grid grid-cols-[1fr_110px_1fr_90px_auto] gap-2 items-center mb-2">
               <input
                 className="input-base text-sm py-1.5 uppercase"
                 value={it.symbol}
                 placeholder="BTCUSDT"
                 onChange={(e) => setRow(i, { symbol: e.target.value })}
               />
+              <select
+                className="input-base text-sm py-1.5"
+                value={it.market}
+                onChange={(e) => setRow(i, { market: e.target.value as Market })}
+              >
+                <option value="spot">Спот</option>
+                <option value="futures">Фьючерсы</option>
+              </select>
               <div className="flex items-center gap-1.5">
                 <input
                   type="number"
                   min={0}
                   step="any"
-                  className="input-base text-sm py-1.5 w-full"
+                  disabled={!!it.collectAll}
+                  className="input-base text-sm py-1.5 w-full disabled:opacity-40"
                   value={it.minCoins}
                   onChange={(e) => setRow(i, { minCoins: Number(e.target.value) })}
                 />
                 <span className="text-xs text-faint w-10 shrink-0">{it.symbol ? baseAsset(it.symbol) : ""}</span>
               </div>
+              <label
+                className="inline-flex items-center gap-1.5 text-xs text-muted cursor-pointer select-none"
+                title="Отбирать все лимитки без порога. Внимание: объём данных на диске сильно вырастет."
+              >
+                <input
+                  type="checkbox"
+                  className="accent-[var(--color-accent)]"
+                  checked={!!it.collectAll}
+                  onChange={(e) => setRow(i, { collectAll: e.target.checked })}
+                />
+                все
+              </label>
               <button
-                onClick={() => removeRow(it.symbol.trim().toUpperCase())}
+                onClick={() => removeRow(it.symbol.trim().toUpperCase(), it.market)}
                 className="input-base p-1.5 text-muted hover:text-loss"
                 title="Удалить (вернётся к дефолту коллектора)"
               >

@@ -18,13 +18,15 @@ export async function GET() {
       prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
         SELECT DISTINCT symbol, exchange FROM "ObRollupBucket"
       `,
-      prisma.collectorConfig.findMany({ select: { symbol: true, minCoins: true } }),
+      prisma.collectorConfig.findMany({ select: { symbol: true, market: true, minCoins: true, collectAll: true } }),
     ]);
     const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();
     const exchanges = Array.from(new Set(rows.map((r) => r.exchange))).sort();
-    // Пороги «только крупные лимитки» по символу (для подписи под фильтром).
+    // Пороги «только крупные лимитки» по символу и рынку (ключ "SYMBOL|market")
+    // — для подписи под фильтром на карте. 0 = режим «отбирать всё» (подпись
+    // о пороге не показывается).
     const minCoins: Record<string, number> = {};
-    for (const c of cfg) minCoins[c.symbol] = c.minCoins;
+    for (const c of cfg) minCoins[`${c.symbol}|${c.market}`] = c.collectAll ? 0 : c.minCoins;
     return NextResponse.json({ symbols, exchanges, minCoins });
   } catch (err) {
     return serverError((err as Error).message);
