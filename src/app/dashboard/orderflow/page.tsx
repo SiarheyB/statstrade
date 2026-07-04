@@ -313,6 +313,14 @@ export default function OrderflowPage() {
     const yspan = yMax - yMin || 1;
     const sy = (p: number) => plotH - ((p - yMin) / yspan) * plotH;
 
+    // Зажимаем heatmap в границы графика — иначе при сильном зуме картинка
+    // вылезает за пределы плота (перекрывая левую панель профиля или уходя
+    // за правый край). Подписи/панель профиля рисуются отдельно, без клипа.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, 0, plotW, plotH);
+    ctx.clip();
+
     // Heatmap (offscreen, перестраивается при смене данных/слайдеров).
     // Рисуем только если включена «История лимитных ордеров».
     if (showLiq) {
@@ -367,6 +375,7 @@ export default function OrderflowPage() {
         }
       }
     }
+    ctx.restore();
 
     // Левая панель: профиль текущей ликвидности (bid зелёный / ask красный).
     if (hm.profileMax > 0) {
@@ -415,6 +424,13 @@ export default function OrderflowPage() {
       ctx.fillText(fmtTime(ms), sx(ms), H - 6);
     }
     ctx.textAlign = "left";
+
+    // Зажимаем кластеры и свечи в границы графика — при сильном зуме бары/тени
+    // иначе вылезают за верх/низ/края плота, перекрывая шкалы.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, 0, plotW, plotH);
+    ctx.clip();
 
     // Footprint-кластеры (как в ClusterBtc): у каждой свечи СПРАВА от её оси —
     // горизонтальная гистограмма объёмов по ценовым уровням. Длина бара = объём
@@ -507,6 +523,8 @@ export default function OrderflowPage() {
       }
       ctx.lineWidth = 1;
     }
+
+    ctx.restore();
 
     // Линия текущей цены.
     const last = candles.length ? candles[candles.length - 1].c : hm.price;

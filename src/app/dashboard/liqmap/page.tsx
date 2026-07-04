@@ -171,6 +171,15 @@ export default function LiqMapPage() {
     const sx = (tfrac: number) => plotX + ((tfrac - v.x0) / xspan) * plotW;
     const sy = (p: number) => plotH - ((p - v.y0) / yspan) * plotH;
 
+    // Clip everything that depends on zoom/pan (heatmap image, candles) to the
+    // plot rect — otherwise at high zoom candle wicks/bodies (and the heatmap
+    // image) can extend past the plot bounds, overlapping the axes or spilling
+    // outside the canvas.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, 0, plotW, plotH);
+    ctx.clip();
+
     // Heatmap via offscreen → smooth bilinear scaling of the visible window.
     if (!offRef.current || offRef.current.src !== data) {
       offRef.current = { src: data, canvas: buildOffscreen(hm) };
@@ -183,6 +192,7 @@ export default function LiqMapPage() {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(off, srcX, srcY, srcW, srcH, plotX, 0, plotW, plotH);
+    ctx.restore();
 
     // Price gridlines + labels (right).
     ctx.font = "10px ui-sans-serif, system-ui";
@@ -214,7 +224,12 @@ export default function LiqMapPage() {
     }
     ctx.textAlign = "left";
 
-    // Candlesticks.
+    // Candlesticks — clipped to the plot rect so wicks don't bleed past the
+    // axes when zoomed in vertically/horizontally.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(plotX, 0, plotW, plotH);
+    ctx.clip();
     const cw = Math.max(1, (plotW / (xspan * n)) * 0.6);
     for (let i = 0; i < n; i++) {
       const tfc = (i + 0.5) / n;
@@ -232,6 +247,7 @@ export default function LiqMapPage() {
       const yc = sy(cd.c);
       ctx.fillRect(x - cw / 2, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
     }
+    ctx.restore();
 
     // Current price line.
     const yp = sy(hm.price);
