@@ -538,13 +538,15 @@ export default function OrderflowPage() {
 
       const ms = t0 + ((hov.mx - plotX) / plotW) * xspan;
       const priceH = yMin + (1 - hov.my / plotH) * yspan;
-      // Ближайшая колонка по времени и бин по цене.
-      let colIdx = 0;
-      let bestDt = Infinity;
-      for (let c = 0; c < hm.cols; c++) {
-        const dt = Math.abs((hm.times[c] ?? t0) - ms);
-        if (dt < bestDt) { bestDt = dt; colIdx = c; }
-      }
+      // Ячейка грида под курсором — ТОЧНО той же трансформацией, какой картинка
+      // heatmap рисуется в drawImage (края = центры крайних колонок). Раньше
+      // колонка бралась «по ближайшему центру времени» — на границах полос это
+      // давало соседнюю (пустую) ячейку: полоса под курсором есть, а тултип
+      // говорил, что лимиток нет.
+      const hmX0 = sx(hm.times[0] ?? t0);
+      const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
+      const colIdx = Math.max(0, Math.min(hm.cols - 1,
+        Math.floor(((hov.mx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
       const vol = hm.grid[colIdx]?.[binIdx] ?? 0;
 
