@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
+import { SUPPORTED_EXCHANGES } from "@/lib/exchanges";
+import { getEnabledExchangeMetas } from "@/lib/exchangeToggle";
 import { TOTAL_METRICS } from "@/lib/analytics/metric-defs";
 import { getServerT } from "@/lib/i18n/server";
 import ThemeMenu from "@/components/ThemeMenu";
@@ -17,14 +19,33 @@ import {
   Layers,
 } from "lucide-react";
 
+// Год запуска проекта — левая граница в «© 2026–20XX» футера. Когда текущий год
+// совпадает с годом запуска, диапазон схлопывается до одного года.
+const START_YEAR = 2026;
+
 export default async function Home() {
   const session = await getSession();
   if (session) redirect("/dashboard");
 
   const { t } = await getServerT();
 
+  // Список бирж — из единого источника (SUPPORTED_EXCHANGES) с учётом
+  // админ-тумблеров: новые/выключенные биржи попадают на лендинг сами, без
+  // правки текстов. Если БД недоступна — фолбэк на полный статичный список.
+  const exchangeNames = await getEnabledExchangeMetas()
+    .then((metas) => metas.map((m) => m.name))
+    .catch(() => Object.values(SUPPORTED_EXCHANGES).map((m) => m.name));
+  const badgeTop = exchangeNames.slice(0, 3).join(" · ");
+  const badgeRest = exchangeNames.length - 3;
+  const badge =
+    badgeRest > 0 ? t("landing.badge", { top: badgeTop, n: badgeRest }) : badgeTop;
+
   const features = [
-    { icon: Plug, title: t("landing.f1.title"), text: t("landing.f1.text") },
+    {
+      icon: Plug,
+      title: t("landing.f1.title"),
+      text: t("landing.f1.text", { list: exchangeNames.join(", ") }),
+    },
     { icon: BarChart3, title: t("landing.f2.title", { count: TOTAL_METRICS }), text: t("landing.f2.text") },
     { icon: LineChart, title: t("landing.f3.title"), text: t("landing.f3.text") },
     { icon: TrendingUp, title: t("landing.f4.title"), text: t("landing.f4.text") },
@@ -63,7 +84,7 @@ export default async function Home() {
         <section className="max-w-4xl mx-auto px-6 pt-20 pb-16 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted mb-6">
             <span className="h-1.5 w-1.5 rounded-full bg-profit" />
-            {t("landing.badge")}
+            {badge}
           </div>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             {t("landing.heroPre")}{" "}
@@ -103,7 +124,8 @@ export default async function Home() {
       </main>
 
       <footer className="border-t border-border px-6 py-5 text-center text-xs text-faint">
-        {t("common.demoFooter")}
+        © {START_YEAR === new Date().getFullYear() ? START_YEAR : `${START_YEAR}–${new Date().getFullYear()}`}{" "}
+        TradeStats · {t("common.footerTagline")}
       </footer>
     </div>
   );

@@ -16,7 +16,7 @@ const en: Dict = {
   "common.cancel": "Cancel",
   "common.next": "Next",
   "common.unset": "Not set",
-  "common.demoFooter": "TradeStats — trading performance analytics. Demo project.",
+  "common.footerTagline": "trading performance analytics",
   "common.trades": "trades",
   "common.fills": "fills",
 
@@ -185,7 +185,7 @@ const en: Dict = {
   // landing
   "landing.signIn": "Sign in",
   "landing.start": "Get started",
-  "landing.badge": "Binance · Bybit · OKX",
+  "landing.badge": "{top} + {n} more exchanges",
   "landing.heroPre": "Trader statistics",
   "landing.heroAccent": "you can see at a glance",
   "landing.heroDesc":
@@ -194,7 +194,7 @@ const en: Dict = {
   "landing.ctaHave": "I have an account",
   "landing.demoHint": "No real keys? You can load demo data in one click.",
   "landing.f1.title": "Connect via API",
-  "landing.f1.text": "Binance, Bybit and OKX via read-only API keys. Trades import automatically.",
+  "landing.f1.text": "{list} — via read-only API keys, trades import automatically. Plus MetaTrader 4/5 report import.",
   "landing.f2.title": "{count}+ metrics",
   "landing.f2.text": "Win rate, Profit Factor, Expectancy, Sharpe, Sortino, Calmar, max drawdown and streaks.",
   "landing.f3.title": "Charts & breakdowns",
@@ -284,7 +284,7 @@ const en: Dict = {
   "dash.trend30": "30d",
   "dash.empty.connectTitle": "Connect an exchange",
   "dash.empty.connectText":
-    "Add a Binance, Bybit or OKX API key to import trades. Or load demo data to explore.",
+    "Add an API key from any supported exchange (Binance, Bybit, OKX and more) to import trades. Or load demo data to explore.",
   "dash.empty.connectAction": "Add exchange",
   "dash.empty.noTradesTitle": "No trades",
   "dash.empty.noTradesText":
@@ -811,7 +811,7 @@ const ru: Dict = {
   "common.cancel": "Отмена",
   "common.next": "Вперёд",
   "common.unset": "Не задано",
-  "common.demoFooter": "TradeStats — аналитика торговых результатов. Демо-проект.",
+  "common.footerTagline": "аналитика торговых результатов",
   "common.trades": "сделок",
   "common.fills": "исполнений",
 
@@ -977,7 +977,7 @@ const ru: Dict = {
 
   "landing.signIn": "Войти",
   "landing.start": "Начать",
-  "landing.badge": "Binance · Bybit · OKX",
+  "landing.badge": "{top} и ещё {n} бирж",
   "landing.heroPre": "Статистика трейдера,",
   "landing.heroAccent": "которая видна сразу",
   "landing.heroDesc":
@@ -986,7 +986,7 @@ const ru: Dict = {
   "landing.ctaHave": "У меня есть аккаунт",
   "landing.demoHint": "Без реальных ключей? Можно загрузить демо-данные одним кликом.",
   "landing.f1.title": "Подключение по API",
-  "landing.f1.text": "Binance, Bybit и OKX через read-only API-ключи. Сделки импортируются автоматически.",
+  "landing.f1.text": "{list} — через read-only API-ключи, сделки импортируются автоматически. Плюс импорт отчётов MetaTrader 4/5.",
   "landing.f2.title": "{count}+ метрик",
   "landing.f2.text": "Win rate, Profit Factor, Expectancy, Sharpe, Sortino, Calmar, макс. просадка и серии.",
   "landing.f3.title": "Графики и разбивки",
@@ -1074,7 +1074,7 @@ const ru: Dict = {
   "dash.trend30": "30д",
   "dash.empty.connectTitle": "Подключите биржу",
   "dash.empty.connectText":
-    "Добавьте API-ключ Binance, Bybit или OKX, чтобы импортировать сделки. Или загрузите демо-данные для знакомства.",
+    "Добавьте API-ключ любой поддерживаемой биржи (Binance, Bybit, OKX и другие), чтобы импортировать сделки. Или загрузите демо-данные для знакомства.",
   "dash.empty.connectAction": "Добавить биржу",
   "dash.empty.noTradesTitle": "Нет сделок",
   "dash.empty.noTradesText":
