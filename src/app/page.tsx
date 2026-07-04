@@ -5,7 +5,6 @@ import { SUPPORTED_EXCHANGES } from "@/lib/exchanges";
 import { getEnabledExchangeMetas } from "@/lib/exchangeToggle";
 import { TOTAL_METRICS } from "@/lib/analytics/metric-defs";
 import { getServerT } from "@/lib/i18n/server";
-import ThemeMenu from "@/components/ThemeMenu";
 import LocaleMenu from "@/components/LocaleMenu";
 import {
   BarChart3,
@@ -67,7 +66,6 @@ export default async function Home() {
         </div>
         <nav className="flex items-center gap-3 text-sm">
           <LocaleMenu />
-          <ThemeMenu />
           <Link href="/login" className="px-3 py-1.5 text-muted hover:text-fg transition">
             {t("landing.signIn")}
           </Link>

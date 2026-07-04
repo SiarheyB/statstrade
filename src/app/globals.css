@@ -44,68 +44,19 @@ html {
   }
 }
 
-/* --- Selectable themes (override palette + background per data-theme) --- */
-:root,
-[data-theme="midnight"] {
-  --app-bg: url("/bg-midnight.svg");
-}
-
-[data-theme="terminal"] {
-  --color-bg: #05080a;
-  --color-surface: #0b1410;
-  --color-surface-2: #10201a;
-  --color-border: #1c3a2b;
-  --color-border-strong: #2a5740;
-  --color-fg: #d6f5e3;
-  --color-muted: #7fae93;
-  --color-faint: #4f7a63;
-  --color-accent: #22c55e;
-  --color-accent-soft: #143524;
-  --app-bg: url("/bg-terminal.svg");
-}
-
-[data-theme="bull"] {
-  --color-bg: #07110b;
-  --color-surface: #0e1a12;
-  --color-surface-2: #15261a;
-  --color-border: #23402c;
-  --color-border-strong: #356b48;
-  --color-fg: #eaf5ee;
-  --color-muted: #8fb39c;
-  --color-faint: #5d7d68;
-  --color-accent: #16c784;
-  --color-accent-soft: #0f3a28;
-  --color-warn: #f0b90b;
-  --app-bg: url("/bg-bull.svg");
-}
-
-[data-theme="bear"] {
-  --color-bg: #0e0810;
-  --color-surface: #190f1c;
-  --color-surface-2: #241228;
-  --color-border: #3a2342;
-  --color-border-strong: #5a3566;
-  --color-fg: #f1e8f3;
-  --color-muted: #a98fb0;
-  --color-faint: #745d7a;
-  --color-accent: #f43f5e;
-  --color-accent-soft: #3a1426;
-  --app-bg: url("/bg-bear.svg");
-}
-
 body {
   background-color: var(--color-bg);
   color: var(--color-fg);
   font-family: var(--font-sans);
 }
 
-/* Fixed, subtle trading background layer driven by the active theme. */
+/* Fixed, subtle trading background layer. */
 body::before {
   content: "";
   position: fixed;
   inset: 0;
   z-index: -1;
-  background-image: var(--app-bg, url("/bg-midnight.svg"));
+  background-image: url("/bg-midnight.svg");
   background-size: cover;
   background-position: center;
   pointer-events: none;

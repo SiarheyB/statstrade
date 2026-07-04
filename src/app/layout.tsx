@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { Manrope, Geist_Mono } from "next/font/google";
-import { cookies } from "next/headers";
-import { THEME_COOKIE, DEFAULT_THEME, isThemeId } from "@/lib/themes";
 import { getLocale } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/provider";
 import "./globals.css";
@@ -40,15 +38,11 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const cookieStore = await cookies();
-  const themeCookie = cookieStore.get(THEME_COOKIE)?.value;
-  const theme = isThemeId(themeCookie) ? themeCookie : DEFAULT_THEME;
   const locale = await getLocale();
 
   return (
     <html
       lang={locale}
-      data-theme={theme}
       className={`${manrope.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">

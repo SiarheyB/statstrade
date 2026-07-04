@@ -172,15 +172,6 @@ const en: Dict = {
 
   // locale / theme
   "locale.label": "Language",
-  "theme.label": "Theme",
-  "theme.midnight.name": "Midnight",
-  "theme.midnight.desc": "Dark blue",
-  "theme.terminal.name": "Terminal",
-  "theme.terminal.desc": "Green terminal",
-  "theme.bull.name": "Bull market",
-  "theme.bull.desc": "Green & gold",
-  "theme.bear.name": "Bear market",
-  "theme.bear.desc": "Crimson & purple",
 
   // landing
   "landing.signIn": "Sign in",
@@ -467,8 +458,6 @@ const en: Dict = {
   // settings
   "settings.title": "Settings",
   "settings.subtitle": "Value lists for trade annotations (used on the Trades page)",
-  "settings.theme": "Appearance theme",
-  "settings.themeHint": "Applies across the whole project",
   "settings.twoFactor": "Two-factor authentication (2FA)",
   "settings.twoFactorHint": "Protect login with a code from an app (Google Authenticator, Authy, 1Password)",
   "settings.twoFactor.enable": "Enable",
@@ -965,15 +954,6 @@ const ru: Dict = {
 
 
   "locale.label": "Язык",
-  "theme.label": "Тема",
-  "theme.midnight.name": "Полночь",
-  "theme.midnight.desc": "Тёмно-синяя",
-  "theme.terminal.name": "Терминал",
-  "theme.terminal.desc": "Зелёный терминал",
-  "theme.bull.name": "Бычий рынок",
-  "theme.bull.desc": "Зелёно-золотая",
-  "theme.bear.name": "Медвежий рынок",
-  "theme.bear.desc": "Багрово-фиолетовая",
 
   "landing.signIn": "Войти",
   "landing.start": "Начать",
@@ -1253,8 +1233,6 @@ const ru: Dict = {
 
   "settings.title": "Настройки",
   "settings.subtitle": "Списки значений для разметки сделок (используются в разделе «Сделки»)",
-  "settings.theme": "Тема оформления",
-  "settings.themeHint": "Применяется ко всему проекту",
   "settings.twoFactor": "Двухфакторная аутентификация (2FA)",
   "settings.twoFactorHint": "Защитите вход кодом из приложения (Google Authenticator, Authy, 1Password)",
   "settings.twoFactor.enable": "Включить",

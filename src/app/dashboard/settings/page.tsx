@@ -1,6 +1,5 @@
 "use client";
 
-import ThemeMenu from "@/components/ThemeMenu";
 import LocaleMenu from "@/components/LocaleMenu";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
@@ -23,14 +22,6 @@ export default function GeneralSettingsPage() {
           <p className="text-xs text-faint mt-0.5">{t("settings.languageHint")}</p>
         </div>
         <LocaleMenu />
-      </div>
-
-      <div className="card p-5 mb-5 flex items-center justify-between gap-4">
-        <div>
-          <h3 className="font-medium text-sm">{t("settings.theme")}</h3>
-          <p className="text-xs text-faint mt-0.5">{t("settings.themeHint")}</p>
-        </div>
-        <ThemeMenu />
       </div>
 
       <ChangePassword />
