@@ -6,21 +6,26 @@ import { rateLimit, clientIp } from "@/lib/ratelimit";
 
 export const dynamic = "force-dynamic";
 
-// Своя переписка с поддержкой: один тред на пользователя (userId = ключ треда).
+// Список своих обращений (тикетов) + число непрочитанных ответов админа в каждом.
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   try {
-    const messages = await prisma.supportMessage.findMany({
-      where: { userId: user.userId },
-      orderBy: { createdAt: "asc" },
+    const [tickets, unreadRows] = await Promise.all([
+      prisma.supportTicket.findMany({
+        where: { userId: user.userId },
+        orderBy: { lastMessageAt: "desc" },
+      }),
+      prisma.supportMessage.groupBy({
+        by: ["ticketId"],
+        where: { userId: user.userId, authorRole: "admin", readAt: null },
+        _count: { _all: true },
+      }),
+    ]);
+    const unreadMap = new Map(unreadRows.map((r) => [r.ticketId, r._count._all]));
+    return NextResponse.json({
+      tickets: tickets.map((t) => ({ ...t, unread: unreadMap.get(t.id) ?? 0 })),
     });
-    // Открыл переписку → ответы админа считаются прочитанными.
-    await prisma.supportMessage.updateMany({
-      where: { userId: user.userId, authorRole: "admin", readAt: null },
-      data: { readAt: new Date() },
-    });
-    return NextResponse.json({ messages });
   } catch (err) {
     return serverError((err as Error).message);
   }
@@ -28,8 +33,14 @@ export async function GET() {
 
 const schema = z.object({ message: z.string().trim().min(1, "Введите сообщение").max(4000) });
 
-// Отправка сообщения (первое или ответ в существующем треде). Rate-limit
-// против спама. Автор — текущий пользователь; email из сессии, не от клиента.
+// Тема тикета: первая строка первого сообщения, обрезанная до 80 символов.
+function subjectFrom(message: string): string {
+  const line = message.split("\n")[0].trim();
+  return line.length > 80 ? line.slice(0, 79) + "…" : line;
+}
+
+// Новое обращение: создаёт тикет с первым сообщением. Ответы в существующий
+// тикет идут через POST /api/support/[ticketId].
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
@@ -47,10 +58,21 @@ export async function POST(req: Request) {
   if (!parsed.success) return badRequest("Проверьте сообщение", parsed.error.flatten().fieldErrors);
 
   try {
-    const msg = await prisma.supportMessage.create({
-      data: { userId: user.userId, authorRole: "user", email: user.email, message: parsed.data.message },
+    const ticket = await prisma.supportTicket.create({
+      data: {
+        userId: user.userId,
+        subject: subjectFrom(parsed.data.message),
+        messages: {
+          create: {
+            userId: user.userId,
+            authorRole: "user",
+            email: user.email,
+            message: parsed.data.message,
+          },
+        },
+      },
     });
-    return NextResponse.json({ message: msg });
+    return NextResponse.json({ ticket });
   } catch (err) {
     return serverError((err as Error).message);
   }

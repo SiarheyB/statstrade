@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, Send } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle2, RotateCcw } from "lucide-react";
 
 type Msg = { id: string; authorRole: string; message: string; createdAt: string };
+type Ticket = { id: string; subject: string; status: string; createdAt: string };
 type UserInfo = { email: string | null; name: string | null };
 
-export default function AdminSupportThread({ userId }: { userId: string }) {
+// Тред одного тикета + кнопка закрыть/переоткрыть.
+export default function AdminSupportThread({ ticketId }: { ticketId: string }) {
+  const [ticket, setTicket] = useState<Ticket | null>(null);
   const [messages, setMessages] = useState<Msg[]>([]);
   const [user, setUser] = useState<UserInfo | null>(null);
   const [loading, setLoading] = useState(true);
@@ -17,33 +20,19 @@ export default function AdminSupportThread({ userId }: { userId: string }) {
   const listRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/admin/support/${userId}`);
+    const res = await fetch(`/api/admin/support/${ticketId}`);
     if (res.ok) {
       const d = await res.json();
+      setTicket(d.ticket ?? null);
       setMessages(d.messages ?? []);
       setUser(d.user ?? null);
     }
     setLoading(false);
-  }, [userId]);
+  }, [ticketId]);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      const res = await fetch(`/api/admin/support/${userId}`);
-      if (!alive) return;
-      if (res.ok) {
-        const d = await res.json();
-        if (alive) {
-          setMessages(d.messages ?? []);
-          setUser(d.user ?? null);
-        }
-      }
-      if (alive) setLoading(false);
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [userId]);
+    load();
+  }, [load]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight });
@@ -55,7 +44,7 @@ export default function AdminSupportThread({ userId }: { userId: string }) {
     setSending(true);
     setError(null);
     try {
-      const res = await fetch(`/api/admin/support/${userId}`, {
+      const res = await fetch(`/api/admin/support/${ticketId}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message }),
@@ -74,15 +63,62 @@ export default function AdminSupportThread({ userId }: { userId: string }) {
     }
   }
 
+  async function setStatus(status: "open" | "closed") {
+    const res = await fetch(`/api/admin/support/${ticketId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status }),
+    });
+    if (res.ok) {
+      const d = await res.json();
+      setTicket(d.ticket ?? null);
+    }
+  }
+
   const fmt = (iso: string) => new Date(iso).toLocaleString("ru-RU");
+  const isOpen = ticket?.status === "open";
 
   return (
     <div>
       <Link href="/admin/support" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-fg mb-4">
         <ArrowLeft size={16} /> Все обращения
       </Link>
-      <h1 className="text-xl font-semibold">{user?.email ?? userId}</h1>
-      {user?.name && <p className="text-sm text-muted">{user.name}</p>}
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold truncate">{ticket?.subject ?? "…"}</h1>
+          <p className="text-sm text-muted">
+            {user?.email ?? ""}
+            {user?.name ? ` · ${user.name}` : ""}
+            {ticket && (
+              <span className={`ml-2 text-[11px] font-semibold px-1.5 py-0.5 rounded align-middle ${
+                isOpen ? "bg-accent-soft text-accent" : "bg-surface-2 text-faint"
+              }`}>
+                {isOpen ? "Открыт" : "Закрыт"}
+              </span>
+            )}
+          </p>
+        </div>
+        {ticket && (
+          <button
+            onClick={() => setStatus(isOpen ? "closed" : "open")}
+            className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition ${
+              isOpen
+                ? "bg-surface-2 text-muted hover:text-profit"
+                : "bg-surface-2 text-muted hover:text-accent"
+            }`}
+          >
+            {isOpen ? (
+              <>
+                <CheckCircle2 size={15} /> Закрыть тикет
+              </>
+            ) : (
+              <>
+                <RotateCcw size={15} /> Открыть заново
+              </>
+            )}
+          </button>
+        )}
+      </div>
 
       <div className="card mt-4 flex flex-col" style={{ height: "60vh" }}>
         <div ref={listRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-2">

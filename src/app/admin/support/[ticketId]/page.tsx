@@ -5,12 +5,12 @@ export const dynamic = "force-dynamic";
 export default async function AdminSupportThreadPage({
   params,
 }: {
-  params: Promise<{ userId: string }>;
+  params: Promise<{ ticketId: string }>;
 }) {
-  const { userId } = await params;
+  const { ticketId } = await params;
   return (
     <div className="p-6 md:p-8 max-w-2xl">
-      <AdminSupportThread userId={userId} />
+      <AdminSupportThread ticketId={ticketId} />
     </div>
   );
 }

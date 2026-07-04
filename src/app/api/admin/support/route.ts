@@ -5,47 +5,43 @@ import { serverError } from "@/lib/api";
 
 export const dynamic = "force-dynamic";
 
-type ThreadRow = {
+type TicketRow = {
+  id: string;
   userId: string;
-  lastMessage: string;
-  lastAt: Date;
-  lastAuthorRole: string;
+  subject: string;
+  status: string;
+  createdAt: Date;
+  lastMessageAt: Date;
+  lastMessage: string | null;
+  lastAuthorRole: string | null;
   email: string | null;
   name: string | null;
+  unread: number;
 };
 
-// Инбокс: один ряд на пользователя — последнее сообщение треда + профиль.
-// Непрочитанные (от юзера) считаются отдельным запросом и мёржатся сюда.
+// Инбокс тикетов: открытые сверху, внутри группы — по последней активности.
+// Последнее сообщение и непрочитанные — коррелированные подзапросы по индексу
+// (ticketId, createdAt); тикетов немного, это дёшево.
 export async function GET() {
   const session = await getAdminSession();
   if (!session) return notFound();
   try {
-    const [threads, unreadRows] = await Promise.all([
-      prisma.$queryRaw<ThreadRow[]>`
-        SELECT DISTINCT ON (sm."userId")
-          sm."userId" AS "userId",
-          sm."message" AS "lastMessage",
-          sm."createdAt" AS "lastAt",
-          sm."authorRole" AS "lastAuthorRole",
-          u."email" AS "email",
-          u."name" AS "name"
-        FROM "SupportMessage" sm
-        LEFT JOIN "User" u ON u.id = sm."userId"
-        ORDER BY sm."userId", sm."createdAt" DESC
-      `,
-      prisma.$queryRaw<{ userId: string; unread: number }[]>`
-        SELECT "userId", count(*)::int AS unread
-        FROM "SupportMessage"
-        WHERE "authorRole" = 'user' AND "readAt" IS NULL
-        GROUP BY "userId"
-      `,
-    ]);
-    const unreadMap = new Map(unreadRows.map((r) => [r.userId, r.unread]));
-    const items = threads
-      .map((t) => ({ ...t, unread: unreadMap.get(t.userId) ?? 0 }))
-      .sort((a, b) => new Date(b.lastAt).getTime() - new Date(a.lastAt).getTime());
-    const totalUnread = unreadRows.reduce((s, r) => s + r.unread, 0);
-    return NextResponse.json({ threads: items, unread: totalUnread });
+    const tickets = await prisma.$queryRaw<TicketRow[]>`
+      SELECT t."id", t."userId", t."subject", t."status", t."createdAt", t."lastMessageAt",
+        (SELECT sm."message" FROM "SupportMessage" sm
+          WHERE sm."ticketId" = t."id" ORDER BY sm."createdAt" DESC LIMIT 1) AS "lastMessage",
+        (SELECT sm."authorRole" FROM "SupportMessage" sm
+          WHERE sm."ticketId" = t."id" ORDER BY sm."createdAt" DESC LIMIT 1) AS "lastAuthorRole",
+        u."email" AS "email",
+        u."name" AS "name",
+        (SELECT count(*)::int FROM "SupportMessage" sm
+          WHERE sm."ticketId" = t."id" AND sm."authorRole" = 'user' AND sm."readAt" IS NULL) AS "unread"
+      FROM "SupportTicket" t
+      LEFT JOIN "User" u ON u."id" = t."userId"
+      ORDER BY (t."status" = 'open') DESC, t."lastMessageAt" DESC
+    `;
+    const unread = tickets.reduce((s, t) => s + t.unread, 0);
+    return NextResponse.json({ tickets, unread });
   } catch (err) {
     return serverError((err as Error).message);
   }

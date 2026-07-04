@@ -337,24 +337,42 @@ model CollectorConfig {
   updatedAt DateTime @updatedAt
 }
 
-// Сообщение в поддержку от пользователя (форма обратной связи). Читается
-// администраторами в /admin/support; readAt = когда прочитано (NULL = новое).
-// Переписка поддержки: один тред на пользователя (userId — ключ треда), внутри
-// него сообщения от юзера и от админа вперемешку. readAt = когда сообщение
-// прочитано ДРУГОЙ стороной (юзерское читает админ, админское — юзер), так
-// непрочитанные считаются раздельно для колокольчика админа и юзера.
+// Обращение в поддержку (тикет). Один вопрос = один тикет: пользователь создаёт
+// новое обращение, переписывается внутри него, тикет закрывается (админом или
+// самим пользователем) — следующий вопрос открывает НОВЫЙ тикет, а не продолжает
+// старую переписку. Существовавшие до тикетов треды смигрированы в один
+// legacy-тикет на пользователя (id = "legacy-<userId>").
+model SupportTicket {
+  id            String    @id @default(cuid())
+  userId        String // владелец тикета (клиент)
+  subject       String // тема: первая строка первого сообщения (обрезка)
+  status        String    @default("open") // open | closed
+  createdAt     DateTime  @default(now())
+  closedAt      DateTime?
+  lastMessageAt DateTime  @default(now()) // для сортировки инбокса
+  messages      SupportMessage[]
+
+  @@index([userId, lastMessageAt])
+  @@index([status, lastMessageAt])
+}
+
+// Сообщение внутри тикета — от юзера и от админа вперемешку. readAt = когда
+// сообщение прочитано ДРУГОЙ стороной (юзерское читает админ, админское — юзер),
+// так непрочитанные считаются раздельно для колокольчика админа и юзера.
 model SupportMessage {
-  id         String    @id @default(cuid())
-  userId     String // владелец треда (всегда клиент, даже для сообщений админа)
-  authorRole String    @default("user") // "user" | "admin"
+  id         String        @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  userId     String // владелец тикета (всегда клиент, даже для сообщений админа)
+  authorRole String        @default("user") // "user" | "admin"
   email      String // снимок email автора сообщения на момент отправки
   message    String
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime      @default(now())
   readAt     DateTime? // NULL = непрочитано другой стороной
 
+  @@index([ticketId, createdAt])
   @@index([userId, createdAt])
   @@index([authorRole, readAt])
-  @@index([userId, authorRole, readAt])
 }
 
 // Серверные ошибки (500-е из API-роутов через serverError(), и необработанные
