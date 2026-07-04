@@ -1,0 +1,10 @@
+# Конфиг деплоя фолбэк-воркера: npx wrangler deploy -c deploy/cloudflare/wrangler.toml
+name = "tradestats-offline"
+main = "offline-worker.js"
+compatibility_date = "2026-07-01"
+
+# Роуты зоны: воркер перехватывает все запросы домена.
+routes = [
+  { pattern = "tradingstat.ru/*", zone_name = "tradingstat.ru" },
+  { pattern = "www.tradingstat.ru/*", zone_name = "tradingstat.ru" },
+]
