@@ -31,7 +31,12 @@ export async function GET() {
   }
 }
 
-const schema = z.object({ message: z.string().trim().min(1, "Введите сообщение").max(4000) });
+// Управляющие символы (кроме \n и \t) вычищаем: \u0000 Postgres не принимает
+// вовсе, остальные бессмысленны в тексте и мусорят рендер.
+const clean = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+const schema = z.object({
+  message: z.string().transform(clean).pipe(z.string().trim().min(1, "Введите сообщение").max(4000)),
+});
 
 // Тема тикета: первая строка первого сообщения, обрезанная до 80 символов.
 function subjectFrom(message: string): string {

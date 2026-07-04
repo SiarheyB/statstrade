@@ -31,7 +31,12 @@ export async function GET(_req: Request, { params }: Params) {
   }
 }
 
-const schema = z.object({ message: z.string().trim().min(1, "Введите сообщение").max(4000) });
+// Управляющие символы (кроме \n и \t) вычищаем: \u0000 Postgres не принимает
+// вовсе, остальные бессмысленны в тексте и мусорят рендер.
+const clean = (s: string) => s.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "");
+const schema = z.object({
+  message: z.string().transform(clean).pipe(z.string().trim().min(1, "Введите сообщение").max(4000)),
+});
 
 // Ответ администратора в тикет (в т.ч. закрытый — статус не меняется).
 export async function POST(req: Request, { params }: Params) {
