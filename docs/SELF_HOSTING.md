@@ -371,3 +371,31 @@ sudo tailscale funnel status
 - [ ] Авто-бэкап БД в cron.
 - [ ] Проверен авто-деплой: тестовый коммит в `main` → через пару минут изменения на сайте.
 ```
+
+
+## Страница «технический перерыв» (edge-nginx)
+
+Перед `app` стоит лёгкий nginx (`edge` в `docker-compose.prod.yml`,
+порт 127.0.0.1:3000 теперь слушает он). Туннель менять НЕ нужно. Когда
+app-контейнер перезапускается (деплой watchtower, OOM, миграции при старте),
+edge отдаёт `deploy/nginx/offline.html` — брендированную страницу с
+автообновлением, вместо голого 502.
+
+Включение на сервере (watchtower compose-правки не подхватывает):
+
+```bash
+cd ~/statstrade && git pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Проверка: `docker stop tradestats-app && curl -s localhost:3000 | head` —
+должна вернуться страница «Технический перерыв»; `docker start tradestats-app`.
+
+### Полное отключение сервера (света)
+
+Если хост обесточен, страницу с него отдавать некому — Tailscale Funnel в этом
+случае показывает свою ошибку, повлиять на неё нельзя. Единственный способ
+показать свою страницу при полном блэкауте — внешний слой перед сервером:
+свой домен на Cloudflare + Cloudflare Tunnel (гайд в docs/local/CLOUDFLARE_TUNNEL.md)
+и Worker-фолбэк, который при недоступности origin отдаёт копию offline.html
+с edge-серверов Cloudflare. Если решим переезжать на свой домен — сделаем.

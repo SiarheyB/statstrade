@@ -88,11 +88,30 @@ services:
       # Внутри compose-сети collector доступен по имени сервиса. Переопределить
       # можно в .env. COLLECTOR_METRICS_TOKEN/ADMIN_EMAILS задаются в .env.
       COLLECTOR_URL: ${COLLECTOR_URL:-http://collector:8080}
-    ports:
-      # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
-      - "127.0.0.1:3000:3000"
+    # Порт наружу НЕ публикуем: вход через edge (nginx ниже). Так во время
+    # рестартов app (деплой watchtower, OOM) туннель получает красивую страницу
+    # «технический перерыв», а не голый 502.
+    expose:
+      - "3000"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+
+  # Входная прослойка: туннель (Tailscale Funnel / cloudflared) указывает на
+  # 127.0.0.1:3000 как и раньше — только теперь это nginx, а не app. Когда app
+  # недоступен, nginx отдаёт deploy/nginx/offline.html с автообновлением.
+  # Конфиг и страница монтируются из репозитория: правка = git pull + up -d.
+  edge:
+    image: nginx:1.27-alpine
+    container_name: tradestats-edge
+    restart: unless-stopped
+    mem_limit: 64m
+    mem_reservation: 16m
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./deploy/nginx/offline.html:/usr/share/nginx/html/offline.html:ro
+    ports:
+      # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
+      - "127.0.0.1:3000:80"
 
   collector:
     image: ghcr.io/siarheyb/statstrade-collector:latest
