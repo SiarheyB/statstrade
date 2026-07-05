@@ -6,6 +6,9 @@ import { useRouter } from "next/navigation";
 import { ShieldCheck, Trash2, KeyRound } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
+import { Pagination } from "@/components/Pagination";
+
+const PAGE_SIZE = 50;
 
 type Row = {
   id: string;
@@ -27,10 +30,14 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
   const nf = locale === "ru" ? "ru-RU" : "en-US";
   const [busy, setBusy] = useState<string | null>(null);
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
 
   const filtered = rows.filter(
     (r) => r.email.toLowerCase().includes(q.toLowerCase()) || (r.name ?? "").toLowerCase().includes(q.toLowerCase()),
   );
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   async function reset2fa(r: Row) {
     if (!confirm(t("admin.users.confirmReset2fa", { email: r.email }))) return;
@@ -66,7 +73,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
     <div className="mt-6">
       <input
         value={q}
-        onChange={(e) => setQ(e.target.value)}
+        onChange={(e) => { setQ(e.target.value); setPage(1); }}
         placeholder={t("admin.users.search")}
         className="w-full max-w-sm mb-4 px-3 py-2 rounded-lg bg-surface border border-border text-sm focus:outline-none focus-visible:ring-2 ring-accent"
       />
@@ -87,7 +94,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((r) => (
+              {pageRows.map((r) => (
                 <tr key={r.id} className="border-b border-border/50 last:border-0 hover:bg-surface-2/50">
                   <td className="px-5 py-2.5 whitespace-nowrap">
                     <Link href={`/admin/users/${r.id}`} className="inline-flex items-center gap-1.5 hover:text-accent transition">
@@ -160,6 +167,16 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-end px-3 py-2.5 text-sm border-t border-border">
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            onChange={setPage}
+            prevLabel={t("common.back")}
+            nextLabel={t("common.next")}
+            pageAriaLabel={t("trades.page", { p: safePage, total: totalPages })}
+          />
         </div>
       </div>
     </div>
