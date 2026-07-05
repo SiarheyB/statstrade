@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope, Geist_Mono } from "next/font/google";
-import { getLocale } from "@/lib/i18n/server";
+import { getLocale, getTimezone } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/provider";
 import "./globals.css";
 
@@ -39,6 +39,7 @@ export default async function RootLayout({
   children: React.ReactNode;
 }>) {
   const locale = await getLocale();
+  const timezone = await getTimezone();
 
   return (
     <html
@@ -46,7 +47,7 @@ export default async function RootLayout({
       className={`${manrope.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <I18nProvider locale={locale}>{children}</I18nProvider>
+        <I18nProvider locale={locale} timezone={timezone}>{children}</I18nProvider>
       </body>
     </html>
   );

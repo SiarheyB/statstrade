@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layers, RefreshCw, HelpCircle, Filter } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { zonedParts, type TimezoneId } from "@/lib/timezone";
 
 type ObHeatmap = {
   priceMin: number;
@@ -64,28 +65,28 @@ function fmtVal(v: number): string {
   if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
   return String(Math.round(v));
 }
-function fmtTime(ms: number): string {
-  const d = new Date(ms);
+function fmtTime(ms: number, tz: TimezoneId): string {
+  const { h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(h)}:${p(mi)}`;
 }
 // Дата (без времени) — подпись на оси X при переходе на новые сутки, иначе
 // одинаковое «03:00» повторяется на каждой полуночи и выглядит как случайные
 // цифры, никак не привязанные к конкретной свече.
-function fmtDate(ms: number): string {
-  const d = new Date(ms);
+function fmtDate(ms: number, tz: TimezoneId): string {
+  const { d, mo } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d.getDate())}.${p(d.getMonth() + 1)}`;
+  return `${p(d)}.${p(mo + 1)}`;
 }
-function dayKey(ms: number): number {
-  const d = new Date(ms);
-  return d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+function dayKey(ms: number, tz: TimezoneId): number {
+  const { y, mo, d } = zonedParts(ms, tz);
+  return y * 10000 + mo * 100 + d;
 }
 // Дата + время для подсказки свечи.
-function fmtDateTime(ms: number): string {
-  const d = new Date(ms);
+function fmtDateTime(ms: number, tz: TimezoneId): string {
+  const { d, mo, h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(d)}.${p(mo + 1)} ${p(h)}:${p(mi)}`;
 }
 // Базовый актив пары (BTCUSDT → BTC) для подписи объёма лимиток.
 function baseAsset(symbol: string): string {
@@ -156,7 +157,7 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
 }
 
 export default function OrderflowPage() {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
   // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
   // после монтирования (иначе ломается гидрация).
   const [range, setRange] = useState<string>("1d");
@@ -481,11 +482,11 @@ export default function OrderflowPage() {
       ctx.stroke();
       // Первая метка новых суток показывает дату (реже время само по себе
       // превращается в бессмысленно повторяющееся «03:00» на каждой полуночи).
-      const day = dayKey(ms);
+      const day = dayKey(ms, timezone);
       const isDayStep = timeStep >= 86400000;
       const isNewDay = day !== lastDay;
       lastDay = day;
-      const label = isDayStep ? fmtDate(ms) : isNewDay ? `${fmtDate(ms)} ${fmtTime(ms)}` : fmtTime(ms);
+      const label = isDayStep ? fmtDate(ms, timezone) : isNewDay ? `${fmtDate(ms, timezone)} ${fmtTime(ms, timezone)}` : fmtTime(ms, timezone);
       ctx.fillStyle = isDayStep || isNewDay ? "#9aa2b3" : "#6b7384";
       ctx.fillText(label, x, H - 6);
     }
@@ -651,7 +652,7 @@ export default function OrderflowPage() {
       // не в отдельной всплывающей подсказке, чтобы не закрывать свечи/стены.
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
-      const timeLabel = fmtDateTime(cndl ? cndl.t : ms);
+      const timeLabel = fmtDateTime(cndl ? cndl.t : ms, timezone);
       ctx.font = "11px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
       const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
@@ -700,7 +701,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, t, range]);
+  }, [data, minT, gamma, clusters, showLiq, t, range, timezone]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -1132,7 +1133,7 @@ export default function OrderflowPage() {
                   <tbody>
                     {data!.bigTrades.slice(0, 24).map((b, i) => (
                       <tr key={i} className="border-b border-border/20">
-                        <td className="text-faint py-0.5 pr-3">{fmtTime(b.t)}</td>
+                        <td className="text-faint py-0.5 pr-3">{fmtTime(b.t, timezone)}</td>
                         <td className="text-faint/80 py-0.5 pr-3">{b.exchange}</td>
                         <td className={`py-0.5 pr-3 ${b.side === "buy" ? "text-profit" : "text-loss"}`}>
                           {b.side === "buy" ? "▲ " : "▼ "}{b.side === "buy" ? t("of.sideBuy") : t("of.sideSell")}

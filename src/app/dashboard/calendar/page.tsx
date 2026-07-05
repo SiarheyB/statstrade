@@ -5,17 +5,25 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
+import { zonedParts, zonedDateToUtcMs, type TimezoneId } from "@/lib/timezone";
 
 type DayStat = { pnl: number; trades: number; wins: number };
 
 const DAY_MS = 24 * 3600 * 1000;
 
-function dayKey(iso: string): string {
-  return new Date(iso).toISOString().slice(0, 10);
+function pad(n: number): string {
+  return String(n).padStart(2, "0");
+}
+// Calendar day the trade falls on, in the user's selected display timezone —
+// so a trade closed at 23:40 local doesn't silently land on "tomorrow" just
+// because the server stored it in UTC.
+function dayKey(iso: string, tz: TimezoneId): string {
+  const { y, mo, d } = zonedParts(new Date(iso).getTime(), tz);
+  return `${y}-${pad(mo + 1)}-${pad(d)}`;
 }
 
 export default function CalendarPage() {
-  const { t, locale } = useI18n();
+  const { t, locale, timezone } = useI18n();
   const loc = locale === "en" ? "en-US" : "ru-RU";
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -34,11 +42,11 @@ export default function CalendarPage() {
     load();
   }, [load]);
 
-  // Per-day aggregates (UTC date, consistent with the rest of the app).
+  // Per-day aggregates, bucketed by the user's selected display timezone.
   const days = useMemo(() => {
     const map = new Map<string, DayStat>();
     for (const tr of data?.trades ?? []) {
-      const k = dayKey(tr.exitTime);
+      const k = dayKey(tr.exitTime, timezone);
       const d = map.get(k) ?? { pnl: 0, trades: 0, wins: 0 };
       d.pnl += tr.netPnl;
       d.trades += 1;
@@ -46,7 +54,7 @@ export default function CalendarPage() {
       map.set(k, d);
     }
     return map;
-  }, [data]);
+  }, [data, timezone]);
 
   // Default the view to the month of the most recent trade.
   useEffect(() => {
@@ -55,11 +63,15 @@ export default function CalendarPage() {
       (mx, tr) => Math.max(mx, new Date(tr.exitTime).getTime()),
       0,
     );
-    const d = new Date(last);
-    setView({ y: d.getUTCFullYear(), m: d.getUTCMonth() });
-  }, [data, view]);
+    const { y, mo } = zonedParts(last, timezone);
+    setView({ y, m: mo });
+  }, [data, view, timezone]);
 
-  const v = view ?? { y: new Date().getUTCFullYear(), m: new Date().getUTCMonth() };
+  const defaultView = useMemo(() => {
+    const zp = zonedParts(Date.now(), timezone);
+    return { y: zp.y, m: zp.mo };
+  }, [timezone]);
+  const v = view ?? defaultView;
 
   const weekdays = useMemo(() => {
     const f = new Intl.DateTimeFormat(loc, { weekday: "short", timeZone: "UTC" });
@@ -74,21 +86,22 @@ export default function CalendarPage() {
 
   // 6-week grid starting on Monday.
   const grid = useMemo(() => {
-    const first = Date.UTC(v.y, v.m, 1);
-    const offset = (new Date(first).getUTCDay() + 6) % 7; // Mon=0
+    const first = zonedDateToUtcMs(v.y, v.m, 1, timezone);
+    const offset = (zonedParts(first, timezone).day + 6) % 7; // Mon=0
     const start = first - offset * DAY_MS;
     const cells: { date: string; inMonth: boolean; stat?: DayStat }[] = [];
     for (let i = 0; i < 42; i++) {
       const ts = start + i * DAY_MS;
-      const date = new Date(ts).toISOString().slice(0, 10);
+      const zp = zonedParts(ts, timezone);
+      const date = `${zp.y}-${pad(zp.mo + 1)}-${pad(zp.d)}`;
       cells.push({
         date,
-        inMonth: new Date(ts).getUTCMonth() === v.m,
+        inMonth: zp.mo === v.m,
         stat: days.get(date),
       });
     }
     return cells;
-  }, [v, days]);
+  }, [v, days, timezone]);
 
   // Month summary (only in-month days).
   const monthStat = useMemo(() => {
@@ -111,13 +124,16 @@ export default function CalendarPage() {
 
   function shiftMonth(delta: number) {
     setSelected(null);
-    const d = new Date(Date.UTC(v.y, v.m + delta, 1));
-    setView({ y: d.getUTCFullYear(), m: d.getUTCMonth() });
+    let m = v.m + delta;
+    let y = v.y;
+    while (m < 0) { m += 12; y -= 1; }
+    while (m > 11) { m -= 12; y += 1; }
+    setView({ y, m });
   }
   function goToday() {
     setSelected(null);
-    const d = new Date();
-    setView({ y: d.getUTCFullYear(), m: d.getUTCMonth() });
+    const zp = zonedParts(Date.now(), timezone);
+    setView({ y: zp.y, m: zp.mo });
   }
 
   function cellColor(pnl: number | undefined): string {
@@ -129,7 +145,7 @@ export default function CalendarPage() {
   const selectedTrades: SerializedTrade[] =
     selected && data
       ? data.trades
-          .filter((tr) => dayKey(tr.exitTime) === selected)
+          .filter((tr) => dayKey(tr.exitTime, timezone) === selected)
           .sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime())
       : [];
 

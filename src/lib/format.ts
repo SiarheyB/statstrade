@@ -1,10 +1,19 @@
 // Formatting helpers shared across client components.
 // The active locale is set by the I18nProvider via setFormatLocale().
 
+import { ianaFor, type TimezoneId } from "@/lib/timezone";
+
 let LOCALE: "en" | "ru" = "en";
+let TZ: TimezoneId = "auto";
 
 export function setFormatLocale(l: "en" | "ru") {
   LOCALE = l;
+}
+
+// Active display timezone, set by I18nProvider via setFormatTimezone() —
+// same "module var synced from context" pattern as the locale above.
+export function setFormatTimezone(tz: TimezoneId) {
+  TZ = tz;
 }
 
 function numLocale(): string {
@@ -66,12 +75,14 @@ export function fmtDuration(ms: number): string {
 
 export function fmtDate(iso: string | Date): string {
   const d = typeof iso === "string" ? new Date(iso) : iso;
+  const timeZone = ianaFor(TZ);
   return d.toLocaleString(numLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
   });
 }
 

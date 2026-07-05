@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import { useI18n } from "@/lib/i18n/provider";
+import { zonedParts, type TimezoneId } from "@/lib/timezone";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Heatmap = {
@@ -65,10 +66,10 @@ function fmtVal(v: number): string {
   if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
   return String(Math.round(v));
 }
-function fmtDT(ms: number): string {
-  const d = new Date(ms);
+function fmtDT(ms: number, tz: TimezoneId): string {
+  const { y, mo, d, h, mi } = zonedParts(ms, tz);
   const p = (x: number) => String(x).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${y}-${p(mo + 1)}-${p(d)} ${p(h)}:${p(mi)}`;
 }
 
 type View = { x0: number; x1: number; y0: number; y1: number };
@@ -99,7 +100,7 @@ function buildOffscreen(hm: Heatmap): HTMLCanvasElement {
 }
 
 export default function LiqMapPage() {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
   const [exchange, setExchange] = useState<string>("binance");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
@@ -228,9 +229,9 @@ export default function LiqMapPage() {
       const ci = Math.max(0, Math.min(n - 1, Math.floor(tfrac * n)));
       const x = sx(tfrac);
       if (x < plotX - 1 || x > plotX + plotW + 1) continue;
-      const d = new Date(hm.candles[ci].t);
+      const { d, mo, h, mi } = zonedParts(hm.candles[ci].t, timezone);
       const p = (z: number) => String(z).padStart(2, "0");
-      ctx.fillText(`${p(d.getDate())}.${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`, x, H - 6);
+      ctx.fillText(`${p(d)}.${p(mo + 1)} ${p(h)}:${p(mi)}`, x, H - 6);
     }
     ctx.textAlign = "left";
 
@@ -309,7 +310,7 @@ export default function LiqMapPage() {
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / span) * hm.bins)));
       const val = hm.grid[colIdx]?.[binIdx] ?? 0;
       const rows: [string, string][] = [
-        [fmtDT(hm.candles[ci].t), ""],
+        [fmtDT(hm.candles[ci].t, timezone), ""],
         [t("liq.tipPrice"), fmtP(priceH)],
         [t("liq.tipLiq"), fmtVal(val)],
       ];
@@ -343,7 +344,7 @@ export default function LiqMapPage() {
         ctx.textAlign = "left";
       }
     }
-  }, [data, t]);
+  }, [data, t, timezone]);
 
   const requestDraw = useCallback(() => {
     cancelAnimationFrame(rafRef.current);

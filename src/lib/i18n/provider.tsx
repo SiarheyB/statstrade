@@ -3,26 +3,37 @@
 import { createContext, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
 import { translate, type Locale, LOCALE_COOKIE } from "./core";
-import { setFormatLocale } from "@/lib/format";
+import { setFormatLocale, setFormatTimezone } from "@/lib/format";
+import { TIMEZONE_COOKIE, type TimezoneId } from "@/lib/timezone";
 
 type T = (key: string, vars?: Record<string, string | number>) => string;
 
-type Ctx = { locale: Locale; t: T; setLocale: (l: Locale) => void };
+type Ctx = {
+  locale: Locale;
+  t: T;
+  setLocale: (l: Locale) => void;
+  timezone: TimezoneId;
+  setTimezone: (tz: TimezoneId) => void;
+};
 
 const I18nContext = createContext<Ctx | null>(null);
 
 export function I18nProvider({
   locale: initial,
+  timezone: initialTz,
   children,
 }: {
   locale: Locale;
+  timezone: TimezoneId;
   children: React.ReactNode;
 }) {
   const [locale, setLoc] = useState<Locale>(initial);
+  const [timezone, setTz] = useState<TimezoneId>(initialTz);
   const router = useRouter();
 
-  // Keep number/date formatting in sync with the active locale.
+  // Keep number/date formatting in sync with the active locale/timezone.
   setFormatLocale(locale);
+  setFormatTimezone(timezone);
 
   const t: T = (key, vars) => translate(locale, key, vars);
 
@@ -33,8 +44,14 @@ export function I18nProvider({
     router.refresh();
   };
 
+  const setTimezone = (tz: TimezoneId) => {
+    setTz(tz);
+    document.cookie = `${TIMEZONE_COOKIE}=${tz}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  };
+
   return (
-    <I18nContext.Provider value={{ locale, t, setLocale }}>
+    <I18nContext.Provider value={{ locale, t, setLocale, timezone, setTimezone }}>
       {children}
     </I18nContext.Provider>
   );

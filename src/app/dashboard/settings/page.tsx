@@ -1,6 +1,7 @@
 "use client";
 
 import LocaleMenu from "@/components/LocaleMenu";
+import TimezoneMenu from "@/components/TimezoneMenu";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
 import GoogleLinkSettings from "@/components/GoogleLinkSettings";
@@ -23,6 +24,14 @@ export default function GeneralSettingsPage() {
           <p className="text-xs text-faint mt-0.5">{t("settings.languageHint")}</p>
         </div>
         <LocaleMenu />
+      </div>
+
+      <div className="card p-5 mb-5 flex items-center justify-between gap-4">
+        <div>
+          <h3 className="font-medium text-sm">{t("settings.timezone")}</h3>
+          <p className="text-xs text-faint mt-0.5">{t("settings.timezoneHint")}</p>
+        </div>
+        <TimezoneMenu />
       </div>
 
       <ChangePassword />

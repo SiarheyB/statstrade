@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
 import { CalendarClock, RefreshCw } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { zonedParts, zonedDateToUtcMs, ianaFor } from "@/lib/timezone";
 
 type Ev = {
   id: string;
@@ -45,17 +46,16 @@ const CATEGORY_RU: Record<string, string> = {
   Other: "Прочее",
 };
 
-// Monday 00:00 of the week containing `base`, shifted by `offsetWeeks`.
-function weekStart(offsetWeeks: number): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  const dow = (d.getDay() + 6) % 7; // 0 = Monday
-  d.setDate(d.getDate() - dow + offsetWeeks * 7);
-  return d;
+// Monday 00:00 (in the given display timezone) of the week containing `base`,
+// shifted by `offsetWeeks`.
+function weekStart(offsetWeeks: number, tz: import("@/lib/timezone").TimezoneId): Date {
+  const zp = zonedParts(Date.now(), tz);
+  const dow = (zp.day + 6) % 7; // 0 = Monday
+  return new Date(zonedDateToUtcMs(zp.y, zp.mo, zp.d - dow + offsetWeeks * 7, tz));
 }
 
 export default function EconCalPage() {
-  const { t, locale } = useI18n();
+  const { t, locale, timezone } = useI18n();
   const [events, setEvents] = useState<Ev[]>([]);
   const [currencies, setCurrencies] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
@@ -69,11 +69,10 @@ export default function EconCalPage() {
 
   // Current week only (the free feed serves just this week).
   const range = useMemo(() => {
-    const from = weekStart(0);
-    const to = new Date(from);
-    to.setDate(to.getDate() + 7);
+    const from = weekStart(0, timezone);
+    const to = new Date(from.getTime() + 7 * 86400000);
     return { from, to };
-  }, []);
+  }, [timezone]);
 
   const load = useCallback(
     async (force = false) => {
@@ -111,14 +110,16 @@ export default function EconCalPage() {
     setter(next);
   };
 
-  // Local Y-M-D id so "today"/"tomorrow" match the user's timezone.
-  const localDayId = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  // Y-M-D id in the user's selected display timezone, so "today"/"tomorrow"
+  // match what they'd expect to see there rather than the browser's own zone.
+  const localDayId = useMemo(() => (d: Date) => {
+    const zp = zonedParts(d.getTime(), timezone);
+    return `${zp.y}-${zp.mo}-${zp.d}`;
+  }, [timezone]);
   const { todayId, tomorrowId } = useMemo(() => {
-    const today = new Date();
-    const tmr = new Date();
-    tmr.setDate(tmr.getDate() + 1);
-    return { todayId: localDayId(today), tomorrowId: localDayId(tmr) };
-  }, []);
+    const now = Date.now();
+    return { todayId: localDayId(new Date(now)), tomorrowId: localDayId(new Date(now + 86400000)) };
+  }, [localDayId]);
 
   const shown = events.filter(
     (e) =>
@@ -129,25 +130,29 @@ export default function EconCalPage() {
         localDayId(new Date(e.time)) === (scope === "today" ? todayId : tomorrowId)),
   );
 
-  // Group by calendar day (local).
+  const tzName = ianaFor(timezone);
+
+  // Group by calendar day (in the selected display timezone).
   const days = useMemo(() => {
     const map = new Map<string, Ev[]>();
     for (const e of shown) {
       const key = new Date(e.time).toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", {
         weekday: "long", day: "numeric", month: "long",
+        ...(tzName ? { timeZone: tzName } : {}),
       });
       (map.get(key) ?? map.set(key, []).get(key)!).push(e);
     }
     return Array.from(map.entries());
-  }, [shown, locale]);
+  }, [shown, locale, tzName]);
 
   const fmtTime = (iso: string) =>
     new Date(iso).toLocaleTimeString(locale === "ru" ? "ru-RU" : "en-US", {
       hour: "2-digit", minute: "2-digit",
+      ...(tzName ? { timeZone: tzName } : {}),
     });
 
   const loc = locale === "ru" ? "ru-RU" : "en-US";
-  const weekLabel = `${range.from.toLocaleDateString(loc, { day: "numeric", month: "long" })} – ${new Date(range.to.getTime() - 1).toLocaleDateString(loc, { day: "numeric", month: "long" })}`;
+  const weekLabel = `${range.from.toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })} – ${new Date(range.to.getTime() - 1).toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })}`;
 
   return (
     <div className="px-6 py-5 max-w-4xl mx-auto">
