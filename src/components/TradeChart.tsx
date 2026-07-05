@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import type { SerializedTrade } from "@/lib/types";
-import { fmtPrice } from "@/lib/format";
+import { fmtPrice, fmtPct } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
+import { computeExitAnalysis } from "@/lib/analytics/exitAnalysis";
+import { Term } from "@/components/Term";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 
@@ -17,6 +19,7 @@ const AXIS = "#5c6577";
 const GRID = "#242b3a";
 const ENTRY = "#e7eaf0";
 const SL_COLOR = "#f0b90b";
+const BEST_COLOR = "#8b5cf6";
 
 // SVG layout (viewBox units; container keeps the aspect ratio).
 const W = 336;
@@ -161,6 +164,10 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
   const candles = real && data ? data : schematic;
   const sl = trade.stopLoss ?? null;
   const exitColor = trade.netPnl >= 0 ? PROFIT : LOSS;
+  // MFE/MAE only makes sense against real market candles — on the schematic
+  // fallback the wicks are fabricated, so "best exit" would be meaningless.
+  const exitAnalysis =
+    real && data ? computeExitAnalysis(data, trade.side, trade.entryPrice, trade.exitPrice) : null;
 
   // Y domain over highs/lows plus markers (entry, exit, stop).
   const ys = [
@@ -254,6 +261,24 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
             </g>
           )}
 
+          {/* best-exit line (MFE) — the theoretical "perfect exit" price */}
+          {exitAnalysis && (
+            <g>
+              <line
+                x1={PAD_L}
+                x2={W - PAD_R}
+                y1={y(exitAnalysis.bestPrice)}
+                y2={y(exitAnalysis.bestPrice)}
+                stroke={BEST_COLOR}
+                strokeWidth={1}
+                strokeDasharray="2 2"
+              />
+              <text x={PAD_L + 2} y={y(exitAnalysis.bestPrice) - 3} textAnchor="start" fill={BEST_COLOR} fontSize={9}>
+                {t("trades.chart.best")} {fmtPrice(exitAnalysis.bestPrice)}
+              </text>
+            </g>
+          )}
+
           {/* entry / exit markers */}
           <circle cx={timeX(entryT)} cy={y(trade.entryPrice)} r={3.5} fill={ENTRY} stroke="#0b0e13" strokeWidth={1} />
           <circle cx={timeX(exitT)} cy={y(trade.exitPrice)} r={3.5} fill={exitColor} stroke="#0b0e13" strokeWidth={1} />
@@ -274,6 +299,24 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
         )}
         <span>{loading ? t("trades.chart.loading") : real ? t("trades.chart.real") : t("trades.chart.schematic")}</span>
       </div>
+      {exitAnalysis && (
+        <div className="mt-1 flex items-center justify-between text-[10px] text-faint">
+          <span>
+            <Term name="MFE">{t("trades.chart.mfe")}</Term>{" "}
+            <span className="text-profit">{fmtPct(exitAnalysis.mfePct)}</span>
+          </span>
+          <span>
+            <Term name="MAE">{t("trades.chart.mae")}</Term>{" "}
+            <span className="text-loss">{fmtPct(exitAnalysis.maePct)}</span>
+          </span>
+          <span>
+            {t("trades.chart.captured")}{" "}
+            <span className={exitAnalysis.capturedPct >= 0 ? "text-profit" : "text-loss"}>
+              {fmtPct(exitAnalysis.capturedPct, 0)}
+            </span>
+          </span>
+        </div>
+      )}
     </div>
   );
 }
