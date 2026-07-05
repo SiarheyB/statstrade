@@ -70,6 +70,7 @@ export function ExitEfficiencyCard({ trades, accounts }: { trades: SerializedTra
       <p className="text-xs text-faint mt-1">
         {t("an.exitEfficiencyIntro", { max: feature.maxTrades })}
       </p>
+      <p className="text-xs text-faint mt-1">{t("an.exitEfficiencyCryptoOnly")}</p>
       {scope && (
         <p className="text-xs text-faint mt-1">
           <Term desc={t("an.scopeHint")}>{t("an.scopeLabel")}</Term>: {scope}
