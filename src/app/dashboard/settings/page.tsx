@@ -6,6 +6,7 @@ import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
 import GoogleLinkSettings from "@/components/GoogleLinkSettings";
 import DeleteAccount from "@/components/DeleteAccount";
+import MentorShareSettings from "@/components/MentorShareSettings";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function GeneralSettingsPage() {
@@ -33,6 +34,8 @@ export default function GeneralSettingsPage() {
         </div>
         <TimezoneMenu />
       </div>
+
+      <MentorShareSettings />
 
       <ChangePassword />
       <GoogleLinkSettings />
