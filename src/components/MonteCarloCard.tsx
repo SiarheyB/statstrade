@@ -59,23 +59,39 @@ export function MonteCarloCard({ netPnls, capital }: { netPnls: number[]; capita
         <button
           onClick={run}
           disabled={busy}
+          title={t("an.monteCarloRunHint", { sims: feature.simulations, steps: feature.projectedTrades })}
           className="input-base text-xs py-1.5 px-3 hover:border-border-strong disabled:opacity-50"
         >
           {busy ? t("common.loading") : t("an.monteCarloRun")}
         </button>
       </div>
+      <p className="text-xs text-faint mt-1">
+        {t("an.monteCarloIntro", { sims: feature.simulations, steps: feature.projectedTrades })}
+      </p>
 
       {result && (
         <div className="mt-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <Stat
-              label={<Term desc={t("an.riskOfRuinHint")}>{t("an.riskOfRuin")}</Term>}
+              label={<Term desc={t("an.riskOfRuinHint", { pct: feature.ruinDrawdownPct })}>{t("an.riskOfRuin")}</Term>}
               value={`${result.riskOfRuinPct.toFixed(1)}%`}
               tone={result.riskOfRuinPct >= 20 ? "loss" : "profit"}
             />
-            <Stat label={t("an.mcP5")} value={fmtPct((result.p5 - 1) * 100, 0)} tone="loss" />
-            <Stat label={t("an.mcP50")} value={fmtPct((result.p50 - 1) * 100, 0)} tone={result.p50 >= 1 ? "profit" : "loss"} />
-            <Stat label={t("an.mcP95")} value={fmtPct((result.p95 - 1) * 100, 0)} tone="profit" />
+            <Stat
+              label={<Term desc={t("an.mcP5Hint")}>{t("an.mcP5")}</Term>}
+              value={fmtPct((result.p5 - 1) * 100, 0)}
+              tone="loss"
+            />
+            <Stat
+              label={<Term desc={t("an.mcP50Hint")}>{t("an.mcP50")}</Term>}
+              value={fmtPct((result.p50 - 1) * 100, 0)}
+              tone={result.p50 >= 1 ? "profit" : "loss"}
+            />
+            <Stat
+              label={<Term desc={t("an.mcP95Hint")}>{t("an.mcP95")}</Term>}
+              value={fmtPct((result.p95 - 1) * 100, 0)}
+              tone="profit"
+            />
           </div>
           <p className="mt-3 text-xs text-faint">
             {t("an.monteCarloNote", { sims: result.simulations, steps: result.projectedTrades })}

@@ -1,27 +1,42 @@
 // Registry of optional/configurable features toggled from /admin/features.
 // One place to add a new feature key + its tunable defaults — the admin page
-// renders a generic form from this, no new UI needed per feature.
+// renders a generic form from this, no new UI needed per feature. `label` +
+// `description` + `fieldHelp` are meta (stripped before the value reaches
+// app code) — write them for a non-technical admin who's never seen this
+// codebase: what does turning this off actually do, what happens if I set
+// this number too high/low.
 
 export type FeatureKey = keyof typeof FEATURE_DEFAULTS;
+export const FEATURE_META_KEYS = ["label", "description", "fieldHelp"] as const;
 
 export const FEATURE_DEFAULTS = {
-  // Aggregate MFE/MAE "exit efficiency" analytics across recent trades
-  // (Analytics page). Fetches public OHLC per trade from the exchange, so the
-  // limits below protect against hammering the exchange's public API for
-  // accounts with a lot of trades.
   exitEfficiency: {
     label: "Exit efficiency (MFE/MAE aggregate)",
+    description:
+      "Показывает пользователям на странице «Аналитика» блок «Exit efficiency»: насколько хорошо они ловят движение цены на своих сделках (сравнивает реальный выход с лучшей возможной ценой за время удержания). Для расчёта приложение делает запросы к публичному API биржи (Binance/Bybit/OKX) за исторические свечи по каждой сделке — реальных денег/торговли это не касается, только чтение котировок.",
+    fieldHelp: {
+      maxTrades:
+        "Сколько последних сделок пользователя анализировать за один клик «Посчитать». Чем больше — тем точнее статистика, но тем больше запросов к бирже и дольше расчёт. Разумный диапазон: 20–100.",
+      concurrency:
+        "Сколько запросов к бирже отправляется ОДНОВРЕМЕННО во время расчёта. Больше — быстрее расчёт, но выше риск, что биржа временно ограничит частые запросы (rate limit) и часть сделок останется без данных. Разумный диапазон: 2–5.",
+    },
     // Сколько последних сделок анализировать за один расчёт.
     maxTrades: 60,
     // Сколько параллельных запросов к публичному API биржи одновременно.
     concurrency: 3,
   },
-  // Bootstrap Monte Carlo simulation (Risk of Ruin) from the user's own trade
-  // history — 100% client-side compute, no external API calls, but a big
-  // simulations × projectedTrades product can noticeably block the tab for a
-  // moment, hence both being admin-tunable.
   monteCarlo: {
     label: "Monte Carlo / Risk of Ruin",
+    description:
+      "Показывает на странице «Аналитика» блок «Monte Carlo simulation»: программа тысячи раз перемешивает уже совершённые пользователем сделки в случайном порядке и смотрит, что было бы со счётом при таком раскладе. Так оценивается «Risk of Ruin» — вероятность серьёзной просадки при текущей манере торговли. Считается прямо в браузере пользователя, без обращений к внешним сервисам, но при больших значениях полей ниже расчёт может на секунду-две «подвесить» вкладку.",
+    fieldHelp: {
+      simulations:
+        "Сколько случайных «параллельных вселенных» (путей) симулировать. Больше — точнее результат, но дольше расчёт (это чистая нагрузка на процессор в браузере пользователя). Разумный диапазон: 200–2000.",
+      projectedTrades:
+        "На сколько сделок ВПЕРЁД прогонять каждый симулированный путь (не обязательно равно реальному числу сделок пользователя — это гипотетическое продолжение). Больше — шире горизонт прогноза, но дольше расчёт. Разумный диапазон: 50–200.",
+      ruinDrawdownPct:
+        "Просадка от максимума счёта (в %), которая считается «разорением» в статистике Risk of Ruin. Например 50 значит: если в какой-то момент симуляции счёт упал на 50% от своего пика — этот путь засчитывается как провальный. Разумный диапазон: 30–70.",
+    },
     // Сколько случайных путей симулировать.
     simulations: 1000,
     // На сколько сделок вперёд прогонять каждый путь.
@@ -29,24 +44,28 @@ export const FEATURE_DEFAULTS = {
     // Просадка от пика (%), при которой путь считается «разорившимся».
     ruinDrawdownPct: 50,
   },
-  // Именованные стратегии/сетапы с текстом правил + статистикой по сделкам
-  // с этим паттерном (страница /dashboard/playbooks). Лимит числа плейбуков
-  // на юзера — защита от неограниченного роста таблицы Playbook.
   playbooks: {
     label: "Playbooks",
+    description:
+      "Даёт пользователям страницу «Playbooks»: там можно завести карточку под каждый свой торговый сетап (тег «Паттерн» на странице «Сделки»), написать для неё правила входа/выхода и увидеть реальную статистику по сделкам с этим тегом. Данных о торговле это не меняет — только добавляет текстовые заметки и уже существующую статистику.",
+    fieldHelp: {
+      maxPerUser:
+        "Максимальное количество плейбуков, которое может завести один пользователь. Нужно, чтобы никто случайно (или намеренно) не создал тысячи пустых карточек. Разумный диапазон: 10–50.",
+    },
     maxPerUser: 20,
   },
-  // "Mentor Mode" — read-only public capability links (/share/[token]) into a
-  // user's aggregate stats, for sharing with a mentor/coach without a login.
-  // Master on/off matters here more than for the others: this is the one
-  // feature that adds an UNAUTHENTICATED public route reading from the DB, so
-  // an admin may want a hard kill switch regardless of individual links.
   mentorMode: {
     label: "Mentor Mode (share links)",
+    description:
+      "Даёт пользователям возможность создать ссылку на страницу с их статистикой (доходность, win rate, кривая капитала), которую можно отправить ментору/другу — без выдачи пароля от аккаунта. Ссылку открывает ЛЮБОЙ, у кого она есть (это открытая страница без входа в систему), поэтому выключение этой фичи здесь — «рубильник», который сразу закрывает доступ по ВСЕМ уже созданным ссылкам, а не только прячет кнопку создания новых.",
+    fieldHelp: {
+      maxLinksPerUser:
+        "Сколько активных (не отозванных) ссылок может одновременно иметь один пользователь. Разумный диапазон: 3–10.",
+    },
     maxLinksPerUser: 5,
   },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {
   enabled: boolean;
-} & Omit<(typeof FEATURE_DEFAULTS)[K], "label">;
+} & Omit<(typeof FEATURE_DEFAULTS)[K], (typeof FEATURE_META_KEYS)[number]>;

@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { NotebookPen, Plus, Trash2 } from "lucide-react";
+import { NotebookPen, Plus, Trash2, Info } from "lucide-react";
 import type { StatsResponse } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
+import { Term } from "@/components/Term";
 import { fmtUsd, fmtPct } from "@/lib/format";
 
 type Playbook = { id: string; name: string; rules: string; updatedAt: string };
@@ -104,7 +105,12 @@ export default function PlaybooksPage() {
         <p className="text-sm text-muted">{t("playbooks.subtitle")}</p>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex items-start gap-2 rounded-lg border border-border bg-surface-2/50 px-3 py-2.5 text-xs text-muted">
+        <Info size={14} className="text-accent shrink-0 mt-0.5" />
+        <span>{t("playbooks.nameMatchNote")}</span>
+      </div>
+
+      <div className="mb-1 flex items-center gap-2">
         <input
           value={newName}
           onChange={(e) => setNewName(e.target.value)}
@@ -116,11 +122,13 @@ export default function PlaybooksPage() {
         <button
           onClick={addNew}
           disabled={playbooks.length >= (feature.maxPerUser ?? 20)}
+          title={t("playbooks.addHint")}
           className="input-base px-3 py-2 text-sm inline-flex items-center gap-1.5 hover:border-border-strong disabled:opacity-50"
         >
           <Plus size={15} /> {t("playbooks.add")}
         </button>
       </div>
+      <p className="text-xs text-faint mb-1">{t("playbooks.newHint")}</p>
       <p className="text-xs text-faint mb-5">
         {t("playbooks.limitNote", { n: playbooks.length, max: feature.maxPerUser ?? 20 })}
       </p>
@@ -143,14 +151,19 @@ export default function PlaybooksPage() {
 
               {s ? (
                 <div className="grid grid-cols-3 gap-3 mb-3 text-xs">
-                  <Stat label={t("playbooks.trades")} value={String(s.trades)} />
-                  <Stat label={t("playbooks.winRate")} value={fmtPct(s.winRate, 0)} />
-                  <Stat label={t("playbooks.netPnl")} value={fmtUsd(s.netPnl, { sign: true })} tone={s.netPnl >= 0 ? "profit" : "loss"} />
+                  <Stat label={<Term desc={t("playbooks.tradesHint")}>{t("playbooks.trades")}</Term>} value={String(s.trades)} />
+                  <Stat label={<Term name="Win Rate">{t("playbooks.winRate")}</Term>} value={fmtPct(s.winRate, 0)} />
+                  <Stat
+                    label={<Term desc={t("playbooks.netPnlHint")}>{t("playbooks.netPnl")}</Term>}
+                    value={fmtUsd(s.netPnl, { sign: true })}
+                    tone={s.netPnl >= 0 ? "profit" : "loss"}
+                  />
                 </div>
               ) : (
                 <p className="text-xs text-faint mb-3">{t("playbooks.noTrades")}</p>
               )}
 
+              <label className="text-xs text-faint block mb-1">{t("playbooks.rulesLabel")}</label>
               <textarea
                 value={drafts[p.name] ?? ""}
                 onChange={(e) => setDrafts((d) => ({ ...d, [p.name]: e.target.value }))}
@@ -159,6 +172,7 @@ export default function PlaybooksPage() {
                 maxLength={5000}
                 className="input-base w-full px-3 py-2 text-sm resize-y"
               />
+              <p className="text-[11px] text-faint mt-1">{t("playbooks.rulesHint")}</p>
               <div className="mt-2 flex justify-end">
                 <button
                   onClick={() => save(p.name)}
@@ -179,7 +193,7 @@ export default function PlaybooksPage() {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone?: "profit" | "loss" }) {
+function Stat({ label, value, tone }: { label: React.ReactNode; value: string; tone?: "profit" | "loss" }) {
   return (
     <div>
       <div className="text-faint">{label}</div>

@@ -50,37 +50,46 @@ export function ExitEfficiencyCard({ trades }: { trades: SerializedTrade[] }) {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h3 className="font-medium text-sm flex items-center gap-1.5">
           <TrendingUp size={15} className="text-accent" />
-          <Term name="MFE" desc={t("an.exitEfficiencyHint")}>
-            {t("an.exitEfficiency")}
-          </Term>
+          <Term desc={t("an.exitEfficiencyHint")}>{t("an.exitEfficiency")}</Term>
         </h3>
         <button
           onClick={run}
           disabled={busy}
+          title={t("an.exitEfficiencyRunHint", { max: feature.maxTrades })}
           className="input-base text-xs py-1.5 px-3 hover:border-border-strong disabled:opacity-50"
         >
           {busy ? t("common.loading") : t("an.exitEfficiencyRun")}
         </button>
       </div>
+      <p className="text-xs text-faint mt-1">
+        {t("an.exitEfficiencyIntro", { max: feature.maxTrades })}
+      </p>
 
       {summary && (
         <div className="mt-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Stat label={t("trades.chart.mfe")} value={fmtPct(summary.avgMfePct)} tone="profit" />
-            <Stat label={t("trades.chart.mae")} value={fmtPct(summary.avgMaePct)} tone="loss" />
+            <Stat label={<Term name="MFE">{t("trades.chart.mfe")}</Term>} value={fmtPct(summary.avgMfePct)} tone="profit" />
+            <Stat label={<Term name="MAE">{t("trades.chart.mae")}</Term>} value={fmtPct(summary.avgMaePct)} tone="loss" />
             <Stat
-              label={t("trades.chart.captured")}
+              label={<Term name="Captured">{t("trades.chart.captured")}</Term>}
               value={fmtPct(summary.avgCapturedPct, 0)}
               tone={summary.avgCapturedPct >= 0 ? "profit" : "loss"}
             />
-            <Stat label={t("an.leftOnTable")} value={fmtUsd(summary.leftOnTableUsd)} tone="loss" />
+            <Stat
+              label={<Term desc={t("an.leftOnTableHint")}>{t("an.leftOnTable")}</Term>}
+              value={fmtUsd(summary.leftOnTableUsd)}
+              tone="loss"
+            />
           </div>
           <p className="mt-3 text-xs text-faint">
             {t("an.exitEfficiencyAnalyzed", { n: summary.analyzed, skipped: summary.skipped })}
           </p>
+          <p className="mt-1 text-xs text-faint">{t("an.exitEfficiencySkippedHint")}</p>
           {summary.worst.length > 0 && (
             <div className="mt-3 space-y-1">
-              <div className="text-xs text-faint">{t("an.exitEfficiencyWorst")}</div>
+              <div className="text-xs text-faint">
+                <Term desc={t("an.exitEfficiencyWorstHint")}>{t("an.exitEfficiencyWorst")}</Term>
+              </div>
               {summary.worst.map(({ trade, capturedPct }) => (
                 <div key={trade.id} className="flex items-center justify-between text-xs">
                   <span>{fmtSymbol(trade.symbol)}</span>
@@ -95,7 +104,7 @@ export function ExitEfficiencyCard({ trades }: { trades: SerializedTrade[] }) {
   );
 }
 
-function Stat({ label, value, tone }: { label: string; value: string; tone: "profit" | "loss" }) {
+function Stat({ label, value, tone }: { label: React.ReactNode; value: string; tone: "profit" | "loss" }) {
   return (
     <div>
       <div className="text-xs text-faint">{label}</div>
