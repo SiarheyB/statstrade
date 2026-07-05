@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Share2, Copy, Trash2, Check } from "lucide-react";
+import { Share2, Copy, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
 type Link = { id: string; token: string; label: string | null; createdAt: string; lastViewedAt: string | null };
@@ -73,9 +73,17 @@ export default function MentorShareSettings() {
       <h3 className="font-medium text-sm flex items-center gap-1.5">
         <Share2 size={15} className="text-accent" /> {t("mentor.title")}
       </h3>
-      <p className="text-xs text-faint mt-0.5 mb-4">{t("mentor.hint")}</p>
+      <p className="text-xs text-faint mt-0.5">{t("mentor.hint")}</p>
 
-      <div className="flex items-center gap-2 mb-3">
+      <p className="text-xs text-faint mt-2">{t("mentor.whatIsShown")}</p>
+
+      <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2.5 mt-3 mb-4 text-xs text-muted">
+        <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />
+        <span>{t("mentor.securityWarning")}</span>
+      </div>
+
+      <label className="text-xs text-faint block mb-1">{t("mentor.labelFieldLabel")}</label>
+      <div className="flex items-center gap-2 mb-1">
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
@@ -86,11 +94,13 @@ export default function MentorShareSettings() {
         <button
           onClick={create}
           disabled={busy || links.length >= (feature.maxLinksPerUser ?? 5)}
+          title={t("mentor.createHint")}
           className="input-base px-3 py-1.5 text-sm hover:border-border-strong disabled:opacity-50"
         >
           {t("mentor.create")}
         </button>
       </div>
+      <p className="text-xs text-faint mb-1">{t("mentor.labelFieldHint")}</p>
       <p className="text-xs text-faint mb-3">
         {t("mentor.limitNote", { n: links.length, max: feature.maxLinksPerUser ?? 5 })}
       </p>
@@ -115,6 +125,7 @@ export default function MentorShareSettings() {
           </div>
         ))}
         {links.length === 0 && <p className="text-xs text-faint">{t("mentor.empty")}</p>}
+        {links.length > 0 && <p className="text-[11px] text-faint pt-1">{t("mentor.iconsLegend")}</p>}
       </div>
     </div>
   );

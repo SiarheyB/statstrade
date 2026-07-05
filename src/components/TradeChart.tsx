@@ -306,7 +306,7 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
             <span className="text-loss">{fmtPct(exitAnalysis.maePct)}</span>
           </span>
           <span>
-            {t("trades.chart.captured")}{" "}
+            <Term name="Captured">{t("trades.chart.captured")}</Term>{" "}
             <span className={exitAnalysis.capturedPct >= 0 ? "text-profit" : "text-loss"}>
               {fmtPct(exitAnalysis.capturedPct, 0)}
             </span>
