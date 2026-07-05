@@ -154,7 +154,7 @@ export default function OrderflowPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   // Слайдеры фильтрации: порог отображения (%) и яркость (%).
-  const [minPct, setMinPct] = useState(2);
+  const [minPct, setMinPct] = useState(20);
   const [brightness, setBrightness] = useState(55);
   const [live, setLive] = useState(true);
   const [clusters, setClusters] = useState(true);
@@ -1024,7 +1024,7 @@ export default function OrderflowPage() {
             {t("of.filterThreshold")}: {minPct}%
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
-          <input type="range" min={0} max={40} value={minPct} onChange={(e) => setMinPct(Number(e.target.value))} className="accent-accent w-40" />
+          <input type="range" min={0} max={100} value={minPct} onChange={(e) => setMinPct(Number(e.target.value))} className="accent-accent w-40" />
         </label>
         <label className="flex items-center gap-2" title={t("of.hintBrightness")}>
           <span className="w-28 inline-flex items-center gap-1">
