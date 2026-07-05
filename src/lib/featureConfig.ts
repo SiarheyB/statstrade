@@ -5,7 +5,8 @@ import { FEATURE_DEFAULTS, type FeatureKey, type FeatureConfigValue } from "@/li
 // defaults. No row = feature enabled with defaults (new features are on by
 // default, same pattern as ExchangeToggle).
 export async function getFeatureConfig<K extends FeatureKey>(key: K): Promise<FeatureConfigValue<K>> {
-  const { label: _label, ...defaults } = FEATURE_DEFAULTS[key];
+  const { label, ...defaults } = FEATURE_DEFAULTS[key];
+  void label;
   const row = await prisma.featureConfig.findUnique({ where: { key } });
   if (!row) return { enabled: true, ...defaults } as FeatureConfigValue<K>;
   let overrides: Record<string, unknown> = {};

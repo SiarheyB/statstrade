@@ -45,3 +45,16 @@ export function computeExitAnalysis(
 
   return { bestPrice, mfePct, maePct, capturedPct };
 }
+
+// Shared "is this actually real market data" check — candles are only usable
+// for MFE/MAE if the trade's own entry/exit prices fall within them (±5%).
+// Used by both the single-trade hover chart (TradeChart) and the aggregate
+// exit-efficiency analytics, so the two never disagree on what counts as real.
+export function candlesLookReal(candles: Candle[], entryPrice: number, exitPrice: number): boolean {
+  if (candles.length <= 2) return false;
+  const closes = candles.map((c) => c.c);
+  const cMin = Math.min(...closes);
+  const cMax = Math.max(...closes);
+  const within = (p: number) => p >= cMin * 0.95 && p <= cMax * 1.05;
+  return within(entryPrice) && within(exitPrice);
+}
