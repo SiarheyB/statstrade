@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, AlertTriangle, HeartHandshake } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, AlertTriangle, HeartHandshake, SlidersHorizontal } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -15,6 +15,7 @@ const LINKS = [
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
+  { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
   { href: "/admin/support", key: "admin.nav.support", icon: Headset },
   { href: "/admin/errors", key: "admin.nav.errors", icon: AlertTriangle },
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },

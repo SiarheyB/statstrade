@@ -5,6 +5,7 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { EquityChart, DrawdownChart, Histogram } from "@/components/charts.lazy";
 import { Term } from "@/components/Term";
+import { ExitEfficiencyCard } from "@/components/ExitEfficiencyCard";
 import { fmtRatio } from "@/lib/format";
 
 type Bin = { label: string; count: number; tone?: "profit" | "loss" | "neutral" };
@@ -207,6 +208,8 @@ export default function AnalyticsPage() {
             </h3>
             <Histogram data={holdBins} height={220} />
           </div>
+
+          <ExitEfficiencyCard trades={trades} />
         </div>
       )}
     </div>

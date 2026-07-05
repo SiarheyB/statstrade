@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { SerializedTrade } from "@/lib/types";
 import { fmtPrice, fmtPct } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
-import { computeExitAnalysis } from "@/lib/analytics/exitAnalysis";
+import { computeExitAnalysis, candlesLookReal } from "@/lib/analytics/exitAnalysis";
 import { Term } from "@/components/Term";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
@@ -111,19 +111,15 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
       .then((r) => r.json())
       .then((j: { candles?: number[][] }) => {
         if (!active) return;
-        if (j.candles && j.candles.length > 2) {
-          const closes = j.candles.map((c) => c[4]);
-          const cMin = Math.min(...closes);
-          const cMax = Math.max(...closes);
-          const within = (p: number) => p >= cMin * 0.95 && p <= cMax * 1.05;
-          if (within(trade.entryPrice) && within(trade.exitPrice)) {
-            const cs: Candle[] = j.candles.map((c) => ({
-              t: c[0],
-              o: c[1],
-              h: c[2],
-              l: c[3],
-              c: c[4],
-            }));
+        if (j.candles) {
+          const cs: Candle[] = j.candles.map((c) => ({
+            t: c[0],
+            o: c[1],
+            h: c[2],
+            l: c[3],
+            c: c[4],
+          }));
+          if (candlesLookReal(cs, trade.entryPrice, trade.exitPrice)) {
             candleCache.set(trade.id, cs);
             setData(cs);
             setReal(true);
