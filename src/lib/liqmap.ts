@@ -27,14 +27,22 @@ export type Kline = {
 };
 
 // Leverage tiers and their relative share of each candle's volume. Heavier on
-// the common retail tiers; tweakable in one place.
+// the common retail tiers; tweakable in one place. Low tiers (3x/5x) matter
+// less for volume but liquidate far from price (~15-30%) — without them the
+// heatmap only ever lit up a narrow band right around price (unlike
+// CoinGlass, whose map stays populated across most of the visible range).
 const LEVERAGES: { lev: number; weight: number }[] = [
+  { lev: 3, weight: 0.25 },
+  { lev: 5, weight: 0.35 },
   { lev: 10, weight: 0.6 },
   { lev: 25, weight: 1.0 },
   { lev: 50, weight: 1.0 },
   { lev: 100, weight: 0.8 },
 ];
 const MMR = 0.004; // maintenance margin ~0.4%
+// Наибольшая относительная дистанция ликвидации среди тиров (3x → ~33%) —
+// диапазон цены грида должен покрывать её, иначе дальние полосы обрежутся.
+const MAX_LEV_DIST = Math.max(...LEVERAGES.map((l) => 1 / l.lev - MMR));
 
 // Same candle interval as the timeframe implies, but ~2x more history fetched
 // (capped at 1000 — Bybit's per-request limit). The chart shows the recent
@@ -153,7 +161,13 @@ export function buildHeatmap(
   let pMin = opts.range?.[0] ?? Math.min(...klines.map((k) => k.low));
   let pMax = opts.range?.[1] ?? Math.max(...klines.map((k) => k.high));
   if (!opts.range) {
-    const pad = (pMax - pMin) * 0.06 || pMax * 0.01;
+    // Отступ берём максимальным из двух: небольшой запас вокруг реального
+    // хода цены (6%) и дистанция самого дальнего плеча (~33% для 3x) —
+    // иначе низкоплечевые полосы обрезаются по краям грида и карта выглядит
+    // почти пустой дальше пары процентов от цены (в отличие от CoinGlass).
+    const basePad = (pMax - pMin) * 0.06 || pMax * 0.01;
+    const levPad = ((pMin + pMax) / 2) * MAX_LEV_DIST;
+    const pad = Math.max(basePad, levPad);
     pMin -= pad;
     pMax += pad;
   }
@@ -221,10 +235,10 @@ export async function computeLiqMap(
   if (ok.length === 0) return null;
 
   const all = ok.flatMap((s) => s.value);
-  const range: [number, number] = [
-    Math.min(...all.map((k) => k.low)) * 0.99,
-    Math.max(...all.map((k) => k.high)) * 1.01,
-  ];
+  const rawMin = Math.min(...all.map((k) => k.low));
+  const rawMax = Math.max(...all.map((k) => k.high));
+  const levPad = ((rawMin + rawMax) / 2) * MAX_LEV_DIST;
+  const range: [number, number] = [rawMin - levPad, rawMax + levPad];
   let combined: Heatmap | null = null;
   for (const s of ok) {
     const hm = buildHeatmap(s.value, { range });

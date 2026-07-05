@@ -16,6 +16,16 @@ const EXCHANGES = ["binance", "bybit", "okx"] as const;
 // We fetch ~2x history; show the recent half by default (same density as before),
 // older bars are reachable by dragging the chart left.
 const DEFAULT_X0 = 0.5;
+// Нижняя граница ширины окна при зуме (доля полного диапазона) — без неё
+// колесо/драг по оси зумят «в бесконечность» и график превращается в кашу из
+// одного растянутого пикселя.
+const MIN_ZOOM_SPAN_FRAC = 0.15;
+// Диапазон priceMin..priceMax уже подобран так, чтобы покрывать самые дальние
+// полосы ликвидации (см. MAX_LEV_DIST в lib/liqmap.ts) — то есть вся эта
+// область и так закрашена. Зумить наружу ЗА её пределы смысла нет: там нет
+// данных, и получаются пустые чёрные полосы сверху/снизу. Поэтому зум по Y не
+// выходит за priceMin..priceMax (множитель 1 = как раз полный диапазон).
+const MAX_Y_ZOOM_OUT_MULT = 1;
 const TFS = ["1d", "2d", "7d", "1M", "3M"] as const;
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT", "DOGEUSDT"];
 
@@ -347,6 +357,11 @@ export default function LiqMapPage() {
   }, [draw, requestDraw]);
 
   function clampX(v: View) {
+    if (v.x1 - v.x0 < MIN_ZOOM_SPAN_FRAC) {
+      const cx = (v.x0 + v.x1) / 2;
+      v.x0 = cx - MIN_ZOOM_SPAN_FRAC / 2;
+      v.x1 = cx + MIN_ZOOM_SPAN_FRAC / 2;
+    }
     const sp = Math.min(1, v.x1 - v.x0);
     if (v.x1 - v.x0 >= 1) { v.x0 = 0; v.x1 = 1; return; }
     if (v.x0 < 0) { v.x1 = sp; v.x0 = 0; }
@@ -354,8 +369,27 @@ export default function LiqMapPage() {
   }
   function clampY(v: View, lo: number, hi: number) {
     const full = hi - lo;
-    const sp = Math.min(full, v.y1 - v.y0);
-    if (v.y1 - v.y0 >= full) { v.y0 = lo; v.y1 = hi; return; }
+    const minSpan = full * MIN_ZOOM_SPAN_FRAC;
+    const maxSpan = full * MAX_Y_ZOOM_OUT_MULT;
+    if (v.y1 - v.y0 < minSpan) {
+      const cy = (v.y0 + v.y1) / 2;
+      v.y0 = cy - minSpan / 2;
+      v.y1 = cy + minSpan / 2;
+    }
+    // За пределами полного диапазона цены — сплющиваем дальше (до maxSpan),
+    // не «примагничивая» жёстко к lo..hi, иначе Y упирался в потолок раньше X.
+    if (v.y1 - v.y0 > maxSpan) {
+      const cy = (v.y0 + v.y1) / 2;
+      v.y0 = cy - maxSpan / 2;
+      v.y1 = cy + maxSpan / 2;
+    }
+    // Если ширина после клампа как раз "докрутилась" до полного диапазона (или
+    // maxSpan <= full, т.е. зумить за пределы вообще нельзя) — жёстко ставим
+    // окно на lo..hi. Иначе центр окна может остаться смещённым от предыдущего
+    // зума, и полоса данных прилипает к одному краю, а другой край — чёрный.
+    if (v.y1 - v.y0 >= full && maxSpan <= full) { v.y0 = lo; v.y1 = hi; return; }
+    if (v.y1 - v.y0 >= full) return;
+    const sp = v.y1 - v.y0;
     if (v.y0 < lo) { v.y1 = lo + sp; v.y0 = lo; }
     if (v.y1 > hi) { v.y0 = hi - sp; v.y1 = hi; }
   }
