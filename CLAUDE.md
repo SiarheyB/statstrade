@@ -32,3 +32,17 @@
   (`ObSnapshotRollup` / `ObRollupBucket`, минутные бакеты), которые наполняет
   коллектор, — а не миллионы сырых `ObSnapshot`. Сырые таблицы держатся коротко
   (`RAW_RETENTION_DAYS`), rollup — дольше (`ROLLUP_RETENTION_DAYS`).
+
+## i18n / часовой пояс — сквозной паттерн
+
+- Язык (`src/lib/i18n/`) и таймзона (`src/lib/timezone.ts`) хранятся **одинаково**:
+  cookie (`ts_locale` / `ts_timezone`) + `I18nProvider`/`useI18n()` на клиенте,
+  `getLocale()`/`getTimezone()` на сервере. Никакого поля в модели `User` — это
+  осознанное решение, не персистентность между устройствами.
+- **Даты/время форматируются в двух режимах:** большинство мест идёт через
+  `fmtDate()` (`src/lib/format.ts`) — там таймзона учтена централизованно. Но
+  canvas-графики (orderflow, liqmap) и календарь/econcal рисуют подписи
+  вручную (`getHours()`/`getDate()` и т.п., не `toLocaleString`) — для них
+  таймзона применяется через `zonedParts()`/`zonedDateToUtcMs()` из
+  `lib/timezone.ts`, а не через `fmtDate`. При добавлении нового
+  времени/даты в UI — сначала проверь, не нужен ли этот сдвиг.
