@@ -479,3 +479,15 @@ model EconomicEvent {
   @@unique([time, currency, title])
   @@index([time])
 }
+
+// Generic on/off + tunable settings for optional features, editable from
+// /admin/features (одна таблица под ВСЕ такие фичи — не заводим отдельную
+// миграцию под каждый новый переключатель). key — стабильный идентификатор
+// фичи в коде (см. src/lib/features.ts), config — JSON с параметрами
+// конкретной фичи (batch size, лимиты и т.п.), поверх статичных дефолтов.
+model FeatureConfig {
+  key       String   @id
+  enabled   Boolean  @default(true)
+  config    String?
+  updatedAt DateTime @updatedAt
+}
