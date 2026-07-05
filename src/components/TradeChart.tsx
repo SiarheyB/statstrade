@@ -164,6 +164,15 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
   // fallback the wicks are fabricated, so "best exit" would be meaningless.
   const exitAnalysis =
     real && data ? computeExitAnalysis(data, trade.side, trade.entryPrice, trade.exitPrice) : null;
+  // Index of the candle where the best price actually occurred — the line
+  // is a flat reference level, but without this the chart can read as if
+  // the best price was already there at the start (i.e. before entry).
+  const bestCandleIndex =
+    real && data && exitAnalysis
+      ? (trade.side === "long"
+          ? data.reduce((bi, c, i) => (c.h > data[bi].h ? i : bi), 0)
+          : data.reduce((bi, c, i) => (c.l < data[bi].l ? i : bi), 0))
+      : null;
 
   // Y domain over highs/lows plus markers (entry, exit, stop).
   const ys = [
@@ -257,11 +266,14 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
             </g>
           )}
 
-          {/* best-exit line (MFE) — the theoretical "perfect exit" price */}
-          {exitAnalysis && (
+          {/* best-exit line (MFE) — the theoretical "perfect exit" price.
+              Drawn only from the candle where it actually happened onward
+              (not from the chart's left edge), with a marker dot at that
+              point in time, so it can't read as "already there at entry". */}
+          {exitAnalysis && bestCandleIndex != null && (
             <g>
               <line
-                x1={PAD_L}
+                x1={cx(bestCandleIndex)}
                 x2={W - PAD_R}
                 y1={y(exitAnalysis.bestPrice)}
                 y2={y(exitAnalysis.bestPrice)}
@@ -269,7 +281,8 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
                 strokeWidth={1}
                 strokeDasharray="2 2"
               />
-              <text x={PAD_L + 2} y={y(exitAnalysis.bestPrice) - 3} textAnchor="start" fill={BEST_COLOR} fontSize={9}>
+              <circle cx={cx(bestCandleIndex)} cy={y(exitAnalysis.bestPrice)} r={2.5} fill={BEST_COLOR} />
+              <text x={W - PAD_R} y={y(exitAnalysis.bestPrice) - 3} textAnchor="end" fill={BEST_COLOR} fontSize={9}>
                 {t("trades.chart.best")} {fmtPrice(exitAnalysis.bestPrice)}
               </text>
             </g>

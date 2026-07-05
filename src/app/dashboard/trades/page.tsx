@@ -54,15 +54,32 @@ export default function TradesPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [chart, setChart] = useState<{ trade: SerializedTrade; x: number; y: number } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function onTickerEnter(e: React.MouseEvent, tr: SerializedTrade) {
     const x = e.clientX;
     const y = e.clientY;
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => setChart({ trade: tr, x, y }), 250);
   }
   function onTickerLeave() {
     if (hoverTimer.current) clearTimeout(hoverTimer.current);
+    // Small grace period so the mouse can travel from the ticker onto the
+    // popup itself (e.g. to hover the MFE/MAE term tooltips inside it)
+    // without the popup vanishing first.
+    closeTimer.current = setTimeout(() => setChart(null), 200);
+  }
+  function onPopupEnter() {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+  function onPopupLeave() {
     setChart(null);
   }
 
@@ -461,11 +478,13 @@ export default function TradesPage() {
       {/* Floating trade chart on ticker hover */}
       {chart && (
         <div
-          className="pointer-events-none fixed z-50"
+          className="fixed z-50"
           style={{
             left: Math.max(8, Math.min(chart.x + 16, window.innerWidth - 372)),
             top: Math.max(8, Math.min(chart.y + 16, window.innerHeight - 290)),
           }}
+          onMouseEnter={onPopupEnter}
+          onMouseLeave={onPopupLeave}
         >
           <div className="card border-border-strong p-3 w-[360px] shadow-2xl">
             <div className="mb-2 flex items-center justify-between">
