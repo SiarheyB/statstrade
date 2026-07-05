@@ -24,6 +24,7 @@ import {
   X,
   LogOut,
   ShieldCheck,
+  NotebookPen,
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
@@ -39,6 +40,7 @@ const LINKS = [
   { href: "/dashboard/calendar", key: "nav.calendar", icon: CalendarDays },
   { href: "/dashboard/analytics", key: "nav.analytics", icon: PieChart },
   { href: "/dashboard/trades", key: "nav.trades", icon: ListOrdered },
+  { href: "/dashboard/playbooks", key: "nav.playbooks", icon: NotebookPen, featureKey: "playbooks" },
 ];
 
 const NEWS_CHILDREN = [
@@ -86,6 +88,27 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [mobileOpen, setMobileOpen] = useState(false);
   const [supportUnread, setSupportUnread] = useState(0);
   const [errorsUnread, setErrorsUnread] = useState(0);
+  // Скрываем пункты, привязанные к отключённой в /admin/features фиче.
+  // Оптимистично показываем, пока не пришёл ответ — не мигает при обычном on.
+  const [hiddenFeatures, setHiddenFeatures] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const keys = Array.from(new Set(LINKS.map((l) => ("featureKey" in l ? l.featureKey : null)).filter(Boolean)));
+    let alive = true;
+    Promise.all(
+      keys.map((key) =>
+        fetch(`/api/features?key=${key}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((j) => ({ key, enabled: j?.value?.enabled ?? true })),
+      ),
+    ).then((results) => {
+      if (!alive) return;
+      setHiddenFeatures(new Set(results.filter((r) => !r.enabled).map((r) => r.key as string)));
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -164,7 +187,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           </div>
         )}
 
-        {LINKS.map((l) => {
+        {LINKS.filter((l) => !("featureKey" in l && l.featureKey && hiddenFeatures.has(l.featureKey))).map((l) => {
           const active =
             l.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(l.href);
           return (

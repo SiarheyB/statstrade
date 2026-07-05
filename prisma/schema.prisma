@@ -37,6 +37,7 @@ model User {
   tokenVersion      Int     @default(0)
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
+  playbooks    Playbook[]
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -490,4 +491,20 @@ model FeatureConfig {
   enabled   Boolean  @default(true)
   config    String?
   updatedAt DateTime @updatedAt
+}
+
+// A named strategy/setup with its own written rules ("playbook") — extends
+// the existing free-text `pattern` tag on TradeAnnotation with documentation
+// and (computed on the fly, not stored) performance stats for that pattern.
+model Playbook {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String // matches a value in the user's patternOptions list
+  rules     String // free-form entry/exit/risk rules text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, name])
+  @@index([userId])
 }

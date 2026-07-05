@@ -29,6 +29,13 @@ export const FEATURE_DEFAULTS = {
     // Просадка от пика (%), при которой путь считается «разорившимся».
     ruinDrawdownPct: 50,
   },
+  // Именованные стратегии/сетапы с текстом правил + статистикой по сделкам
+  // с этим паттерном (страница /dashboard/playbooks). Лимит числа плейбуков
+  // на юзера — защита от неограниченного роста таблицы Playbook.
+  playbooks: {
+    label: "Playbooks",
+    maxPerUser: 20,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

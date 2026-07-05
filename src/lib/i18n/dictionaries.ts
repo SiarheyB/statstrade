@@ -25,6 +25,7 @@ const en: Dict = {
   "nav.calendar": "Calendar",
   "nav.analytics": "Analytics",
   "nav.trades": "Trades",
+  "nav.playbooks": "Playbooks",
   "nav.liqmap": "Liquidation map",
   "nav.orderflow": "Order heatmap",
   "nav.service": "Service",
@@ -834,6 +835,22 @@ const en: Dict = {
   "admin.audit.action.account.sync": "Run sync",
   "admin.audit.action.account.reset": "Reset sync status",
   "admin.audit.action.content.refresh": "Refresh feed",
+
+  "playbooks.title": "Playbooks",
+  "playbooks.subtitle": "Document the rules for each of your setups (pattern tag) and see how it's actually performing.",
+  "playbooks.newPlaceholder": "New playbook name (e.g. \"Breakout retest\")",
+  "playbooks.add": "Add",
+  "playbooks.limitNote": "{n} / {max} playbooks used.",
+  "playbooks.delete": "Delete",
+  "playbooks.confirmDelete": "Delete playbook \"{name}\"? The rules text will be lost (trades keep their pattern tag).",
+  "playbooks.trades": "Trades",
+  "playbooks.winRate": "Win rate",
+  "playbooks.netPnl": "Net P&L",
+  "playbooks.noTrades": "No trades tagged with this pattern yet.",
+  "playbooks.rulesPlaceholder": "Entry criteria, exit criteria, risk rules…",
+  "playbooks.save": "Save",
+  "playbooks.empty": "No playbooks yet — add one above.",
+  "playbooks.error": "Couldn't save the playbook.",
 };
 
 const ru: Dict = {
@@ -855,6 +872,7 @@ const ru: Dict = {
   "nav.analytics": "Аналитика",
   "nav.calendar": "Календарь",
   "nav.trades": "Сделки",
+  "nav.playbooks": "Плейбуки",
   "nav.liqmap": "Карта ликвидаций",
   "nav.orderflow": "Карта ордеров",
   "nav.service": "Сервис",
@@ -1652,6 +1670,22 @@ const ru: Dict = {
   "admin.audit.action.account.sync": "Запуск синхронизации",
   "admin.audit.action.account.reset": "Сброс статуса синка",
   "admin.audit.action.content.refresh": "Обновление фида",
+
+  "playbooks.title": "Плейбуки",
+  "playbooks.subtitle": "Опишите правила для каждого своего сетапа (тег «Паттерн») и смотрите, как он реально отрабатывает.",
+  "playbooks.newPlaceholder": "Название нового плейбука (например «Пробой с ретестом»)",
+  "playbooks.add": "Добавить",
+  "playbooks.limitNote": "Использовано {n} / {max} плейбуков.",
+  "playbooks.delete": "Удалить",
+  "playbooks.confirmDelete": "Удалить плейбук «{name}»? Текст правил будет потерян (у сделок тег паттерна останется).",
+  "playbooks.trades": "Сделок",
+  "playbooks.winRate": "Win rate",
+  "playbooks.netPnl": "Net P&L",
+  "playbooks.noTrades": "Пока нет сделок с этим паттерном.",
+  "playbooks.rulesPlaceholder": "Критерии входа, критерии выхода, правила риска…",
+  "playbooks.save": "Сохранить",
+  "playbooks.empty": "Плейбуков пока нет — добавьте выше.",
+  "playbooks.error": "Не удалось сохранить плейбук.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };
