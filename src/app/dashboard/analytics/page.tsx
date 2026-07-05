@@ -210,8 +210,8 @@ export default function AnalyticsPage() {
             <Histogram data={holdBins} height={220} />
           </div>
 
-          <ExitEfficiencyCard trades={trades} />
-          <MonteCarloCard netPnls={trades.map((tr) => tr.netPnl)} capital={capital} />
+          <ExitEfficiencyCard trades={trades} accounts={data?.accounts ?? []} />
+          <MonteCarloCard trades={trades} capital={capital} accounts={data?.accounts ?? []} />
         </div>
       )}
     </div>
