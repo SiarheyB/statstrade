@@ -1,71 +1,11 @@
 import ccxt, { type Exchange } from "ccxt";
 
-// ccxt id бирж, поддержанных для синхронизации аккаунтов. Все создаются через
-// общий createExchange (ccxt[id]); отличия — passphrase, demo и особенности
-// выборки сделок (см. sync.ts REQUIRES_SYMBOL). Добавление биржи = запись здесь.
-export type ExchangeId =
-  | "binance"
-  | "bybit"
-  | "okx"
-  | "kraken"
-  | "kucoin"
-  | "bitget"
-  | "gate"
-  | "mexc"
-  | "htx";
-
-export type ExchangeMeta = {
-  id: ExchangeId;
-  name: string;
-  needsPassphrase: boolean;
-  supportsDemo: boolean; // есть ли у нас поддержка demo/testnet-режима
-  docsUrl: string;
-};
-
-export const SUPPORTED_EXCHANGES: Record<ExchangeId, ExchangeMeta> = {
-  binance: {
-    id: "binance", name: "Binance", needsPassphrase: false, supportsDemo: true,
-    docsUrl: "https://www.binance.com/en/my/settings/api-management",
-  },
-  bybit: {
-    id: "bybit", name: "Bybit", needsPassphrase: false, supportsDemo: true,
-    docsUrl: "https://www.bybit.com/app/user/api-management",
-  },
-  okx: {
-    id: "okx", name: "OKX", needsPassphrase: true, supportsDemo: true,
-    docsUrl: "https://www.okx.com/account/my-api",
-  },
-  kraken: {
-    id: "kraken", name: "Kraken", needsPassphrase: false, supportsDemo: false,
-    docsUrl: "https://www.kraken.com/u/security/api",
-  },
-  kucoin: {
-    id: "kucoin", name: "KuCoin", needsPassphrase: true, supportsDemo: false,
-    docsUrl: "https://www.kucoin.com/account/api",
-  },
-  bitget: {
-    id: "bitget", name: "Bitget", needsPassphrase: true, supportsDemo: false,
-    docsUrl: "https://www.bitget.com/account/newapi",
-  },
-  gate: {
-    id: "gate", name: "Gate.io", needsPassphrase: false, supportsDemo: false,
-    docsUrl: "https://www.gate.io/myaccount/apiv4keys",
-  },
-  mexc: {
-    id: "mexc", name: "MEXC", needsPassphrase: false, supportsDemo: false,
-    docsUrl: "https://www.mexc.com/user/openapi",
-  },
-  htx: {
-    id: "htx", name: "HTX (Huobi)", needsPassphrase: false, supportsDemo: false,
-    docsUrl: "https://www.htx.com/en-us/apikey/",
-  },
-};
-
-export const EXCHANGE_IDS = Object.keys(SUPPORTED_EXCHANGES) as ExchangeId[];
-
-export function isExchangeId(value: string): value is ExchangeId {
-  return Object.prototype.hasOwnProperty.call(SUPPORTED_EXCHANGES, value);
-}
+// ccxt id бирж, поддержанных для синхронизации аккаунтов — вынесены в
+// exchangeIds.ts (без импорта ccxt), чтобы клиентские компоненты могли
+// использовать ExchangeId/isExchangeId, не затягивая ccxt в браузерный бандл.
+import type { ExchangeId } from "@/lib/exchangeIds";
+export type { ExchangeId, ExchangeMeta } from "@/lib/exchangeIds";
+export { SUPPORTED_EXCHANGES, EXCHANGE_IDS, isExchangeId } from "@/lib/exchangeIds";
 
 export type ExchangeCredentials = {
   apiKey: string;
