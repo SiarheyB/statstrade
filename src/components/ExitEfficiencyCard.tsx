@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TrendingUp } from "lucide-react";
-import type { SerializedTrade } from "@/lib/types";
+import type { SerializedTrade, AccountSummary } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { Term } from "@/components/Term";
 import { fmtPct, fmtUsd, fmtSymbol } from "@/lib/format";
-import { computeExitEfficiency, type ExitEfficiencySummary } from "@/lib/analytics/exitEfficiency";
+import { computeExitEfficiency, pickRecentTrades, type ExitEfficiencySummary } from "@/lib/analytics/exitEfficiency";
+import { scopeLabel } from "@/lib/analytics/scopeLabel";
 
 type FeatureValue = { enabled: boolean; maxTrades: number; concurrency: number };
 
@@ -14,11 +15,16 @@ type FeatureValue = { enabled: boolean; maxTrades: number; concurrency: number }
 // OHLC per trade from the exchange, which is too expensive to run silently
 // every time someone opens Analytics. Hidden entirely if the admin disabled
 // the feature in /admin/features.
-export function ExitEfficiencyCard({ trades }: { trades: SerializedTrade[] }) {
+export function ExitEfficiencyCard({ trades, accounts }: { trades: SerializedTrade[]; accounts: AccountSummary[] }) {
   const { t } = useI18n();
   const [feature, setFeature] = useState<FeatureValue | null>(null);
   const [summary, setSummary] = useState<ExitEfficiencySummary | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const scope = useMemo(() => {
+    if (!feature) return "";
+    return scopeLabel(pickRecentTrades(trades, feature.maxTrades), accounts);
+  }, [trades, accounts, feature]);
 
   useEffect(() => {
     let alive = true;
@@ -64,6 +70,11 @@ export function ExitEfficiencyCard({ trades }: { trades: SerializedTrade[] }) {
       <p className="text-xs text-faint mt-1">
         {t("an.exitEfficiencyIntro", { max: feature.maxTrades })}
       </p>
+      {scope && (
+        <p className="text-xs text-faint mt-1">
+          <Term desc={t("an.scopeHint")}>{t("an.scopeLabel")}</Term>: {scope}
+        </p>
+      )}
 
       {summary && (
         <div className="mt-4">

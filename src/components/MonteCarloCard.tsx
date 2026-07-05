@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Dices } from "lucide-react";
+import type { SerializedTrade, AccountSummary } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { Term } from "@/components/Term";
 import { fmtPct } from "@/lib/format";
 import { runMonteCarlo, type MonteCarloResult } from "@/lib/analytics/monteCarlo";
+import { scopeLabel } from "@/lib/analytics/scopeLabel";
 
 type FeatureValue = {
   enabled: boolean;
@@ -17,7 +19,15 @@ type FeatureValue = {
 // On-demand (button), same reasoning as ExitEfficiencyCard: a big
 // simulations × projectedTrades product is real CPU work, don't run it
 // silently on every page load. Hidden entirely if disabled in /admin/features.
-export function MonteCarloCard({ netPnls, capital }: { netPnls: number[]; capital: number }) {
+export function MonteCarloCard({
+  trades,
+  capital,
+  accounts,
+}: {
+  trades: SerializedTrade[];
+  capital: number;
+  accounts: AccountSummary[];
+}) {
   const { t } = useI18n();
   const [feature, setFeature] = useState<FeatureValue | null>(null);
   const [result, setResult] = useState<MonteCarloResult | null>(null);
@@ -36,14 +46,16 @@ export function MonteCarloCard({ netPnls, capital }: { netPnls: number[]; capita
     };
   }, []);
 
-  if (!feature || !feature.enabled || netPnls.length < 5 || capital <= 0) return null;
+  const scope = useMemo(() => scopeLabel(trades, accounts), [trades, accounts]);
+
+  if (!feature || !feature.enabled || trades.length < 5 || capital <= 0) return null;
 
   function run() {
     setBusy(true);
     setResult(null);
     // Дать React отрисовать "busy" до тяжёлого синхронного расчёта.
     setTimeout(() => {
-      const returnsPct = netPnls.map((p) => p / capital);
+      const returnsPct = trades.map((tr) => tr.netPnl / capital);
       setResult(runMonteCarlo(returnsPct, feature!));
       setBusy(false);
     }, 30);
@@ -68,6 +80,11 @@ export function MonteCarloCard({ netPnls, capital }: { netPnls: number[]; capita
       <p className="text-xs text-faint mt-1">
         {t("an.monteCarloIntro", { sims: feature.simulations, steps: feature.projectedTrades })}
       </p>
+      {scope && (
+        <p className="text-xs text-faint mt-1">
+          <Term desc={t("an.scopeHintAll")}>{t("an.scopeLabel")}</Term>: {scope}
+        </p>
+      )}
 
       {result && (
         <div className="mt-4">

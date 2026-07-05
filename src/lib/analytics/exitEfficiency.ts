@@ -50,14 +50,20 @@ async function runPool<T>(items: T[], concurrency: number, worker: (item: T) => 
   await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, next));
 }
 
+// Most recent trades first — that's what a trader cares about improving
+// next. Exported so the UI can show which trades/exchanges are actually in
+// scope *before* running the (expensive) analysis, not just after.
+export function pickRecentTrades(allTrades: SerializedTrade[], maxTrades: number): SerializedTrade[] {
+  return [...allTrades]
+    .sort((a, b) => new Date(b.exitTime).getTime() - new Date(a.exitTime).getTime())
+    .slice(0, Math.max(1, maxTrades));
+}
+
 export async function computeExitEfficiency(
   allTrades: SerializedTrade[],
   opts: { maxTrades: number; concurrency: number },
 ): Promise<ExitEfficiencySummary> {
-  // Most recent trades first — that's what a trader cares about improving next.
-  const trades = [...allTrades]
-    .sort((a, b) => new Date(b.exitTime).getTime() - new Date(a.exitTime).getTime())
-    .slice(0, Math.max(1, opts.maxTrades));
+  const trades = pickRecentTrades(allTrades, opts.maxTrades);
 
   const perTrade: { trade: SerializedTrade; mfePct: number; maePct: number; capturedPct: number; leftUsd: number }[] = [];
   let skipped = 0;
