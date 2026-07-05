@@ -80,9 +80,38 @@ function baseAsset(symbol: string): string {
   return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
 }
 
+// «Круглый» шаг цены (1-2-5 × 10^n) под примерно nLines делений видимого
+// диапазона. Сетка привязывается к этим АБСОЛЮТНЫМ уровням цены, а не к долям
+// текущего окна — иначе при пане/зуме линии остаются на тех же 6 фиксированных
+// экранных позициях и просто переподписываются, а должны реально «ехать»
+// вместе со свечами.
+function niceStep(raw: number): number {
+  if (!Number.isFinite(raw) || raw <= 0) return 1;
+  const exp = Math.floor(Math.log10(raw));
+  const base = Math.pow(10, exp);
+  const frac = raw / base;
+  const niceFrac = frac < 1.5 ? 1 : frac < 3 ? 2 : frac < 7 ? 5 : 10;
+  return niceFrac * base;
+}
+
+// «Круглые» шаги времени (мс) для сетки/подписей оси X — фиксированный набор
+// человекопонятных интервалов, ближайший даёт ~nLines делений видимого окна.
+const TIME_STEPS_MS = [
+  1000, 5000, 15000, 30000, // секунды
+  60000, 5 * 60000, 15 * 60000, 30 * 60000, // минуты
+  3600000, 2 * 3600000, 4 * 3600000, 6 * 3600000, 12 * 3600000, // часы
+  86400000, 2 * 86400000, 7 * 86400000, 30 * 86400000, // дни/недели/месяц
+];
+function niceTimeStep(xspan: number, maxLines = 8): number {
+  for (const s of TIME_STEPS_MS) if (xspan / s <= maxLines) return s;
+  return TIME_STEPS_MS[TIME_STEPS_MS.length - 1];
+}
+
 // Heatmap лимитных ордеров в стиле ClusterBtc/Bookmap: тёмный фон, «стены»
-// рисуются как светлые горизонтальные полосы, яркость = объём лимиток на уровне.
-// minT — порог отображения (скрыть мелочь), gamma — кривая яркости.
+// рисуются как серые блочные плитки (без полутонов и без синеватого оттенка,
+// как в ClusterBtc), яркость = объём лимиток на уровне. minT — порог отображения
+// (скрыть мелочь), gamma — кривая яркости.
+const WALL_LEVELS = 8; // квантование яркости на N ступеней — чёткие блоки вместо гладкого градиента
 function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasElement {
   const cv = document.createElement("canvas");
   cv.width = hm.cols;
@@ -99,11 +128,14 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
         img.data[idx + 3] = 0;
         continue;
       }
-      const t = Math.pow(lin, gamma);
-      const g = 180 + Math.round(60 * t);
+      let t = Math.pow(lin, gamma);
+      // Квантование в дискретные ступени яркости — плитки с чёткими краями
+      // между уровнями, как блоки в ClusterBtc, вместо гладкого градиента.
+      t = Math.round(t * WALL_LEVELS) / WALL_LEVELS;
+      const g = 170 + Math.round(75 * t); // чистый серый, без синеватого оттенка
       img.data[idx] = g;
       img.data[idx + 1] = g;
-      img.data[idx + 2] = Math.min(255, g + 12);
+      img.data[idx + 2] = g;
       img.data[idx + 3] = Math.round(235 * t);
     }
   }
@@ -401,13 +433,18 @@ export default function OrderflowPage() {
       ctx.stroke();
     }
 
-    // Ценовая сетка + подписи (справа).
+    // Ценовая сетка + подписи (справа). Линии привязаны к «круглым» абсолютным
+    // уровням цены (шаг из niceStep) — при пане/зуме позиция каждой линии
+    // пересчитывается через sy() и реально едет вместе со свечами, а не остаётся
+    // на фиксированных 6 экранных позициях.
     ctx.font = "10px ui-sans-serif, system-ui";
     ctx.textAlign = "left";
-    for (let i = 0; i <= 6; i++) {
-      const price = yMin + (i / 6) * yspan;
-      const y = plotH - (i / 6) * plotH;
-      ctx.strokeStyle = "rgba(255,255,255,0.05)";
+    const priceStep = niceStep(yspan / 6);
+    const priceStart = Math.ceil(yMin / priceStep) * priceStep;
+    for (let price = priceStart; price <= yMax; price += priceStep) {
+      const y = sy(price);
+      if (y < 0 || y > plotH) continue;
+      ctx.strokeStyle = "rgba(255,255,255,0.08)";
       ctx.beginPath();
       ctx.moveTo(plotX, y);
       ctx.lineTo(plotX + plotW, y);
@@ -416,12 +453,21 @@ export default function OrderflowPage() {
       ctx.fillText(fmtP(price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, y + 3)));
     }
 
-    // Подписи времени (снизу).
+    // Вертикальные линии сетки + подписи времени — та же логика: привязаны к
+    // круглым отметкам времени (шаг из niceTimeStep), а не к долям окна.
+    const timeStep = niceTimeStep(xspan);
+    const timeStart = Math.ceil(t0 / timeStep) * timeStep;
     ctx.textAlign = "center";
-    ctx.fillStyle = "#6b7384";
-    for (let i = 0; i <= 6; i++) {
-      const ms = t0 + (i / 6) * xspan;
-      ctx.fillText(fmtTime(ms), sx(ms), H - 6);
+    for (let ms = timeStart; ms <= t1; ms += timeStep) {
+      const x = sx(ms);
+      if (x < plotX || x > plotX + plotW) continue;
+      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, plotH);
+      ctx.stroke();
+      ctx.fillStyle = "#6b7384";
+      ctx.fillText(fmtTime(ms), x, H - 6);
     }
     ctx.textAlign = "left";
 
@@ -510,7 +556,7 @@ export default function OrderflowPage() {
         const x = sx(k.t + stepMs / 2);
         if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
         const up = k.c >= k.o;
-        ctx.strokeStyle = up ? "#13af74" : "#ce323b"; // на 1 тон темнее
+        ctx.strokeStyle = up ? "#13af74" : "#ce323b";
         ctx.fillStyle = up ? "#13af74" : "#ce323b";
         ctx.beginPath();
         ctx.moveTo(x, sy(k.h));
