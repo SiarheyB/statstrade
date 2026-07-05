@@ -9,6 +9,7 @@ import { TradeChart } from "@/components/charts.lazy";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol, canonSymbol } from "@/lib/format";
 import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
+import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSync } from "@/components/SyncProvider";
 
@@ -444,12 +445,15 @@ export default function TradesPage() {
             </table>
           </div>
 
-          <div className="flex items-center justify-between px-3 py-2.5 text-sm border-t border-border">
-            <span className="text-faint">{t("trades.page", { p: page + 1, total: totalPages })}</span>
-            <div className="flex gap-2">
-              <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0} className="px-3 py-1 rounded-lg input-base disabled:opacity-40">{t("common.back")}</button>
-              <button onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} className="px-3 py-1 rounded-lg input-base disabled:opacity-40">{t("common.next")}</button>
-            </div>
+          <div className="flex items-center justify-end px-3 py-2.5 text-sm border-t border-border">
+            <Pagination
+              page={page + 1}
+              totalPages={totalPages}
+              onChange={(p) => setPage(p - 1)}
+              prevLabel={t("common.back")}
+              nextLabel={t("common.next")}
+              pageAriaLabel={t("trades.page", { p: page + 1, total: totalPages })}
+            />
           </div>
         </div>
       )}

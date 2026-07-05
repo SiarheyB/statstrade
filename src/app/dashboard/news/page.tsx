@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import clsx from "clsx";
 import { Newspaper, RefreshCw, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtDate } from "@/lib/format";
+import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
 
 type Item = {
@@ -154,29 +155,16 @@ export default function NewsPage() {
             ))}
           </div>
 
-          {pageCount > 1 && (
-            <div className="flex items-center justify-center gap-3 mt-6 text-sm">
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg input-base hover:border-border-strong disabled:opacity-40"
-              >
-                <ChevronLeft size={15} />
-                {t("news.prev")}
-              </button>
-              <span className="text-muted tabular-nums">
-                {safePage} / {pageCount}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
-                disabled={safePage >= pageCount}
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg input-base hover:border-border-strong disabled:opacity-40"
-              >
-                {t("news.next")}
-                <ChevronRight size={15} />
-              </button>
-            </div>
-          )}
+          <div className="flex items-center justify-center mt-6 text-sm">
+            <Pagination
+              page={safePage}
+              totalPages={pageCount}
+              onChange={setPage}
+              prevLabel={<><ChevronLeft size={15} />{t("news.prev")}</>}
+              nextLabel={<>{t("news.next")}<ChevronRight size={15} /></>}
+              pageAriaLabel={t("news.page", { p: safePage, total: pageCount })}
+            />
+          </div>
         </>
       )}
     </div>

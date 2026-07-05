@@ -79,6 +79,7 @@ const en: Dict = {
   "news.empty": "No news yet — try refreshing.",
   "news.prev": "Back",
   "news.next": "Next",
+  "news.page": "Page {p} of {total}",
 
   // economic calendar
   "econcal.title": "Economic calendar",
@@ -882,6 +883,7 @@ const ru: Dict = {
   "news.empty": "Пока нет новостей — попробуйте обновить.",
   "news.prev": "Назад",
   "news.next": "Вперёд",
+  "news.page": "Стр. {p} из {total}",
 
   // economic calendar
   "econcal.title": "Экономический календарь",
