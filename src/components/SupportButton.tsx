@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { LifeBuoy, X, Send, Plus, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -163,10 +164,13 @@ export default function SupportButton({ onOpen }: { onOpen?: () => void }) {
         {t("nav.support")}
       </button>
 
-      {open && (
+      {open && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/50" onClick={close} />
-          <div className="relative w-full max-w-md card p-0 flex flex-col" style={{ maxHeight: "80vh" }}>
+          <div className="absolute inset-0 bg-black/70" onClick={close} />
+          <div
+            className="relative w-full max-w-md p-0 flex flex-col rounded-[0.85rem] border border-border-strong bg-surface shadow-2xl"
+            style={{ maxHeight: "80vh" }}
+          >
             <div className="flex items-center justify-between px-5 py-4 border-b border-border shrink-0">
               <h2 className="text-lg font-semibold flex items-center gap-2 min-w-0">
                 {view !== "list" ? (
@@ -310,7 +314,8 @@ export default function SupportButton({ onOpen }: { onOpen?: () => void }) {
               )}
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
