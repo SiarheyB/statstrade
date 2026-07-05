@@ -69,6 +69,18 @@ function fmtTime(ms: number): string {
   const p = (z: number) => String(z).padStart(2, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
+// Дата (без времени) — подпись на оси X при переходе на новые сутки, иначе
+// одинаковое «03:00» повторяется на каждой полуночи и выглядит как случайные
+// цифры, никак не привязанные к конкретной свече.
+function fmtDate(ms: number): string {
+  const d = new Date(ms);
+  const p = (z: number) => String(z).padStart(2, "0");
+  return `${p(d.getDate())}.${p(d.getMonth() + 1)}`;
+}
+function dayKey(ms: number): number {
+  const d = new Date(ms);
+  return d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+}
 // Дата + время для подсказки свечи.
 function fmtDateTime(ms: number): string {
   const d = new Date(ms);
@@ -458,6 +470,7 @@ export default function OrderflowPage() {
     const timeStep = niceTimeStep(xspan);
     const timeStart = Math.ceil(t0 / timeStep) * timeStep;
     ctx.textAlign = "center";
+    let lastDay: number | null = null;
     for (let ms = timeStart; ms <= t1; ms += timeStep) {
       const x = sx(ms);
       if (x < plotX || x > plotX + plotW) continue;
@@ -466,8 +479,15 @@ export default function OrderflowPage() {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, plotH);
       ctx.stroke();
-      ctx.fillStyle = "#6b7384";
-      ctx.fillText(fmtTime(ms), x, H - 6);
+      // Первая метка новых суток показывает дату (реже время само по себе
+      // превращается в бессмысленно повторяющееся «03:00» на каждой полуночи).
+      const day = dayKey(ms);
+      const isDayStep = timeStep >= 86400000;
+      const isNewDay = day !== lastDay;
+      lastDay = day;
+      const label = isDayStep ? fmtDate(ms) : isNewDay ? `${fmtDate(ms)} ${fmtTime(ms)}` : fmtTime(ms);
+      ctx.fillStyle = isDayStep || isNewDay ? "#9aa2b3" : "#6b7384";
+      ctx.fillText(label, x, H - 6);
     }
     ctx.textAlign = "left";
 
@@ -627,44 +647,58 @@ export default function OrderflowPage() {
       ctx.fillStyle = "#08080d";
       ctx.fillText(fmtP(priceH), plotX + plotW + 5, hov.my + 3);
 
-      // Наведение на «стену» лимитных ордеров → подсказка про лимитный ордер и
-      // объём монет на уровне. Иначе (пустое место / свеча) — только дата+время.
+      // Время наведённой свечи показываем на нижней оси (как цена справа) —
+      // не в отдельной всплывающей подсказке, чтобы не закрывать свечи/стены.
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
+      const timeLabel = fmtDateTime(cndl ? cndl.t : ms);
+      ctx.font = "11px ui-sans-serif, system-ui";
+      ctx.textAlign = "center";
+      const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
+      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, hov.mx));
+      ctx.fillStyle = "#e6b800";
+      ctx.fillRect(timeBoxX - timeBoxW / 2, plotH, timeBoxW, PADB - 1);
+      ctx.fillStyle = "#08080d";
+      ctx.fillText(timeLabel, timeBoxX, H - 6);
+      ctx.textAlign = "left";
+
+      // Наведение на «стену» лимитных ордеров → подсказка про лимитный ордер и
+      // объём монет на уровне. Без стены отдельную подсказку не рисуем — время
+      // уже подписано на оси, дублировать его во всплывающем окне незачем.
       const base = baseAsset(data.symbol);
       // Стену показываем только если она реально отрисована — т.е. выше порога
       // «Мин. размер» (minT). Иначе на «пустом» месте всплывала ложная подсказка.
       const hasWall = showLiq && insideHeatmap && hm.maxVal > 0 && vol / hm.maxVal >= minT;
-      const lines = hasWall
-        ? [
-            t("of.tipLimitOrder"),
-            `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
-          ]
-        : [fmtDateTime(cndl ? cndl.t : ms)];
-      // Крупный читаемый шрифт тултипа (по умолчанию canvas брал остаточные 10px,
-      // на больших мониторах это было слишком мелко). Размер бокса считаем по
-      // реальной ширине текста, чтобы строки не обрезались.
-      const tipPx = 14;
-      const lineH = 20;
-      const padX = 12;
-      const padY = 10;
-      ctx.font = `${tipPx}px ui-sans-serif, system-ui`;
-      let textW = 0;
-      for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
-      const boxW = Math.ceil(textW) + padX * 2;
-      const boxH = padY * 2 + lines.length * lineH;
-      let bx = hov.mx + 16;
-      let by = hov.my + 16;
-      if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 16;
-      if (by + boxH > plotH) by = hov.my - boxH - 16;
-      ctx.fillStyle = "rgba(16,18,26,0.96)";
-      ctx.strokeStyle = "rgba(255,255,255,0.18)";
-      ctx.fillRect(bx, by, boxW, boxH);
-      ctx.strokeRect(bx, by, boxW, boxH);
-      ctx.textBaseline = "middle";
-      ctx.fillStyle = "#e6eaf2";
-      lines.forEach((ln, i) => ctx.fillText(ln, bx + padX, by + padY + lineH / 2 + i * lineH));
-      ctx.textBaseline = "alphabetic";
+      if (hasWall) {
+        const lines = [
+          t("of.tipLimitOrder"),
+          `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
+        ];
+        // Крупный читаемый шрифт тултипа (по умолчанию canvas брал остаточные 10px,
+        // на больших мониторах это было слишком мелко). Размер бокса считаем по
+        // реальной ширине текста, чтобы строки не обрезались.
+        const tipPx = 14;
+        const lineH = 20;
+        const padX = 12;
+        const padY = 10;
+        ctx.font = `${tipPx}px ui-sans-serif, system-ui`;
+        let textW = 0;
+        for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
+        const boxW = Math.ceil(textW) + padX * 2;
+        const boxH = padY * 2 + lines.length * lineH;
+        let bx = hov.mx + 16;
+        let by = hov.my + 16;
+        if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 16;
+        if (by + boxH > plotH) by = hov.my - boxH - 16;
+        ctx.fillStyle = "rgba(16,18,26,0.96)";
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
+        ctx.fillRect(bx, by, boxW, boxH);
+        ctx.strokeRect(bx, by, boxW, boxH);
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#e6eaf2";
+        lines.forEach((ln, i) => ctx.fillText(ln, bx + padX, by + padY + lineH / 2 + i * lineH));
+        ctx.textBaseline = "alphabetic";
+      }
     }
   }, [data, minT, gamma, clusters, showLiq, t, range]);
 
