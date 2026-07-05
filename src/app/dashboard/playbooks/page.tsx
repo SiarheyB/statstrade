@@ -144,7 +144,7 @@ export default function PlaybooksPage() {
               {s ? (
                 <div className="grid grid-cols-3 gap-3 mb-3 text-xs">
                   <Stat label={t("playbooks.trades")} value={String(s.trades)} />
-                  <Stat label={t("playbooks.winRate")} value={fmtPct(s.winRate * 100, 0)} />
+                  <Stat label={t("playbooks.winRate")} value={fmtPct(s.winRate, 0)} />
                   <Stat label={t("playbooks.netPnl")} value={fmtUsd(s.netPnl, { sign: true })} tone={s.netPnl >= 0 ? "profit" : "loss"} />
                 </div>
               ) : (
