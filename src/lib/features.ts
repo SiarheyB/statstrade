@@ -36,6 +36,15 @@ export const FEATURE_DEFAULTS = {
     label: "Playbooks",
     maxPerUser: 20,
   },
+  // "Mentor Mode" — read-only public capability links (/share/[token]) into a
+  // user's aggregate stats, for sharing with a mentor/coach without a login.
+  // Master on/off matters here more than for the others: this is the one
+  // feature that adds an UNAUTHENTICATED public route reading from the DB, so
+  // an admin may want a hard kill switch regardless of individual links.
+  mentorMode: {
+    label: "Mentor Mode (share links)",
+    maxLinksPerUser: 5,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

@@ -851,6 +851,20 @@ const en: Dict = {
   "playbooks.save": "Save",
   "playbooks.empty": "No playbooks yet — add one above.",
   "playbooks.error": "Couldn't save the playbook.",
+
+  "mentor.title": "Mentor Mode",
+  "mentor.hint": "Share a read-only link to your aggregate performance with a coach or accountability partner — no login required, no access to your account.",
+  "mentor.labelPlaceholder": "Label (e.g. \"For my mentor\")",
+  "mentor.create": "Create link",
+  "mentor.limitNote": "{n} / {max} active links.",
+  "mentor.unlabeled": "Untitled link",
+  "mentor.lastViewed": "Last viewed {date}",
+  "mentor.neverViewed": "Never viewed yet",
+  "mentor.copy": "Copy link",
+  "mentor.revoke": "Revoke",
+  "mentor.confirmRevoke": "Revoke this link? Anyone with it will lose access immediately.",
+  "mentor.empty": "No share links yet.",
+  "mentor.error": "Couldn't create the link.",
 };
 
 const ru: Dict = {
@@ -1686,6 +1700,20 @@ const ru: Dict = {
   "playbooks.save": "Сохранить",
   "playbooks.empty": "Плейбуков пока нет — добавьте выше.",
   "playbooks.error": "Не удалось сохранить плейбук.",
+
+  "mentor.title": "Режим ментора",
+  "mentor.hint": "Поделитесь ссылкой на агрегированную статистику (только чтение) с наставником или партнёром по отчётности — без логина, без доступа к аккаунту.",
+  "mentor.labelPlaceholder": "Название (например «Для наставника»)",
+  "mentor.create": "Создать ссылку",
+  "mentor.limitNote": "Активных ссылок: {n} / {max}.",
+  "mentor.unlabeled": "Без названия",
+  "mentor.lastViewed": "Последний просмотр {date}",
+  "mentor.neverViewed": "Ещё не открывали",
+  "mentor.copy": "Скопировать ссылку",
+  "mentor.revoke": "Отозвать",
+  "mentor.confirmRevoke": "Отозвать эту ссылку? Все, у кого она есть, сразу потеряют доступ.",
+  "mentor.empty": "Пока нет ссылок для шаринга.",
+  "mentor.error": "Не удалось создать ссылку.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

@@ -38,6 +38,7 @@ model User {
   accounts     ExchangeAccount[]
   annotations  TradeAnnotation[]
   playbooks    Playbook[]
+  shareLinks   ShareLink[]
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -506,5 +507,22 @@ model Playbook {
   updatedAt DateTime @updatedAt
 
   @@unique([userId, name])
+  @@index([userId])
+}
+
+// A capability link ("Mentor Mode"): a read-only public snapshot of a user's
+// aggregate stats, for sharing with a coach/mentor/accountability partner
+// without giving them a login. `token` is the only credential — high-entropy,
+// looked up directly (never enumerated), no separate user id in the URL.
+model ShareLink {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token     String    @unique
+  label     String? // e.g. "For my mentor"
+  createdAt DateTime  @default(now())
+  lastViewedAt DateTime?
+  revokedAt DateTime?
+
   @@index([userId])
 }
