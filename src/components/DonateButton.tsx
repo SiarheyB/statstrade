@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import Image from "next/image";
 import { HeartHandshake, X, Copy, Check } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
@@ -49,10 +50,10 @@ export default function DonateButton({ onOpen }: { onOpen?: () => void }) {
         {t("nav.donate")}
       </button>
 
-      {open && (
+      {open && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center px-4" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-black/50" onClick={() => setOpen(false)} />
-          <div className="relative w-full max-w-md card p-5 max-h-[85vh] overflow-y-auto">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setOpen(false)} />
+          <div className="relative w-full max-w-md rounded-[0.85rem] border border-border-strong bg-surface shadow-2xl p-5 max-h-[85vh] overflow-y-auto">
             <button
               onClick={() => setOpen(false)}
               className="absolute top-4 right-4 text-faint hover:text-fg"
@@ -103,7 +104,8 @@ export default function DonateButton({ onOpen }: { onOpen?: () => void }) {
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
