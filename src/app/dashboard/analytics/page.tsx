@@ -6,6 +6,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { EquityChart, DrawdownChart, Histogram } from "@/components/charts.lazy";
 import { Term } from "@/components/Term";
 import { ExitEfficiencyCard } from "@/components/ExitEfficiencyCard";
+import { MonteCarloCard } from "@/components/MonteCarloCard";
 import { fmtRatio } from "@/lib/format";
 
 type Bin = { label: string; count: number; tone?: "profit" | "loss" | "neutral" };
@@ -210,6 +211,7 @@ export default function AnalyticsPage() {
           </div>
 
           <ExitEfficiencyCard trades={trades} />
+          <MonteCarloCard netPnls={trades.map((tr) => tr.netPnl)} capital={capital} />
         </div>
       )}
     </div>

@@ -16,6 +16,19 @@ export const FEATURE_DEFAULTS = {
     // Сколько параллельных запросов к публичному API биржи одновременно.
     concurrency: 3,
   },
+  // Bootstrap Monte Carlo simulation (Risk of Ruin) from the user's own trade
+  // history — 100% client-side compute, no external API calls, but a big
+  // simulations × projectedTrades product can noticeably block the tab for a
+  // moment, hence both being admin-tunable.
+  monteCarlo: {
+    label: "Monte Carlo / Risk of Ruin",
+    // Сколько случайных путей симулировать.
+    simulations: 1000,
+    // На сколько сделок вперёд прогонять каждый путь.
+    projectedTrades: 100,
+    // Просадка от пика (%), при которой путь считается «разорившимся».
+    ruinDrawdownPct: 50,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {
