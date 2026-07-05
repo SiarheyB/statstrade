@@ -25,10 +25,12 @@ export type OfCandle = { t: number; o: number; h: number; l: number; c: number }
 
 // Интервал свечей = выбранный таймфрейм (Binance klines interval).
 const CANDLE_INTERVAL: Record<string, string> = {
+  "5m": "5m",
   "15m": "15m",
   "1h": "1h",
   "4h": "4h",
-  "24h": "1d",
+  "12h": "12h",
+  "1d": "1d",
   "1w": "1w",
 };
 
@@ -128,10 +130,12 @@ export type Footprint = { interval: number; maxVol: number; candles: FootprintCa
 
 // Длительность свечи (мс) = выбранный таймфрейм — совпадает с CANDLE_INTERVAL.
 const CANDLE_MS: Record<string, number> = {
+  "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "1h": 60 * 60_000,
   "4h": 4 * 60 * 60_000,
-  "24h": 24 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
   "1w": 7 * 24 * 60 * 60_000,
 };
 

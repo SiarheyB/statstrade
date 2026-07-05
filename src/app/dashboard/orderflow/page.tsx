@@ -37,10 +37,10 @@ type Resp = {
   bigTrades: BigTrade[];
 };
 
-const RANGES = ["15m", "1h", "4h", "24h", "1w"] as const;
+const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 // Сколько свечей показываем ПО УМОЛЧАНИЮ (недавние). Данных грузится больше —
 // остальное открывается прокруткой влево (история, как в ClusterBtc).
-const VISIBLE_CANDLES: Record<string, number> = { "15m": 120, "1h": 110, "4h": 100, "24h": 90, "1w": 60 };
+const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
@@ -147,7 +147,7 @@ export default function OrderflowPage() {
   const { t } = useI18n();
   // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
   // после монтирования (иначе ломается гидрация).
-  const [range, setRange] = useState<string>("24h");
+  const [range, setRange] = useState<string>("1d");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [exchange, setExchange] = useState("binance-spot");
   const [data, setData] = useState<Resp | null>(null);
