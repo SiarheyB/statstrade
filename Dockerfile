@@ -12,7 +12,7 @@ RUN apt-get update \
 # Зависимости (postinstall = prisma generate, поэтому схема нужна до npm ci).
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci
+RUN npm install
 
 # Исходники + сборка. NEXT_PUBLIC_* встраивается на этапе сборки, поэтому
 # Google Client ID (опционально) передаётся build-арг'ом из CI.

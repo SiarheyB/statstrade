@@ -5,8 +5,8 @@ FROM node:24-alpine
 WORKDIR /app
 
 # Сначала зависимости (кэш слоёв).
-COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev || npm install --omit=dev
+COPY package.json package-lock.json ./
+RUN npm install --omit=dev
 
 # Исходники collector.
 COPY *.mjs ./
