@@ -13,7 +13,7 @@ import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSync } from "@/components/SyncProvider";
 
-type SortKey = "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
+type SortKey = "entryTime" | "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
 type Ann = {
   entryPoint: string | null;
   entryType: string | null;
@@ -48,6 +48,7 @@ export default function TradesPage() {
   const [etFilter, setEtFilter] = useState("all");
   const [mtFilter, setMtFilter] = useState("all");
   const [ptFilter, setPtFilter] = useState("all");
+  const [openFilter, setOpenFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("exitTime");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -128,6 +129,27 @@ export default function TradesPage() {
   const mtOptions = data?.mistakeOptions ?? [];
   const ptOptions = data?.patternOptions ?? [];
 
+  // Unique open-date groupings for the "Открытие" filter. Groups by local calendar day
+  // in the user's timezone (fmtDate returns a long date like "07.07.2026"), so each
+  // option is a distinct trading day. Sorted newest-first to match the close filter.
+  const openDateOptions = useMemo(() => {
+    const set = new Map<string, number>();
+    for (const tr of data?.trades ?? []) {
+      const key = fmtDate(tr.entryTime); // long date, local tz
+      set.set(key, (set.get(key) ?? 0) + 1);
+    }
+    return [...set.entries()]
+      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
+      .map(([label, count]) => ({ label, count }));
+  }, [data]);
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const openCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const tr of data?.trades ?? []) m.set(fmtDate(tr.entryTime), (m.get(fmtDate(tr.entryTime)) ?? 0) + 1);
+    return m;
+  }, [data, fmtDate]);
+
   function annOf(tr: SerializedTrade): Ann {
     return (
       ann[tr.id] ?? {
@@ -193,13 +215,19 @@ export default function TradesPage() {
         const v = annOf(tr).pattern;
         return ptFilter === UNSET ? !v : v === ptFilter;
       });
+
+  if (openFilter !== "all")
+    rows = rows.filter((tr) => {
+      const v = fmtDate(tr.entryTime);
+      return openFilter === UNSET ? !v : v === openFilter;
+    });
     return [...rows].sort((a, b) => {
       const av = sortVal(a, sortKey);
       const bv = sortVal(b, sortKey);
       return sortDir === "asc" ? av - bv : bv - av;
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, ptFilter, sortKey, sortDir]);
+  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, ptFilter, openFilter, sortKey, sortDir]);
 
   const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -352,6 +380,7 @@ export default function TradesPage() {
                   <Th><Term desc={t("trades.colDesc.symbol")}>{t("trades.col.symbol")}</Term></Th>
                   <Th><Term desc={t("trades.colDesc.side")}>{t("trades.col.side")}</Term></Th>
                   <Th><Term desc={t("trades.colDesc.market")}>{t("trades.col.market")}</Term></Th>
+                  <Th sortable onClick={() => toggleSort("entryTime")} active={sortKey === "entryTime"}><Term desc={t("trades.colDesc.entryTime")}>{t("trades.col.open")}</Term></Th>
                   <Th sortable onClick={() => toggleSort("exitTime")} active={sortKey === "exitTime"}><Term desc={t("trades.colDesc.close")}>{t("trades.col.close")}</Term></Th>
                   <Th sortable onClick={() => toggleSort("durationMs")} active={sortKey === "durationMs"}><Term desc={t("trades.colDesc.duration")}>{t("trades.col.duration")}</Term></Th>
                   <Th right><Term desc={t("trades.colDesc.qty")}>{t("trades.col.qty")}</Term></Th>
@@ -403,6 +432,7 @@ export default function TradesPage() {
                           {marketShort(tr.market)}
                         </Term>
                       </td>
+                      <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.entryTime)}</td>
                       <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.exitTime)}</td>
                       <td className="px-3 py-2 text-muted">{fmtDuration(tr.durationMs)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(tr.qty, 4)}</td>
@@ -699,6 +729,7 @@ function SideBadge({ side }: { side: string }) {
 
 function sortVal(tr: SerializedTrade, key: SortKey): number {
   if (key === "exitTime") return new Date(tr.exitTime).getTime();
+  if (key === "entryTime") return new Date(tr.entryTime).getTime();
   return tr[key];
 }
 
