@@ -29,5 +29,10 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
-# В рантайме: применяем миграции к БД, затем стартуем сервер.
-CMD ["sh", "-c", "npx prisma migrate deploy && npm run start -- -p 3000 -H 0.0.0.0"]
+# Копируем и делаем исполняемым наш entrypoint-скрипт (авто-фикс миграций).
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
+# В рантайме: entrypoint проверяет/чинит застрявшие миграции,
+# затем применяет остальные и стартует сервер.
+CMD ["/app/docker-entrypoint.sh"]
