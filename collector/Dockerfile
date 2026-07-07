@@ -1,6 +1,6 @@
 # Collector-сервис (orderbook heatmap). Постоянный процесс — деплоить на
 # платформу с long-running контейнерами (Railway/Fly/Render/VPS), НЕ на Vercel.
-FROM node:22-alpine
+FROM node:24-alpine
 
 WORKDIR /app
 

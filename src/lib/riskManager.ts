@@ -62,7 +62,7 @@ export async function checkRiskLimits(
  *   netR = Σ (netPnl / rAmount)
  *   used = ceil( -netR - 1e‑9 )
  */
-async function getNetStopsCount(
+export async function getNetStopsCount(
   userId: string,
   exchangeId: string,
   period: Period

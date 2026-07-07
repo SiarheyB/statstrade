@@ -1,6 +1,6 @@
 # Production-образ Next.js приложения (TradeStats).
 # Собирается в CI (GitHub Actions) и пушится в GHCR — мини-сервер только запускает.
-FROM node:22-slim
+FROM node:24-slim
 
 WORKDIR /app
 
