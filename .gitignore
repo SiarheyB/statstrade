@@ -45,6 +45,9 @@ docs/local/
 # vercel
 .vercel
 
+# .claude/worktrees (isolated git worktree created by EnterWorktree tool)
+.claude/worktrees/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
