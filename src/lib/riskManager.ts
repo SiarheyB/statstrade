@@ -1,5 +1,4 @@
 import { prisma } from "./db";
-import { fetchCompletedStops } from "./exchanges";
 import { Cache } from "./cache";
 import { parseRiskProfile, riskPerTradeAmount, defaultRiskProfile } from "./risk";
 
@@ -25,10 +24,46 @@ export async function checkRiskLimits(
 
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { riskLimits: true },
+    select: { id: true }, // We just need to check if user exists
   });
-  const limits: Limits | undefined = user?.riskLimits?.[exchangeId];
-  if (!limits) return; // лимитов нет – пропускаем
+
+  if (!user) return;
+
+  // Get risk profile for this user and exchange (empty string = default profile)
+  const riskProfileRecord = await prisma.riskProfile.findFirst({
+    where: {
+      userId,
+      accountId: exchangeId, // "" means default profile
+    },
+    select: {
+      enabled: true,
+      maxStopsPerDay: true,
+      riskPerTrade: true,
+      lossLimits: true,
+    },
+  });
+
+  const profile = riskProfileRecord
+    ? parseRiskProfile({
+        enabled: riskProfileRecord.enabled,
+        maxStopsPerDay: riskProfileRecord.maxStopsPerDay,
+        riskPerTrade: riskProfileRecord.riskPerTrade,
+        lossLimits: riskProfileRecord.lossLimits,
+      })
+    : defaultRiskProfile();
+
+  const lossLimits = riskProfileRecord?.lossLimits
+    ? JSON.parse(riskProfileRecord.lossLimits)
+    : {};
+
+  if (!profile || !profile.enabled) return; // профиль риска не включён – пропускаем
+
+  const limits: Limits = {
+    dailyStops: lossLimits.day?.on ? (Number.isFinite(parseFloat(String(lossLimits.day.value))) ? parseFloat(String(lossLimits.day.value)) : undefined) : undefined,
+    weeklyStops: lossLimits.week?.on ? (Number.isFinite(parseFloat(String(lossLimits.week.value))) ? parseFloat(String(lossLimits.week.value)) : undefined) : undefined,
+    monthlyStops: lossLimits.month?.on ? (Number.isFinite(parseFloat(String(lossLimits.month.value))) ? parseFloat(String(lossLimits.month.value)) : undefined) : undefined,
+    yearlyStops: lossLimits.year?.on ? (Number.isFinite(parseFloat(String(lossLimits.year.value))) ? parseFloat(String(lossLimits.year.value)) : undefined) : undefined,
+  };
 
   const [
     day,
@@ -85,11 +120,20 @@ export async function getNetStopsCount(
     from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
   }
 
-  // Получаем **все** закрытые сделки за период
+  // Получаем **все** закрытые сделки за период, сначала находим аккаунт пользователя
+  const tradeAccount = await prisma.exchangeAccount.findFirst({
+    where: {
+      id: exchangeId,
+      userId,
+    },
+    select: { id: true },
+  });
+
+  if (!tradeAccount) return 0;
+
   const trades = await prisma.trade.findMany({
     where: {
-      userId,
-      exchangeId,
+      accountId: tradeAccount.id,
       exitTime: { gte: from },
     },
     select: {
@@ -98,12 +142,27 @@ export async function getNetStopsCount(
     },
   });
 
-  // Получаем профиль риска пользователя
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { riskProfile: true },
+  // Получаем профиль риска пользователя (из таблицы RiskProfile)
+  const riskProfileRecord = await prisma.riskProfile.findFirst({
+    where: {
+      userId,
+      accountId: exchangeId,
+    },
+    select: {
+      enabled: true,
+      maxStopsPerDay: true,
+      riskPerTrade: true,
+      lossLimits: true,
+    },
   });
-  const profile = user?.riskProfile ? parseRiskProfile(user.riskProfile) : defaultRiskProfile();
+  const profile = riskProfileRecord
+    ? parseRiskProfile({
+        enabled: riskProfileRecord.enabled,
+        maxStopsPerDay: riskProfileRecord.maxStopsPerDay,
+        riskPerTrade: riskProfileRecord.riskPerTrade,
+        lossLimits: riskProfileRecord.lossLimits,
+      })
+    : defaultRiskProfile();
 
   // Получаем баланс аккаунта для расчёта R‑value, если нужно процентное значение
   const account = await prisma.exchangeAccount.findUnique({
