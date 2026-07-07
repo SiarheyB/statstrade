@@ -70,7 +70,12 @@
       "Bash(docker compose *)",
       "Bash(curl *)",
       "Bash(xargs grep -l \"export function matchTerm\")",
-      "Bash(xargs grep -n \"matchTerm\")"
+      "Bash(xargs grep -n \"matchTerm\")",
+      "Bash(npm test *)",
+      "Bash(git reset *)",
+      "Bash(Microsoft-PowerShell-Windows-Version *)",
+      "Bash(Remove-Item *)",
+      "Bash(npx next *)"
     ]
   },
   "enableAllProjectMcpServers": true,
