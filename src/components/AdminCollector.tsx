@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Activity, CircleCheck, CircleX, RefreshCw, Clock, AlertTriangle } from "lucide-react";
+import { Term } from "@/components/Term";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -216,14 +217,14 @@ export default function AdminCollector() {
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
-                <th className="px-5 py-2 font-medium">{t("admin.collector.th.feed")}</th>
-                <th className="px-3 py-2 font-medium">{t("admin.collector.th.status")}</th>
-                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.levels")}</th>
-                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.resyncs")}</th>
-                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.bins")}</th>
-                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.rowsMin")}</th>
-                <th className="px-3 py-2 font-medium text-right">{t("admin.collector.th.total")}</th>
-                <th className="px-3 py-2 font-medium">{t("admin.collector.th.lastWrite")}</th>
+                <th className="px-5 py-2 font-medium"><Term desc={t("admin.collector.th.feed.desc")}>{t("admin.collector.th.feed")}</Term></th>
+                <th className="px-3 py-2 font-medium"><Term desc={t("admin.collector.th.status.desc")}>{t("admin.collector.th.status")}</Term></th>
+                <th className="px-3 py-2 font-medium text-right"><Term desc={t("admin.collector.th.levels.desc")}>{t("admin.collector.th.levels")}</Term></th>
+                <th className="px-3 py-2 font-medium text-right"><Term desc={t("admin.collector.th.resyncs.desc")}>{t("admin.collector.th.resyncs")}</Term></th>
+                <th className="px-3 py-2 font-medium text-right"><Term desc={t("admin.collector.th.bins.desc")}>{t("admin.collector.th.bins")}</Term></th>
+                <th className="px-3 py-2 font-medium text-right"><Term desc={t("admin.collector.th.rowsMin.desc")}>{t("admin.collector.th.rowsMin")}</Term></th>
+                <th className="px-3 py-2 font-medium text-right"><Term desc={t("admin.collector.th.total.desc")}>{t("admin.collector.th.total")}</Term></th>
+                <th className="px-3 py-2 font-medium"><Term desc={t("admin.collector.th.lastWrite.desc")}>{t("admin.collector.th.lastWrite")}</Term></th>
                 <th className="px-5 py-2"></th>
               </tr>
             </thead>
@@ -238,7 +239,7 @@ export default function AdminCollector() {
                     <td className="px-5 py-2.5 font-medium whitespace-nowrap">
                       {f.symbol} <span className="text-faint">· {f.exchange}</span>
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-3 py-2.5" title={cf ? (cf.synced ? t("admin.collector.th.status.desc") : t("admin.collector.th.status.desc")) : t("admin.collector.th.status.desc")}>
                       {cf ? (
                         cf.synced ? (
                           <span className="inline-flex items-center gap-1 text-profit"><CircleCheck size={14} /> {t("admin.collector.synced")}</span>

@@ -45,11 +45,36 @@
       "Bash(rm -rf /tmp/ui-ux-pro-max-skill && echo \"temp clone removed\"; echo \"installed at: ~/.claude/skills/ui-ux-pro-max\")",
       "Bash(python3 scripts/search.py \"crypto trading analytics dashboard dark mode professional fintech\" --design-system -p \"TradeStats\")",
       "Bash(git rm *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(docker exec *)",
+      "Bash(npm run *)",
+      "Bash(taskkill //PID 1144 //F)",
+      "Bash(taskkill //F //IM node.exe)",
+      "Bash(curl -s http://localhost:3001/)",
+      "Bash(curl -s \"http://localhost:3000/dashboard/trades\")",
+      "Read(//mnt/c/Users/Sergey/IdeaProjects/**)",
+      "Bash(curl -s http://localhost:3000/dashboard/trades)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/dashboard/trades)",
+      "Bash(curl -s -I http://localhost:3000/dashboard/trades)",
+      "Bash(git config *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(xargs grep -l \"synced.*=.*true\\\\|synced ?:\")",
+      "Bash(</parameter=)",
+      "Bash(git checkout *)",
+      "Bash(docker compose up *)",
+      "Bash(netstat -tlnp)",
+      "Bash(curl -s \"http://localhost:3001\")",
+      "Bash(curl -sI \"http://localhost:3001\")",
+      "Bash(curl -v \"http://localhost:3001\")",
+      "Bash(docker compose *)",
+      "Bash(curl *)",
+      "Bash(xargs grep -l \"export function matchTerm\")",
+      "Bash(xargs grep -n \"matchTerm\")"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "@21st-dev/magic"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }
