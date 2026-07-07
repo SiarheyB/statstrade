@@ -579,6 +579,41 @@ volume) — для локальной разработки достаточно 
 Reverse-proxy и TLS — через Nginx/Caddy перед контейнером. Не забудьте
 `npx prisma migrate deploy` на старте контейнера (entrypoint).
 
+### Авто-перезапуск collector (Docker)
+
+По умолчанию Docker-контейнер `collector` настроен на автоматический перезапуск при падении:
+
+```yaml
+# docker-compose.prod.yml
+collector:
+  restart: unless-stopped   # перезапускает контейнер при рестарте Docker или падении
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:8080/metrics || exit 1"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+```
+
+**Что делает healthcheck:**
+- Каждые 30 секунд проверяет доступность эндпоинта `/metrics` (требует `COLLECTOR_METRICS_TOKEN`).
+- Если 3 раза подряд не отвечает — контейнер помечается как `unhealthy` и перезапускается.
+
+**Дополнительный мониторинг (опционально):**
+Скрипт `scripts/restart-watcher.sh` наблюдает за контейнером и перезапускает его вручную при необходимости:
+
+```bash
+# На сервере:
+chmod +x scripts/restart-watcher.sh
+nohup ./scripts/restart-watcher.sh > /dev/null 2>&1 &
+```
+
+**Почему это важно:**
+- Если сеть пропала между сервером и биржей (Binance/Bybit/OKX), collector может «зависнуть».
+- Docker healthcheck + `restart: unless-stopped` гарантируют, что процесс восстановится.
+
+---
+
 ### Сервер из iPhone (iSH + Cloudflare Tunnel)
 
 Запуск приложения как **постоянного сервера прямо на iPhone** (без джейлбрейка),

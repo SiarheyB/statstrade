@@ -1,6 +1,11 @@
 # Local PostgreSQL for development (and a reference for production).
 # Dev:   docker compose up -d db
 # Prod:  use a managed Postgres or this service behind your own backups.
+#
+networks:
+  tradestats:
+    driver: bridge
+
 services:
   db:
     image: postgres:16-alpine
@@ -19,6 +24,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    networks:
+      - tradestats
 
   # Orderbook-heatmap collector. Постоянный сбор стаканов/сделок в БД.
   # Запуск (после применения миграций приложением):  docker compose up -d collector
@@ -42,6 +49,19 @@ services:
       PORT: 8080
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - tradestats
 
 volumes:
   tradestats_pg:

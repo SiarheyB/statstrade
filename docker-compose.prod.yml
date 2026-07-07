@@ -4,6 +4,11 @@
 # Запуск:   docker compose -f docker-compose.prod.yml up -d
 # Логи:     docker compose -f docker-compose.prod.yml logs -f app
 # Образы лежат в GHCR (lowercase owner): ghcr.io/siarheyb/statstrade-{app,collector}
+#
+networks:
+  tradestats:
+    driver: bridge
+
 services:
   db:
     image: postgres:16-alpine
@@ -61,6 +66,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks:
+      - tradestats
 
   app:
     image: ghcr.io/siarheyb/statstrade-app:latest
@@ -78,10 +85,10 @@ services:
     environment:
       # Внутри compose-сети БД доступна по имени сервиса `db`.
       # connection_limit/pool_timeout — больше пула Prisma и дольше ожидание
-      # соединения: карта ордеров шлёт по нескольку тяжёлых SQL-агрегаций за
+      # соединения: карта ордеров шлёт по несколько тяжёлых SQL-агрегаций за
       # запрос, дефолтных 9 соединений не хватало (Timed out fetching a connection).
       DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public&connection_limit=20&pool_timeout=20
-      # Авто-синхронизацию бирж «по времени» на сервере гоняет СИСТЕМНЫЙ крон
+      # Авто-синхронизацию бирж «по времени» на сервере гоняет СИСТЕМНЫй крон
       # хоста (см. SELF_HOSTING.md — шаг про /api/cron/sync), поэтому встроенный
       # in-process планировщик выключен: иначе синхронизации дублировались бы.
       ENABLE_SCHEDULER: "false"
@@ -95,6 +102,8 @@ services:
       - "3000"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - tradestats
 
   # Входная прослойка: туннель (Tailscale Funnel / cloudflared) указывает на
   # 127.0.0.1:3000 как и раньше — только теперь это nginx, а не app. Когда app
@@ -112,6 +121,8 @@ services:
     ports:
       # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
       - "127.0.0.1:3000:80"
+    networks:
+      - tradestats
 
   collector:
     image: ghcr.io/siarheyb/statstrade-collector:latest
@@ -139,8 +150,21 @@ services:
       # у сервиса app. Если пусто — /metrics закрыт (404), раздел работает на
       # агрегатах Postgres без live-статуса фидов.
       COLLECTOR_METRICS_TOKEN: ${COLLECTOR_METRICS_TOKEN:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/metrics || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    networks:
+      - tradestats
 
   # Авто-деплой: следит за GHCR и подменяет образы app/collector на новые.
   watchtower:
@@ -161,6 +185,8 @@ services:
       # по устаревшей 1.25 и падает в цикл рестарта ("client version is too old").
       DOCKER_API_VERSION: "1.44"
     command: ["--label-enable", "--cleanup", "--interval", "120"]
+    networks:
+      - tradestats
 
 volumes:
   tradestats_pg:
