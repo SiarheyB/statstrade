@@ -433,6 +433,7 @@ const en: Dict = {
   "trades.chart.mfe": "MFE",
   "trades.chart.mae": "MAE",
   "trades.chart.captured": "captured",
+  "trades.chart.partial": "partial",
 
   // accounts
   "acc.title": "Exchanges",
@@ -1326,6 +1327,7 @@ const ru: Dict = {
   "trades.chart.mfe": "MFE",
   "trades.chart.mae": "MAE",
   "trades.chart.captured": "захвачено",
+  "trades.chart.partial": "частичное",
 
   "acc.title": "Биржи",
   "acc.subtitle": "Подключите аккаунты по read-only API-ключам",

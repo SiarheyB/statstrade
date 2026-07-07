@@ -47,6 +47,7 @@ docs/local/
 
 # .claude/worktrees (isolated git worktree created by EnterWorktree tool)
 .claude/worktrees/
+.claude/settings.local.json
 
 # typescript
 *.tsbuildinfo

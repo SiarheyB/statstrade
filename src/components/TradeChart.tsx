@@ -20,6 +20,7 @@ const GRID = "#242b3a";
 const ENTRY = "#e7eaf0";
 const SL_COLOR = "#f0b90b";
 const BEST_COLOR = "#8b5cf6";
+const PARTIAL_CLOSE = "#f5c542"; // yellow for partial position closes
 
 // SVG layout (viewBox units; container keeps the aspect ratio).
 const W = 336;
@@ -82,6 +83,9 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
   );
   const [real, setReal] = useState(candleCache.has(trade.id));
   const [loading, setLoading] = useState(!candleCache.has(trade.id));
+  const [partialFills, setPartialFills] = useState<{
+    price: number; amount: number; time: number; realizedPnl: number | null;
+  }[]>([]);
 
   const entryT = new Date(trade.entryTime).getTime();
   const exitT = new Date(trade.exitTime).getTime();
@@ -140,6 +144,30 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
     return () => {
       active = false;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trade.id]);
+
+  // Fetch partial closes (exit fills) for this trade
+  useEffect(() => {
+    let active = true;
+    const params = new URLSearchParams({
+      accountId: trade.accountId,
+      symbol: trade.symbol,
+      market: trade.market,
+      side: trade.side,
+      from: trade.entryTime,
+      to: trade.exitTime,
+    });
+    fetch(`/api/trade-fills?${params}`)
+      .then((r) => r.json())
+      .then((j: { fills?: { price: number; amount: number; time: number; realizedPnl: number | null }[] }) => {
+        if (!active || !j.fills) return;
+        // Если 1 филл — это полное закрытие, частичных нет.
+        // Если 2+ филла — последний это полное закрытие, остальные частичные.
+        setPartialFills(j.fills.length > 1 ? j.fills.slice(0, -1) : []);
+      })
+      .catch(() => {});
+    return () => { active = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trade.id]);
 
@@ -290,7 +318,20 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
 
           {/* entry / exit markers */}
           <circle cx={timeX(entryT)} cy={y(trade.entryPrice)} r={3.5} fill={ENTRY} stroke="#0b0e13" strokeWidth={1} />
-          <circle cx={timeX(exitT)} cy={y(trade.exitPrice)} r={3.5} fill={exitColor} stroke="#0b0e13" strokeWidth={1} />
+          <circle cx={timeX(exitT)} cy={y(trade.exitPrice)} r={3.5} fill={PROFIT} stroke="#0b0e13" strokeWidth={1} />
+
+          {/* partial close markers (yellow) — each exit fill is a partial position close */}
+          {partialFills.map((pf, i) => (
+            <circle
+              key={i}
+              cx={timeX(pf.time)}
+              cy={y(pf.price)}
+              r={3.5}
+              fill={PARTIAL_CLOSE}
+              stroke="#0b0e13"
+              strokeWidth={1}
+            />
+          ))}
         </svg>
       </div>
 
@@ -299,11 +340,16 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
           <span className="inline-block h-2 w-2 rounded-full bg-fg" /> {t("trades.chart.entry")} {fmtPrice(trade.entryPrice)}
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="inline-block h-2 w-2 rounded-full" style={{ background: exitColor }} /> {t("trades.chart.exit")} {fmtPrice(trade.exitPrice)}
+          <span className="inline-block h-2 w-2 rounded-full" style={{ background: PROFIT }} /> {t("trades.chart.exit")} {fmtPrice(trade.exitPrice)}
         </span>
         {sl != null && (
           <span className="inline-flex items-center gap-1" style={{ color: SL_COLOR }}>
             SL {fmtPrice(sl)}
+          </span>
+        )}
+        {partialFills.length > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full" style={{ background: PARTIAL_CLOSE }} /> {t("trades.chart.partial")} ({partialFills.length})
           </span>
         )}
         <span>{loading ? t("trades.chart.loading") : real ? t("trades.chart.real") : t("trades.chart.schematic")}</span>

@@ -1,8 +1,8 @@
 -- DropIndex
-DROP INDEX "SupportMessage_createdAt_idx";
+DROP INDEX IF EXISTS "SupportMessage_createdAt_idx";
 
 -- DropIndex
-DROP INDEX "SupportMessage_readAt_createdAt_idx";
+DROP INDEX IF EXISTS "SupportMessage_readAt_createdAt_idx";
 
 -- AlterTable
 ALTER TABLE "ObBigTrade" ADD CONSTRAINT "ObBigTrade_pkey" PRIMARY KEY ("id", "t");
