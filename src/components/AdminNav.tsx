@@ -22,6 +22,7 @@ const LINKS = [
   { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
   { href: "/admin/system", key: "admin.nav.system", icon: Database },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },
+  { href: "/admin/backup", key: "admin.nav.backup", icon: Database },
 ];
 
 const POLL_MS = 30_000;
