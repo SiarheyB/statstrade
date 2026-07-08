@@ -1,110 +1,110 @@
-# TradingStats Database Backup Script Documentation
+# Документация по скрипту резервного копирования БД TradingStats
 
-Last updated: 2026-07-08
+Дата обновления: 2026-07-08
 
-## Overview
-The `db-backup-functions.sh` script provides comprehensive functions for database backup and restore operations for the TradingStats application. It supports multiple export strategies and import methods with deduplication, all designed to work within a Docker environment.
+## Обзор
+Скрипт `db-backup-functions.sh` содержит набор функций для резервного копирования и восстановления базы данных приложения TradingStats. Поддерживаются различные стратегии экспорта и методы импорта с дедубликацией, всё работает в среде Docker.
 
-## Key Features
-- **Multiple Export Options**:
-  - `export_full`: Complete database dump (schema + data)
-  - `export_data_only`: Data-only export for deduplication workflows
-  - `export_analytics`: Analytics tables export only
-  - `create_basic_dump`: DDL + INSERT dump for documentation purposes
+## Основные возможности
+- **Несколько вариантов экспорта**:
+  - `export_full` — полный дамп базы данных (схема + данные)
+  - `export_data_only` — экспорт только данных для последующего импорта с дедубликацией
+  - `export_analytics` — экспорт только аналитических таблиц
+  - `create_basic_dump` — дамп DDL + INSERT для документирования
 
-- **Different Import Methods**:
-  - `import_with_dedup`: Smart import with conflict resolution (ON CONFLICT DO NOTHING)
-  - `import_clean`: Full database replacement (TRUNCATE → IMPORT)
+- **Разные способы импорта**:
+  - `import_with_dedup` — умный импорт с разрешением конфликтов (ON CONFLICT DO NOTHING)
+  - `import_clean` — полная замена базы данных (TRUNCATE → IMPORT)
 
-- **Robust Error Handling**:
-  - Detailed logging to `db-backup-functions.log`
-  - English error messages to avoid rendering issues
-  - Container readiness checks before operations
+- **Надёжная обработка ошибок**:
+  - Подробное логирование в `db-backup-functions.log`
+  - Сообщения об ошибках на английском, чтобы избежать проблем с отображением (ёроглифов)
+  - Проверка готовности контейнера перед операциями
 
-- **Intelligent Resource Management**:
-  - Temporary database creation for exports
-  - Proper cleanup of temporary resources
-  - Dedicated encoding handling for consistent SQL output
+- **Разумное управление ресурсами**:
+  - Создание временной БД для экспорта данных
+  - Корректная очистка временных ресурсов
+  - Специальная обработка кодировки для стабильного SQL-вывода
 
-## Usage Instructions
+## Инструкция по использованию
 
-### Prerequisites
-1. Execute `source .env` to load environment variables
-2. Ensure PostgreSQL credentials are configured in `.env`
-3. Maintain running Docker containers (particularly the `db` service)
+### Предварительные условия
+1. Выполните `source .env` для загрузки переменных окружения
+2. Убедитесь, что учётные данные PostgreSQL заданы в `.env`
+3. Запущены Docker-контейнеры (особенно сервис `db`)
 
-### Command Details
+### Описание команд
 
-#### Export Commands
-- **`export_full [output_path]`**
-  - Archives full database (execution: `db-backup-functions.sh export_full`)
-  - Output: Timestamped SQL file in `tmp/` directory
+#### Команды экспорта
+- **`export_full [путь_вывода]`**
+  - Архивирует всю базу данных (запуск: `db-backup-functions.sh export_full`)
+  - Результат: SQL-файл с отметкой времени в каталоге `tmp/`
 
-- **`export_data_only [output_path]`**
-  - Exports only data INSERT statements for deduplication workflows
-  - Creates temporary database during export process
-  - Output: Timestamped SQL file in `tmp/` directory
+- **`export_data_only [путь_вывода]`**
+  - Экспортирует только INSERT-операторы данных для сценариев дедубликации
+  - Создаёт временную БД в процессе экспорта
+  - Результат: SQL-файл с отметкой времени в каталоге `tmp/`
 
-- **`export_analytics [output_path]`**
-  - Exports analytics tables only (`ObSnapshotRollup`, `ObRollupBucket`, etc.)
-  - Optimized for space efficiency
-  - Output: Timestamped SQL file in `tmp/` directory
+- **`export_analytics [путь_вывода]`**
+  - Экспортирует только аналитические таблицы (`ObSnapshotRollup`, `ObRollupBucket` и др.)
+  - Оптимизировано по размеру
+  - Результат: SQL-файл с отметкой времени в каталоге `tmp/`
 
-- **`create_basic_dump [output_path]`**
-  - Combines schema (DDL) and data (INSERT) for comprehensive backup
-  - Useful for migration documentation
-  - Output: Timestamped SQL file in `tmp/` directory
+- **`create_basic_dump [путь_вывода]`**
+  - Объединяет схему (DDL) и данные (INSERT) в единый дамп
+  - Удобно для документирования миграций
+  - Результат: SQL-файл с отметкой времени в каталоге `tmp/`
 
-#### Import Commands
-- **`import_with_dedup input_file.sql`**
-  - Imports data with conflict resolution
-  - Automatically cleans relevant analytics tables
-  - Executes with ON CONFLICT DO NOTHING logic
-  - Cleanup of temporary resources guaranteed
+#### Команды импорта
+- **`import_with_dedup входной_файл.sql`**
+  - Импорт данных с разрешением конфликтов
+  - Автоматически очищает соответствующие аналитические таблицы
+  - Выполняется с логикой ON CONFLICT DO NOTHING
+  - Гарантированная очистка временных ресурсов
 
-- **`import_clean input_file.sql`**
-  - Complete database replacement workflow
-  - Drops existing database and recreates from scratch
-  - Ideal for full data migration scenarios
+- **`import_clean входной_файл.sql`**
+  - Полная замена базы данных
+  - Удаляет существующую БД и создаёт заново
+  - Идеально для полных сценариев миграции данных
 
 - **`show_help`**
-  - Displays comprehensive help reference
+  - Выводит подробную справку
 
-### Key Usage Examples
+### Примеры использования
 ```bash
-# Create full backup
+# Создать полную резервную копию
 ./db-backup-functions.sh export_full
 
-# Import data with deduplication
+# Импортировать данные с дедубликацией
 ./db-backup-functions.sh import_with_dedup data_dump.sql
 
-# Perform full database migration
+# Выполнить полную миграцию базы данных
 ./db-backup-functions.sh import_clean full_dump.sql
 ```
 
-## Technical Notes
-- **Environment Management**: The script automatically parses `DATABASE_URL` to extract connection parameters
-- **Encoding Safety**: Uses `env LC_ALL=C` to ensure consistent output regardless of system locale
-- **Resource Cleanup**: All temporary databases and files are properly cleaned up
-- **Conflict Resolution**: Import operations use sophisticated deduplication logic
-- **Error Reporting**: Dual logging (to console and log file) in foreground/background formats
+## Технические примечания
+- **Управление окружением**: скрипт автоматически разбирает `DATABASE_URL` для извлечения параметров подключения
+- **Безопасность кодировки**: используется `env LC_ALL=C` для стабильного вывода независимо от локали системы
+- **Очистка ресурсов**: все временные БД и файлы корректно удаляются
+- **Разрешение конфликтов**: операции импорта используют логику дедубликации
+- **Отчёт об ошибках**: двойное логирование (в консоль и в файл)
 
-## Configuration Files
-- `.env`: Contains `DATABASE_URL` and other environment variables
-- `db-backup-functions.log`: Automatic log file of all operations
-- `tmp/`: Temporary directory for intermediate files
+## Конфигурационные файлы
+- `.env` — содержит `DATABASE_URL` и другие переменные окружения
+- `db-backup-functions.log` — автоматический журнал всех операций
+- `tmp/` — временный каталог для промежуточных файлов
 
-## Troubleshooting
-- Check `db-backup-functions.log` for detailed operation records
-- Verify database container status: `docker compose ps db`
-- Ensure DATABASE_URL is accessible to container via `docker compose exec`
-- Watch for common pitfalls:
-  - Missing `.env` file
-  - Incorrect container name in Docker configuration
-  - Insufficient permissions in temporary directories
+## Устранение неполадок
+- Проверьте `db-backup-functions.log` для подробной записи операций
+- Проверьте статус контейнера БД: `docker compose ps db`
+- Убедитесь, что `DATABASE_URL` доступен контейнеру через `docker compose exec`
+- Следите за частыми ошибками:
+  - Отсутствует файл `.env`
+  - Неверное имя контейнера в конфигурации Docker
+  - Недостаточно прав в временных каталогах
 
-## Best Practices
-- Regular backups using timestamped exports for versioning
-- Use `export_data_only` for migration scenarios requiring deduplication
-- Perform full database replacements during maintenance windows
-- Monitor log files for proactive issue detection
+## Рекомендации
+- Регулярно создавайте резервные копии с отметкой времени для версионирования
+- Используйте `export_data_only` для сценариев миграции, требующих дедубликации
+- Выполняйте полную замену БД в окнах обслуживания
+- Следите за лог-файлами для упреждающего обнаружения проблем

@@ -30,7 +30,7 @@ error() {
 # ──────────────────────────────────────────────────────────────────────
 
 parse_db_url() {
-  local url="${DATABASE_URL}"
+  local url="${DATABASE_URL:-}"
 
   # Удаляем префикс postgresql://
   url="${url#postgresql://}"
@@ -65,7 +65,13 @@ parse_db_url() {
 
 # Выполнение команд внутри контейнера БД (без TTY, потоковый вывод)
 exec_db() {
-  docker compose exec -T db "$@"
+  docker compose exec -T db env \
+    PGHOST="${DB_HOST:-localhost}" \
+    PGPORT="${DB_PORT:-5432}" \
+    PGUSER="${DB_USER:-postgres}" \
+    PGPASSWORD="${DB_PASSWORD:-}" \
+    PGDATABASE="${DB_NAME:-postgres}" \
+    "$@"
 }
 
 # Выполнение команды psql в контейнере БД
@@ -100,7 +106,7 @@ export_full() {
   # Экспорт в формате plain SQL
   exec_db pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
     --no-owner --no-privileges --no-acl \
-    --quoteIdentifiers --inserts --column-inserts \
+    --quote-all-identifiers --inserts --column-inserts \
     --format=plain > "${output_file}" || {
     error "Не удалось экспортировать базу данных"
     return 1
@@ -130,7 +136,7 @@ export_data_only() {
   echo "${tables}" | while read -r table; do
     log "Экспортирую данные таблицы: ${table}"
     exec_db pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${temp_db}" \
-      --column-inserts --inserts --quoteIdentifiers \
+      --column-inserts --inserts --quote-all-identifiers \
       --table="${table}" >> "${output_file}" || {
       error "Не удалось экспортировать данные таблицы: ${table}"
       failed_tables="${failed_tables} ${table}"
@@ -164,7 +170,7 @@ export_analytics() {
   for table in ${analytics_tables}; do
     log "Экспортирую аналитическую таблицу: ${table}"
     exec_db pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
-      --column-inserts --inserts --quoteIdentifiers \
+      --column-inserts --inserts --quote-all-identifiers \
       --table="${table}" >> "${output_file}" || {
       error "Не удалось экспортировать аналитическую таблицу: ${table}"
       failed_tables="${failed_tables} ${table}"
@@ -268,23 +274,26 @@ import_with_dedup() {
 
   log "Начинаю импорт данных с дедубликацией: ${input_file}"
 
-  # Очистка существующих аналитических таблиц
+  # Очистка существующих аналитических таблиц (только если они существуют)
   local analytics_tables="ObSnapshotRollup ObRollupBucket ObBigTrade ObTrade ObSnapshotFootprint"
   local cleanup_failed=""
 
   for table in ${analytics_tables}; do
-    if run_psql -c "TRUNCATE TABLE \"${table}\" CASCADE;" >> "${LOG_FILE}" 2>&1; then
-      log "Таблица ${table} успешно очищена"
+    # Проверяем наличие таблицы перед очисткой
+    if run_psql -c "\dt \"${table}\"" > "${LOG_FILE}" 2>&1; then
+      if run_psql -c "TRUNCATE TABLE \"${table}\" CASCADE;" >> "${LOG_FILE}" 2>&1; then
+        log "Таблица ${table} успешно очищена"
+      else
+        log "Предупреждение: не удалось очистить таблицу ${table}"
+        cleanup_failed="${cleanup_failed} ${table}"
+      fi
     else
-      log "Предупреждение: не удалось очистить таблицу ${table}"
-      cleanup_failed="${cleanup_failed} ${table}"
+      log "Таблица ${table} не существует, пропускаем очистку"
     fi
   done
 
-  if [[ -n "${cleanup_failed}" ]]; then
-    error "Не удалось очистить таблицы:${cleanup_failed}"
-    return 1
-  fi
+  # Продолжаем даже при ошибках очистки, чтобы не прерывать импорт
+  log "Продолжение импорта несмотря на ошибки очистки (${cleanup_failed})"
 
   # Обработка файла для добавления ON CONFLICT DO NOTHING
   process_inserts_for_dedup "${input_file}" "${temp_dedup_file}"
@@ -422,7 +431,7 @@ create_basic_dump() {
 
     # Экспорт данных таблицы
     exec_db pg_dump -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" \
-      --column-inserts --inserts --quoteIdentifiers \
+      --column-inserts --inserts --quote-all-identifiers \
       --table="${table}" >> "${output_file}" || {
       error "Не удалось экспортировать данные таблицы: ${table}"
       return 1
@@ -479,45 +488,41 @@ EOF
 # ──────────────────────────────────────────────────────────────────────
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-  case "${1:-}" in
-    export_full)
-      export_full "${2:-}"
-      ;;
-    export_data_only)
-      export_data_only "${2:-}"
-      ;;
-    export_analytics)
-      export_analytics "${2:-}"
-      ;;
-    import_with_dedup)
-      load_env
-      check_env
-      parse_db_url
-      check_db_connection
-      import_with_dedup "${1}"
-      ;;
-    import_clean)
-      load_env
-      check_env
-      parse_db_url
-      check_db_connection
-      import_clean "${1}"
-      ;;
-    create_basic_dump)
-      load_env
-      check_env
-      parse_db_url
-      check_db_connection
-      create_basic_dump "${2:-}"
-      ;;
-    help|"*")
-      show_help
-      ;;
-    *)
-      echo "Неизвестная команда: ${1:-}"
-      show_help
-      ;;
-  esac
-fi
+    # Загрузка переменных окружения из .env
+    if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+      set -a
+      source "${SCRIPT_DIR}/.env"
+      set +a
+    fi
+    parse_db_url
 
-EOF
+    case "${1:-}" in
+      export_full)
+        export_full "${2:-}"
+        ;;
+      export_data_only)
+        export_data_only "${2:-}"
+        ;;
+      export_analytics)
+        export_analytics "${2:-}"
+        ;;
+      import_with_dedup)
+        check_db_connection
+        import_with_dedup "${2:-}"
+        ;;
+      import_clean)
+        check_db_connection
+        import_clean "${2:-}"
+        ;;
+      create_basic_dump)
+        create_basic_dump "${2:-}"
+        ;;
+      help|"*")
+        show_help
+        ;;
+      *)
+        echo "Неизвестная команда: ${1:-}"
+        show_help
+        ;;
+    esac
+  fi
