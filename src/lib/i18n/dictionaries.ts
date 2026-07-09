@@ -694,7 +694,6 @@ const en: Dict = {
   "admin.nav.content": "Content feeds",
   "admin.nav.system": "Database health",
   "admin.nav.backup": "Backup DB",
-  "admin.nav.database": "Database",
   "admin.nav.audit": "Audit log",
   "admin.backup.title": "Database backup",
   "admin.backup.subtitle": "Export and import the TradeStats database",
@@ -1617,11 +1616,9 @@ const ru: Dict = {
   "admin.nav.donate": "Кошельки для донатов",
   "admin.nav.content": "Контент-фиды",
   "admin.nav.system": "Здоровье БД",
-  "admin.nav.db": "Здоровье БД",
   "admin.nav.backup": "Бекап БД",
   "admin.nav.database": "База Данных",
   "admin.nav.audit": "Аудит действий",
-  "admin.nav.backup": "Бекап БД",
   "admin.backup.title": "Резервные копии БД",
   "admin.backup.subtitle": "Экспорт и импорт базы данных TradingStats",
   "admin.backup.exportSection": "Экспорт",
@@ -1690,8 +1687,6 @@ const ru: Dict = {
   // admin.backup section
   "admin.backup.inProgress": "Выполняется",
   "admin.backup.success": "Успешно",
-  "admin.backup.error": "Ошибка",
-  "admin.backup.operationsTitle": "Операции",
 
   "admin.collector.title": "Карта ордеров",
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",
