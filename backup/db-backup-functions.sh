@@ -49,11 +49,26 @@ parse_db_url() {
 
 # Execute command inside the db container
 exec_in_db() {
-  docker compose -f "${COMPOSE_FILE}" exec -T db env \
-    PGUSER="${DB_USER}" \
-    PGPASSWORD="${DB_PASSWORD}" \
-    PGDATABASE="${DB_NAME}" \
-    "$@"
+  local db_host="${DB_HOST:-db}"
+  local db_port="${DB_PORT:-5432}"
+  local db_user="${DB_USER}"
+  local db_password="${DB_PASSWORD}"
+  local db_name="${DB_NAME}"
+
+  # Если мы запущены внутри контейнера app (Docker CLI отсутствует),
+  # то подключаемся напрямую к хосту postgres (обычно db:5432).
+  # На хосте Docker доступен, используем docker compose exec.
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker compose -f "${COMPOSE_FILE}" exec -T db env \
+      PGUSER="${db_user}" \
+      PGPASSWORD="${db_password}" \
+      PGDATABASE="${db_name}" \
+      "$@"
+  else
+    # Прямое подключение к хосту БД
+    PGPASSWORD="${db_password}" \
+      psql -h "${db_host}" -p "${db_port}" -U "${db_user}" -d "${db_name}" "$@"
+  fi
 }
 
 # Get list of all user tables
