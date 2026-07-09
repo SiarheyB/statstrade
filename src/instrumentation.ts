@@ -5,6 +5,10 @@ export async function register() {
   if (process.env.ENABLE_SCHEDULER === "false") return;
   const { startScheduler } = await import("./lib/scheduler");
   startScheduler();
+
+  // Start backup scheduler
+  const { startBackupScheduler } = await import("./lib/backup-scheduler");
+  startBackupScheduler();
 }
 
 // Global catch for errors NOT already handled by a route's own try/catch (the

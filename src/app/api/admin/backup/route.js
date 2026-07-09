@@ -27,6 +27,48 @@ export async function GET(request) {
   const action = searchParams.get('action');
   const operationId = searchParams.get('operationId');
 
+  // Handle file download
+  if (action === 'download') {
+    const file = searchParams.get('file');
+    if (!file) {
+      return new Response(JSON.stringify({ error: 'Missing file parameter' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    try {
+      await ensureTmpDir();
+      const filePath = join(TMP_DIR, file);
+      await fs.access(filePath);
+      const stat = await fs.stat(filePath);
+      const fileStream = (await import('fs')).createReadStream(filePath);
+      const { Readable } = await import('stream');
+      return new Response(Readable.toWeb(fileStream), {
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': `attachment; filename="${file}"`,
+          'Content-Length': stat.size.toString(),
+        },
+      });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: `Failed to download file: ${e.message}` }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
+  // Handle scheduled backup configuration read
+  if (action === 'schedule') {
+    try {
+      const schedulePath = join(PROJECT_ROOT, '.backup-schedule');
+      let schedule = null;
+      try {
+        const data = await fs.readFile(schedulePath, 'utf8');
+        schedule = JSON.parse(data);
+      } catch (e) {
+        // schedule file doesn't exist yet
+      }
+      return new Response(JSON.stringify({ schedule }), { headers: { 'Content-Type': 'application/json' } });
+    } catch (e) {
+      return new Response(JSON.stringify({ error: `Failed to read schedule: ${e.message}` }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (action === 'list') {
     try {
       await ensureTmpDir();
@@ -83,6 +125,22 @@ export async function POST(request) {
     if (!action) {
       return new Response(JSON.stringify({ error: 'Missing action' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
+
+    // Handle schedule save
+    if (action === 'schedule') {
+      const { enabled, type, time, cron } = body;
+      const schedulePath = join(PROJECT_ROOT, '.backup-schedule');
+      const schedule = {
+        enabled: Boolean(enabled),
+        type: type || 'daily',
+        time: time || '02:00',
+        cron: cron || '',
+        updatedAt: new Date().toISOString(),
+      };
+      await fs.writeFile(schedulePath, JSON.stringify(schedule, null, 2), 'utf8');
+      return new Response(JSON.stringify({ success: true, schedule }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
     const operationId = generateId();
     const op = { id: operationId, status: 'pending', logs: [], startedAt: Date.now() };
     operations[operationId] = op;

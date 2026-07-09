@@ -88,6 +88,51 @@ export default function AdminBackupPage() {
   const logRef = useRef<HTMLDivElement>(null);
   const polls = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
+  // Schedule configuration state
+  const [configFileContent, setConfigFileContent] = useState<Record<string, any>>({});
+  const [isSaving, setIsSaving] = useState(false);
+
+  const fetchSchedule = async (): Promise<Record<string, any>> => {
+    try {
+      const res = await fetch('/api/admin/backup?action=schedule');
+      const data = await res.json();
+      return data.schedule || {};
+    } catch (e) {
+      console.error('fetch schedule failed', e);
+      return {};
+    }
+  };
+
+  useEffect(() => {
+    fetchSchedule().then(schedule => {
+      setConfigFileContent(schedule);
+    });
+  }, []);
+
+  async function handleSaveSchedule() {
+    setIsSaving(true);
+    try {
+      const res = await fetch('/api/admin/backup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'schedule',
+          enabled: configFileContent.enabled,
+          type: configFileContent.type,
+          time: configFileContent.time,
+          cron: configFileContent.cron,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error('Failed to save schedule');
+      }
+      setIsSaving(false);
+    } catch (error) {
+      setIsSaving(false);
+      console.error('Failed to save schedule:', error);
+    }
+  }
+
   async function fetchFiles() {
     setFilesLoading(true);
     try {
@@ -494,11 +539,18 @@ export default function AdminBackupPage() {
                       </div>
                       <button
                         onClick={(e) => { e.stopPropagation(); deleteFile(f.name); }}
-                        className='p-1 text-loss hover:bg-loss/10 rounded shrink-0'
+                        className='p-1 text-loss hover:bg-loss/10 rounded shrink-0 ltr:opacity-75 mr-1'
                         title='Удалить'
                       >
                         <Trash2 size={14} />
                       </button>
+                      <a
+                        href={`/api/admin/backup?action=download&file=${encodeURIComponent(f.name)}`}
+                        className='p-1 text-accent hover:bg-accent/10 rounded shrink-0 ltr:opacity-75 mr-1 ms-1'
+                        download
+                      >
+                        <Download size={14} />
+                      </a>
                     </div>
                   ))}
                 </div>
@@ -568,6 +620,130 @@ export default function AdminBackupPage() {
                 })}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Backup Schedule Configuration */}
+        <div className='mt-8'>
+          <h2 className='text-lg font-semibold flex items-center gap-2'>
+            <Clock size={18} /> {t('admin.backup.schedule.title')}
+          </h2>
+          <div className='mt-3 card p-4 bg-surface-2/30'>
+            <div className='space-y-4'>
+              <div className='flex items-center gap-4 pb-3 border-b border-border'>
+                <div className='flex items-center gap-2'>
+                  <input
+                    type='checkbox'
+                    id='schedule-enabled'
+                    checked={configFileContent.enabled || false}
+                    onChange={(e) =>
+                      setConfigFileContent((prev: Record<string, any>) => ({ ...prev, enabled: e.target.checked }))
+                    }
+                    className='h-4 w-4 rounded border-border'
+                  />
+                  <label htmlFor='schedule-enabled' className='text-sm font-medium cursor-pointer'>
+                    {t('admin.backup.schedule.enabled')}
+                  </label>
+                </div>
+              </div>
+
+              <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
+                <div>
+                  <label className='block text-sm font-medium mb-2'>{t('admin.backup.schedule.typeLabel')}</label>
+                  <select
+                    value={configFileContent.type || 'daily'}
+                    onChange={(e) =>
+                      setConfigFileContent((prev: Record<string, any>) => ({ ...prev, type: e.target.value, cron: undefined }))
+                    }
+                    className='block w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-fg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/20 [&>option]:bg-surface-2 [&>option]:text-fg'
+                  >
+                    <option value='daily'>{t('admin.backup.schedule.daily')}</option>
+                    <option value='hourly'>{t('admin.backup.schedule.hourly')}</option>
+                    <option value='weekly'>{t('admin.backup.schedule.weekly')}</option>
+                    <option value='custom'>{t('admin.backup.schedule.custom')}</option>
+                  </select>
+                </div>
+
+                {(configFileContent.type === 'daily' || configFileContent.type === 'weekly') && (
+                  <div>
+                    <label className='block text-sm font-medium mb-2'>{t('admin.backup.schedule.timeLabel')}</label>
+                    <input
+                      type='time'
+                      value={configFileContent.time || '02:00'}
+                      onChange={(e) =>
+                        setConfigFileContent((prev: Record<string, any>) => ({ ...prev, time: e.target.value }))
+                      }
+                      className='block w-full px-3 py-2 rounded-lg border border-border bg-surface-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20'
+                    />
+                  </div>
+                )}
+
+                {configFileContent.type === 'custom' && (
+                  <div className='md:col-span-2'>
+                    <label className='block text-sm font-medium mb-2'>{t('admin.backup.schedule.cronLabel')}</label>
+                    <select
+                      value={configFileContent.cron || ''}
+                      onChange={(e) =>
+                        setConfigFileContent((prev: Record<string, any>) => ({ ...prev, cron: e.target.value || undefined }))
+                      }
+                      className='block w-full px-3 py-2 rounded-lg border border-border bg-surface-2 text-fg text-sm appearance-none focus:outline-none focus:ring-2 focus:ring-accent/20 [&>option]:bg-surface-2 [&>option]:text-fg'
+                    >
+                      <option value=''>{t('admin.backup.schedule.cronSelectPlaceholder')}</option>
+                      <optgroup label={t('admin.backup.schedule.cronPresets.daily')}>
+                        <option value='0 2 * * *'>{t('admin.backup.schedule.cronPreset.daily2am')}</option>
+                        <option value='0 3 * * *'>{t('admin.backup.schedule.cronPreset.daily3am')}</option>
+                        <option value='0 4 * * *'>{t('admin.backup.schedule.cronPreset.daily4am')}</option>
+                        <option value='0 5 * * *'>{t('admin.backup.schedule.cronPreset.daily5am')}</option>
+                        <option value='0 6 * * *'>{t('admin.backup.schedule.cronPreset.daily6am')}</option>
+                        <option value='0 12 * * *'>{t('admin.backup.schedule.cronPreset.dailyNoon')}</option>
+                        <option value='0 18 * * *'>{t('admin.backup.schedule.cronPreset.daily6pm')}</option>
+                        <option value='0 20 * * *'>{t('admin.backup.schedule.cronPreset.daily8pm')}</option>
+                      </optgroup>
+                      <optgroup label={t('admin.backup.schedule.cronPresets.weekly')}>
+                        <option value='0 2 * * 0'>{t('admin.backup.schedule.cronPreset.weeklySunday')}</option>
+                        <option value='0 2 * * 1'>{t('admin.backup.schedule.cronPreset.weeklyMonday')}</option>
+                        <option value='0 2 * * 2'>{t('admin.backup.schedule.cronPreset.weeklyTuesday')}</option>
+                        <option value='0 2 * * 3'>{t('admin.backup.schedule.cronPreset.weeklyWednesday')}</option>
+                        <option value='0 2 * * 4'>{t('admin.backup.schedule.cronPreset.weeklyThursday')}</option>
+                        <option value='0 2 * * 5'>{t('admin.backup.schedule.cronPreset.weeklyFriday')}</option>
+                        <option value='0 2 * * 6'>{t('admin.backup.schedule.cronPreset.weeklySaturday')}</option>
+                      </optgroup>
+                      <optgroup label={t('admin.backup.schedule.cronPresets.hourly')}>
+                        <option value='0 * * * *'>{t('admin.backup.schedule.cronPreset.hourly')}</option>
+                        <option value='30 * * * *'>{t('admin.backup.schedule.cronPreset.hourlyHalf')}</option>
+                      </optgroup>
+                      <optgroup label={t('admin.backup.schedule.cronPresets.monthly')}>
+                        <option value='0 2 1 * *'>{t('admin.backup.schedule.cronPreset.monthly1st')}</option>
+                        <option value='0 2 15 * *'>{t('admin.backup.schedule.cronPreset.monthly15th')}</option>
+                      </optgroup>
+                      <optgroup label={t('admin.backup.schedule.cronPresets.weekdays')}>
+                        <option value='0 2 * * 1-5'>{t('admin.backup.schedule.cronPreset.weekdays')}</option>
+                        <option value='0 2 * * 0,6'>{t('admin.backup.schedule.cronPreset.weekends')}</option>
+                      </optgroup>
+                    </select>
+                    <p className='text-xs text-muted mt-1'>{t('admin.backup.schedule.cronHint')}</p>
+                  </div>
+                )}
+              </div>
+
+              <div className='pt-3 border-t border-border flex justify-end gap-3'>
+                <button
+                  onClick={() => setConfigFileContent((prev: Record<string, any>) => ({ ...prev, time: '02:00', cron: undefined }))}
+                  className='px-4 py-2 text-sm text-muted hover:text-fg transition-colors'
+                >
+                  {t('admin.backup.schedule.reset')}
+                </button>
+                <button
+                  onClick={handleSaveSchedule}
+                  disabled={isSaving || !configFileContent.enabled}
+                  className='px-4 py-2 bg-accent text-white rounded-lg text-sm hover:bg-accent/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                >
+                  {isSaving
+                    ? t('common.saving')
+                    : t('admin.backup.schedule.save')}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
