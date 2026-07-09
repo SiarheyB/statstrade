@@ -194,6 +194,26 @@ export default function AdminBackupPage() {
     }
   }
 
+  async function clearAllFiles() {
+    if (!confirm(t('admin.backup.clearAllConfirm'))) return;
+
+    try {
+      const res = await fetch('/api/admin/backup', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear-all' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        fetchFiles();
+      } else {
+        alert(`${t('admin.backup.errorClearAll')}: ${data.error}`);
+      }
+    } catch (e) {
+      alert(`${t('admin.backup.errorClearAll')}: ${(e as Error).message}`);
+    }
+  }
+
   async function deleteFile(name: string) {
     if (!confirm(t('admin.backup.deleteConfirm', { name }))) return;
 
@@ -210,6 +230,25 @@ export default function AdminBackupPage() {
       }
     } catch (e) {
       alert(`${t('admin.backup.errorDelete')}: ${(e as Error).message}`);
+    }
+  }
+
+  async function clearAllLogs() {
+    if (!confirm(t('admin.backup.clearLogsConfirm'))) return;
+    try {
+      const res = await fetch('/api/admin/backup', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'clear-logs' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setOperations([]);
+      } else {
+        alert(`${t('admin.backup.errorClearLogs')}: ${data.error}`);
+      }
+    } catch (e) {
+      alert(`${t('admin.backup.errorClearLogs')}: ${(e as Error).message}`);
     }
   }
 
@@ -412,7 +451,16 @@ export default function AdminBackupPage() {
             )}
 
             <div className='mt-5'>
-              <h3 className='text-sm font-medium mb-2'>{t('admin.backup.availableFiles')}</h3>
+              <div className='flex justify-between items-center mb-3'>
+                <h3 className='text-sm font-medium'>{t('admin.backup.availableFiles')}</h3>
+                <button
+                  onClick={clearAllFiles}
+                  disabled={filesLoading}
+                  className='px-3 py-1 bg-loss/10 text-loss hover:bg-loss/20 rounded text-sm transition'
+                >
+                  {t('admin.backup.clearAll')}
+                </button>
+              </div>
               {filesLoading ? (
                 <div className='flex justify-center py-6'>
                   <RefreshCw size={20} className='animate-spin text-muted' />
@@ -467,6 +515,15 @@ export default function AdminBackupPage() {
         <div>
           <h2 className='text-lg font-semibold flex items-center gap-2'>
             <Clock size={18} /> {t('admin.backup.operationsLog')}
+            {operations.length > 0 && (
+              <button
+                onClick={clearAllLogs}
+                disabled={filesLoading}
+                className='ml-auto px-3 py-1 bg-loss/10 text-loss hover:bg-loss/20 rounded text-sm transition'
+              >
+                {t('admin.backup.clearLogs')}
+              </button>
+            )}
           </h2>
           <div className='mt-3 card p-4'>
             {operations.length === 0 ? (

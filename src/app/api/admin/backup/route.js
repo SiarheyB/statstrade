@@ -120,19 +120,70 @@ export async function POST(request) {
 
 export async function DELETE(request) {
   try {
+    // Parse request body to get action
+    let action = 'delete-file'; // default action
+    let filename = null;
+    let backupLog = false;
+
+    try {
+      const body = await request.json();
+      action = body.action || action;
+      filename = body.filename || null;
+      backupLog = body.action === 'clear-logs';
+    } catch {
+      // If request body parsing fails, treat as regular request with file param
+      const { searchParams } = new URL(request.url);
+      filename = searchParams.get('file');
+    }
+
+    // NEW: Clear all logs endpoint - deletes the log file itself
+    if (backupLog) {
+      try {
+        await fs.unlink(LOG_FILE);
+        // Also clear operations memory
+        const currentIds = Object.keys(operations);
+        for (const id of currentIds) {
+          delete operations[id];
+        }
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { 'Content-Type': 'application/json' }
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: `Failed to delete log: ${e.message}` }), {
+          status: 500, headers: { 'Content-Type': 'application/json' }
+        });
+      }
+    }
+
+    // Clear all files endpoint (existing functionality)
+    if (action === 'clear-all') {
+      await ensureTmpDir();
+      // Delete all files in TMP_DIR
+      const files = await fs.readdir(TMP_DIR);
+      await Promise.all(files.map(f => fs.unlink(join(TMP_DIR, f))));
+      // remove all operations references
+      const currentIds = Object.keys(operations);
+      for (const id of currentIds) {
+        delete operations[id];
+      }
+      return new Response(JSON.stringify({ success: true }), { headers: { 'Content-Type': 'application/json' } });
+    }
+
+    // Existing delete file logic (existing behavior)
     await ensureTmpDir();
     const { searchParams } = new URL(request.url);
-    const filename = searchParams.get('file');
-    if (!filename) {
+    const fileParam = searchParams.get('file');
+    const fileToDelete = filename || fileParam;
+    if (!fileToDelete) {
       return new Response(JSON.stringify({ error: 'Missing file parameter' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
-    const filePath = join(TMP_DIR, filename);
+    const filePath = join(TMP_DIR, fileToDelete);
     try {
       await fs.access(filePath);
       await fs.unlink(filePath);
       // remove any operations referencing this file
       for (const [id, op] of Object.entries(operations)) {
-        if (op.logs && op.logs.some(l => l.includes(filename))) {
+        if (op.logs && op.logs.some(l => l.includes(fileToDelete))) {
           delete operations[id];
         }
       }
