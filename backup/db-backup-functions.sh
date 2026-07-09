@@ -66,14 +66,33 @@ exec_in_db() {
       "$@"
   else
     # Прямое подключение к хосту БД
+    PGHOST="${db_host}" \
+    PGPORT="${db_port}" \
+    PGUSER="${db_user}" \
     PGPASSWORD="${db_password}" \
-      psql -h "${db_host}" -p "${db_port}" -U "${db_user}" -d "${db_name}" "$@"
+    PGDATABASE="${db_name}" \
+    "$@"
   fi
 }
 
 # Get list of all user tables
 list_tables() {
-  exec_in_db psql -Atq -c "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+  # Исключаем дочерние партиции (relispartition = true, напр. ObTrade_p20260709,
+  # ObSnapshot_default): при дампе родительской партиционированной таблицы pg_dump
+  # и так включает данные всех её партиций, поэтому дампить их по отдельности
+  # избыточно (дубликаты данных в файле).
+  exec_in_db psql -Atq -c "
+    SELECT t.tablename
+    FROM pg_catalog.pg_tables t
+    WHERE t.schemaname = 'public'
+      AND t.tablename NOT IN (
+        SELECT c.relname
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relispartition AND n.nspname = 'public'
+      )
+    ORDER BY t.tablename
+  "
 }
 
 # Check if table exists
