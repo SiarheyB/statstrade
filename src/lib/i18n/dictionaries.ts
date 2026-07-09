@@ -1654,6 +1654,7 @@ const ru: Dict = {
   "admin.backup.starting": "Запуск:",
   "admin.backup.errorDelete": "Ошибка удаления: {name}",
   "admin.backup.errorUpload": "Ошибка загрузки: {name}",
+  "admin.backup.error": "Ошибка операции бэкапа: {error}",
   "admin.backup.clearAll": "Очистить всё",
   "admin.backup.clearAllConfirm": "Очистить все файлы бэкапа? Это действие необратимо.",
   "admin.backup.clearLogs": "Очистить журнал операций",
