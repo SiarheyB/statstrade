@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '@/lib/i18n/provider';
 import {
   Database, Download, Upload, FileText, Clock, CheckCircle, AlertTriangle,
-  Folder, File, Trash2, RefreshCw, PlayCircle, HardDrive,
+  Folder, File, Trash2, RefreshCw, PlayCircle, HardDrive, X,
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -83,6 +83,7 @@ export default function AdminBackupPage() {
   const [busy, setBusy] = useState(false);
   const [filesLoading, setFilesLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const polls = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -138,30 +139,57 @@ export default function AdminBackupPage() {
   async function startOperation(type: OpType, file?: string) {
     if (busy) return;
     setBusy(true);
+    setProgress(`${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`);
+
     try {
-      const res = await fetch('/api/admin/backup', {
+      const response = await fetch('/api/admin/backup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: type, file }),
       });
-      const data = await res.json();
+      const data = await response.json();
       if (data.operationId) {
         const op: BackupOperation = {
           id: data.operationId,
           type,
-          status: 'pending',
+          status: 'running',
           logs: [],
           startedAt: Date.now(),
         };
-        setOperations((prev) => [op, ...prev]);
+        setOperations([...operations, op]);
         setProgress(`${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`);
-        startPoll(data.operationId);
+
+        // Poll for operation status updates
+        const interval = setInterval(async () => {
+          const statusRes = await fetch(`/api/admin/backup?operationId=${data.operationId}`);
+          const statusData = await statusRes.json();
+
+          // Update the operations state with new status and logs
+          setOperations((prev) => prev.map((op) =>
+            op.id === data.operationId
+              ? { ...op, logs: statusData.logs || [], status: statusData.status }
+              : op
+          ));
+
+          if (['success', 'error', 'canceled'].includes(statusData.status)) {
+            clearInterval(interval);
+            setBusy(false);
+            if (statusData.status === 'success') {
+              fetchFiles();
+            }
+            setProgress(statusData.status === 'success'
+              ? t('admin.backup.success')
+              : t('admin.backup.error'));
+          } else {
+            setProgress(`${t('admin.backup.inProgress')} • ${statusData.status}`);
+          }
+        }, 1500);
       } else {
         setProgress(`${t('admin.backup.error')}: ${data.error || t('admin.backup.unknown')}`);
+        setBusy(false);
       }
     } catch (e) {
       setProgress(`${t('admin.backup.errorStart')}: ${(e as Error).message}`);
-    } finally {
       setBusy(false);
     }
   }
@@ -266,8 +294,24 @@ export default function AdminBackupPage() {
 
       {progress && (
         <div className='mt-4 card p-3 border-accent/30 bg-accent/5 text-sm flex items-center gap-2'>
-          <RefreshCw size={16} className='animate-spin text-accent' />
-          {progress}
+          {progress === t('admin.backup.success') ? (
+            <>
+              <CheckCircle size={16} className='text-profit' />
+              <span>{progress}</span>
+              <button
+                className='ml-auto hover:bg-loss/20 p-1 rounded text-loss'
+                onClick={() => setProgress(null)}
+                aria-label='close'
+              >
+                <X size={15} />
+              </button>
+            </>
+          ) : (
+            <>
+              <RefreshCw size={16} className='animate-spin text-accent' />
+              {progress}
+            </>
+          )}
         </div>
       )}
 

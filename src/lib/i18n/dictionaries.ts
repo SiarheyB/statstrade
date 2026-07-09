@@ -39,6 +39,7 @@ const en: Dict = {
   "nav.admin": "Admin",
   "nav.logout": "Log out",
   "nav.support": "Support",
+  "admin.nav.database": "Database",
   "common.close": "Close",
   "support.title": "Contact support",
   "support.subtitle": "Describe your question or problem — we'll get back to you.",
@@ -693,6 +694,7 @@ const en: Dict = {
   "admin.nav.content": "Content feeds",
   "admin.nav.system": "Database health",
   "admin.nav.backup": "Backup DB",
+  "admin.nav.database": "Database",
   "admin.nav.audit": "Audit log",
   "admin.backup.title": "Database backup",
   "admin.backup.subtitle": "Export and import the TradeStats database",
@@ -1615,6 +1617,9 @@ const ru: Dict = {
   "admin.nav.donate": "Кошельки для донатов",
   "admin.nav.content": "Контент-фиды",
   "admin.nav.system": "Здоровье БД",
+  "admin.nav.db": "Здоровье БД",
+  "admin.nav.backup": "Бекап БД",
+  "admin.nav.database": "База Данных",
   "admin.nav.audit": "Аудит действий",
   "admin.nav.backup": "Бекап БД",
   "admin.backup.title": "Резервные копии БД",
@@ -1678,6 +1683,12 @@ const ru: Dict = {
   "admin.overview.cardUsers.desc": "Управление пользователями и синхронизацией бирж.",
   "admin.overview.syncErrorBanner": "{n} аккаунт(ов) с ошибкой синхронизации.",
   "admin.overview.accessHint": "Доступ выдаётся через переменную окружения ADMIN_EMAILS.",
+
+  // admin.backup section
+  "admin.backup.inProgress": "Выполняется",
+  "admin.backup.success": "Успешно",
+  "admin.backup.error": "Ошибка",
+  "admin.backup.operationsTitle": "Операции",
 
   "admin.collector.title": "Карта ордеров",
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",

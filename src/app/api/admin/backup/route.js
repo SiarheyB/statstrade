@@ -46,6 +46,21 @@ export async function GET(request) {
     }
   }
 
+  // Handle operation status polling for backup operations
+  if (operationId && (!action || action === 'status' || action === '')) {
+    if (operations[operationId]) {
+      const op = operations[operationId];
+      return new Response(JSON.stringify({
+        logs: op.logs,
+        status: op.status,
+        startedAt: op.startedAt,
+        updatedAt: new Date().toISOString()
+      }), { headers: { 'Content-Type': 'application/json' } });
+    } else {
+      return new Response(JSON.stringify({ error: 'Operation not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });
+    }
+  }
+
   if (action === 'logs' && operationId) {
     const op = operations[operationId];
     if (!op) {
@@ -54,7 +69,10 @@ export async function GET(request) {
     return new Response(JSON.stringify({ logs: op.logs, status: op.status }), { headers: { 'Content-Type': 'application/json' } });
   }
 
-  return new Response(JSON.stringify({ error: 'Invalid action' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+  return new Response(JSON.stringify({ error: 'Invalid action' }), {
+    status: 400,
+    headers: { 'Content-Type': 'application/json' }
+  });
 }
 
 export async function POST(request) {
