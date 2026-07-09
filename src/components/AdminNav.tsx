@@ -77,7 +77,7 @@ export default function AdminNav({ email }: { email: string }) {
 
   const isGroupOpen = (key: string) => expanded.has(key);
 
-  const hasChildren = (item: typeof LINKS[number]) =>
+  const hasChildren = (item: (typeof LINKS)[number]) =>
     "children" in item && (item as any).children?.length > 0;
 
   const body = (onNavigate: () => void) => (
@@ -106,22 +106,25 @@ export default function AdminNav({ email }: { email: string }) {
                 </button>
                 {isGroupOpen(item.key) && (
                   <div className="ml-4 mt-1 space-y-1 border-l border-border pl-2">
-                    {item.children.map((c) => (
-                      <Link
-                        key={c.href}
-                        href={c.href}
-                        onClick={onNavigate}
-                        className={clsx(
-                          "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
-                          isActive(c.href)
-                            ? "bg-accent/15 text-accent"
-                            : "text-muted hover:text-fg hover:bg-surface-2",
-                        )}
-                      >
-                        <c.icon size={16} />
-                        {t(c.key)}
-                      </Link>
-                    ))}
+                    {item.children.map((c) => {
+                      const link = c as { href: string; key: string; icon: any; exact?: boolean };
+                      return (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          onClick={onNavigate}
+                          className={clsx(
+                            "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                            isActive(link.href, link.exact)
+                              ? "bg-accent/15 text-accent"
+                              : "text-muted hover:text-fg hover:bg-surface-2",
+                          )}
+                        >
+                          <link.icon size={16} />
+                          {t(link.key)}
+                        </Link>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -129,14 +132,15 @@ export default function AdminNav({ email }: { email: string }) {
           }
 
           // Regular Link
+          const link = l as { href: string; key: string; icon: any; exact?: boolean };
           return (
             <Link
-              key={l.href}
-              href={l.href}
+              key={link.href}
+              href={link.href}
               onClick={onNavigate}
               className={clsx(
                 "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
-                isActive(l.href, (l as any).exact)
+                isActive(link.href, link.exact)
                   ? "bg-accent/15 text-accent"
                   : "text-muted hover:text-fg hover:bg-surface-2",
               )}
