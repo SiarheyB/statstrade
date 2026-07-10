@@ -1,7 +1,8 @@
 {
   "enabled": true,
   "type": "daily",
-  "time": "19:08",
+  "time": "16:22",
   "cron": "",
-  "updatedAt": "2026-07-09T16:07:05.318Z"
+  "timezone": "UTC+3",
+  "updatedAt": "2026-07-10T13:20:31.704Z"
 }

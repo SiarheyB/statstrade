@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useI18n } from '@/lib/i18n/provider';
+import { ianaFor } from '@/lib/timezone';
 import {
   Database, Download, Upload, FileText, Clock, CheckCircle, AlertTriangle,
   Folder, File, Trash2, RefreshCw, PlayCircle, HardDrive, X,
@@ -75,7 +76,14 @@ const OP_ICONS: Record<OpType, typeof Database> = {
 };
 
 export default function AdminBackupPage() {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
+  const [now, setNow] = useState(() => new Date());
+
+  // live clock updates every minute
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(id);
+  }, []);
   const [files, setFiles] = useState<BackupFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [operations, setOperations] = useState<BackupOperation[]>([]);
@@ -124,7 +132,8 @@ export default function AdminBackupPage() {
         }),
       });
       if (!res.ok) {
-        throw new Error('Failed to save schedule');
+        const errBody = await res.text();
+        throw new Error(`Schedule save failed (${res.status}): ${errBody}`);
       }
       setIsSaving(false);
     } catch (error) {
@@ -675,6 +684,18 @@ export default function AdminBackupPage() {
                       }
                       className='block w-full px-3 py-2 rounded-lg border border-border bg-surface-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20'
                     />
+                    <div className="mt-1 text-sm text-muted">
+                      Текущее время в выбранном часовом поясе: <strong>
+                        {now.toLocaleTimeString('ru-RU', {
+                          timeZone: ianaFor(timezone) ?? 'UTC',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          hour12: false,
+                        })}
+                      </strong>
+                      <br/>
+                      (Часовой пояс: <strong>{timezone}</strong>)
+                    </div>
                   </div>
                 )}
 
