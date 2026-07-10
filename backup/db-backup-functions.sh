@@ -49,16 +49,50 @@ parse_db_url() {
 
 # Execute command inside the db container
 exec_in_db() {
-  docker compose -f "${COMPOSE_FILE}" exec -T db env \
-    PGUSER="${DB_USER}" \
-    PGPASSWORD="${DB_PASSWORD}" \
-    PGDATABASE="${DB_NAME}" \
+  local db_host="${DB_HOST:-db}"
+  local db_port="${DB_PORT:-5432}"
+  local db_user="${DB_USER}"
+  local db_password="${DB_PASSWORD}"
+  local db_name="${DB_NAME}"
+
+  # Если мы запущены внутри контейнера app (Docker CLI отсутствует),
+  # то подключаемся напрямую к хосту postgres (обычно db:5432).
+  # На хосте Docker доступен, используем docker compose exec.
+  if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    docker compose -f "${COMPOSE_FILE}" exec -T db env \
+      PGUSER="${db_user}" \
+      PGPASSWORD="${db_password}" \
+      PGDATABASE="${db_name}" \
+      "$@"
+  else
+    # Прямое подключение к хосту БД
+    PGHOST="${db_host}" \
+    PGPORT="${db_port}" \
+    PGUSER="${db_user}" \
+    PGPASSWORD="${db_password}" \
+    PGDATABASE="${db_name}" \
     "$@"
+  fi
 }
 
 # Get list of all user tables
 list_tables() {
-  exec_in_db psql -Atq -c "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'public' ORDER BY tablename"
+  # Исключаем дочерние партиции (relispartition = true, напр. ObTrade_p20260709,
+  # ObSnapshot_default): при дампе родительской партиционированной таблицы pg_dump
+  # и так включает данные всех её партиций, поэтому дампить их по отдельности
+  # избыточно (дубликаты данных в файле).
+  exec_in_db psql -Atq -c "
+    SELECT t.tablename
+    FROM pg_catalog.pg_tables t
+    WHERE t.schemaname = 'public'
+      AND t.tablename NOT IN (
+        SELECT c.relname
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE c.relispartition AND n.nspname = 'public'
+      )
+    ORDER BY t.tablename
+  "
 }
 
 # Check if table exists

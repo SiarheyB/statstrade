@@ -6,7 +6,7 @@ WORKDIR /app
 
 # Prisma требует openssl в slim-образе.
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates postgresql-client \
   && rm -rf /var/lib/apt/lists/*
 
 # Зависимости (postinstall = prisma generate, поэтому схема нужна до npm ci).
