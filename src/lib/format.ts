@@ -16,7 +16,7 @@ export function setFormatTimezone(tz: TimezoneId) {
   TZ = tz;
 }
 
-function numLocale(): string {
+export function numLocale(): string {
   return LOCALE === "ru" ? "ru-RU" : "en-US";
 }
 

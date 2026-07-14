@@ -1,5 +1,5 @@
 import type { Metrics } from "./metrics";
-import { fmtUsd, fmtPct, fmtRatio, fmtNum } from "../format";
+import { fmtUsd, fmtPct, fmtRatio, fmtNum, numLocale } from "../format";
 import { translate, type Locale } from "../i18n/core";
 
 // Numeric-only keys of Metrics (excludes arrays / breakdown objects).
@@ -159,11 +159,11 @@ export function formatMetric(
   const u = (k: string) => translate(locale, k);
   switch (format) {
     case "usd":
-      return fmtUsd(value);
+      return formatUsdAsInteger(value);
     case "usdSigned":
-      return fmtUsd(value, { sign: true });
+      return formatUsdAsInteger(value, { sign: true });
     case "usdLoss":
-      return fmtUsd(-Math.abs(value));
+      return formatUsdAsInteger(-Math.abs(value));
     case "pct":
       return fmtPct(value);
     case "pctPlain":
@@ -194,6 +194,22 @@ export function formatMetric(
     default:
       return String(value);
   }
+}
+
+function formatUsdAsInteger(value: number, opts: { sign?: boolean } = {}): string {
+  if (!Number.isFinite(value)) return "—";
+
+  // Determine sign prefix: always show minus for negatives, plus only if explicitly requested
+  let signPrefix = "";
+  if (value < 0) {
+    signPrefix = "-";
+  } else if (opts.sign === true) {
+    signPrefix = "+";
+  }
+
+  const abs = Math.round(Math.abs(value));
+  const formatted = abs.toLocaleString(numLocale());
+  return signPrefix + formatted + " $";
 }
 
 // Tone for coloring a metric value.

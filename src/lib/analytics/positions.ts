@@ -4,7 +4,7 @@ import type { FillInput, RoundTripTrade, TradeResult } from "./types";
 const REL_EPS = 1e-9;
 
 // Convert a fill's fee into the quote currency (best effort).
-function feeInQuote(fill: FillInput): number {
+export function feeInQuote(fill: FillInput): number {
   if (!fill.fee) return 0;
   if (!fill.feeCurrency) return fill.fee; // assume already quote
   if (fill.feeCurrency === fill.quote) return fill.fee;
