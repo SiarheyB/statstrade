@@ -145,9 +145,9 @@ export function normalizeFill(
   trade: Record<string, unknown>,
 ): NormalizedFill | null {
   const symbol = trade.symbol as string | undefined;
-  const price = Number(trade.price);
-  const amount = Number(trade.amount);
-  if (!symbol || !Number.isFinite(price) || !Number.isFinite(amount) || amount === 0) {
+  const priceNum = Number(trade.price);
+  const amountNum = Number(trade.amount);
+  if (!symbol || trade.price == null || trade.amount == null || !Number.isFinite(priceNum) || !Number.isFinite(amountNum) || amountNum === 0) {
     return null;
   }
 
@@ -172,20 +172,20 @@ export function normalizeFill(
   const cost = Number(trade.cost);
 
   return {
-    tradeId: String(trade.id ?? `${symbol}-${trade.timestamp}-${trade.side}-${amount}`),
+    tradeId: String(trade.id ?? `${symbol}-${trade.timestamp}-${trade.side}-${amountNum}`),
     orderId: trade.order ? String(trade.order) : null,
     symbol,
     base,
     quote,
     market,
     side: String(trade.side ?? "buy"),
-    price,
-    amount,
-    cost: Number.isFinite(cost) ? cost : price * amount,
+    price: priceNum,
+    amount: amountNum,
+    cost: Number.isFinite(cost) ? cost : priceNum * amountNum,
     fee: feeObj?.cost ? Number(feeObj.cost) : 0,
     feeCurrency: feeObj?.currency ?? null,
     realizedPnl: extractRealizedPnl(trade.info as Record<string, unknown> | undefined),
     takerOrMaker: (trade.takerOrMaker as string | undefined) ?? null,
-    timestamp: new Date(Number(trade.timestamp ?? Date.now())),
+    timestamp: new Date(trade.timestamp ?? Date.now()),
   };
 }
