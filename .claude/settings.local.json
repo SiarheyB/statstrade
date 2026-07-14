@@ -76,7 +76,10 @@
       "Bash(Microsoft-PowerShell-Windows-Version *)",
       "Bash(Remove-Item *)",
       "Bash(npx next *)",
-      "Bash(chmod +x *)"
+      "Bash(chmod +x *)",
+      "Bash(npx vitest *)",
+      "Bash(node *)",
+      "Bash(pkill -f \"node.*next\")"
     ]
   },
   "enableAllProjectMcpServers": true,

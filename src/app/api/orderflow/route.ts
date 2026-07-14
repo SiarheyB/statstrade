@@ -8,6 +8,7 @@ import {
   computeBigTrades,
   fetchOrderflowCandles,
 } from "@/lib/orderflow";
+import { isTimezone, normalizeTimezone } from "@/lib/timezone";
 
 export const maxDuration = 30;
 
@@ -87,12 +88,22 @@ export async function GET(req: Request) {
   const symbol = (url.searchParams.get("symbol") ?? "BTCUSDT").toUpperCase().replace(/[^A-Z0-9]/g, "");
   const exchange = (url.searchParams.get("exchange") ?? "binance-futures").toLowerCase().replace(/[^a-z0-9-]/g, "");
   const range = url.searchParams.get("range") ?? "1h";
+  const tzParam = url.searchParams.get("tz");
 
   const tf = TF_MS[range];
   if (!tf) return badRequest("Неизвестный таймфрейм");
   if (symbol.length < 5 || symbol.length > 20) return badRequest("Некорректный символ");
 
-  const key = `${symbol}|${exchange}|${range}`;
+  // Validate timezone if provided
+  let timezone: string | undefined;
+  if (tzParam !== null && tzParam !== undefined) {
+    if (!isTimezone(tzParam)) {
+      return badRequest("Некорректный часовой пояс");
+    }
+    timezone = normalizeTimezone(tzParam);
+  }
+
+  const key = `${symbol}|${exchange}|${range}|${timezone ?? "none"}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
 
@@ -103,8 +114,13 @@ export async function GET(req: Request) {
       inflight.set(key, p);
     }
     const data = await p;
-    cache.set(key, { at: Date.now(), data });
-    return NextResponse.json(data);
+    // Add timezone to response for frontend consistency
+    const response = {
+      ...data,
+      timezone: timezone || "auto" // Default to auto if not provided
+    };
+    cache.set(key, { at: Date.now(), data: response });
+    return NextResponse.json(response);
   } catch (err) {
     return serverError((err as Error).message);
   }

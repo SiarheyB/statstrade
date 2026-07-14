@@ -15,13 +15,60 @@ function offsetLabel(h: number): string {
 
 export const TIMEZONES: { id: TimezoneId; label: string }[] = [
   { id: "auto", label: "Auto (device)" },
-  ...Array.from({ length: 27 }, (_, i) => 12 - i) // +14 .. -12
+  ...Array.from({ length: 27 }, (_, i) => 14 - i) // +14 .. -12
     .map((h) => ({ id: offsetLabel(h), label: offsetLabel(h) })),
 ];
 
 export function isTimezone(v: string | undefined | null): v is TimezoneId {
   if (!v) return false;
-  return v === "auto" || TIMEZONES.some((tz) => tz.id === v);
+  if (v === "auto") return true;
+
+  // Клиент шлёт "UTC+3", но URL-парсер на сервере превращает '+' в пробел
+  // ("UTC 3"), либо кодирует как "UTC%2B3" (decodeURIComponent -> "UTC+3").
+  // Учитываем оба варианта.
+  const decoded = decodeURIComponent(v);
+  const toCheck = decoded !== v ? decoded : v;
+
+  if (TIMEZONES.some((tz) => tz.id === toCheck)) return true;
+
+  // Шаблон "UTC±N" / "±N" — пробелы вокруг знака допустимы.
+  const m = /^(?:utc)?\s*([+-]?)\s*(\d{1,2})\s*$/i.exec(toCheck);
+  if (!m) return false;
+  const h = parseInt(`${m[1] || "+"}${m[2]}`, 10);
+  return h >= -12 && h <= 14;
+}
+
+/**
+ * Нормализует и валидирует timezone из куки/стейта.
+ * Возвращает безопасный TimezoneId (никогда не null/undefined).
+ * Если значение невалидно — фоллбэк на DEFAULT_TIMEZONE ("auto").
+ */
+export function normalizeTimezone(tz: string | undefined | null): TimezoneId {
+  if (tz === undefined || tz === null) return DEFAULT_TIMEZONE;
+  if (typeof tz !== "string") return DEFAULT_TIMEZONE;
+  // Точное совпадение с известным id ("auto" | "UTC" | "UTC±N").
+  if (tz === "auto" || TIMEZONES.some((x) => x.id === tz)) return tz;
+  // Попытка распарсить варианты вроде "UTC+3", "utc-5", "+3", "-5",
+  // а также "UTC 3" (пробел вместо '+' — результат парсинга URL).
+  const m = /^(?:utc)?\s*([+-]?)\s*(\d{1,2})$/i.exec(tz.trim());
+  if (m) {
+    const h = parseInt(`${m[1] || "+"}${m[2]}`, 10);
+    if (h >= -12 && h <= 14) return offsetLabel(h);
+  }
+  console.warn(`[timezone] Invalid timezone "${tz}", falling back to "${DEFAULT_TIMEZONE}"`);
+  return DEFAULT_TIMEZONE;
+}
+
+/**
+ * Получает timezone из куки на клиенте (browser-only).
+ * Безопасно для использования в useEffect / event handlers.
+ */
+export function getTimezoneFromCookie(): TimezoneId {
+  if (typeof document === "undefined") return DEFAULT_TIMEZONE;
+  const cookie = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith(`${TIMEZONE_COOKIE}=`));
+  return normalizeTimezone(cookie?.split("=")[1]);
 }
 
 // Fixed UTC-offset minutes for the id, or null for "auto" (use the device's

@@ -4,7 +4,7 @@ import { createContext, useContext, useState } from "react";
 import { useRouter } from "next/navigation";
 import { translate, type Locale, LOCALE_COOKIE } from "./core";
 import { setFormatLocale, setFormatTimezone } from "@/lib/format";
-import { TIMEZONE_COOKIE, type TimezoneId } from "@/lib/timezone";
+import { TIMEZONE_COOKIE, type TimezoneId, normalizeTimezone } from "@/lib/timezone";
 
 type T = (key: string, vars?: Record<string, string | number>) => string;
 
@@ -28,7 +28,7 @@ export function I18nProvider({
   children: React.ReactNode;
 }) {
   const [locale, setLoc] = useState<Locale>(initial);
-  const [timezone, setTz] = useState<TimezoneId>(initialTz);
+  const [timezone, setTz] = useState<TimezoneId>(normalizeTimezone(initialTz));
   const router = useRouter();
 
   // Keep number/date formatting in sync with the active locale/timezone.
@@ -45,8 +45,9 @@ export function I18nProvider({
   };
 
   const setTimezone = (tz: TimezoneId) => {
-    setTz(tz);
-    document.cookie = `${TIMEZONE_COOKIE}=${tz}; path=/; max-age=31536000; samesite=lax`;
+    const normalized = normalizeTimezone(tz);
+    setTz(normalized);
+    document.cookie = `${TIMEZONE_COOKIE}=${normalized}; path=/; max-age=31536000; samesite=lax`;
     router.refresh();
   };
 

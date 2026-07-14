@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layers, RefreshCw, HelpCircle, Filter } from "lucide-react";
+import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import { zonedParts, type TimezoneId } from "@/lib/timezone";
+import { zonedParts, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
 
 type ObHeatmap = {
   priceMin: number;
@@ -199,9 +199,19 @@ export default function OrderflowPage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}`);
+      const tz = timezone; // Используем локальный timezone (куки)
+      const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${tz}`);
       const d = await res.json();
       if (!res.ok) {
+        // Если timezone не поддерживается на сервере — логирование и повторный запрос без timezone
+        if (res.status === 400 && d.error?.includes("timezone")) {
+          console.warn("[orderflow] timezone rejected by server, retrying without tz");
+          const res2 = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}`);
+          if (!res2.ok) throw new Error(await res2.text());
+          const d2 = await res2.json();
+          setData(d2);
+          return;
+        }
         setError(d.error ?? "Error");
         setData(null);
         return;
@@ -209,12 +219,13 @@ export default function OrderflowPage() {
       offRef.current = null;
       viewRef.current = null; // сброс zoom/pan при смене диапазона/символа/биржи
       setData(d);
-    } catch {
+    } catch (e) {
       setError("Network error");
+      console.error("[orderflow] load error:", e);
     } finally {
       setLoading(false);
     }
-  }, [range, symbol, exchange]);
+  }, [range, symbol, exchange, timezone]);
 
   useEffect(() => {
     load();
@@ -275,7 +286,7 @@ export default function OrderflowPage() {
     let cancelled = false;
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}`);
+        const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${timezone}`);
         if (!res.ok || cancelled) return;
         const d = await res.json();
         offRef.current = null;
@@ -288,7 +299,7 @@ export default function OrderflowPage() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [live, range, symbol, exchange]);
+  }, [live, range, symbol, exchange, timezone]);
 
   const PADL = 8;
   const PADR = 64;
