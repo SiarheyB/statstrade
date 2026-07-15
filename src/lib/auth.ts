@@ -181,7 +181,7 @@ export async function handleLogin(credentials: { username: string, password: str
   if (!user) return { isSuccess: false };
   const valid = await verifyPassword(credentials.password, user.password ?? "");
   if (!valid) return { isSuccess: false };
-  await createSessionCookie(user);
+  await createSessionCookie({ userId: user.id, email: user.email });
   return { isSuccess: true };
 }
 
