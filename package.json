@@ -8,7 +8,8 @@
     "start": "next start",
     "postinstall": "prisma generate",
     "lint": "eslint",
-    "test": "vitest"
+    "test": "vitest",
+    "test:lib": "vitest src/lib/__tests__/"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",

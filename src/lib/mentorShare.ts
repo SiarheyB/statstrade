@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
-import { prisma } from "@/lib/db";
-import { computeMetrics } from "@/lib/analytics/metrics";
-import type { RoundTripTrade, TradeSide, TradeResult } from "@/lib/analytics/types";
+import { prisma } from '@/lib/db';
+import { computeMetrics } from '@/lib/analytics/metrics';
+import type { RoundTripTrade, TradeSide, TradeResult } from '@/lib/analytics/types';
 
 // High-entropy, URL-safe token — the ONLY credential for a share link (no
 // user id in the URL, never enumerable). 24 bytes = 192 bits.
@@ -20,53 +20,58 @@ export async function computePublicSummary(userId: string) {
     prisma.exchangeAccount.findMany({ where: { userId }, select: { balance: true } }),
   ]);
 
-  const cryptoTrades: RoundTripTrade[] = tradeRows.map((r) => ({
-    id: r.id,
-    symbol: r.symbol,
-    base: r.base,
-    quote: r.quote,
-    market: r.market,
-    exchange: r.exchange,
-    accountId: r.accountId,
-    side: r.side as TradeSide,
-    entryTime: r.entryTime,
-    exitTime: r.exitTime,
-    durationMs: r.exitTime.getTime() - r.entryTime.getTime(),
-    qty: r.qty,
-    entryPrice: r.entryPrice,
-    exitPrice: r.exitPrice,
-    grossPnl: r.grossPnl,
-    fees: r.fees,
-    netPnl: r.netPnl,
-    returnPct: r.returnPct,
-    fillCount: r.fillCount,
-    result: r.result as TradeResult,
-  }));
-  const importedTrades: RoundTripTrade[] = importedRows.map((it) => ({
-    id: `${it.accountId}:${it.externalId}`,
-    symbol: it.symbol,
-    base: it.base,
-    quote: it.quote,
-    market: it.market,
-    exchange: it.source,
-    accountId: it.accountId,
-    side: it.side as TradeSide,
-    entryTime: it.entryTime,
-    exitTime: it.exitTime,
-    durationMs: it.exitTime.getTime() - it.entryTime.getTime(),
-    qty: it.qty,
-    entryPrice: it.entryPrice,
-    exitPrice: it.exitPrice,
-    grossPnl: it.grossProfit + it.swap,
-    fees: it.commission,
-    netPnl: it.netPnl,
-    returnPct: 0,
-    fillCount: 1,
-    result: it.netPnl > 1e-9 ? "win" : it.netPnl < -1e-9 ? "loss" : "breakeven",
-    lots: it.lots,
-    pips: it.pips,
-    swap: it.swap,
-  }));
+  const cryptoTrades: RoundTripTrade[] = tradeRows.map((r) => (
+    {
+      id: r.id,
+      symbol: r.symbol,
+      base: r.base,
+      quote: r.quote,
+      market: r.market,
+      exchange: r.exchange,
+      accountId: r.accountId,
+      side: r.side as TradeSide,
+      entryTime: r.entryTime,
+      exitTime: r.exitTime,
+      durationMs: r.exitTime.getTime() - r.entryTime.getTime(),
+      qty: r.qty,
+      entryPrice: r.entryPrice,
+      exitPrice: r.exitPrice,
+      grossPnl: r.grossPnl,
+      fees: r.fees,
+      netPnl: r.netPnl,
+      returnPct: r.returnPct,
+      fillCount: r.fillCount,
+      result: r.result as TradeResult,
+    }
+  ));
+
+  const importedTrades: RoundTripTrade[] = importedRows.map((it) => (
+    {
+      id: `${it.accountId}:${it.externalId}`,
+      symbol: it.symbol,
+      base: it.base,
+      quote: it.quote,
+      market: it.market,
+      exchange: it.source,
+      accountId: it.accountId,
+      side: it.side as TradeSide,
+      entryTime: it.entryTime,
+      exitTime: it.exitTime,
+      durationMs: it.exitTime.getTime() - it.entryTime.getTime(),
+      qty: it.qty,
+      entryPrice: it.entryPrice,
+      exitPrice: it.exitPrice,
+      grossPnl: it.grossProfit + it.swap,
+      fees: it.commission,
+      netPnl: it.netPnl,
+      returnPct: 0,
+      fillCount: 1,
+      result: it.netPnl > 1e-9 ? "win" : it.netPnl < -1e-9 ? "loss" : "breakeven",
+      lots: it.lots,
+      pips: it.pips,
+      swap: it.swap,
+    }
+  ));
 
   const trades = [...cryptoTrades, ...importedTrades].sort(
     (a, b) => a.exitTime.getTime() - b.exitTime.getTime(),
