@@ -111,7 +111,7 @@ describe('auth', () => {
 
   describe('handleLogin', () => {
     it('успех: ставит сессионную куку', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', passwordHash: 'h', tokenVersion: 0 });
+      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
       compare.mockResolvedValue(true);
       const result = await handleLogin({ username: 'user@x.com', password: 'pw' });
       expect(result).toEqual({ isSuccess: true });
@@ -123,7 +123,7 @@ describe('auth', () => {
       expect(result).toEqual({ isSuccess: false });
     });
     it('провал: неверный пароль', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', passwordHash: 'h', tokenVersion: 0 });
+      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
       compare.mockResolvedValue(false);
       const result = await handleLogin({ username: 'user@x.com', password: 'bad' });
       expect(result).toEqual({ isSuccess: false });
@@ -132,7 +132,7 @@ describe('auth', () => {
 
   describe('handleLogout', () => {
     it('удаляет сессионную куку', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', passwordHash: 'h', tokenVersion: 0 });
+      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
       compare.mockResolvedValue(true);
       await handleLogin({ username: 'user@x.com', password: 'pw' });
       expect(cookieStore.has(COOKIE_NAME)).toBe(true);

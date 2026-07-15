@@ -179,7 +179,7 @@ export async function verifyToken(token: string): Promise<string | null> {
 export async function handleLogin(credentials: { username: string, password: string }): Promise<{ isSuccess: boolean }> {
   const user = await prisma.user.findUnique({ where: { email: credentials.username } });
   if (!user) return { isSuccess: false };
-  const valid = await verifyPassword(credentials.password, user.passwordHash);
+  const valid = await verifyPassword(credentials.password, user.password ?? "");
   if (!valid) return { isSuccess: false };
   await createSessionCookie(user);
   return { isSuccess: true };
