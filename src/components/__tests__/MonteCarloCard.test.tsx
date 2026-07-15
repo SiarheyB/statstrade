@@ -15,12 +15,8 @@ vi.mock('@/lib/i18n/provider', () => ({
 
 // Mock format
 vi.mock('@/lib/format', () => ({
-  fmtPct: (val: number) => `${val}%`,
+  fmtPct: (val: number, digits = 1) => `${val.toFixed(digits)}%`,
   fmtUsd: (val: number) => `$${val}`,
-  fmtPct: (val: number, ...args: any[]) => {
-    // Simple mock: just return the value with a percent sign
-    return `${val}%`;
-  }
 }));
 
 // Mock scopeLabel
@@ -140,11 +136,12 @@ describe('MonteCarloCard', () => {
     });
 
     await waitFor(() => {
-      // Check for the specific formatted percentages (6 decimal places)
-      expect(screen.getAllByText(/5\.2%/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/-15\.000000000000002%/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/14\.999999999999991%/).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/44\.99999999999999%/).length).toBeGreaterThan(0);
+      // Форматируемые проценты (mock fmtPct с digits=0): -15%, 15%, 45%
+      // и riskOfRuinPct через toFixed(1): 5.2%
+      expect(screen.getAllByText("-15%").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("15%").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("45%").length).toBeGreaterThan(0);
+      expect(screen.getAllByText("5.2%").length).toBeGreaterThan(0);
     });
   });
 
