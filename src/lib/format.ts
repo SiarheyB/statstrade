@@ -52,11 +52,16 @@ export function fmtRatio(value: number, digits = 2): string {
 
 export function fmtNum(value: number, digits = 2): string {
   if (!Number.isFinite(value)) return "—";
-  return value.toLocaleString(numLocale(), { maximumFractionDigits: digits });
+  return value.toLocaleString(numLocale(), {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
 }
 
 export function fmtPrice(value: number): string {
   if (!Number.isFinite(value)) return "—";
+  const isZero = value === 0;
+  if (isZero) return "0.00";
   if (value >= 1000) return value.toLocaleString(numLocale(), { maximumFractionDigits: 2 });
   if (value >= 1) return value.toFixed(2);
   return value.toPrecision(4);
@@ -70,18 +75,17 @@ export function fmtDuration(ms: number): string {
   const hours = min / 60;
   if (hours < 24) return `${hours.toFixed(1)} ${ru ? "ч" : "h"}`;
   const days = hours / 24;
-  return `${days.toFixed(1)} ${ru ? "дн" : "d"}`;
+  const daysStr = Number.isInteger(days) ? String(days) : days.toFixed(1);
+  return `${daysStr} ${ru ? "дн" : "d"}`;
 }
 
-export function fmtDate(iso: string | Date): string {
-  const d = typeof iso === "string" ? new Date(iso) : iso;
+export function fmtDate(iso: string | number | Date): string {
+  const d = iso instanceof Date ? iso : new Date(iso);
   const timeZone = ianaFor(TZ);
   return d.toLocaleString(numLocale(), {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
     ...(timeZone ? { timeZone } : {}),
   });
 }
