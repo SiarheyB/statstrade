@@ -25,3 +25,13 @@ export type ParseResult = {
   balance: number | null; // final account balance from the report summary
   errors: string[];
 };
+
+// Candle type used by exitEfficiency / orderflow charting
+export type Candle = {
+  t: number;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v?: number;
+};

@@ -186,6 +186,14 @@ export function normalizeFill(
     feeCurrency: feeObj?.currency ?? null,
     realizedPnl: extractRealizedPnl(trade.info as Record<string, unknown> | undefined),
     takerOrMaker: (trade.takerOrMaker as string | undefined) ?? null,
-    timestamp: new Date(trade.timestamp ?? Date.now()),
+    timestamp: new Date(
+      typeof trade.timestamp === "number"
+        ? trade.timestamp
+        : typeof trade.timestamp === "string"
+          ? /^\d+$/.test(trade.timestamp)
+            ? parseInt(trade.timestamp, 10)
+            : trade.timestamp
+          : Date.now()
+    ),
   };
 }
