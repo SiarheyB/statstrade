@@ -1,60 +1,62 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GET } from '../route';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { asUser, asGuest, mockGetAuthUser } from "@/lib/__tests__/helpers/routeMocks";
+import { GET } from "@/app/api/orderflow/route";
 
-let mockUser: { id: string } = { id: 'test-user' };
+vi.mock("@/lib/orderflow", () => ({
+  computeOrderflow: vi.fn().mockResolvedValue({ bins: [], maxVol: 0 }),
+  fetchOrderflowCandles: vi.fn().mockResolvedValue([]),
+  computeDelta: vi.fn().mockResolvedValue({ series: [] }),
+  computeFootprint: vi.fn().mockResolvedValue({ candles: [] }),
+  computeBA: vi.fn().mockResolvedValue({ series: [] }),
+  computeBigTrades: vi.fn().mockResolvedValue([]),
+}));
 
-vi.mock('@/lib/api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
-  return {
-    ...actual,
-    getAuthUser: vi.fn().mockImplementation(() => Promise.resolve(mockUser)),
-    unauthorized: () => ({ status: 401, json: () => Promise.resolve({ error: 'Unauthorized' }) }),
-    badRequest: (msg: string) => ({ status: 400, json: () => Promise.resolve({ error: msg }) }),
-    serverError: (msg: string) => ({ status: 500, json: () => Promise.resolve({ error: msg }) }),
-  };
-});
+const base = "https://example.com/api/orderflow";
 
-describe('Orderflow API Integration Tests', () => {
+describe("GET /api/orderflow", () => {
   beforeEach(() => {
-    vi.useFakeTimers();
+    mockGetAuthUser.mockReset();
   });
 
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.clearAllMocks();
-  });
-
-  it('GET /orderflow?symbol=BTCUSDT returns 200 with valid params', async () => {
-    const req = new Request('http://localhost/api/orderflow?symbol=BTCUSDT&range=1d&tz=UTC');
-    const res = await GET(req);
-
-    expect(res.status).toBe(200);
-  });
-
-  it('GET /orderflow with empty symbol returns 400', async () => {
-    const req = new Request('http://localhost/api/orderflow?symbol=&range=1d&tz=UTC');
-    const res = await GET(req);
-
-    expect(res.status).toBe(400);
-    expect(res.json()).resolves.toEqual({ error: 'Некорректный символ' });
-  });
-
-  it('GET /orderflow with invalid range returns 400', async () => {
-    const req = new Request('http://localhost/api/orderflow?symbol=BTCUSDT&range=invalid&tz=UTC');
-    const res = await GET(req);
-
-    expect(res.status).toBe(400);
-    expect(res.json()).resolves.toEqual({ error: 'Неизвестный таймфрейм' });
-  });
-
-  it('GET /orderflow without auth returns 401', async () => {
-    const { getAuthUser: getAuthUserMock } = await import('@/lib/api');
-    getAuthUserMock.mockResolvedValueOnce(null);
-
-    const req = new Request('http://localhost/api/orderflow?symbol=BTCUSDT&range=1d&tz=UTC');
-    const res = await GET(req);
-
+  it("returns 401 when not authenticated", async () => {
+    asGuest();
+    const res = await GET(new Request(`${base}?symbol=BTCUSDT&range=1h`));
     expect(res.status).toBe(401);
-    expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
+  });
+
+  it("returns 400 for unknown timeframe", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?symbol=BTCUSDT&range=9h`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("таймфрейм") });
+  });
+
+  it("returns 400 for too-short symbol", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?symbol=BTC&range=1h`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("символ") });
+  });
+
+  it("returns 400 for invalid timezone", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?symbol=BTCUSDT&range=1h&tz=Mars/Phobos`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("часовой пояс") });
+  });
+
+  it("returns 200 with assembled payload for a valid request", async () => {
+    asUser();
+    const res = await GET(
+      new Request(`${base}?symbol=BTCUSDT&exchange=binance-futures&range=1h`),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.symbol).toBe("BTCUSDT");
+    expect(body.exchange).toBe("binance-futures");
+    expect(body.range).toBe("1h");
+    expect(body.heatmap).toBeDefined();
+    expect(body.candles).toEqual([]);
+    expect(body.timezone).toBe("auto");
   });
 });

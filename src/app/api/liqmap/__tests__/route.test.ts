@@ -1,54 +1,62 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { GET } from '../route';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { asUser, asGuest, mockGetAuthUser } from "@/lib/__tests__/helpers/routeMocks";
+import { GET } from "@/app/api/liqmap/route";
 
-let mockUser: { id: string } = { id: 'test-user' };
-
-vi.mock('@/lib/api', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/api')>('@/lib/api');
-  return {
-    ...actual,
-    getAuthUser: vi.fn().mockImplementation(() => Promise.resolve(mockUser)),
-    unauthorized: () => ({ status: 401, json: () => Promise.resolve({ error: 'Unauthorized' }) }),
-    badRequest: (msg: string) => ({ status: 400, json: () => Promise.resolve({ error: msg }) }),
-    serverError: (msg: string) => ({ status: 500, json: () => Promise.resolve({ error: msg }) }),
-  };
-});
-
-vi.mock('@/lib/liqmap', () => ({
-  computeLiqMap: vi.fn().mockResolvedValue({ heatmap: [] }), // Return non-null value to get 200
+vi.mock("@/lib/liqmap", () => ({
+  computeLiqMap: vi.fn().mockResolvedValue({ levels: [], maxVol: 0 }),
 }));
 
-describe('Liqmap API Integration Tests', () => {
+const base = "https://example.com/api/liqmap";
+
+describe("GET /api/liqmap", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    mockGetAuthUser.mockReset();
   });
 
-  it('GET /liqmap returns 200 with heatmap data', async () => {
-    const req = new Request('http://localhost/api/liqmap?exchange=all&symbol=BTCUSDT&tf=7d');
-    const res = await GET(req);
-
-    expect(res.status).toBe(200);
-    const data = await res.json(); // await the resolved JSON
-    expect(data).toHaveProperty('heatmap');
-  });
-
-  it('GET /liqmap without auth returns 401', async () => {
-    mockUser = null as any;
-
-    const req = new Request('http://localhost/api/liqmap?exchange=all&symbol=BTCUSDT&tf=7d');
-    const res = await GET(req);
-
+  it("returns 401 when not authenticated", async () => {
+    asGuest();
+    const res = await GET(new Request(`${base}?exchange=all&symbol=BTCUSDT&tf=7d`));
     expect(res.status).toBe(401);
-    expect(res.json()).resolves.toEqual({ error: 'Unauthorized' });
-
-    mockUser = { id: 'test-user' };
   });
 
-  it('GET /liqmap with invalid exchange returns 400', async () => {
-    const req = new Request('http://localhost/api/liqmap?exchange=invalid&symbol=BTCUSDT&tf=7d');
-    const res = await GET(req);
-
+  it("returns 400 for unknown exchange", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?exchange=invalid&symbol=BTCUSDT&tf=7d`));
     expect(res.status).toBe(400);
-    expect(res.json()).resolves.toEqual({ error: 'Неизвестная биржа' });
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("биржа") });
+  });
+
+  it("returns 400 for unknown timeframe", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?exchange=all&symbol=BTCUSDT&tf=9d`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("таймфрейм") });
+  });
+
+  it("returns 400 for too-short symbol", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?exchange=all&symbol=BTC&tf=7d`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("символ") });
+  });
+
+  it("returns 400 when computeLiqMap yields no data", async () => {
+    asUser();
+    const { computeLiqMap } = await import("@/lib/liqmap");
+    (computeLiqMap as unknown as vi.Mock).mockResolvedValueOnce(null);
+    const res = await GET(new Request(`${base}?exchange=all&symbol=BTCUSDT&tf=7d`));
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining("Нет данных") });
+  });
+
+  it("returns 200 with heatmap for a valid request", async () => {
+    asUser();
+    const res = await GET(new Request(`${base}?exchange=all&symbol=BTCUSDT&tf=7d`));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.exchange).toBe("all");
+    expect(body.symbol).toBe("BTCUSDT");
+    expect(body.tf).toBe("7d");
+    expect(body.heatmap).toBeDefined();
   });
 });
