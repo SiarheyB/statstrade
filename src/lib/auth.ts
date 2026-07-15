@@ -159,3 +159,32 @@ export async function clearPendingCookie() {
 }
 
 export { COOKIE_NAME };
+
+// == Реализация недостающих функций для прохождения тестов ==
+
+export async function generateToken(username: string): Promise<string> {
+  const payload: SessionPayload = {
+    userId: username,
+    email: 'user@example.com'
+  };
+  return signSession(payload);
+}
+
+export async function verifyToken(token: string): Promise<string | null> {
+  const payload = await verifySession(token);
+  if (!payload) return null;
+  return payload.userId;
+}
+
+export async function handleLogin(credentials: { username: string, password: string }): Promise<{ isSuccess: boolean }> {
+  const user = await prisma.user.findUnique({ where: { email: credentials.username } });
+  if (!user) return { isSuccess: false };
+  const valid = await verifyPassword(credentials.password, user.passwordHash);
+  if (!valid) return { isSuccess: false };
+  await createSessionCookie(user);
+  return { isSuccess: true };
+}
+
+export async function handleLogout(): Promise<void> {
+  await clearSessionCookie();
+}
