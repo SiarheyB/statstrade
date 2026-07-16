@@ -111,9 +111,9 @@ describe("format helpers", () => {
   // -------------------------------------------------------------------------
   describe("fmtDate & symbol formatters", () => {
     it("formats dates according to locale/timezone (date only)", () => {
-      const now = Date.now();
+      const ts = new Date("2024-01-15T12:30:45.123Z").getTime();
       const opts = { day: "2-digit", month: "2-digit", year: "numeric" } as const;
-      expect(fmtDate(now)).toBe(new Date(now).toLocaleDateString("en-US", opts));
+      expect(fmtDate(ts)).toBe(new Date(ts).toLocaleDateString("en-US", opts));
       expect(fmtDate("2024-01-15T12:30:45.123Z")).toBe(
         new Date("2024-01-15T12:30:45.123Z").toLocaleDateString("en-US", opts)
       );
