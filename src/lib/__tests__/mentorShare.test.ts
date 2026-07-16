@@ -27,7 +27,7 @@ vi.mock('@/lib/analytics/metrics', () => ({
   }),
 }));
 
-import { computePublicSummary } from '@/lib/mentorShare';
+import { computePublicSummary, generateShareToken } from '@/lib/mentorShare';
 
 describe('mentorShare module', () => {
   beforeEach(() => {
@@ -108,5 +108,80 @@ describe('mentorShare module', () => {
     // netPnl comes from the mocked computeMetrics (totalNetPnl: 100)
     expect(result.netPnl).toBe(100);
     expect(result.totalTrades).toBe(1);
+  });
+
+  it('generateShareToken returns a 48-char hex string (192 bits)', () => {
+    const token = generateShareToken();
+    expect(token).toMatch(/^[0-9a-f]{48}$/);
+    expect(generateShareToken()).not.toBe(generateShareToken());
+  });
+
+  it('covers imported trades branch (result win/loss/breakeven, grossPnl = netProfit + swap)', async () => {
+    mocks.importedTradeFindMany.mockResolvedValue([
+      {
+        accountId: 'acc1',
+        externalId: 'ext1',
+        symbol: 'BTC/USDT',
+        base: 'BTC',
+        quote: 'USDT',
+        market: 'spot',
+        source: 'bybit',
+        side: 'buy',
+        entryTime: new Date('2026-01-01T00:00:00Z'),
+        exitTime: new Date('2026-01-01T02:00:00Z'),
+        qty: 0.1,
+        entryPrice: 50000,
+        exitPrice: 52000,
+        grossProfit: 200,
+        swap: -5,
+        commission: 3,
+        netPnl: 192,
+        lots: 0.1,
+        pips: 50,
+      },
+    ]);
+    mocks.exchangeAccountFindMany.mockResolvedValue([{ balance: 5000 }]);
+
+    const result = await computePublicSummary('user123');
+    // 0 крипто + 1 импортированная
+    expect(result.totalTrades).toBe(1);
+    const { computeMetrics } = await import('@/lib/analytics/metrics');
+    const passedTrades = (computeMetrics as any).mock.calls[0][0];
+    expect(passedTrades[0].grossPnl).toBe(195); // netProfit + swap
+    expect(passedTrades[0].fees).toBe(3);
+    expect(passedTrades[0].result).toBe('win');
+    // capital = сумма балансов аккаунтов
+    expect(computeMetrics).toHaveBeenCalledWith(expect.any(Array), 5000);
+  });
+
+  it('classifies an imported trade as breakeven when netPnl ~ 0', async () => {
+    mocks.importedTradeFindMany.mockResolvedValue([
+      {
+        accountId: 'acc1',
+        externalId: 'ext2',
+        symbol: 'ETH/USDT',
+        base: 'ETH',
+        quote: 'USDT',
+        market: 'spot',
+        source: 'binance',
+        side: 'sell',
+        entryTime: new Date('2026-01-01T00:00:00Z'),
+        exitTime: new Date('2026-01-01T01:00:00Z'),
+        qty: 1,
+        entryPrice: 3000,
+        exitPrice: 3000,
+        grossProfit: 0,
+        swap: 0,
+        commission: 0,
+        netPnl: 0,
+        lots: 1,
+        pips: 0,
+      },
+    ]);
+
+    const result = await computePublicSummary('user123');
+    const { computeMetrics } = await import('@/lib/analytics/metrics');
+    const passedTrades = (computeMetrics as any).mock.calls[0][0];
+    expect(passedTrades[0].result).toBe('breakeven');
   });
 });
