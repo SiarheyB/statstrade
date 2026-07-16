@@ -9,7 +9,15 @@ import { POST } from "@/app/api/auth/login/route";
 import * as authModule from "@/lib/auth";
 import * as ratelimitModule from "@/lib/ratelimit";
 
-// Mock the auth module properly to avoid import errors
+vi.mock("@/lib/ratelimit", () => ({
+  rateLimit: vi.fn().mockReturnValue({ ok: true, retryAfterSec: 0 }),
+  clientIp: () => "127.0.0.1",
+}));
+
+vi.mock("@/lib/sync", () => ({
+  kickUserSync: vi.fn(),
+}));
+
 vi.mock("@/lib/auth", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/auth")>();
   return {
@@ -21,41 +29,24 @@ vi.mock("@/lib/auth", async (importOriginal) => {
   };
 });
 
-vi.mock("@/lib/ratelimit", () => ({
-  rateLimit: vi.fn().mockReturnValue({ ok: true, retryAfterSec: 0 }),
-  clientIp: () => "127.0.0.1",
-}));
-
-vi.mock("@/lib/sync", () => ({
-  kickUserSync: vi.fn(),
-}));
-
-vi.mock("@/lib/ratelimit", () => ({
-  rateLimit: vi.fn().mockReturnValue({ ok: true, retryAfterSec: 0 }),
-  clientIp: () => "127.0.0.1",
-}));
-
-vi.mock("@/lib/sync", () => ({
-  kickUserSync: vi.fn(),
-}));
-
 const base = "https://example.com/api/auth/login";
 
 describe("POST /api/auth/login", () => {
   beforeEach(() => {
     mockGetAuthUser.mockReset();
     mockPrisma.user.findUnique.mockReset();
+    ratelimitModule.rateLimit.mockReturnValue({ ok: true, retryAfterSec: 0 });
     authModule.verifyPassword.mockReset();
     authModule.createSessionCookie.mockReset();
     authModule.createPendingCookie.mockReset();
   });
 
-  it("returns 401 when not authenticated", async () => {
-    asGuest();
+  it("returns 400 when body is malformed", async () => {
+    asUser();
     const res = await POST(
-      new Request(base, { method: "POST", body: JSON.stringify({ email: "test@example.com", password: "password" }) })
+      new Request(base, { method: "POST", body: "not-json" })
     );
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(400);
   });
 
   it("returns 400 when email/password missing", async () => {
@@ -128,6 +119,7 @@ describe("POST /api/auth/login", () => {
 
   it("returns 500 when unexpected error occurs", async () => {
     asUser();
+    ratelimitModule.rateLimit.mockReturnValue({ ok: true, retryAfterSec: 0 });
     mockPrisma.user.findUnique.mockRejectedValueOnce(new Error("Database error"));
     const res = await POST(
       new Request(base, { method: "POST", body: JSON.stringify({ email: "test@example.com", password: "password" }) })

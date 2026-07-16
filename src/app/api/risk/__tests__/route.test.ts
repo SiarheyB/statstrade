@@ -12,24 +12,40 @@ vi.mock("@/lib/analytics/positions", () => ({
 }));
 
 vi.mock("@/lib/risk", () => ({
-  parseRiskProfile: vi.fn().mockImplementation((row) => ({
-    enabled: false,
-    maxStopsPerDay: null,
-    riskPerTrade: { on: false, value: 0, unit: "pct" as const },
-    lossLimits: {
-      day: { on: false, value: 0, unit: "pct" as const },
-      week: { on: false, value: 0, unit: "pct" as const },
-      month: { on: false, value: 0, unit: "pct" as const },
-      year: { on: false, value: 0, unit: "pct" as const },
-    },
-  })),
+  parseRiskProfile: vi.fn().mockImplementation((row) => {
+    if (!row) {
+      return {
+        enabled: false,
+        maxStopsPerDay: null,
+        riskPerTrade: { on: false, value: 0, unit: "pct" as const },
+        lossLimits: {
+          day: { on: false, value: 0, unit: "pct" as const },
+          week: { on: false, value: 0, unit: "pct" as const },
+          month: { on: false, value: 0, unit: "pct" as const },
+          year: { on: false, value: 0, unit: "pct" as const },
+        },
+      };
+    }
+
+    return {
+      enabled: !!row.enabled,
+      maxStopsPerDay: row.maxStopsPerDay ?? null,
+      riskPerTrade: row.riskPerTrade ? JSON.parse(row.riskPerTrade) : { on: false, value: 0, unit: "pct" as const },
+      lossLimits: row.lossLimits ? JSON.parse(row.lossLimits) : {
+        day: { on: false, value: 0, unit: "pct" as const },
+        week: { on: false, value: 0, unit: "pct" as const },
+        month: { on: false, value: 0, unit: "pct" as const },
+        year: { on: false, value: 0, unit: "pct" as const },
+      },
+    };
+  }),
   computeAccountRisk: vi.fn().mockImplementation(
     (accountId: string, trades: any[], balance: number | null, profile: any) => ({
       accountId,
-      enabled: false,
+      enabled: !!profile?.enabled,
       balance,
-      state: "off" as const,
-      limits: [],
+      state: profile?.enabled ? "ok" : "off",
+      limits: profile?.enabled ? [{ key: "stops", unit: "count", used: 0, limit: 5, pct: 0, state: "ok" }] : [],
     })
   ),
 }));
