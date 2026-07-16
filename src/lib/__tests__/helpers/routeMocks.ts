@@ -40,7 +40,11 @@ export const mockPrisma = {
   },
   exchangeAccount: { findMany: vi.fn().mockResolvedValue([]) },
   trade: { findMany: vi.fn().mockResolvedValue([]) },
-  fill: { count: vi.fn().mockResolvedValue(0) },
+  fill: {
+    count: vi.fn().mockResolvedValue(0),
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+  riskProfile: { findMany: vi.fn().mockResolvedValue([]) },
   importedTrade: { findMany: vi.fn().mockResolvedValue([]) },
   user: {
     findUnique: vi.fn().mockResolvedValue(null),
