@@ -9,7 +9,7 @@ vi.mock('bcrypt', () => ({
   default: { hash, compare },
 }));
 
-// --- Мок prisma (для handleLogin) ---
+// --- Мок prisma (для handleLogin + token-version cache) ---
 const findUnique = vi.fn();
 vi.mock('@/lib/db', () => ({
   prisma: { user: { findUnique: (...a: any[]) => findUnique(...a) } },
@@ -37,7 +37,9 @@ vi.mock('jose', () => {
     setIssuedAt() { return this; }
     setExpirationTime() { return this; }
     async sign() {
-      // Кодируем payload в base64url, чтобы verify мог его раскодировать
+      // jose кладёт claim `v` прямо в тело токена (signSession передаёт его
+      // вторым аргументом в конструктор, здесь это this.payload). Кодируем
+      // в base64url, чтобы jwtVerify мог раскодировать.
       return `fake.${Buffer.from(JSON.stringify(this.payload)).toString('base64url')}.sig`;
     }
   }
@@ -61,6 +63,13 @@ import {
   verifyToken,
   handleLogin,
   handleLogout,
+  createSessionCookie,
+  clearSessionCookie,
+  getSession,
+  createPendingCookie,
+  getPendingUserId,
+  clearPendingCookie,
+  invalidateTokenVersionCache,
   COOKIE_NAME,
 } from '@/lib/auth';
 
@@ -138,6 +147,88 @@ describe('auth', () => {
       expect(cookieStore.has(COOKIE_NAME)).toBe(true);
       await handleLogout();
       expect(cookieStore.has(COOKIE_NAME)).toBe(false);
+    });
+  });
+
+  describe('createSessionCookie / getSession / clearSessionCookie', () => {
+    it('getSession возвращает null если куки нет', async () => {
+      expect(await getSession()).toBeNull();
+    });
+
+    it('round-trip: куку ставим → getSession её читает', async () => {
+      await createSessionCookie({ userId: 'u1', email: 'a@b.com' });
+      expect(cookieStore.has(COOKIE_NAME)).toBe(true);
+      const session = await getSession();
+      expect(session).toEqual({ userId: 'u1', email: 'a@b.com' });
+    });
+
+    it('clearSessionCookie удаляет куку', async () => {
+      await createSessionCookie({ userId: 'u1', email: 'a@b.com' });
+      await clearSessionCookie();
+      expect(cookieStore.has(COOKIE_NAME)).toBe(false);
+      expect(await getSession()).toBeNull();
+    });
+  });
+
+  describe('token-version отзыв сессий', () => {
+    // versionCache — module-level, живёт между тестами; у каждого теста свой
+    // userId, чтобы кэш одного не влиял на другой.
+    it('verifySession возвращает null, если v токена != текущей версии', async () => {
+      findUnique.mockResolvedValue({ tokenVersion: 5 });
+      const token = await signSession({ userId: 'tv-a', email: 'a@b.com' }, 0);
+      // v=0 в токене, но в БД уже 5 → отозвано
+      expect(await verifySession(token)).toBeNull();
+    });
+
+    it('verifySession проходит при совпадении версий', async () => {
+      findUnique.mockResolvedValue({ tokenVersion: 3 });
+      const token = await signSession({ userId: 'tv-b', email: 'a@b.com' }, 3);
+      expect(await verifySession(token)).toEqual({ userId: 'tv-b', email: 'a@b.com' });
+    });
+
+    it('invalidateTokenVersionCache очищает кэш (дальше ходит в БД)', async () => {
+      // первый вызов кэширует v=0
+      findUnique.mockResolvedValue({ tokenVersion: 0 });
+      await verifySession(await signSession({ userId: 'tv-c', email: 'a@b.com' }, 0));
+      // меняем версию в БД и сбрасываем кэш
+      findUnique.mockResolvedValue({ tokenVersion: 9 });
+      invalidateTokenVersionCache('tv-c');
+      const token = await signSession({ userId: 'tv-c', email: 'a@b.com' }, 0);
+      // кэш сброшен, БД вернула 9 → v=0 в токене уже невалиден
+      expect(await verifySession(token)).toBeNull();
+    });
+  });
+
+  describe('pending 2FA cookie', () => {
+    const PENDING = 'ts_2fa_pending';
+
+    it('createPendingCookie + getPendingUserId round-trip', async () => {
+      await createPendingCookie('u1');
+      expect(cookieStore.has(PENDING)).toBe(true);
+      expect(await getPendingUserId()).toBe('u1');
+    });
+
+    it('getPendingUserId возвращает null без куки', async () => {
+      expect(await getPendingUserId()).toBeNull();
+    });
+
+    it('getPendingUserId возвращает null для битого токена', async () => {
+      cookieStore.set(PENDING, { value: 'bad.token' });
+      expect(await getPendingUserId()).toBeNull();
+    });
+
+    it('getPendingUserId возвращает null, если claim pending неверный', async () => {
+      // токен без pending=true (обычная сессия) не должен пройти
+      const sessionToken = await signSession({ userId: 'u1', email: 'a@b.com' });
+      cookieStore.set(PENDING, { value: sessionToken });
+      expect(await getPendingUserId()).toBeNull();
+    });
+
+    it('clearPendingCookie удаляет куку', async () => {
+      await createPendingCookie('u1');
+      await clearPendingCookie();
+      expect(cookieStore.has(PENDING)).toBe(false);
+      expect(await getPendingUserId()).toBeNull();
     });
   });
 });
