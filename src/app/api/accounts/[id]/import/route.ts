@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
+import { existsSync, writeFileSync, mkdirSync } from "fs";
+import { join } from "path";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
@@ -9,11 +11,26 @@ import type { MtFormat } from "@/lib/mt/types";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
-// Логи импорта включаются переменной окружения ENABLE_IMPORT_LOGS=true
-// (в .env / .env.production / docker-compose). По умолчанию — выключены.
+// Логи импорта пишутся в logs/import.log в корне проекта (создаётся при
+// старте роута) и дублируются в консоль. Включаются переменной окружения
+// ENABLE_IMPORT_LOGS=true (в .env / .env.production / docker-compose).
+// По умолчанию — выключены.
 const ENABLE_IMPORT_LOGS = process.env.ENABLE_IMPORT_LOGS === "true";
+const LOG_DIR = join(process.cwd(), "logs");
+if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
+const LOG_PATH = join(LOG_DIR, "import.log");
+
 function log(...args: unknown[]): void {
-  if (ENABLE_IMPORT_LOGS) console.info("[IMPORT]", ...args);
+  if (!ENABLE_IMPORT_LOGS) return;
+  const line = `[${new Date().toISOString()}] ${args
+    .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
+    .join(" ")}`;
+  console.info("[IMPORT]", ...args);
+  try {
+    writeFileSync(LOG_PATH, line + "\n", { flag: "a" });
+  } catch {
+    // писать в файл не удалось — не ломаем импорт из-за логов
+  }
 }
 
 // ---------- НАЧАЛО ЛОГИРОВАНИЯ ВСЕГО ИМПОРТА ----------
