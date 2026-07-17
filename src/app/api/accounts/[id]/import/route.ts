@@ -1,51 +1,28 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { existsSync, writeFileSync, mkdirSync } from "fs";
-import { join } from "path";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
 import type { MtFormat } from "@/lib/mt/types";
+import { logger } from "@/lib/logger";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
-
-// Логи импорта пишутся в logs/import.log в корне проекта (создаётся при
-// старте роута) и дублируются в консоль. Включаются переменной окружения
-// ENABLE_IMPORT_LOGS=true (в .env / .env.production / docker-compose).
-// По умолчанию — выключены.
-const ENABLE_IMPORT_LOGS = process.env.ENABLE_IMPORT_LOGS === "true";
-const LOG_DIR = join(process.cwd(), "logs");
-if (!existsSync(LOG_DIR)) mkdirSync(LOG_DIR, { recursive: true });
-const LOG_PATH = join(LOG_DIR, "import.log");
-
-function log(...args: unknown[]): void {
-  if (!ENABLE_IMPORT_LOGS) return;
-  const line = `[${new Date().toISOString()}] ${args
-    .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))
-    .join(" ")}`;
-  console.info("[IMPORT]", ...args);
-  try {
-    writeFileSync(LOG_PATH, line + "\n", { flag: "a" });
-  } catch {
-    // писать в файл не удалось — не ломаем импорт из-за логов
-  }
-}
 
 // ---------- НАЧАЛО ЛОГИРОВАНИЯ ВСЕГО ИМПОРТА ----------
 export async function POST(
   req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  params: { params: Promise<{ id: string }> },
 ) {
   const startTime = Date.now();
   // ЛОГИ: вход в роут
-  log("=== IMPORT START ===", { url: req.url });
+  logger.info("import", null, "=== IMPORT START ===", { url: req.url });
 
   const user = await getAuthUser();
-  log("AUTH", { userId: user?.userId ?? null });
+  logger.info("import", user?.userId ?? null, "AUTH", { userId: user?.userId ?? null });
   if (!user) {
-    log("UNAUTHORIZED", "No valid auth token");
+    logger.warn("import", null, "UNAUTHORIZED", { reason: "No valid auth token" });
     return unauthorized();
   }
   const { id } = await params;
@@ -54,9 +31,13 @@ export async function POST(
     where: { id, userId: user.userId },
     select: { id: true, source: true, accountCurrency: true },
   });
-  log("account lookup", { found: !!account, source: account?.source });
-  if (!account) return badRequest("Аккаунт не найден");
+  logger.info("import", account?.id ?? null, "account lookup", { found: !!account, source: account?.source });
+  if (!account) {
+    logger.warn("import", user.userId, "Account not found", { accountId: id });
+    return badRequest("Аккаунт не найден");
+  }
   if (account.source !== "mt4" && account.source !== "mt5") {
+    logger.warn("import", account.id, "Invalid account source for import", { source: account.source });
     return badRequest("Импорт доступен только для аккаунтов MetaTrader");
   }
 
@@ -65,22 +46,28 @@ export async function POST(
   try {
     form = await req.formData();
   } catch {
-    log("formData parse failed");
+    logger.error("import", account.id, "formData parse failed", {});
     return badRequest("Ожидается multipart/form-data запрос");
   }
   const file = form.get("file");
   const dryRun = form.get("dryRun") === "1";
-  log("file received", {
+  logger.info("import", account.id, "file received", {
     hasFile: file instanceof File,
     size: file instanceof File ? file.size : 0,
     dryRun,
     originalName: file instanceof File ? file.name : null
   });
-  if (!(file instanceof File)) return badRequest("Файл не выбран");
-  if (file.size > MAX_BYTES) return badRequest("Файл слишком большой (макс. 10 МБ)");
+  if (!(file instanceof File)) {
+    logger.error("import", account.id, "File not provided in request", {});
+    return badRequest("Файл не выбран");
+  }
+  if (file.size > MAX_BYTES) {
+    logger.error("import", account.id, "File too large", { size: file.size, max: MAX_BYTES });
+    return badRequest("Файл слишком большой (макс. 10 МБ)");
+  }
 
   const buf = Buffer.from(await file.arrayBuffer());
-  log("buffer size", buf.length);
+  logger.info("import", account.id, "buffer size", buf.length);
   let html: string | undefined;
   const encodings = ["utf-8", "utf-16le", "windows-1251", "utf-16be"];
   for (const encoding of encodings) {
@@ -102,23 +89,24 @@ export async function POST(
         decoded.includes("Время закрытия")
       ) {
         html = decoded;
-        log("encoding detection SUCCESS", encoding);
+        logger.info("import", account.id, "encoding detection SUCCESS", { encoding });
         break;
       }
     } catch (e) {
-      log("encoding detection FAILED", encoding, (e as Error).message);
+      logger.warn("import", account.id, "encoding detection FAILED", { encoding, error: (e as Error).message });
     }
   }
   if (!html) {
     html = buf.toString("utf-8");
-    log("encoding fallback to utf-8");
+    logger.info("import", account.id, "encoding fallback to utf-8");
   }
-  log("decoded html length", html?.length ?? 0);
+  logger.info("import", account.id, "decoded html length", html?.length ?? 0);
 
   // ----------  ПАРСИНГ ----------
   const { format, trades, balance, errors } = parseStatement(html, account.source as MtFormat);
-  log("parse result", { format, tradeCount: trades.length, balance, errorCount: errors.length });
+  logger.info("import", account.id, "parse result", { format, tradeCount: trades.length, balance, errorCount: errors.length });
   if (trades.length === 0) {
+    logger.error("import", account.id, "No closed trades found in file", { errors });
     return badRequest(errors[0] ?? "В файле не найдено закрытых сделок");
   }
 
@@ -133,7 +121,7 @@ export async function POST(
   };
   const netTotal = rows.reduce((s, r) => s + r.netPnl, 0);
   const deposit = balance != null ? Math.round((balance - netTotal) * 100) / 100 : null;
-  log("prepared data", {
+  logger.info("import", account.id, "prepared data", {
     rowsCount: rows.length,
     batch,
     symbols,
@@ -141,9 +129,9 @@ export async function POST(
     deposit,
   });
 
-  // ----------  ОБРОБКА dryRun ----------
+  // ----------  ОБРАБОТКА dryRun ----------
   if (dryRun) {
-    log("dry-run response", { parsed: rows.length, batch });
+    logger.info("import", account.id, "dry-run response", { parsed: rows.length, batch });
     return NextResponse.json({
       preview: true,
       format,
@@ -176,7 +164,7 @@ export async function POST(
       },
     });
     bumpStatsVersion(user.userId);
-    log("DB upsert SUCCESS", {
+    logger.info("import", account.id, "DB upsert SUCCESS", {
       imported: res.count,
       skipped: rows.length - res.count,
       batch,
@@ -194,11 +182,17 @@ export async function POST(
       errors,
     });
   } catch (err) {
-    log("ERROR", { message: (err as Error).message, stack: (err as Error).stack });
+    logger.error("import", account.id, "Database error during import", {
+      message: (err as Error).message,
+      stack: (err as Error).stack
+    });
     return serverError((err as Error).message);
   } finally {
     // LOG END
-    log("IMPORT_END", { accountId: id, durationMs: Date.now() - startTime });
+    logger.info("import", account?.id ?? null, "IMPORT_END", {
+      accountId: id,
+      durationMs: Date.now() - startTime
+    });
   }
 }
 
@@ -207,39 +201,45 @@ export async function POST(
 // -------------------------------------------------------------------
 export async function DELETE(
   _req: Request,
-  { params }: { params: Promise<{ id: string }> },
+  params: { params: Promise<{ id: string }> },
 ) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   const { id } = await params;
-  log("DELETE_START", { userId: user.userId, accountId: id });
+  logger.info("import", user.userId, "DELETE_START", { userId: user.userId, accountId: id });
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
     select: { id: true },
   });
-  log("account lookup", { found: !!account });
-  if (!account) return badRequest("Аккаунт не найден");
+  logger.info("import", account?.id ?? null, "account lookup", { found: !!account });
+  if (!account) {
+    logger.warn("import", user.userId, "Account not found for DELETE", { accountId: id });
+    return badRequest("Аккаунт не найден");
+  }
 
   const latest = await prisma.importedTrade.findFirst({
     where: { accountId: id, importBatch: { not: null } },
     orderBy: { importedAt: "desc" },
     select: { importBatch: true },
   });
-  log("latest batch", { batch: latest?.importBatch ?? null });
-  if (!latest?.importBatch) return badRequest("Нет загрузок для отката");
+  logger.info("import", account.id, "latest batch", { batch: latest?.importBatch ?? null });
+  if (!latest?.importBatch) {
+    logger.warn("import", account.id, "No imports found for rollback", { accountId: id });
+    return badRequest("Нет загрузок для отката");
+  }
 
   try {
     const res = await prisma.importedTrade.deleteMany({
       where: { accountId: id, importBatch: latest.importBatch },
     });
     bumpStatsVersion(user.userId);
-    log("DELETE_SUCCESS", { deleted: res.count, batch: latest.importBatch });
+    logger.info("import", account.id, "DELETE_SUCCESS", { deleted: res.count, batch: latest.importBatch });
     return NextResponse.json({ deleted: res.count });
   } catch (err) {
-    log("DELETE_ERROR", { message: (err as Error).message });
+    logger.error("import", account.id, "Database error during DELETE", { message: (err as Error).message });
     return serverError((err as Error).message);
   } finally {
-    log("DELETE_END", { accountId: id });
+    logger.info("import", account?.id ?? null, "DELETE_END", { accountId: id });
   }
 }
