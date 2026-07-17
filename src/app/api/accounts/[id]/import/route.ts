@@ -31,7 +31,7 @@ export async function POST(
     log("UNAUTHORIZED", "No valid auth token");
     return unauthorized();
   }
-  const { id } = await params;
+  const { id } = params;
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
@@ -43,6 +43,7 @@ export async function POST(
     return badRequest("Импорт доступен только для аккаунтов MetaTrader");
   }
 
+  // ----------  FORM DATA ----------
   let form: FormData;
   try {
     form = await req.formData();
@@ -52,11 +53,17 @@ export async function POST(
   }
   const file = form.get("file");
   const dryRun = form.get("dryRun") === "1";
-  log("file received", { hasFile: file instanceof File, size: file instanceof File ? file.size : 0, dryRun });
+  log("file received", {
+    hasFile: file instanceof File,
+    size: file instanceof File ? file.size : 0,
+    dryRun,
+    originalName: file instanceof File ? file.name : null
+  });
   if (!(file instanceof File)) return badRequest("Файл не выбран");
   if (file.size > MAX_BYTES) return badRequest("Файл слишком большой (макс. 10 МБ)");
 
   const buf = Buffer.from(await file.arrayBuffer());
+  log("buffer size", buf.length);
   let html: string | undefined;
   const encodings = ["utf-8", "utf-16le", "windows-1251", "utf-16be"];
   for (const encoding of encodings) {
@@ -89,22 +96,35 @@ export async function POST(
     html = buf.toString("utf-8");
     log("encoding fallback to utf-8");
   }
+  log("decoded html length", html?.length ?? 0);
 
+  // ----------  ПАРСИНГ ----------
   const { format, trades, balance, errors } = parseStatement(html, account.source as MtFormat);
   log("parse result", { format, tradeCount: trades.length, balance, errorCount: errors.length });
   if (trades.length === 0) {
     return badRequest(errors[0] ?? "В файле не найдено закрытых сделок");
   }
 
+  // ----------  ПОДГОТОВКА ДАННЫХ ----------
   const batch = randomUUID();
   const rows = trades.map((t) => toImportedTrade(t, account, account.source, batch));
   const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();
   const times = rows.map((r) => r.exitTime.getTime());
-  const dateRange = { from: new Date(Math.min(...times)), to: new Date(Math.max(...times)) };
+  const dateRange: { from: Date; to: Date } = {
+    from: new Date(Math.min(...times)),
+    to: new Date(Math.max(...times))
+  };
   const netTotal = rows.reduce((s, r) => s + r.netPnl, 0);
   const deposit = balance != null ? Math.round((balance - netTotal) * 100) / 100 : null;
-  log("prepared data", { rowsCount: rows.length, batch, symbols, netTotal, deposit });
+  log("prepared data", {
+    rowsCount: rows.length,
+    batch,
+    symbols,
+    netTotal,
+    deposit,
+  });
 
+  // ----------  ОБРОБКА dryRun ----------
   if (dryRun) {
     log("dry-run response", { parsed: rows.length, batch });
     return NextResponse.json({
@@ -126,6 +146,7 @@ export async function POST(
     });
   }
 
+  // ----------  ЗАПИСЬ В БАЗУ ----------
   try {
     const res = await prisma.importedTrade.createMany({ data: rows, skipDuplicates: true });
     await prisma.exchangeAccount.update({
@@ -138,7 +159,12 @@ export async function POST(
       },
     });
     bumpStatsVersion(user.userId);
-    log("DB upsert SUCCESS", { imported: res.count, skipped: rows.length - res.count, batch, netTotal });
+    log("DB upsert SUCCESS", {
+      imported: res.count,
+      skipped: rows.length - res.count,
+      batch,
+      netTotal: rows.reduce((s, r) => s + r.netPnl, 0)
+    });
     return NextResponse.json({
       imported: res.count,
       skipped: rows.length - res.count,
@@ -154,10 +180,14 @@ export async function POST(
     log("ERROR", { message: (err as Error).message });
     return serverError((err as Error).message);
   } finally {
+    // LOG END
     log("END", { accountId: id });
   }
 }
 
+// -------------------------------------------------------------------
+//  DELETE /api/accounts/[id]/import (откат последней партии)
+// -------------------------------------------------------------------
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -166,7 +196,6 @@ export async function DELETE(
 
   const user = await getAuthUser();
   if (!user) return unauthorized();
-  const { id } = await params;
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
