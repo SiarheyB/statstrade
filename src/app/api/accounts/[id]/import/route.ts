@@ -20,7 +20,7 @@ function log(...args: unknown[]): void {
 // ---------- НАЧАЛО ЛОГИРОВАНИЯ ВСЕГО ИМПОРТА ----------
 export async function POST(
   req: Request,
-  { params }: { params: { id: string } },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   // ЛОГИ: вход в роут
   log("=== IMPORT START ===", { url: req.url });
@@ -31,7 +31,7 @@ export async function POST(
     log("UNAUTHORIZED", "No valid auth token");
     return unauthorized();
   }
-  const { id } = params;
+  const { id } = await params;
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
@@ -190,12 +190,12 @@ export async function POST(
 // -------------------------------------------------------------------
 export async function DELETE(
   _req: Request,
-  { params }: { id: string },
+  { params }: { params: Promise<{ id: string }> },
 ) {
-  log("DELETE START", { userId: (await getAuthUser()).userId, accountId: (await params).id });
-
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const { id } = await params;
+  log("DELETE START", { userId: user.userId, accountId: id });
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
