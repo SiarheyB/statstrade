@@ -12,7 +12,6 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 // Логи импорта включаются переменной окружения ENABLE_IMPORT_LOGS=true
 // (в .env / .env.production / docker-compose). По умолчанию — выключены.
 const ENABLE_IMPORT_LOGS = process.env.ENABLE_IMPORT_LOGS === "true";
-
 function log(...args: unknown[]): void {
   if (ENABLE_IMPORT_LOGS) console.info("[IMPORT]", ...args);
 }
@@ -22,6 +21,7 @@ export async function POST(
   req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
+  const startTime = Date.now();
   // ЛОГИ: вход в роут
   log("=== IMPORT START ===", { url: req.url });
 
@@ -177,11 +177,11 @@ export async function POST(
       errors,
     });
   } catch (err) {
-    log("ERROR", { message: (err as Error).message });
+    log("ERROR", { message: (err as Error).message, stack: (err as Error).stack });
     return serverError((err as Error).message);
   } finally {
     // LOG END
-    log("END", { accountId: id });
+    log("IMPORT_END", { accountId: id, durationMs: Date.now() - startTime });
   }
 }
 
@@ -195,7 +195,7 @@ export async function DELETE(
   const user = await getAuthUser();
   if (!user) return unauthorized();
   const { id } = await params;
-  log("DELETE START", { userId: user.userId, accountId: id });
+  log("DELETE_START", { userId: user.userId, accountId: id });
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
@@ -217,12 +217,12 @@ export async function DELETE(
       where: { accountId: id, importBatch: latest.importBatch },
     });
     bumpStatsVersion(user.userId);
-    log("DELETE SUCCESS", { deleted: res.count, batch: latest.importBatch });
+    log("DELETE_SUCCESS", { deleted: res.count, batch: latest.importBatch });
     return NextResponse.json({ deleted: res.count });
   } catch (err) {
-    log("DELETE ERROR", { message: (err as Error).message });
+    log("DELETE_ERROR", { message: (err as Error).message });
     return serverError((err as Error).message);
   } finally {
-    log("DELETE END", { accountId: id });
+    log("DELETE_END", { accountId: id });
   }
 }
