@@ -31,7 +31,7 @@ export async function POST(
     log("UNAUTHORIZED", "No valid auth token");
     return unauthorized();
   }
-  const { id } = params;
+  const { id } = await params;
 
   const account = await prisma.exchangeAccount.findFirst({
     where: { id, userId: user.userId },
