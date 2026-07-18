@@ -108,14 +108,14 @@ export async function DELETE(req: Request) {
   }
 
   const body = await req.json();
-  const ids = Array.isArray(body.ids) ? body.ids : [];
+  const ids = (Array.isArray(body.ids) ? body.ids : []) as string[];
 
   if (!ids.length) {
     return NextResponse.json({ error: "ids array is required" }, { status: 400 });
   }
 
   // Validate all IDs are UUIDs
-  const invalidIds = ids.filter(id => !isValidUUID(id));
+  const invalidIds = ids.filter((id: string) => !isValidUUID(id));
   if (invalidIds.length > 0) {
     return NextResponse.json(
       { error: `Invalid ID format: ${invalidIds.join(", ")}` },

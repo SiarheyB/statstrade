@@ -6,7 +6,7 @@ import { Pagination } from './components/Pagination';
 import { DeleteModal } from './components/DeleteModal';
 import { useState, useEffect, useCallback } from 'react';
 
-export const dynamic = 'force-dynamic';
+// Dynamic configuration removed - uses default dynamic behavior;
 
 // Собираем query-string из page/limit/filters, отбрасывая пустые значения.
 function buildQuery(page: number, limit: number, filters: Record<string, any>): string {
