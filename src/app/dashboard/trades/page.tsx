@@ -251,7 +251,7 @@ export default function TradesPage() {
       t("trades.export.open"), t("trades.export.close"), t("trades.export.durationMin"),
       t("trades.col.qty"), t("trades.col.entry"), t("trades.col.exit"), t("trades.col.stop"),
       t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
-      t("trades.export.result"), t("trades.col.lots"), t("trades.col.pips"), t("trades.col.swap"),
+      t("trades.export.result"), t("trades.col.pips"), t("trades.col.swap"),
       t("trades.col.pattern"), t("trades.col.entryPoint"),
       t("trades.col.entryType"), t("trades.col.mistake"),
     ];
@@ -265,7 +265,7 @@ export default function TradesPage() {
         fmtDate(tr.entryTime),
         fmtDate(tr.exitTime),
         Math.round(tr.durationMs / 60000),
-        tr.qty.toFixed(6),
+        tr.lots != null ? tr.lots.toFixed(2) : tr.qty.toFixed(6),
         tr.entryPrice,
         tr.exitPrice,
         a.stopLoss ?? "",
@@ -274,7 +274,6 @@ export default function TradesPage() {
         tr.returnPct.toFixed(2),
         tr.netPnl.toFixed(2),
         resultLabel(tr.result),
-        tr.lots ?? "",
         tr.pips ?? "",
         tr.swap ?? "",
         a.pattern ?? "",
@@ -435,7 +434,7 @@ export default function TradesPage() {
                       <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.entryTime)}</td>
                       <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.exitTime)}</td>
                       <td className="px-3 py-2 text-muted">{fmtDuration(tr.durationMs)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtNum(tr.qty, 4)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{tr.lots != null ? fmtNum(tr.lots, 2) : fmtNum(tr.qty, 4)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.entryPrice)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.exitPrice)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${tr.returnPct >= 0 ? "text-profit" : "text-loss"}`}>{fmtPct(tr.returnPct)}</td>
@@ -449,9 +448,6 @@ export default function TradesPage() {
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             {tr.lots != null && (
                               <>
-                                <DetailField label={t("trades.col.lots")}>
-                                  <span className="text-sm tabular-nums">{fmtNum(tr.lots, 2)}</span>
-                                </DetailField>
                                 <DetailField label={t("trades.col.pips")}>
                                   <span className={`text-sm tabular-nums ${(tr.pips ?? 0) >= 0 ? "text-profit" : "text-loss"}`}>
                                     {tr.pips != null ? tr.pips.toFixed(1) : "—"}
