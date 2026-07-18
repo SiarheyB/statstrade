@@ -1,24 +1,11 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, screen, act } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import LogsPage from '../page';
-
-// Mock the entire log.service module
-vi.mock('@/lib/log.service', () => {
-  return {
-    LogService: {
-      fetchPage: vi.fn(),
-      deleteMany: vi.fn(),
-      record: vi.fn(),
-    },
-  };
-});
-
-import * as logServiceMock from '@/lib/log.service';
 
 const mockFetchPageResponse = {
   data: [
     {
-      id: '1',
+      id: '550e8400-e29b-41d4-a716-446655440000',
       module: 'import',
       accountId: 'acc1',
       eventType: 'FILE_RECEIVED',
@@ -35,7 +22,11 @@ const mockFetchPageResponse = {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  logServiceMock.LogService.fetchPage.mockResolvedValue(mockFetchPageResponse);
+  // Mock global.fetch — the component calls fetch('/api/admin/logs?...') internally
+  global.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve(mockFetchPageResponse),
+  });
 });
 
 describe('LogsPage', () => {
@@ -45,16 +36,16 @@ describe('LogsPage', () => {
   });
 
   it('renders error when fetch fails', async () => {
-    logServiceMock.LogService.fetchPage.mockRejectedValue(new Error('Test error'));
+    global.fetch = vi.fn().mockRejectedValue(new Error('Network error'));
     render(<LogsPage />);
-    // The page shows the error message from the caught error
-    expect(await screen.findByText('Test error')).toBeInTheDocument();
+    // The page shows the error message from the caught fetch error
+    expect(await screen.findByText('Network error')).toBeInTheDocument();
   });
 
   it('applies filters and fetches logs', async () => {
     const mockData = [
       {
-        id: '1',
+        id: '550e8400-e29b-41d4-a716-446655440000',
         module: 'import',
         accountId: 'acc1',
         eventType: 'FILE_RECEIVED',
@@ -70,12 +61,13 @@ describe('LogsPage', () => {
       limit: 20,
       pages: 1,
     };
-    logServiceMock.LogService.fetchPage.mockResolvedValue(mockResponse);
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(mockResponse),
+    });
 
     render(<LogsPage />);
     // Wait for data to load
     expect(await screen.findByText(/File received/)).toBeInTheDocument();
-    // verify fetchPage called
-    expect(logServiceMock.LogService.fetchPage).toHaveBeenCalledWith(1, 20, expect.any(Object));
   });
 });

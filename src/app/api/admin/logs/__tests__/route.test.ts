@@ -29,7 +29,7 @@ const mockNonAdminSession = {
 const mockLogsResponse = {
   data: [
     {
-      id: '1',
+      id: '550e8400-e29b-41d4-a716-446655440000',
       module: 'import',
       accountId: 'acc1',
       eventType: 'FILE_RECEIVED',
@@ -133,7 +133,7 @@ describe('DELETE /api/admin/logs', () => {
 
     const request = new Request('http://localhost/api/admin/logs', {
       method: 'DELETE',
-      body: JSON.stringify({ ids: ['1', '2'] }),
+      body: JSON.stringify({ ids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001'] }),
       headers: { 'Content-Type': 'application/json' },
     });
     const response = await DELETE(request);
@@ -160,7 +160,7 @@ describe('DELETE /api/admin/logs', () => {
 
     const request = new Request('http://localhost/api/admin/logs', {
       method: 'DELETE',
-      body: JSON.stringify({ ids: ['1', '2', '3'] }),
+      body: JSON.stringify({ ids: ['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002'] }),
       headers: { 'Content-Type': 'application/json' },
     });
     const response = await DELETE(request);
@@ -168,8 +168,8 @@ describe('DELETE /api/admin/logs', () => {
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.success).toBe(true);
-    expect(data.deletedIds).toEqual(['1', '2', '3']);
-    expect(LogService.deleteMany).toHaveBeenCalledWith(['1', '2', '3']);
+    expect(data.deletedIds).toEqual(['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002']);
+    expect(LogService.deleteMany).toHaveBeenCalledWith(['550e8400-e29b-41d4-a716-446655440000', '550e8400-e29b-41d4-a716-446655440001', '550e8400-e29b-41d4-a716-446655440002']);
   });
 
   it('handles delete errors gracefully', async () => {
@@ -178,7 +178,7 @@ describe('DELETE /api/admin/logs', () => {
 
     const request = new Request('http://localhost/api/admin/logs', {
       method: 'DELETE',
-      body: JSON.stringify({ ids: ['1'] }),
+      body: JSON.stringify({ ids: ['550e8400-e29b-41d4-a716-446655440000'] }),
       headers: { 'Content-Type': 'application/json' },
     });
     const response = await DELETE(request);

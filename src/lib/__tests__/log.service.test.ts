@@ -63,20 +63,11 @@ describe('LogService', () => {
       expect.objectContaining({
         where: expect.objectContaining({
           module: 'import',
-          OR: [
-            { message: { contains: 'file received', mode: 'insensitive' } },
-            {
-              details: {
-                path: [],
-                string_contains: 'file received',
-              },
-            },
-          ],
+          message: { contains: 'file received', mode: 'insensitive' },
         }),
         skip: 0,
         take: 20,
         orderBy: { timestamp: 'desc' },
-        include: { details: true },
       })
     );
     expect(prisma.importLog.count).toHaveBeenCalledWith({
