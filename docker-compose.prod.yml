@@ -77,10 +77,11 @@ services:
     container_name: tradestats-app
     restart: unless-stopped
     # Главный «виновник» прошлого OOM (next-server раздувался до ~6.6 ГБ на тяжёлом
-    # orderflow). Жёсткий потолок 1.5 ГБ: нормальная работа укладывается в ~0.3–0.6 ГБ,
-    # а runaway будет прибит и перезапущен, не уронив весь сервер.
-    mem_limit: 1536m
-    mem_reservation: 384m
+    # orderflow). Увеличили до 3 ГБ: импорт отчётов (парсинг HTML + тысячи сделок)
+    # требует дополнительной памяти; без этого контейнер убивается OOM и nginx
+    # отдаёт offline.html — «Сервер временно недоступен».
+    mem_limit: 3072m
+    mem_reservation: 512m
     depends_on:
       db:
         condition: service_healthy
@@ -98,6 +99,9 @@ services:
       # Внутри compose-сети collector доступен по имени сервиса. Переопределить
       # можно в .env. COLLECTOR_METRICS_TOKEN/ADMIN_EMAILS задаются в .env.
       COLLECTOR_URL: ${COLLECTOR_URL:-http://collector:8080}
+      # Логи импорта в БД (ImportLog). Без «true» LogService.record() молча
+      # возвращается — логи не пишутся, диагностика импорта слепая.
+      ENABLE_IMPORT_LOGS: ${ENABLE_IMPORT_LOGS:-true}
     # Порт наружу НЕ публикуем: вход через edge (nginx ниже). Так во время
     # рестартов app (деплой watchtower, OOM) туннель получает красивую страницу
     # «технический перерыв», а не голый 502.
