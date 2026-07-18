@@ -108,6 +108,6 @@ export async function recordAudit(
  */
 export async function adminCheck(): Promise<boolean> {
   const session = await getSession();
-  if (!session?.user?.email) return false;
+  if (!session?.email) return false;
   return isAdminEmail(session.email);
 }

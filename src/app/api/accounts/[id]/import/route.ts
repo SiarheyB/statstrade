@@ -13,7 +13,7 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 // ---------- НАЧАЛО ЛОГИРОВАНИЯ ВСЕГО ИМПОРТА ----------
 export async function POST(
   req: Request,
-  params: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const startTime = Date.now();
   // ЛОГИ: вход в роут
@@ -201,7 +201,7 @@ export async function POST(
 // -------------------------------------------------------------------
 export async function DELETE(
   _req: Request,
-  params: { params: Promise<{ id: string }> },
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
