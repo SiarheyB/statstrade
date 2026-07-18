@@ -35,6 +35,8 @@ async function buildBase(
   userId: string,
   accountId: string,
   market: string,
+  fromMs: number | null,
+  toMs: number | null,
 ): Promise<BaseData> {
   // Restrict to accounts owned by this user.
   const accountRows = await prisma.exchangeAccount.findMany({
@@ -57,6 +59,12 @@ async function buildBase(
   }
   if (market === "spot") where.market = "spot";
   else if (market === "futures") where.market = { in: ["swap", "future"] };
+  if (fromMs != null || toMs != null) {
+    const exitTime: Prisma.DateTimeFilter = {};
+    if (fromMs != null) exitTime.gte = new Date(fromMs);
+    if (toMs != null) exitTime.lte = new Date(toMs);
+    where.exitTime = exitTime;
+  }
   // Symbol is filtered post-merge by canonical form (so "BTC/USDT" and
   // "BTCUSDT" collapse to one), not via the raw-symbol SQL where.
 
@@ -104,6 +112,12 @@ async function buildBase(
     account: { userId },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
+  if (fromMs != null || toMs != null) {
+    const exitTime: Prisma.DateTimeFilter = {};
+    if (fromMs != null) exitTime.gte = new Date(fromMs);
+    if (toMs != null) exitTime.lte = new Date(toMs);
+    importedWhere.exitTime = exitTime;
+  }
   const importedRows = includeImported
     ? await prisma.importedTrade.findMany({ where: importedWhere, orderBy: { exitTime: "asc" } })
     : [];
@@ -203,22 +217,29 @@ export async function GET(req: Request) {
   const pattern = url.searchParams.get("pattern") ?? "all";
   const initialCapital = Number(url.searchParams.get("initialCapital") ?? "10000");
 
+  // Date range (ms) — вычисляем до кэша, чтобы фильтровать на уровне SQL.
+  const fromMs = from ? new Date(from).getTime() : null;
+  const toMs = to ? new Date(to).getTime() : null;
+
   try {
     // Кэш тяжёлой базы: юзер + версия его данных (любая запись бампает версию,
     // и старые entries просто перестают находиться) + фильтры уровня выборки.
+    // Дата-диапазон тоже часть ключа: при выборе "7d" / "30d" / "90d" на дашборде
+    // кэшируем только эти сделки, а не весь портфель — холодный старт быстрее.
     const baseKey = JSON.stringify([
-      "base", user.userId, statsVersion(user.userId), accountId, market,
+      "base", user.userId, statsVersion(user.userId), accountId, market, from, to,
     ]);
     let base = getCached<BaseData>(baseKey);
     if (!base) {
-      base = await buildBase(user.userId, accountId, market);
+      base = await buildBase(user.userId, accountId, market, fromMs, toMs);
       setCached(baseKey, base);
     }
 
     // Date range: keep trades CLOSED within [from, to] (exit time).
+    // Фильтр уже применён на уровне SQL в buildBase(), но дублируем здесь
+    // для подстраховки (если кэш вернул данные без этого фильтра из-за
+    // смены версии ключа — см. statsVersion).
     let filteredTrades = base.trades;
-    const fromMs = from ? new Date(from).getTime() : null;
-    const toMs = to ? new Date(to).getTime() : null;
     if (fromMs != null || toMs != null) {
       filteredTrades = filteredTrades.filter((t) => {
         const x = t.exitTime.getTime();
