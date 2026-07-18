@@ -5,10 +5,15 @@ import type { NextConfig } from "next";
 // Insights (аналитика). Это закрывает подгрузку чужих скриптов/фреймов при
 // XSS-инъекции, кликджекинг (frame-ancestors) и утечку форм на чужой origin
 // (form-action).
+// upgrade-insecure-requests — браузер принудительно поднимает все HTTP-запросы
+// до HTTPS (Mixed Content). Tailscale Funnel отдаёт страницу через HTTPS, но
+// запросы к бэкенду идут через nginx по HTTP — без этого флага браузер блокирует
+// их как небезопасные.
 // img-src https: — картинки новостей приходят с произвольных доменов фидов.
 // В dev Turbopack использует eval и ws — добавляем только там.
 const dev = process.env.NODE_ENV === "development";
 const CSP = [
+  "upgrade-insecure-requests",
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""} https://challenges.cloudflare.com https://accounts.google.com https://static.cloudflareinsights.com`,
   "style-src 'self' 'unsafe-inline' https://accounts.google.com",
