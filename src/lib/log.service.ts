@@ -14,6 +14,16 @@ export class LogService {
   ): Promise<void> {
     // Check if logging is enabled via environment variable
     if (process.env.ENABLE_IMPORT_LOGS !== "true") {
+      // Fallback to console when DB logging is disabled (for Docker logs visibility)
+      const prefix = `[${level.toUpperCase()}] [${module}]`;
+      const account = accountId ? ` [${accountId}]` : "";
+      if (level === "error") {
+        console.error(`${prefix}${account} ${eventType}: ${message}`, details);
+      } else if (level === "warn") {
+        console.warn(`${prefix}${account} ${eventType}: ${message}`, details);
+      } else {
+        console.log(`${prefix}${account} ${eventType}: ${message}`, details);
+      }
       return;
     }
 

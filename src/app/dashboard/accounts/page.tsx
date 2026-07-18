@@ -72,9 +72,14 @@ export default function AccountsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/accounts");
-    if (res.ok) setAccounts(await res.json());
-    setLoading(false);
+    try {
+      const res = await fetch("/api/accounts");
+      if (res.ok) setAccounts(await res.json());
+    } catch {
+      // ignore — retry on next interaction
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -101,6 +106,8 @@ export default function AccountsPage() {
       const data = await res.json();
       if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
       else setNotice(t("acc.notice.demo", { n: data.imported }));
+    } catch (e) {
+      setNotice((e as Error).message ?? t("settings.saveError"));
     } finally {
       setBusy(null);
       load();
@@ -117,6 +124,8 @@ export default function AccountsPage() {
       const data = await res.json();
       if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
       else setNotice(t("acc.mt.rolledBack", { n: data.deleted }));
+    } catch (e) {
+      setNotice((e as Error).message ?? t("settings.saveError"));
     } finally {
       setBusy(null);
       load();
@@ -134,6 +143,8 @@ export default function AccountsPage() {
       const data = await res.json();
       if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
       else setNotice(t("acc.mt.imported", { n: data.imported, skipped: data.skipped }));
+    } catch (e) {
+      setNotice((e as Error).message ?? t("settings.saveError"));
     } finally {
       setBusy(null);
       load();
@@ -143,9 +154,14 @@ export default function AccountsPage() {
   async function remove(id: string) {
     if (!confirm(t("acc.confirmDelete"))) return;
     setBusy(id);
-    await fetch(`/api/accounts/${id}`, { method: "DELETE" });
-    setBusy(null);
-    load();
+    try {
+      await fetch(`/api/accounts/${id}`, { method: "DELETE" });
+    } catch {
+      // ignore
+    } finally {
+      setBusy(null);
+      load();
+    }
   }
 
   async function updateAuto(
