@@ -1,18 +1,35 @@
+'use client';
+
 import { LogFilters } from './components/LogFilters';
 import { LogTable } from './components/LogTable';
 import { Pagination } from './components/Pagination';
 import { DeleteModal } from './components/DeleteModal';
 import { useState, useEffect, useCallback } from 'react';
-import { LogService } from '@/lib/log.service';
 
 export const dynamic = 'force-dynamic';
 
+// Собираем query-string из page/limit/filters, отбрасывая пустые значения.
+function buildQuery(page: number, limit: number, filters: Record<string, any>): string {
+  const params = new URLSearchParams();
+  params.set('page', String(page));
+  params.set('limit', String(limit));
+  for (const [key, value] of Object.entries(filters)) {
+    if (value === undefined || value === null || value === '') continue;
+    if (value instanceof Date) {
+      params.set(key, value.toISOString());
+    } else {
+      params.set(key, String(value));
+    }
+  }
+  return params.toString();
+}
+
 export default function LogsPage() {
-  const [logs, setLogs] = useState<Array<any>>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
-  const [filters, setFilters] = useState<any>({});
+  const [filters, setFilters] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
@@ -24,11 +41,15 @@ export default function LogsPage() {
     setLoading(true);
     setError(null);
     try {
-      const result = await LogService.fetchPage(page, limit, filters);
-      setLogs(result.data);
-      setTotal(result.total);
+      const res = await fetch(`/api/admin/logs?${buildQuery(page, limit, filters)}`);
+      if (!res.ok) {
+        throw new Error(`Ошибка загрузки логов (${res.status})`);
+      }
+      const result = await res.json();
+      setLogs(result.data ?? []);
+      setTotal(result.total ?? 0);
     } catch (err: any) {
-      setError(err.message || 'Failed to fetch logs');
+      setError(err.message || 'Не удалось загрузить логи');
       console.error('Error fetching logs:', err);
     } finally {
       setLoading(false);
@@ -45,16 +66,18 @@ export default function LogsPage() {
 
   const handleLimitChange = (newLimit: number) => {
     setLimit(newLimit);
-    setPage(1); // reset to first page when changing limit
+    setPage(1); // сброс на первую страницу при смене лимита
   };
 
-  const handleFiltersChange = (newFilters: any) => {
+  const handleFiltersChange = (newFilters: Record<string, any>) => {
     setFilters(newFilters);
-    setPage(1); // reset to first page when filters change
+    setPage(1); // сброс на первую страницу при смене фильтров
   };
 
-  const handleDelete = async (ids: string[]) => {
+  const handleDelete = (ids: string[]) => {
     setDeleteIds(ids);
+    setDeleteError(null);
+    setDeleteSuccess(false);
     setDeleteModalOpen(true);
   };
 
@@ -62,16 +85,22 @@ export default function LogsPage() {
     setDeleteError(null);
     setDeleteSuccess(false);
     try {
-      await LogService.deleteMany(deleteIds);
+      const res = await fetch('/api/admin/logs', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: deleteIds }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `Ошибка удаления (${res.status})`);
+      }
       setDeleteSuccess(true);
-      // Refetch logs after deletion
       await fetchLogs();
-    } catch (err: any) {
-      setDeleteError(err.message || 'Failed to delete logs');
-      console.error('Error deleting logs:', err);
-    } finally {
-      setDeleteIds([]);
       setDeleteModalOpen(false);
+      setDeleteIds([]);
+    } catch (err: any) {
+      setDeleteError(err.message || 'Не удалось удалить логи');
+      console.error('Error deleting logs:', err);
     }
   };
 
@@ -101,16 +130,9 @@ export default function LogsPage() {
         </div>
       )}
 
-      <LogFilters
-        filters={filters}
-        onChange={handleFiltersChange}
-      />
+      <LogFilters filters={filters} onChange={handleFiltersChange} />
 
-      <LogTable
-        logs={logs}
-        loading={loading}
-        onDelete={handleDelete}
-      />
+      <LogTable logs={logs} loading={loading} onDelete={handleDelete} />
 
       <div className="mt-4 flex justify-between items-center">
         <p className="text-sm text-gray-600">

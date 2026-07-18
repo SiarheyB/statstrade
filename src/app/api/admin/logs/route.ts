@@ -2,6 +2,48 @@ import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { LogService } from "@/lib/log.service";
 
+// Simple in-memory rate limiter for DELETE endpoint
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const RATE_LIMIT_WINDOW_MS = 60 * 1000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 5; // 5 requests per minute
+
+/**
+ * Simple rate limiting middleware
+ */
+function rateLimit(ip: string): { allowed: boolean; retryAfter?: number } {
+  const now = Date.now();
+  const record = rateLimitMap.get(ip);
+
+  if (!record) {
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true };
+  }
+
+  if (now > record.resetTime) {
+    // Reset window
+    rateLimitMap.set(ip, { count: 1, resetTime: now + RATE_LIMIT_WINDOW_MS });
+    return { allowed: true };
+  }
+
+  if (record.count >= MAX_REQUESTS_PER_WINDOW) {
+    return {
+      allowed: false,
+      retryAfter: Math.ceil((record.resetTime - now) / 1000)
+    };
+  }
+
+  record.count++;
+  return { allowed: true };
+}
+
+/**
+ * Validate if string is a valid UUID
+ */
+function isValidUUID(str: string): boolean {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidPattern.test(str);
+}
+
 /**
  * GET /api/admin/logs
  * Fetch paginated and filterable logs
@@ -48,9 +90,21 @@ export async function GET(req: Request) {
  */
 export async function DELETE(req: Request) {
   // Check admin auth
-  const result = await requireAdmin();
-  if (result instanceof Response) {
-    return result;
+  const authResult = await requireAdmin();
+  if (authResult instanceof Response) {
+    return authResult;
+  }
+
+  // Rate limiting by IP
+  const forwarded = req.headers.get("x-forwarded-for");
+  const ip = forwarded ? forwarded.split(",")[0].trim() : "unknown";
+  const rateLimitResult = rateLimit(ip);
+
+  if (!rateLimitResult.allowed) {
+    return NextResponse.json(
+      { error: "Too many requests. Please try again later." },
+      { status: 429, headers: { "Retry-After": String(rateLimitResult.retryAfter) } }
+    );
   }
 
   const body = await req.json();
@@ -58,6 +112,15 @@ export async function DELETE(req: Request) {
 
   if (!ids.length) {
     return NextResponse.json({ error: "ids array is required" }, { status: 400 });
+  }
+
+  // Validate all IDs are UUIDs
+  const invalidIds = ids.filter(id => !isValidUUID(id));
+  if (invalidIds.length > 0) {
+    return NextResponse.json(
+      { error: `Invalid ID format: ${invalidIds.join(", ")}` },
+      { status: 400 }
+    );
   }
 
   try {

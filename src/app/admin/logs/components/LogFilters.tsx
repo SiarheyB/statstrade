@@ -34,39 +34,39 @@ export const LogFilters: React.FC<{
   };
 
   return (
-    <div className="space-y-4 bg-gray-50 p-6 rounded-lg border border-gray-200">
+    <div className="card space-y-4 p-6">
       <h2 className="text-lg font-semibold mb-2">Фильтры логов</h2>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Модуль</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Модуль</label>
           <input
             type="text"
             value={module}
             onChange={(e) => setModule(e.target.value)}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
             placeholder="Например: import"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">ID аккаунта</label>
+          <label className="block text-sm font-medium mb-1 text-muted">ID аккаунта</label>
           <input
             type="text"
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
             placeholder="Например: acc_123"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Тип события</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Тип события</label>
           <input
             type="text"
             value={eventType}
             onChange={(e) => setEventType(e.target.value)}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
             placeholder="Например: FILE_RECEIVED"
           />
         </div>
@@ -74,11 +74,11 @@ export const LogFilters: React.FC<{
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:gap-4">
         <div>
-          <label className="block text-sm font-medium mb-1">Уровень лога</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Уровень лога</label>
           <select
             value={level}
             onChange={(e) => setLevel(e.target.value)}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
           >
             <option value="">Все уровни</option>
             <option value="info">Info</option>
@@ -88,20 +88,20 @@ export const LogFilters: React.FC<{
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Поиск</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Поиск</label>
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
             placeholder="Поиск в сообщениях..."
           />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:gap-4 pt-4 border-t">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:gap-4 pt-4 border-t border-border">
         <div>
-          <label className="block text-sm font-medium mb-1">Дата с</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Дата с</label>
           <input
             type="date"
             value={startDate ? startDate.toISOString().split('T')[0] : ''}
@@ -109,12 +109,12 @@ export const LogFilters: React.FC<{
               if (e.target.value) setStartDate(new Date(e.target.value));
               else setStartDate(null);
             }}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
           />
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Дата по</label>
+          <label className="block text-sm font-medium mb-1 text-muted">Дата по</label>
           <input
             type="date"
             value={endDate ? endDate.toISOString().split('T')[0] : ''}
@@ -122,7 +122,7 @@ export const LogFilters: React.FC<{
               if (e.target.value) setEndDate(new Date(e.target.value));
               else setEndDate(null);
             }}
-            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+            className="input-base w-full"
           />
         </div>
       </div>
@@ -148,7 +148,7 @@ export const LogFilters: React.FC<{
               endDate: undefined,
             });
           }}
-          className="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 transition-colors"
+          className="px-4 py-2 rounded bg-surface-2 text-fg hover:bg-border transition-colors"
         >
           Сбросить
         </button>
@@ -156,7 +156,7 @@ export const LogFilters: React.FC<{
         <button
           type="button"
           onClick={handleChange}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+          className="px-4 py-2 rounded bg-accent text-white hover:opacity-90 transition-colors"
         >
           Применить фильтры
         </button>
