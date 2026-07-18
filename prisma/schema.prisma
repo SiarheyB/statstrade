@@ -494,6 +494,23 @@ model FeatureConfig {
   updatedAt DateTime @updatedAt
 }
 
+model ImportLog {
+  id          String    @id @default(uuid())
+  module      String
+  accountId   String?
+  eventType   String
+  message     String
+  details     Json?
+  level       String
+  timestamp   DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+
+  @@index([timestamp])
+  @@index([module])
+  @@index([accountId])
+  @@index([eventType])
+}
+
 // A named strategy/setup with its own written rules ("playbook") — extends
 // the existing free-text `pattern` tag on TradeAnnotation with documentation
 // and (computed on the fly, not stored) performance stats for that pattern.

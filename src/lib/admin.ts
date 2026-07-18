@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "./auth";
 import { prisma } from "./db";
+import { logError } from "./errorLog";
 
-// Список администраторов задаётся через ENV (без миграции БД): ADMIN_EMAILS —
-// e-mail'ы через запятую. Сравнение нечувствительно к регистру.
+// Global admin emails list - configurable via environment variable (no DB migration needed)
 function adminEmails(): string[] {
-  return (process.env.ADMIN_EMAILS ?? "")
+  return (process.env.ADMIN_EMAILS || "")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean);
@@ -20,37 +20,44 @@ export function isAdminSession(session: SessionPayload | null): boolean {
   return isAdminEmail(session?.email);
 }
 
-// Серверный гард для админских route-handler'ов и страниц. Возвращает сессию,
-// если пользователь — админ, иначе null (вызывающий отдаёт 404, не светя
-// существование раздела).
+/**
+ * Get current user session if user is admin
+ * Returns session object if admin, null otherwise
+ */
 export async function getAdminSession(): Promise<SessionPayload | null> {
   const session = await getSession();
-  if (!isAdminSession(session)) return null;
+  if (!isAdminEmail(session?.email)) {
+    return null;
+  }
   return session;
 }
 
-// Унифицированный «404» для админских API — намеренно не 403, чтобы не
-// раскрывать наличие раздела не-админам.
+/**
+ * Middleware helper for API routes that require admin access
+ * Returns the admin session if authenticated, or a 401 Response if not
+ */
+export async function requireAdmin(): Promise<SessionPayload | Response> {
+  const session = await getAdminSession();
+  if (!session) {
+    return NextResponse.json({ error: "Admin access required" }, { status: 401 });
+  }
+  return session;
+}
+
 export function notFound() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
-// Порог «пользователь онлайн»: lastSeenAt свежее 10 минут (записывается с
-// шагом ~5 мин, см. lib/api.ts touchLastSeen).
 export const ONLINE_THRESHOLD_MS = 10 * 60_000;
 
-// Порог свежести фида карты ордеров: collector пишет снимок раз в ~2 c, поэтому
-// отсутствие записей дольше этого считаем «фид отстал/упал».
+// Feed staleness threshold
 export const FEED_STALE_MS = 90_000;
-
 export type FeedFreshness = { symbol: string; exchange: string; lastT: Date | null; lagMs: number; stale: boolean };
 
-// Свежесть каждого фида ObSnapshot (для алертов на «Обзоре» и странице collector).
-//
-// Список фидов берём из маленькой ObRollupBucket (а НЕ сканируем сырую
-// ObSnapshot — на разросшейся таблице GROUP BY вешал страницу /admin). Время
-// последнего снапшота для каждого фида — точечный max(t) по индексу
-// (symbol,exchange,t): мгновенно при любом размере таблицы.
+/**
+ * Get freshness of all orderbook feeds (from ObRollupBucket + ObSnapshot)
+ * Returns freshness status per feed
+ */
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
   const feeds = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
     SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
@@ -69,8 +76,10 @@ export async function getFeedFreshness(): Promise<FeedFreshness[]> {
   return out;
 }
 
-// Запись действия админа в аудит-лог (append-only, см. /admin/audit). Ошибка
-// записи не должна валить само действие — логируем и продолжаем.
+/**
+ * Record admin action in the audit log (append-only)
+ * Errors in audit recording never break the admin action
+ */
 export async function recordAudit(
   actor: SessionPayload,
   action: string,
@@ -89,6 +98,16 @@ export async function recordAudit(
       },
     });
   } catch (err) {
-    console.error("[audit] не удалось записать:", (err as Error).message);
+    console.error("[audit] error recording audit:", (err as Error).message);
   }
+}
+
+/**
+ * Check if current user is admin
+ * Returns boolean (useful for middleware, route guards, UI components)
+ */
+export async function adminCheck(): Promise<boolean> {
+  const session = await getSession();
+  if (!session?.user?.email) return false;
+  return isAdminEmail(session.email);
 }
