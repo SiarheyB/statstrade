@@ -11,10 +11,10 @@ const dev = process.env.NODE_ENV === "development";
 const CSP = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${dev ? " 'unsafe-eval'" : ""} https://challenges.cloudflare.com https://accounts.google.com https://static.cloudflareinsights.com`,
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://accounts.google.com",
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
-  `connect-src 'self'${dev ? " ws:" : ""} https://challenges.cloudflare.com https://accounts.google.com`,
+  `connect-src 'self'${dev ? " ws:" : ""} http://tradingstat.ru https://tradingstat.ru https://challenges.cloudflare.com https://accounts.google.com`,
   "frame-src https://challenges.cloudflare.com https://accounts.google.com",
   "frame-ancestors 'none'",
   "base-uri 'self'",
