@@ -51,6 +51,7 @@ type CollectorMeta = {
     snapshotMs: number;
     depthPct: number;
     retentionDays: number;
+    tradeRetentionDays: number;
     feeds: CollectorFeed[];
   };
 };
@@ -193,6 +194,7 @@ export default function AdminCollector() {
             <span className="text-muted">{t("admin.collector.snapshotEvery", { ms: col.data.snapshotMs })}</span>
             <span className="text-muted">{t("admin.collector.depth", { pct: (col.data.depthPct * 100).toFixed(1) })}</span>
             <span className="text-muted">{t("admin.collector.retention", { days: col.data.retentionDays })}</span>
+            <span className="text-muted">{t("admin.collector.tradeRetention", { days: col.data.tradeRetentionDays })}</span>
           </>
         )}
         {!col?.ok && <span className="text-faint">{col?.error}</span>}

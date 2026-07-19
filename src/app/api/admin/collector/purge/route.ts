@@ -8,8 +8,9 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 30;
 
 // Ручная очистка истории карты ордеров: удаляет строки старше `before` во всех
-// таблицах Ob*. Автоочистки этих таблиц нет (см. коллектор pruneOld) — только
-// сырые ObSnapshot чистятся по ретеншену; остальное копится и удаляется отсюда.
+// таблицах Ob*. Авто-ретеншн (коллектор pruneOld) чистит все партиционированные
+// таблицы по RETENTION_DAYS — этот эндпоинт для принудительной очистки старше
+// ретеншна или удаления rollup-таблиц (ObSnapshotRollup, ObRollupBucket).
 
 const schema = z.object({ before: z.string().datetime() });
 

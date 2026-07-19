@@ -19,7 +19,8 @@ const cfg = {
   binSize: Number(process.env.BIN_SIZE ?? 25),
   snapshotMs: Number(process.env.SNAPSHOT_MS ?? 2000),
   depthPct: Number(process.env.DEPTH_PCT ?? 0.02),
-  retentionDays: Number(process.env.RETENTION_DAYS ?? 7),
+  retentionDays: Number(process.env.RETENTION_DAYS ?? 7),         // сырые снапшоты ObSnapshot
+  tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
   noiseMinNotional: Number(process.env.NOISE_MIN_NOTIONAL ?? 50000),
   bigNotional: Number(process.env.BIG_NOTIONAL ?? 100000),
   databaseUrl: process.env.DATABASE_URL,
@@ -364,23 +365,51 @@ async function writeSnapshot() {
 
 // Обслуживание дневных партиций (таблицы Ob* партиционированы по t, см.
 // миграцию partition_ob_tables): создаём партиции на неделю вперёд и чистим
-// ретеншн ТОЛЬКО сырых ObSnapshot — они тяжёлые (каждый снапшот × уровень).
+// ретеншн всех таблиц.
+//   - ObSnapshot        — сырые снапшоты, чистим по RETENTION_DAYS (умолч. 7 дн)
+//   - ObTrade / ObFootprint / ObBigTrade — сделки, футпринт, крупные ордера,
+//     чистим по TRADE_RETENTION_DAYS (умолч. 30 дн, либо RETENTION_DAYS если задан)
 // Чистка = мгновенный DROP партиции вместо DELETE (ноль bloat'а на SSD).
-// Rollup, сделки, футпринт и крупные сделки — это «история» карты ордеров: её
-// храним полностью и чистим вручную из админ-панели (по периодам). См.
-// /api/admin/collector/purge.
+// Rollup (ObSnapshotRollup, ObRollupBucket) — не партиционированы, чистятся
+// DELETE из админ-панели (см. /api/admin/collector/purge).
 const PARTITIONED_TABLES = ["ObSnapshot", "ObTrade", "ObFootprint", "ObBigTrade"];
 async function pruneOld() {
   try {
     for (const tbl of PARTITIONED_TABLES) {
       await pool.query(`SELECT ob_ensure_partitions($1, 7)`, [tbl]);
     }
-    const r1 = await pool.query(
-      `SELECT ob_drop_partitions_before('ObSnapshot', NOW() - ($1 || ' days')::interval) AS n`,
-      [String(cfg.retentionDays)],
-    );
-    const n = r1.rows[0]?.n ?? 0;
-    if (n) console.log(`[prune] ObSnapshot: сброшено ${n} дневных партиций (ретеншн ${cfg.retentionDays}д; история остальных таблиц — до ручной очистки)`);
+    let total = 0;
+    // Snapshot-таблица — отдельный ретеншн (короткий, данные тяжёлые)
+    {
+      const r = await pool.query(
+        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
+        ["ObSnapshot", String(cfg.retentionDays)],
+      );
+      total += r.rows[0]?.n ?? 0;
+    }
+    // Сделки, футпринт, крупные ордера — другой ретеншн (дольше, легковеснее)
+    {
+      const r = await pool.query(
+        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
+        ["ObTrade", String(cfg.tradeRetentionDays)],
+      );
+      total += r.rows[0]?.n ?? 0;
+    }
+    {
+      const r = await pool.query(
+        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
+        ["ObFootprint", String(cfg.tradeRetentionDays)],
+      );
+      total += r.rows[0]?.n ?? 0;
+    }
+    {
+      const r = await pool.query(
+        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
+        ["ObBigTrade", String(cfg.tradeRetentionDays)],
+      );
+      total += r.rows[0]?.n ?? 0;
+    }
+    if (total) console.log(`[prune] сброшено ${total} партиций (снапшоты: ${cfg.retentionDays}д, сделки: ${cfg.tradeRetentionDays}д)`);
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);
   }
@@ -431,6 +460,7 @@ const server = http.createServer((req, res) => {
       snapshotMs: cfg.snapshotMs,
       depthPct: cfg.depthPct,
       retentionDays: cfg.retentionDays,
+      tradeRetentionDays: cfg.tradeRetentionDays,
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
       minCoins: Object.fromEntries(minCoinsMap),
@@ -445,7 +475,8 @@ server.listen(cfg.port, () => console.log(`[health] http://0.0.0.0:${cfg.port}/h
 
 console.log(
   `[start] collector feeds=${feeds.length} (${feeds.map((f) => `${f.exchange}:${f.symbol}`).join(", ")}) ` +
-    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% retention=${cfg.retentionDays}d`,
+    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% ` +
+    `retention: snap=${cfg.retentionDays}d trades=${cfg.tradeRetentionDays}d`,
 );
 for (const f of feeds) f.book.connect();
 for (const tf of tradeFeeds) tf.trades.connect();

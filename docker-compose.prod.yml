@@ -151,6 +151,7 @@ services:
       NOISE_MIN_NOTIONAL: ${OB_NOISE_MIN_NOTIONAL:-50000}
       BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
       RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
+      TRADE_RETENTION_DAYS: ${OB_TRADE_RETENTION_DAYS:-30}
       PORT: 8080
       # Bearer-токен для защищённого GET /metrics — его опрашивает админ-панель
       # приложения (раздел «Карта ордеров»). Должен совпадать с COLLECTOR_METRICS_TOKEN
