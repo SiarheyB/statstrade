@@ -21,8 +21,8 @@ const cfg = {
   depthPct: Number(process.env.DEPTH_PCT ?? 0.02),
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),         // сырые снапшоты ObSnapshot
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
-  noiseMinNotional: Number(process.env.NOISE_MIN_NOTIONAL ?? 50000),
-  bigNotional: Number(process.env.BIG_NOTIONAL ?? 100000),
+  rawRetention: Number(process.env.RAW_RETENTION_DAYS ?? 30),     // сырые данные хранить 30 дней
+  rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
   metricsToken: process.env.COLLECTOR_METRICS_TOKEN ?? "",
@@ -252,6 +252,15 @@ async function flushRollup(now) {
   }
 }
 
+// Асинхронный «beat» для flush rollup — не блокирует запись снапшотов
+function startRollupFlushBeat() {
+  // Каждые 1000 мс сбрасываем завершённые минутные бакеты
+  // На 4 ядрах один beat-поток достаточен; избегаем лишних воркеров
+  return setInterval(() => {
+    flushRollup(new Date()).catch(err => console.error(`[rollup-beat] ошибка: ${err.message}`));
+  }, 1000);
+}
+
 async function writeSnapshot() {
   const t = new Date();
   const rows = [];
@@ -383,7 +392,7 @@ async function pruneOld() {
     {
       const r = await pool.query(
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObSnapshot", String(cfg.retentionDays)],
+        ["ObSnapshot", String(cfg.rawRetention)],
       );
       total += r.rows[0]?.n ?? 0;
     }
@@ -409,7 +418,28 @@ async function pruneOld() {
       );
       total += r.rows[0]?.n ?? 0;
     }
-    if (total) console.log(`[prune] сброшено ${total} партиций (снапшоты: ${cfg.retentionDays}д, сделки: ${cfg.tradeRetentionDays}д)`);
+    // Rollup‑таблицы — НЕ партиционированы, чистим DELETE‑ом по ROLLUP_RETENTION_DAYS
+    let rollupDeleted = 0;
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObSnapshotRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObRollupBucket" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
+    if (total || rollupDeleted) {
+      console.log(
+        `[prune] сброшено ${total} партиций (снапшоты: ${cfg.rawRetention}д, сделки: ${cfg.tradeRetentionDays}д); ` +
+        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д)`,
+      );
+    }
   } catch (err) {
     console.error(`[prune] ошибка: ${err.message}`);
   }
@@ -473,13 +503,10 @@ const server = http.createServer((req, res) => {
 });
 server.listen(cfg.port, () => console.log(`[health] http://0.0.0.0:${cfg.port}/health`));
 
-console.log(
-  `[start] collector feeds=${feeds.length} (${feeds.map((f) => `${f.exchange}:${f.symbol}`).join(", ")}) ` +
-    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% ` +
-    `retention: snap=${cfg.retentionDays}d trades=${cfg.tradeRetentionDays}d`,
-);
-for (const f of feeds) f.book.connect();
-for (const tf of tradeFeeds) tf.trades.connect();
+// Запуск коллектора — только если файл исполняется напрямую (node index.mjs),
+// а не импортируется в юнит-тесты. Проверка: import.meta.url совпадает с
+// process.argv[1] (исполняемый файл).
+const isMain = process.argv[1] && import.meta.url === `file://${process.argv[1]}`;
 
 // Одноразовый бэкафилл rollup из сырой истории ObSnapshot — чтобы при первом
 // запуске новой версии heatmap сразу показывал всю историю (а не только минуты
@@ -515,6 +542,16 @@ async function backfillRollup() {
     console.error(`[rollup] бэкафилл ошибка: ${err.message}`);
   }
 }
+
+if (isMain) {
+console.log(
+  `[start] collector feeds=${feeds.length} (${feeds.map((f) => `${f.exchange}:${f.symbol}`).join(", ")}) ` +
+    `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% ` +
+    `retention: snap=${cfg.retentionDays}d trades=${cfg.tradeRetentionDays}d`,
+);
+for (const f of feeds) f.book.connect();
+for (const tf of tradeFeeds) tf.trades.connect();
+
 setTimeout(backfillRollup, 5_000);
 
 // Пороги «крупных лимиток» — читаем сразу и обновляем каждые 30с (правки из админки).
@@ -522,11 +559,13 @@ loadCollectorConfig();
 const configTimer = setInterval(loadCollectorConfig, 30_000);
 
 const writeTimer = setInterval(writeSnapshot, cfg.snapshotMs);
+const flushTimer = startRollupFlushBeat();
 const pruneTimer = setInterval(pruneOld, 3600_000);
 setTimeout(pruneOld, 10_000);
 
 async function shutdown() {
   clearInterval(writeTimer);
+  clearInterval(flushTimer);
   clearInterval(pruneTimer);
   clearInterval(configTimer);
   for (const f of feeds) f.book.close();
@@ -539,3 +578,8 @@ process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
+} // end isMain
+
+// Экспорты для юнит-тестов (не влияют на работу скрипта)
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup };
+export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
