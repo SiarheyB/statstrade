@@ -171,6 +171,54 @@ describe("computeAccountRisk", () => {
     expect(d.state).toBe("ok");
   });
 
+  it("nets wins against losses in period loss limits", () => {
+    const profile = onProfile();
+    profile.lossLimits.week = { on: true, value: 200, unit: "amount" };
+    // 3 losses (−$33) + 1 win (+$30) = −$3 net → used = 3
+    const trades = [
+      trade(-11, "loss", new Date("2024-06-12T10:00:00Z")),
+      trade(-11, "loss", new Date("2024-06-13T10:00:00Z")),
+      trade(-11, "loss", new Date("2024-06-14T10:00:00Z")),
+      trade(30, "win", new Date("2024-06-14T14:00:00Z")),
+    ];
+    const r = computeAccountRisk("a1", trades, 1000, profile, NOW);
+    const w = r.limits.find((l) => l.key === "week")!;
+    expect(w.used).toBe(3); // net loss = $3, not $33
+    expect(w.state).toBe("ok");
+  });
+
+  it("nets wins against losses in month loss limit", () => {
+    const profile = onProfile();
+    profile.lossLimits.month = { on: true, value: 500, unit: "amount" };
+    // 3 losses (−$100, −$100, −$100) + 1 win (+$250) = −$50 net → used = 50
+    const trades = [
+      trade(-100, "loss", new Date("2024-06-05T10:00:00Z")),
+      trade(-100, "loss", new Date("2024-06-12T10:00:00Z")),
+      trade(-100, "loss", new Date("2024-06-19T10:00:00Z")),
+      trade(250, "win", new Date("2024-06-20T14:00:00Z")),
+    ];
+    const r = computeAccountRisk("a1", trades, 1000, profile, NOW);
+    const m = r.limits.find((l) => l.key === "month")!;
+    expect(m.used).toBe(50); // net loss = $50, not $300
+    expect(m.state).toBe("ok");
+  });
+
+  it("nets wins against losses in year loss limit", () => {
+    const profile = onProfile();
+    profile.lossLimits.year = { on: true, value: 10000, unit: "amount" };
+    // 3 losses (−$1000) + 1 win (+$2500) = −$500 net → used = 500
+    const trades = [
+      trade(-1000, "loss", new Date("2024-02-10T10:00:00Z")),
+      trade(-1000, "loss", new Date("2024-05-15T10:00:00Z")),
+      trade(-1000, "loss", new Date("2024-08-20T10:00:00Z")),
+      trade(2500, "win", new Date("2024-11-10T14:00:00Z")),
+    ];
+    const r = computeAccountRisk("a1", trades, 1000, profile, NOW);
+    const y = r.limits.find((l) => l.key === "year")!;
+    expect(y.used).toBe(500); // net loss = $500, not $3000
+    expect(y.state).toBe("ok");
+  });
+
   it("skips a pct loss limit when balance is unknown", () => {
     const profile = onProfile();
     profile.lossLimits.month = { on: true, value: 10, unit: "pct" };

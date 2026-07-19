@@ -127,17 +127,16 @@ function periodStart(key: PeriodKey, now: Date): number {
   return Date.UTC(y, 0, 1);
 }
 
-// Realized loss (positive number) within a period: the sum of losing trades'
-// P&L — the same "stops" the day-counter sees, not the net of wins and losses.
-// Winning trades must NOT mask the losses already taken (a daily/weekly loss
-// limit tracks how much was lost, regardless of offsetting profits).
+// Net loss within a period: sum of ALL trades' P&L (wins offset losses).
+// Consistent with getNetStopsCount() and the "stops" day-counter — a +3R
+// take-profit offsets −3R of losses, showing the net drawdown.
 function lossInPeriod(trades: RiskTrade[], key: PeriodKey, now: Date): number {
   const start = periodStart(key, now);
-  let loss = 0;
+  let net = 0;
   for (const t of trades) {
-    if (t.exitTime.getTime() >= start && t.netPnl < 0) loss += -t.netPnl;
+    if (t.exitTime.getTime() >= start) net += t.netPnl;
   }
-  return loss;
+  return net < 0 ? -net : 0;
 }
 
 function stateFor(used: number, limit: number): LimitState {
