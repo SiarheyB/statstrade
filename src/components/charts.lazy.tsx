@@ -38,6 +38,10 @@ export const PnlHeatmap = dynamic(() => import("./PnlHeatmap"), {
   ssr: false,
   loading,
 });
+export const RHeatmap = dynamic(() => import("./RHeatmap"), {
+  ssr: false,
+  loading,
+});
 // График сделки (свечи) рендерится только в развёрнутой строке таблицы —
 // его код подгружается по требованию.
 export const TradeChart = dynamic(

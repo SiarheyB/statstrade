@@ -56,6 +56,25 @@ export default function CalendarPage() {
     return map;
   }, [data, timezone]);
 
+  // R-multiple per day for the RR heatmap.
+  const rDaily = useMemo(() => {
+    const map = new Map<string, { winR: number; lossR: number; trades: number }>();
+    for (const tr of data?.trades ?? []) {
+      if (tr.stopLoss == null) continue;
+      const risk = Math.abs(tr.entryPrice - tr.stopLoss) * tr.qty;
+      if (risk <= 0) continue;
+      const r = tr.netPnl / risk;
+      const k = dayKey(tr.exitTime, timezone);
+      const d = map.get(k) ?? { winR: 0, lossR: 0, trades: 0 };
+      if (r >= 0) d.winR += r; else d.lossR += r;
+      d.trades += 1;
+      map.set(k, d);
+    }
+    return Array.from(map.entries())
+      .map(([date, v]) => ({ date, ...v }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+  }, [data, timezone]);
+
   // Default the view to the month of the most recent trade.
   useEffect(() => {
     if (view || !data?.trades?.length) return;
@@ -115,6 +134,20 @@ export default function CalendarPage() {
     }
     return { pnl, trades, winRate: trades ? (wins / trades) * 100 : 0, best };
   }, [grid]);
+
+  // Total R for the current month view.
+  const monthR = useMemo(() => {
+    const rMap = new Map(rDaily.map((d) => [d.date, d]));
+    let totalR = 0, rTrades = 0;
+    for (const c of grid) {
+      if (!c.inMonth) continue;
+      const rd = rMap.get(c.date);
+      if (!rd) continue;
+      totalR += rd.winR + rd.lossR;
+      rTrades += rd.trades;
+    }
+    return { totalR, rTrades };
+  }, [grid, rDaily]);
 
   const weeks = useMemo(() => {
     const rows: (typeof grid)[] = [];
@@ -183,8 +216,9 @@ export default function CalendarPage() {
       </div>
 
       {/* Month summary */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-5">
         <Summary label={t("cal.monthPnl")} value={fmtUsd(monthStat.pnl, { sign: true })} tone={monthStat.pnl >= 0 ? "profit" : "loss"} />
+        <Summary label={t("cal.monthR")} value={`${monthR.totalR >= 0 ? "+" : ""}${monthR.totalR.toFixed(1)}R`} tone={monthR.totalR >= 0 ? "profit" : "loss"} />
         <Summary label={t("cal.monthTrades")} value={String(monthStat.trades)} />
         <Summary label={t("cal.monthWin")} value={`${monthStat.winRate.toFixed(0)}%`} />
         <Summary label={t("cal.bestDay")} value={fmtUsd(monthStat.best, { sign: true })} tone="profit" />

@@ -453,7 +453,7 @@ export default function DashboardPage() {
             <EquityChart data={m.equityCurve} />
           </div>
 
-          {/* Daily pnl + heatmap */}
+          {/* Daily pnl + heatmaps */}
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-5 min-w-0">
               <div className="flex items-center justify-between mb-3">
@@ -475,14 +475,14 @@ export default function DashboardPage() {
               <DailyPnlChart data={m.daily} metric={dailyPnlMetric} />
             </div>
             <div className="card p-5 min-w-0">
-              <SectionTitle title={t("dash.calendar")} />
-              <PnlHeatmap daily={m.daily} />
-              <div className="grid grid-cols-3 gap-2 mt-4">
-                <MiniStat label={t("dash.bestDay")} value={fmtUsd(maxDaily(m.daily), { sign: true })} tone="profit" />
-                <MiniStat label={t("dash.worstDay")} value={fmtUsd(minDaily(m.daily), { sign: true })} tone="loss" />
-                <MiniStat label={t("dash.winningDays")} value={`${winningDays(m.daily)}/${m.daily.length}`} />
+                <SectionTitle title={t("dash.calendar")} />
+                <PnlHeatmap daily={m.daily} />
+                <div className="grid grid-cols-3 gap-2 mt-4">
+                  <MiniStat label={t("dash.bestDay")} value={fmtUsd(maxDaily(m.daily), { sign: true })} tone="profit" />
+                  <MiniStat label={t("dash.worstDay")} value={fmtUsd(minDaily(m.daily), { sign: true })} tone="loss" />
+                  <MiniStat label={t("dash.winningDays")} value={`${winningDays(m.daily)}/${m.daily.length}`} />
+                </div>
               </div>
-            </div>
           </div>
 
           {/* Side + extras */}
