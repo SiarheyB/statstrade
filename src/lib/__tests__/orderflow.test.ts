@@ -3,12 +3,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   queryRaw: vi.fn(),
   findMany: vi.fn(),
+  obCandleFindMany: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     $queryRaw: mocks.queryRaw,
     obBigTrade: { findMany: mocks.findMany },
+    obCandle: { findMany: mocks.obCandleFindMany },
   },
 }));
 
@@ -24,6 +26,7 @@ import {
 beforeEach(() => {
   mocks.queryRaw.mockReset();
   mocks.findMany.mockReset();
+  mocks.obCandleFindMany.mockReset();
 });
 
 afterEach(() => {
@@ -31,43 +34,50 @@ afterEach(() => {
 });
 
 describe("fetchOrderflowCandles", () => {
-  it("maps binance klines to OfCandle via fetch", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [
-        [1000, "100", "110", "90", "105", "0"],
-        [2000, "105", "115", "95", "108", "0"],
-      ],
-    });
-    vi.stubGlobal("fetch", mockFetch);
+  beforeEach(() => {
+    mocks.obCandleFindMany.mockReset();
+  });
+
+  it("maps ObCandle rows to OfCandle", async () => {
+    mocks.obCandleFindMany.mockResolvedValue([
+      { t: new Date(1000), o: 100, h: 110, l: 90, c: 105 },
+      { t: new Date(2000), o: 105, h: 115, l: 95, c: 108 },
+    ]);
 
     const out = await fetchOrderflowCandles("BTCUSDT", "binance", "1h", 0, 1000);
     expect(out).toHaveLength(2);
     expect(out[0]).toEqual({ t: 1000, o: 100, h: 110, l: 90, c: 105 });
-    // фьючерсный URL для не-spot биржи
-    expect(mockFetch.mock.calls[0][0]).toContain("fapi.binance.com");
-  });
-
-  it("uses spot URL and 1m fallback for unknown range", async () => {
-    const mockFetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => [[1, "1", "1", "1", "1", "0"]],
+    expect(mocks.obCandleFindMany).toHaveBeenCalledWith({
+      where: {
+        symbol: "BTCUSDT",
+        exchange: "binance",
+        interval: "1h",
+        t: { gte: new Date(0), lte: new Date(1000) },
+      },
+      orderBy: { t: "asc" },
+      select: { t: true, o: true, h: true, l: true, c: true },
     });
-    vi.stubGlobal("fetch", mockFetch);
-
-    await fetchOrderflowCandles("BTCUSDT", "binance-spot", "weird", 0, 1);
-    expect(mockFetch.mock.calls[0][0]).toContain("api.binance.com");
-    expect(mockFetch.mock.calls[0][0]).toContain("interval=1m");
   });
 
-  it("returns [] on non-ok response", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, json: async () => [] }));
-    const out = await fetchOrderflowCandles("BTCUSDT", "binance", "1h", 0, 1);
+  it("uses 1m fallback for unknown range", async () => {
+    mocks.obCandleFindMany.mockResolvedValue([]);
+
+    const out = await fetchOrderflowCandles("BTCUSDT", "binance-spot", "weird", 0, 1);
     expect(out).toEqual([]);
+    expect(mocks.obCandleFindMany).toHaveBeenCalledWith({
+      where: {
+        symbol: "BTCUSDT",
+        exchange: "binance-spot",
+        interval: "1m",
+        t: { gte: new Date(0), lte: new Date(1) },
+      },
+      orderBy: { t: "asc" },
+      select: { t: true, o: true, h: true, l: true, c: true },
+    });
   });
 
-  it("returns [] when fetch throws", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("net")));
+  it("returns [] when findMany throws", async () => {
+    mocks.obCandleFindMany.mockRejectedValue(new Error("db"));
     const out = await fetchOrderflowCandles("BTCUSDT", "binance", "1h", 0, 1);
     expect(out).toEqual([]);
   });

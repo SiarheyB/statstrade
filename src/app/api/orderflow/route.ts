@@ -35,9 +35,9 @@ const TF_MS: Record<string, number> = {
 const CANDLES_IN_WINDOW: Record<string, number> = {
   "5m": 400,
   "15m": 400,
-  "1h": 400,
-  "4h": 400,
-  "12h": 400,
+  "1h": 800,
+  "4h": 800,
+  "12h": 800,
   "1d": 365,
   "1w": 200,
 };
