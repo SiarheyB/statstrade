@@ -118,9 +118,10 @@ describe('admin', () => {
   describe('getFeedFreshness', () => {
     it('собирает свежесть по фидам и помечает отставшие', async () => {
       const now = Date.now();
-      mockQueryRaw.mockResolvedValueOnce([
-        { symbol: 'BTCUSDT', exchange: 'binance', last_t: new Date(now - 1000) }, // свежий
-      ]);
+      // Первый вызов — DISTINCT из ObRollupBucket
+      mockQueryRaw.mockResolvedValueOnce([{ symbol: 'BTCUSDT', exchange: 'binance' }]);
+      // Второй вызов — max(t) из ObSnapshot (параллельно, один на фид)
+      mockQueryRaw.mockResolvedValueOnce([{ last_t: new Date(now - 1000) }]);
 
       const out = await getFeedFreshness();
       expect(out).toHaveLength(1);
@@ -132,18 +133,16 @@ describe('admin', () => {
 
     it('помечает фид как stale при большом лаге', async () => {
       const now = Date.now();
-      mockQueryRaw.mockResolvedValueOnce([
-        { symbol: 'ETHUSDT', exchange: 'bybit', last_t: new Date(now - 200_000) },
-      ]);
+      mockQueryRaw.mockResolvedValueOnce([{ symbol: 'ETHUSDT', exchange: 'bybit' }]);
+      mockQueryRaw.mockResolvedValueOnce([{ last_t: new Date(now - 200_000) }]);
 
       const out = await getFeedFreshness();
       expect(out[0].stale).toBe(true);
     });
 
     it('считает фид stale при отсутствии снимков (last_t null)', async () => {
-      mockQueryRaw.mockResolvedValueOnce([
-        { symbol: 'SOLUSDT', exchange: 'binance', last_t: null },
-      ]);
+      mockQueryRaw.mockResolvedValueOnce([{ symbol: 'SOLUSDT', exchange: 'binance' }]);
+      mockQueryRaw.mockResolvedValueOnce([{ last_t: null }]);
 
       const out = await getFeedFreshness();
       expect(out[0].lastT).toBeNull();

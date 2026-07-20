@@ -59,17 +59,25 @@ export type FeedFreshness = { symbol: string; exchange: string; lastT: Date | nu
  * Returns freshness status per feed
  */
 export async function getFeedFreshness(): Promise<FeedFreshness[]> {
-  const rows = await prisma.$queryRaw<{ symbol: string; exchange: string; last_t: Date | null }[]>`
-    SELECT r.symbol, r.exchange, MAX(s.t) AS last_t
-    FROM "ObRollupBucket" r
-    LEFT JOIN "ObSnapshot" s ON s.symbol = r.symbol AND s.exchange = r.exchange
-    GROUP BY r.symbol, r.exchange
-    ORDER BY r.symbol, r.exchange
+  const feeds = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+    SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
   `;
+  // Запускаем N запросов параллельно — каждый берёт max(t) по индексу
+  // (symbol, exchange, t) — быстро, без сканирования всей ObSnapshot.
   const now = Date.now();
-  return rows.map((r) => {
-    const lagMs = r.last_t ? now - new Date(r.last_t).getTime() : Infinity;
-    return { symbol: r.symbol, exchange: r.exchange, lastT: r.last_t, lagMs, stale: lagMs > FEED_STALE_MS };
+  const results = await Promise.all(
+    feeds.map((f) =>
+      prisma
+        .$queryRaw<{ last_t: Date | null }[]>`
+          SELECT max(t) AS last_t FROM "ObSnapshot"
+          WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+        `
+        .then((r) => ({ ...f, lastT: r[0]?.last_t ?? null })),
+    ),
+  );
+  return results.map((r) => {
+    const lagMs = r.lastT ? now - new Date(r.lastT).getTime() : Infinity;
+    return { symbol: r.symbol, exchange: r.exchange, lastT: r.lastT, lagMs, stale: lagMs > FEED_STALE_MS };
   });
 }
 
