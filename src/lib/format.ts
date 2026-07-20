@@ -60,10 +60,15 @@ export function fmtNum(value: number, digits = 2): string {
 
 export function fmtPrice(value: number): string {
   if (!Number.isFinite(value)) return "—";
-  const isZero = value === 0;
-  if (isZero) return "0.00";
+  if (value === 0) return "0.00";
   if (value >= 1000) return value.toLocaleString(numLocale(), { maximumFractionDigits: 2 });
-  if (value >= 1) return value.toFixed(2);
+  if (value >= 1) {
+    // Show up to 5 decimal places when the price has significant fractional digits
+    // (e.g. forex 1.41455 → "1.41455", crypto 150.25 → "150.25").
+    const s = value.toFixed(5);
+    if (s.endsWith("000")) return value.toFixed(2);
+    return s;
+  }
   return value.toPrecision(4);
 }
 

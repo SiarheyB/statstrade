@@ -729,15 +729,14 @@ function sortVal(tr: SerializedTrade, key: SortKey): number {
   return tr[key];
 }
 
-// Realized R-multiple, measured in price terms where the stop distance is 1R.
-// Exiting exactly at the stop yields -1R, regardless of position size or fees.
+// Realized R-multiple, measured in dollar terms where the stop distance × qty is 1R.
+// Exiting exactly at the stop yields -1R (before fees). Uses netPnl so fees are
+// correctly counted as part of the trade outcome.
 function rrOf(tr: SerializedTrade, stopLoss: number | null): number | null {
   if (stopLoss == null) return null;
-  const risk = Math.abs(tr.entryPrice - stopLoss);
+  const risk = Math.abs(tr.entryPrice - stopLoss) * tr.qty;
   if (risk <= 0) return null;
-  const move =
-    tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
-  return move / risk;
+  return tr.netPnl / risk;
 }
 
 function fmtRR(rr: number | null): string {

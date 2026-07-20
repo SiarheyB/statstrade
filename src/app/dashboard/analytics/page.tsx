@@ -20,10 +20,9 @@ function compact(n: number): string {
 
 function rrOf(tr: SerializedTrade): number | null {
   if (tr.stopLoss == null) return null;
-  const risk = Math.abs(tr.entryPrice - tr.stopLoss);
+  const risk = Math.abs(tr.entryPrice - tr.stopLoss) * tr.qty;
   if (risk <= 0) return null;
-  const move = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
-  return move / risk;
+  return tr.netPnl / risk;
 }
 
 export default function AnalyticsPage() {

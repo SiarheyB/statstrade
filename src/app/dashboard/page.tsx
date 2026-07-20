@@ -122,6 +122,7 @@ export default function DashboardPage() {
   const [entryMetric, setEntryMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [patternMetric, setPatternMetric] = useState<"netPnl" | "winRate">("netPnl");
   const [exchangeMetric, setExchangeMetric] = useState<"netPnl" | "winRate">("netPnl");
+  const [dailyPnlMetric, setDailyPnlMetric] = useState<"pnl" | "winRate">("pnl");
 
   // Capital is user-set per account. Editable only for a single selected account;
   // for "all" it shows the sum of accounts that have a capital set (read-only).
@@ -455,8 +456,23 @@ export default function DashboardPage() {
           {/* Daily pnl + heatmap */}
           <div className="grid gap-5 lg:grid-cols-2">
             <div className="card p-5 min-w-0">
-              <SectionTitle title={t("dash.dailyPnl")} />
-              <DailyPnlChart data={m.daily} metric="pnl" />
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="font-medium text-sm">{t("dash.dailyPnl")}</h3>
+                <div className="flex gap-1 text-xs">
+                  {(["pnl", "winRate"] as const).map((mk) => (
+                    <button
+                      key={mk}
+                      onClick={() => setDailyPnlMetric(mk)}
+                      className={`px-2.5 py-1 rounded-md transition ${
+                        dailyPnlMetric === mk ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
+                      }`}
+                    >
+                      {mk === "pnl" ? t("metric.pnl") : t("metric.risk")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <DailyPnlChart data={m.daily} metric={dailyPnlMetric} />
             </div>
             <div className="card p-5 min-w-0">
               <SectionTitle title={t("dash.calendar")} />

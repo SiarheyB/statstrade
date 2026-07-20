@@ -379,6 +379,7 @@ const en: Dict = {
   // metric value mode toggle
   "metric.pnl": "P&L",
   "metric.winRateShort": "Win Rate",
+  "metric.risk": "TP/SL",
 
   // trades
   "trades.title": "Trades",
@@ -1314,6 +1315,7 @@ const ru: Dict = {
 
   "metric.pnl": "P&L",
   "metric.winRateShort": "Win Rate",
+  "metric.risk": "TP/SL",
 
   "trades.title": "Сделки",
   "trades.subtitle": "{n} закрытых сделок (реконструированы из исполнений)",

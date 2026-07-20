@@ -95,6 +95,32 @@ export function EquityChart({ data }: { data: EquityPoint[] }) {
   );
 }
 
+// Custom shape for risk‑decomposition bars: winR (green, above 0) + lossR (red, below 0)
+// at the same x position. Uses a single Bar with a computed _rScale dataKey.
+function RiskBarShape(props: Record<string, unknown>) {
+  const { x, y, width, height, payload } = props as {
+    x: number; y: number; width: number; height: number;
+    payload: DailyPoint & { _rScale: number };
+  };
+  if (!payload || height <= 0) return null;
+  const { winR, lossR, _rScale } = payload;
+  const scale = _rScale / height; // units per pixel
+  const baseline = y + height;
+  const winH = winR > 0 ? winR / scale : 0;
+  const lossH = lossR < 0 ? Math.abs(lossR) / scale : 0;
+  const r = 2;
+  return (
+    <g>
+      {winH > 0 && (
+        <rect x={x} y={baseline - winH} width={width} height={winH} fill={PROFIT} rx={r} ry={r} />
+      )}
+      {lossH > 0 && (
+        <rect x={x} y={baseline} width={width} height={lossH} fill={LOSS} rx={r} ry={r} />
+      )}
+    </g>
+  );
+}
+
 export function DailyPnlChart({
   data,
   metric = "pnl",
@@ -104,11 +130,36 @@ export function DailyPnlChart({
 }) {
   const { t: tr } = useI18n();
   if (data.length === 0) return <Empty />;
-  const isWin = metric === "winRate";
+  const isRisk = metric === "winRate";
+  const fmtR = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}R`;
+
+  // Compute Y‑axis domain, capping at the 90th percentile so outlier R‑values
+  // (e.g. +50R) don't squash the rest of the chart into invisibility.
+  // Bars that exceed the cap are drawn at the maximum height; the exact value is
+  // shown in the tooltip only.
+  let yDomain: [number, number] | undefined;
+  if (isRisk) {
+    const winVals = data.map((d) => d.winR).filter((v) => v > 0).sort((a, b) => a - b);
+    const lossVals = data.map((d) => Math.abs(d.lossR)).filter((v) => v > 0).sort((a, b) => a - b);
+    const atP90 = (arr: number[], def: number) =>
+      arr.length > 0 ? arr[Math.min(Math.floor(arr.length * 0.9), arr.length - 1)] : def;
+    const cap = Math.max(atP90(winVals, 3), atP90(lossVals, 3), 3);
+    yDomain = [-cap * 1.15, cap * 1.15];
+  }
+
+  // For risk mode, add a synthetic field that spans the full bar height, capped
+  // to the domain so outlier days don't overflow the chart area.
+  const chartData = isRisk
+    ? data.map((d) => ({
+        ...d,
+        _rScale: Math.min(Math.max(d.winR, Math.abs(d.lossR), 0.001), yDomain![1]),
+      }))
+    : data;
+
   return (
     <div className="h-64 w-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+        <BarChart data={chartData as any} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="date"
@@ -118,11 +169,11 @@ export function DailyPnlChart({
             minTickGap={30}
           />
           <YAxis
-            tickFormatter={isWin ? (v: number) => `${Math.round(v)}%` : compact}
-            domain={isWin ? [0, 100] : undefined}
+            domain={yDomain}
+            tickFormatter={isRisk ? (v: number) => `${v.toFixed(1)}R` : compact}
             tick={{ fill: AXIS, fontSize: 11 }}
             stroke={GRID}
-            width={isWin ? 40 : 48}
+            width={48}
           />
           <Tooltip
             cursor={{ fill: "#ffffff08" }}
@@ -132,9 +183,10 @@ export function DailyPnlChart({
               return (
                 <TooltipBox>
                   <div className="text-muted">{p.date}</div>
-                  {isWin ? (
+                  {isRisk ? (
                     <>
-                      <div className="font-medium">{p.winRate.toFixed(1)}% win</div>
+                      <div className="font-medium text-profit">{fmtR(p.winR)}</div>
+                      <div className="font-medium text-loss">{fmtR(p.lossR)}</div>
                       <div className="text-faint">{p.trades} {tr("common.trades")}</div>
                     </>
                   ) : (
@@ -146,11 +198,15 @@ export function DailyPnlChart({
               );
             }}
           />
-          <Bar dataKey={metric} radius={[2, 2, 0, 0]}>
-            {data.map((d, i) => (
-              <Cell key={i} fill={isWin ? (d.winRate >= 50 ? PROFIT : LOSS) : d.pnl >= 0 ? PROFIT : LOSS} />
-            ))}
-          </Bar>
+          {isRisk ? (
+            <Bar dataKey="_rScale" shape={<RiskBarShape />} radius={[2, 2, 0, 0]} />
+          ) : (
+            <Bar dataKey="pnl" radius={[2, 2, 0, 0]}>
+              {data.map((d, i) => (
+                <Cell key={i} fill={d.pnl >= 0 ? PROFIT : LOSS} />
+              ))}
+            </Bar>
+          )}
         </BarChart>
       </ResponsiveContainer>
     </div>

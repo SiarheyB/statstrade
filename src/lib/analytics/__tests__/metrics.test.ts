@@ -273,10 +273,10 @@ describe("computeMetrics", () => {
 
   it("computes avgRR from stop-loss trades", () => {
     const trades = [
-      // Long, entry 100, stop 90 (risk 10), exit 120 (move +20) => +2R
-      makeTrade({ id: "t1", side: "long", entryPrice: 100, exitPrice: 120, stopLoss: 90 }),
-      // Long, entry 100, stop 90 (risk 10), exit 80 (move -20) => -2R
-      makeTrade({ id: "t2", side: "long", entryPrice: 100, exitPrice: 80, stopLoss: 90 }),
+      // Long, qty 1, entry 100, stop 90 (risk $10), exit 120 => netPnl $20, +2R
+      makeTrade({ id: "t1", side: "long", qty: 1, entryPrice: 100, exitPrice: 120, stopLoss: 90, fees: 0, netPnl: 20 }),
+      // Long, qty 1, entry 100, stop 90 (risk $10), exit 80 => netPnl $-20, -2R
+      makeTrade({ id: "t2", side: "long", qty: 1, entryPrice: 100, exitPrice: 80, stopLoss: 90, fees: 0, netPnl: -20 }),
       // No stop-loss => ignored
       makeTrade({ id: "t3", side: "long", entryPrice: 100, exitPrice: 110 }),
     ];

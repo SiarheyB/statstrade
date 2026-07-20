@@ -26,7 +26,7 @@ export type Bucket = {
 };
 
 export type EquityPoint = { t: number; equity: number; pnl: number };
-export type DailyPoint = { date: string; pnl: number; cumulative: number; trades: number; winRate: number };
+export type DailyPoint = { date: string; pnl: number; cumulative: number; trades: number; winRate: number; winR: number; lossR: number };
 
 export type Metrics = {
   initialCapital: number;
@@ -270,13 +270,27 @@ export function computeMetrics(
     : 0;
 
   // daily P&L series and daily returns for Sharpe/Sortino
-  const dayMap = new Map<string, { pnl: number; trades: number; wins: number }>();
+  // Helper: dollar-based R-multiple for a trade. Risk = |entry - stop| × qty.
+// Returns null when the stop is unset or zero (= 1R would be $0).
+function rMultiple(t: RoundTripTrade): number | null {
+  if (t.stopLoss == null) return null;
+  const risk = Math.abs(t.entryPrice - t.stopLoss) * t.qty;
+  if (risk <= 0) return null;
+  return t.netPnl / risk;
+}
+
+const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR: number; lossR: number }>();
   for (const t of sorted) {
     const key = t.exitTime.toISOString().slice(0, 10);
-    const d = dayMap.get(key) ?? { pnl: 0, trades: 0, wins: 0 };
+    const d = dayMap.get(key) ?? { pnl: 0, trades: 0, wins: 0, winR: 0, lossR: 0 };
     d.pnl += t.netPnl;
     d.trades += 1;
     if (t.result === "win") d.wins += 1;
+    const r = rMultiple(t);
+    if (r != null) {
+      if (r > 0) d.winR += r;
+      else d.lossR += r; // already negative
+    }
     dayMap.set(key, d);
   }
   const dailyKeys = Array.from(dayMap.keys()).sort();
@@ -287,7 +301,7 @@ export function computeMetrics(
   for (const key of dailyKeys) {
     const d = dayMap.get(key)!;
     cum += d.pnl;
-    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades, winRate: d.trades ? (d.wins / d.trades) * 100 : 0 });
+    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades, winRate: d.trades ? (d.wins / d.trades) * 100 : 0, winR: d.winR, lossR: d.lossR });
     if (runningEquity > 0) dailyReturns.push(d.pnl / runningEquity);
     runningEquity += d.pnl;
   }
@@ -428,16 +442,14 @@ export function computeMetrics(
   const kellyPct =
     kellyFracPayoff > 0 ? (w - (1 - w) / kellyFracPayoff) * 100 : 0;
 
-  // Average realized R-multiple (price-based, stop distance = 1R), over trades
-  // with a stop-loss. Exiting at the stop is exactly -1R.
+  // Average realized R-multiple, measured in dollar terms where the stop distance
+  // × qty is 1R. Exiting exactly at the stop is -1R (before fees).
   const rMultiples: number[] = [];
   for (const tr of sorted) {
     if (tr.stopLoss == null) continue;
-    const risk = Math.abs(tr.entryPrice - tr.stopLoss);
+    const risk = Math.abs(tr.entryPrice - tr.stopLoss) * tr.qty;
     if (risk <= 0) continue;
-    const move =
-      tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
-    rMultiples.push(move / risk);
+    rMultiples.push(tr.netPnl / risk);
   }
   const avgRR = rMultiples.length ? mean(rMultiples) : 0;
 
