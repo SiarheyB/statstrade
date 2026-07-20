@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { getAdminSession, notFound } from "@/lib/admin";
 import { serverError } from "@/lib/api";
 
-export const maxDuration = 20;
+export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 // Раздел «Карта ордеров» админ-панели. Совмещает два источника:
@@ -80,14 +80,23 @@ async function getTotals(
   if (totalsInflight) return totalsInflight;
   totalsInflight = (async () => {
     const map = new Map<string, { total: number; oldest: Date | null }>();
-    // Последовательно, чтобы не занимать несколько соединений тяжёлыми COUNT.
-    for (const f of feeds) {
-      const [row] = await prisma.$queryRaw<{ total: number; oldest: Date | null }[]>`
-        SELECT count(*)::int AS total, min(t) AS oldest
-        FROM "ObSnapshot" WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
-      `;
-      map.set(`${f.symbol}|${f.exchange}`, { total: row?.total ?? 0, oldest: row?.oldest ?? null });
-    }
+    // Параллельно — каждый фид по своему индексу (symbol, exchange, t).
+    // Последовательный запуск нескольких COUNT(*) на 180M строк превышает
+    // таймаут (504). При параллельном — все финишируют за время самого
+    // медленного.
+    // Используем ObSnapshotRollup (7.4M строк) вместо ObSnapshot (180M строк)
+    // — в 24 раза меньше, результат практически тот же.
+    const results = await Promise.all(
+      feeds.map((f) =>
+        prisma
+          .$queryRaw<{ total: number; oldest: Date | null }[]>`
+            SELECT count(*)::int AS total, min(bucket) AS oldest
+            FROM "ObSnapshotRollup" WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+          `
+          .then((r) => ({ key: `${f.symbol}|${f.exchange}`, total: r[0]?.total ?? 0, oldest: r[0]?.oldest ?? null })),
+      ),
+    );
+    for (const r of results) map.set(r.key, { total: r.total, oldest: r.oldest });
     totalsCache = { at: Date.now(), data: map };
     return map;
   })().finally(() => {
@@ -117,21 +126,26 @@ async function getHeavyStats(): Promise<HeavyStats> {
 
     // Свежесть/темп на фид: max(t) и счётчики за минуту/час — range-скан по
     // индексу (symbol, exchange, t), читает только последние записи фида.
+    // Параллельно, чтобы не ждать последовательно (как и getTotals выше).
+    const feedRows = await Promise.all(
+      feedList.map((f) =>
+        prisma
+          .$queryRaw<{ last_min: number; last_hour: number; last_t: Date | null }[]>`
+          SELECT
+            (SELECT count(*)::int FROM "ObSnapshot"
+              WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+                AND t > now() - interval '1 minute') AS last_min,
+            (SELECT count(*)::int FROM "ObSnapshot"
+              WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+                AND t > now() - interval '1 hour') AS last_hour,
+            (SELECT max(t) FROM "ObSnapshot"
+              WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}) AS last_t
+        `
+          .then((r) => ({ f, row: r[0] })),
+      ),
+    );
     const feeds: FeedRow[] = [];
-    for (const f of feedList) {
-      const [row] = await prisma.$queryRaw<
-        { last_min: number; last_hour: number; last_t: Date | null }[]
-      >`
-        SELECT
-          (SELECT count(*)::int FROM "ObSnapshot"
-            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
-              AND t > now() - interval '1 minute') AS last_min,
-          (SELECT count(*)::int FROM "ObSnapshot"
-            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
-              AND t > now() - interval '1 hour') AS last_hour,
-          (SELECT max(t) FROM "ObSnapshot"
-            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}) AS last_t
-      `;
+    for (const { f, row } of feedRows) {
       const tot = totals.get(`${f.symbol}|${f.exchange}`);
       feeds.push({
         symbol: f.symbol,
@@ -145,49 +159,61 @@ async function getHeavyStats(): Promise<HeavyStats> {
     }
 
     // Скорость наполнения за час: по каждому фиду через индекс, агрегация по
-    // биржам — в JS (строк «минута × биржа» максимум 60 × фиды).
+    // биржам — в JS (строк «минута × биржа» максимум 60 × фиды). Параллельно.
+    const seriesMaps = await Promise.all(
+      feedList.map((f) =>
+        prisma
+          .$queryRaw<{ minute: Date; c: number }[]>`
+            SELECT date_trunc('minute', t) AS minute, count(*)::int AS c
+            FROM "ObSnapshot"
+            WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+              AND t > now() - interval '60 minutes'
+            GROUP BY minute
+          `
+          .then((rows) => ({ exchange: f.exchange, rows })),
+      ),
+    );
     const seriesMap = new Map<string, SeriesRow>();
-    for (const f of feedList) {
-      const rows = await prisma.$queryRaw<{ minute: Date; c: number }[]>`
-        SELECT date_trunc('minute', t) AS minute, count(*)::int AS c
-        FROM "ObSnapshot"
-        WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
-          AND t > now() - interval '60 minutes'
-        GROUP BY minute
-      `;
+    for (const { exchange, rows } of seriesMaps) {
       for (const r of rows) {
-        const key = `${f.exchange}|${r.minute.getTime()}`;
+        const key = `${exchange}|${r.minute.getTime()}`;
         const cur = seriesMap.get(key);
         if (cur) cur.c += r.c;
-        else seriesMap.set(key, { exchange: f.exchange, minute: r.minute, c: r.c });
+        else seriesMap.set(key, { exchange, minute: r.minute, c: r.c });
       }
     }
     const series = [...seriesMap.values()].sort(
       (a, b) => a.minute.getTime() - b.minute.getTime(),
     );
 
-    // Сопутствующие потоки: max(t)/строк-за-минуту тоже точечно на фид.
-    const tableStats: { tbl: string; last_min: number; last_t: Date | null }[] = [];
-    for (const tbl of ["ObTrade", "ObFootprint", "ObBigTrade"] as const) {
-      let lastMin = 0;
-      let lastT: Date | null = null;
-      for (const f of feedList) {
-        const [row] = await prisma.$queryRawUnsafe<
-          { last_min: number; last_t: Date | null }[]
-        >(
-          `SELECT
-             (SELECT count(*)::int FROM "${tbl}"
-               WHERE symbol = $1 AND exchange = $2 AND t > now() - interval '1 minute') AS last_min,
-             (SELECT max(t) FROM "${tbl}"
-               WHERE symbol = $1 AND exchange = $2) AS last_t`,
-          f.symbol,
-          f.exchange,
+    // Сопутствующие потоки: max(t)/строк-за-минуту — точечно на фид, параллельно
+    // по таблицам и фидам.
+    const tableStats = await Promise.all(
+      (["ObTrade", "ObFootprint", "ObBigTrade"] as const).map(async (tbl) => {
+        const tblRows = await Promise.all(
+          feedList.map((f) =>
+            prisma
+              .$queryRawUnsafe<{ last_min: number; last_t: Date | null }[]>(
+                `SELECT
+                   (SELECT count(*)::int FROM "${tbl}"
+                     WHERE symbol = $1 AND exchange = $2 AND t > now() - interval '1 minute') AS last_min,
+                   (SELECT max(t) FROM "${tbl}"
+                     WHERE symbol = $1 AND exchange = $2) AS last_t`,
+                f.symbol,
+                f.exchange,
+              )
+              .then((r) => r[0]),
+          ),
         );
-        lastMin += row?.last_min ?? 0;
-        if (row?.last_t && (!lastT || row.last_t > lastT)) lastT = row.last_t;
-      }
-      tableStats.push({ tbl, last_min: lastMin, last_t: lastT });
-    }
+        let lastMin = 0;
+        let lastT: Date | null = null;
+        for (const row of tblRows) {
+          lastMin += row?.last_min ?? 0;
+          if (row?.last_t && (!lastT || row.last_t > lastT)) lastT = row.last_t;
+        }
+        return { tbl, last_min: lastMin, last_t: lastT };
+      }),
+    );
 
     const collector = await fetchCollectorMetrics();
     const data: HeavyStats = { feeds, series, tableStats, collector };
