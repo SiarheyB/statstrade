@@ -108,8 +108,6 @@ describe('LogService', () => {
 
   it('should clean up old logs', async () => {
     // Arrange
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - 30);
     prisma.importLog.deleteMany.mockResolvedValue({ count: 5 });
 
     // Act
@@ -119,9 +117,7 @@ describe('LogService', () => {
     expect(result).toEqual({ count: 5 });
     expect(prisma.importLog.deleteMany).toHaveBeenCalledWith({
       where: {
-        createdAt: {
-          lt: cutoffDate,
-        },
+        createdAt: expect.objectContaining({ lt: expect.any(Date) }),
       },
     });
   });

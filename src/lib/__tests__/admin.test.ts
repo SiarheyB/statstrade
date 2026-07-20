@@ -118,9 +118,9 @@ describe('admin', () => {
   describe('getFeedFreshness', () => {
     it('собирает свежесть по фидам и помечает отставшие', async () => {
       const now = Date.now();
-      mockQueryRaw
-        .mockResolvedValueOnce([{ symbol: 'BTCUSDT', exchange: 'binance' }])
-        .mockResolvedValueOnce([{ last_t: new Date(now - 1000) }]); // свежий
+      mockQueryRaw.mockResolvedValueOnce([
+        { symbol: 'BTCUSDT', exchange: 'binance', last_t: new Date(now - 1000) }, // свежий
+      ]);
 
       const out = await getFeedFreshness();
       expect(out).toHaveLength(1);
@@ -132,18 +132,18 @@ describe('admin', () => {
 
     it('помечает фид как stale при большом лаге', async () => {
       const now = Date.now();
-      mockQueryRaw
-        .mockResolvedValueOnce([{ symbol: 'ETHUSDT', exchange: 'bybit' }])
-        .mockResolvedValueOnce([{ last_t: new Date(now - 200_000) }]);
+      mockQueryRaw.mockResolvedValueOnce([
+        { symbol: 'ETHUSDT', exchange: 'bybit', last_t: new Date(now - 200_000) },
+      ]);
 
       const out = await getFeedFreshness();
       expect(out[0].stale).toBe(true);
     });
 
     it('считает фид stale при отсутствии снимков (last_t null)', async () => {
-      mockQueryRaw
-        .mockResolvedValueOnce([{ symbol: 'SOLUSDT', exchange: 'binance' }])
-        .mockResolvedValueOnce([{ last_t: null }]);
+      mockQueryRaw.mockResolvedValueOnce([
+        { symbol: 'SOLUSDT', exchange: 'binance', last_t: null },
+      ]);
 
       const out = await getFeedFreshness();
       expect(out[0].lastT).toBeNull();
