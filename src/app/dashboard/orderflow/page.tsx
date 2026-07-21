@@ -46,6 +46,10 @@ const DEFAULT_VISIBLE = 100;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
+// Максимальное увеличение по вертикали (цена) и горизонтали (время). ZOOM_IN_LIMIT = 1
+const ZOOM_IN_LIMIT = 1;
+const ZOOM_OUT_LIMIT = 2;
+
 // Порог «только крупные лимитки» в монетах базового актива. Показываем его в UI
 // рядом с Яркостью. Значения — дефолты коллектора (позже придут из настроек в БД).
 const BIG_LIMIT_COINS: Record<string, number> = { BTCUSDT: 500, ETHUSDT: 5000 };
@@ -883,8 +887,8 @@ export default function OrderflowPage() {
         const f = Math.exp((my - drag.my) * 0.006);
         const cy = (drag.view.y0 + drag.view.y1) / 2;
         const b = boundsRef.current;
-        const minP = b ? (b.y1 - b.y0) * 0.05 * 5 : 0;
-        const maxP = b ? (b.y1 - b.y0) * 2 : Infinity;
+        const minP = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
+        const maxP = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
         const span = Math.min(maxP, Math.max(minP, (drag.view.y1 - drag.view.y0) * f));
         viewRef.current = { ...drag.view, y0: cy - span / 2, y1: cy + span / 2 };
       } else if (drag.mode === "zoomX") {
@@ -892,8 +896,8 @@ export default function OrderflowPage() {
         const f = Math.exp(-(mx - drag.mx) * 0.006);
         const cx = (drag.view.t0 + drag.view.t1) / 2;
         const b = boundsRef.current;
-        const minT = b ? b.step * 3 * 5 : 0;
-        const maxT = b ? (b.t1 - b.t0) * 2 : Infinity;
+        const minT = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
+        const maxT = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
         const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
         viewRef.current = { ...drag.view, t0: cx - span / 2, t1: cx + span / 2 };
       } else {
@@ -961,12 +965,7 @@ export default function OrderflowPage() {
       const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
       const fy = Math.min(1, Math.max(0, my / plotH));
       const b = boundsRef.current;
-      // Ограничения зума: не отдалить шире загруженного окна и не приблизить
-      // ближе предела. Предел приближения на 30% «дальше» (минимальный размер
-      // окна больше в 1.30× — т.е. максимальное увеличение на 30% меньше).
-      const ZOOM_IN_LIMIT = 5;
-      // Отдаление можно немного больше полного окна — для «воздуха» по краям.
-      const ZOOM_OUT_LIMIT = 2;
+// ZOOM_IN_LIMIT/ZOOM_OUT_LIMIT объявлены на уровне модуля (см. const ZOOM_IN_LIMIT).
       const maxTSpan = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
       const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
       const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
