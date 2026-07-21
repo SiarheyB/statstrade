@@ -168,6 +168,7 @@ function PurgeCandles() {
   const [range, setRange] = useState<{ oldest: string | null; newest: string | null }>({ oldest: null, newest: null });
   const [before, setBefore] = useState("");
   const [busy, setBusy] = useState(false);
+  const [truncating, setTruncating] = useState(false);
   const [result, setResult] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -192,6 +193,24 @@ function PurgeCandles() {
     d.setMonth(d.getMonth() + n);
     return d.toISOString();
   };
+
+  async function truncateAll() {
+    if (!confirm(`Полностью очистить таблицу свечей (OHLCV)? Коллектор заново заполнит историю из Binance. Действие необратимо.`)) return;
+    setTruncating(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/admin/collector/purge-candles/truncate", { method: "POST" });
+      const d = await res.json();
+      if (res.ok) {
+        setResult("Таблица ObCandle полностью очищена. Коллектор заполнит свечи в течение ~1 минуты.");
+        await load();
+      } else {
+        setResult(`Ошибка: ${d.error ?? res.status}`);
+      }
+    } finally {
+      setTruncating(false);
+    }
+  }
 
   async function purge(beforeIso: string) {
     if (!beforeIso) return;
@@ -262,6 +281,20 @@ function PurgeCandles() {
             className="input-base text-sm py-1.5 px-3 inline-flex items-center gap-1.5 text-loss border-loss/40 hover:border-loss disabled:opacity-40"
           >
             <AlertTriangle size={14} /> Удалить
+          </button>
+        </div>
+        <hr className="border-border" />
+        <div className="flex items-center justify-between pt-1">
+          <div className="text-xs text-muted">
+            Полная очистка удалит <b>все</b> свечи. Коллектор заново заполнит историю
+            в течение ~1 минуты.
+          </div>
+          <button
+            disabled={busy || truncating}
+            onClick={truncateAll}
+            className="input-base text-sm py-1.5 px-3 inline-flex items-center gap-1.5 text-loss border-loss/40 hover:border-loss font-medium disabled:opacity-40"
+          >
+            <Trash2 size={14} /> Полная очистка
           </button>
         </div>
         {result && <div className="text-xs text-muted">{result}</div>}

@@ -7,6 +7,8 @@ import {
   computeBA,
   computeBigTrades,
   fetchOrderflowCandles,
+  CANDLES_IN_WINDOW,
+  DEFAULT_CANDLES,
 } from "@/lib/orderflow";
 import { isTimezone, normalizeTimezone } from "@/lib/timezone";
 
@@ -27,21 +29,9 @@ const TF_MS: Record<string, number> = {
   "1w": 7 * 24 * 60 * 60_000,
 };
 
-// Сколько свечей таймфрейма ТЯНЕМ в окно. Держим глубокую историю (как в
-// ClusterBtc): фронт по умолчанию показывает недавние ~100 свечей, а влево
-// прокручивается вся история. Коллектор теперь хранит историю полностью (чистка
-// вручную из админки) и пишет только крупные стены, поэтому широкое окно дёшево.
-// Ограничено лимитом Binance klines (1500 баров за запрос).
-const CANDLES_IN_WINDOW: Record<string, number> = {
-  "5m": 400,
-  "15m": 400,
-  "1h": 800,
-  "4h": 800,
-  "12h": 800,
-  "1d": 365,
-  "1w": 200,
-};
-const DEFAULT_CANDLES = 300;
+// Сколько свечей таймфрейма ТЯНЕМ в окно. Определено в orderflow.ts
+// (импортируется выше) — чтобы fetchOrderflowCandles и buildPayload
+// использовали одно значение.
 
 type Payload = {
   symbol: string;

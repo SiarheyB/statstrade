@@ -23,6 +23,22 @@ export type ObHeatmap = {
 
 export type OfCandle = { t: number; o: number; h: number; l: number; c: number };
 
+// Сколько свечей таймфрейма ТЯНЕМ в окно. Держим глубокую историю (как в
+// ClusterBtc): фронт по умолчанию показывает недавние ~100 свечей, а влево
+// прокручивается вся история. Коллектор теперь хранит историю полностью (чистка
+// вручную из админки) и пишет только крупные стены, поэтому широкое окно дёшево.
+// Ограничено лимитом Binance klines (1500 баров за запрос).
+export const CANDLES_IN_WINDOW: Record<string, number> = {
+  "5m": 400,
+  "15m": 400,
+  "1h": 800,
+  "4h": 800,
+  "12h": 800,
+  "1d": 365,
+  "1w": 200,
+};
+export const DEFAULT_CANDLES = 300;
+
 // Интервал свечей = выбранный таймфрейм (Binance klines interval).
 const CANDLE_INTERVAL: Record<string, string> = {
   "5m": "5m",
@@ -48,8 +64,12 @@ export async function fetchOrderflowCandles(
 ): Promise<OfCandle[]> {
   const interval = CANDLE_INTERVAL[range] ?? "1m";
 
+  // Try to get existing candles from the local DB (ObCandle table)
+  // Prisma returns t as Date, so we use a separate type and convert to OfCandle.
+  interface ObCandleRow { t: Date; o: number; h: number; l: number; c: number; }
+  let rows: ObCandleRow[] = [];
   try {
-    const rows = await prisma.obCandle.findMany({
+    rows = await prisma.obCandle.findMany({
       where: {
         symbol,
         exchange,
@@ -59,17 +79,58 @@ export async function fetchOrderflowCandles(
       orderBy: { t: "asc" },
       select: { t: true, o: true, h: true, l: true, c: true },
     });
+  } catch {
+    // If we can't query the DB (e.g., missing table on a fresh deploy) we fall back to
+    // direct Binance fetch – this mimics the pre‑collector behavior where candles were
+    // obtained on‑demand from Binance klines.
+  }
 
-    return rows.map((r) => ({
+  // If we have enough candles to satisfy the UI's expected window, return them.
+  // Otherwise (e.g., after a fresh deploy or when data is sparse) fall back to a
+  // direct Binance request to fill the gaps.
+  const expected = CANDLES_IN_WINDOW[range] ?? 300;
+  if (rows.length >= expected) {
+    return rows.map(r => ({
       t: r.t.getTime(),
       o: r.o,
       h: r.h,
       l: r.l,
       c: r.c,
     }));
-  } catch {
-    return [];
   }
+
+  // -----– Direct Binance fallback – mirrors the original implementation ----------
+  const urlBase = exchange === "binance-futures"
+    ? "https://fapi.binance.com/fapi/v1/klines"
+    : exchange === "binance-spot"
+      ? "https://api.binance.com/api/v3/klines"
+      : null;
+
+  if (urlBase) {
+    const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
+      + `&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
+    try {
+      const res = await fetch(url);
+      if (res.ok) {
+        const raw = await res.json();
+        // Convert Binance K‑line response to OfCandle shape.
+        // Binance returns prices as strings — convert to numbers so the
+        // chart rendering code gets numeric comparisons (k.c >= k.o).
+        return raw.map((k: (string | number)[]) => ({
+          t: Number(k[0]), // open time (ms)
+          o: Number(k[1]), // open
+          h: Number(k[2]), // high
+          l: Number(k[3]), // low
+          c: Number(k[4]), // close
+        }));
+      }
+    } catch (e) {
+      console.error(`[fetchOrderflowCandles] Binance fetch error: ${(e as Error).message}`);
+    }
+  }
+
+  // If everything failed, return an empty array – the UI will render an empty series.
+  return [];
 }
 
 export type DeltaSeries = {
