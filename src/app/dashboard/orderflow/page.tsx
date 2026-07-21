@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import { zonedParts, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
+import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
 
 type ObHeatmap = {
   priceMin: number;
@@ -74,9 +74,25 @@ function fmtTime(ms: number, tz: TimezoneId): string {
   const p = (z: number) => String(z).padStart(2, "0");
   return `${p(h)}:${p(mi)}`;
 }
-// Дата (без времени) — подпись на оси X при переходе на новые сутки, иначе
-// одинаковое «03:00» повторяется на каждой полуночи и выглядит как случайные
-// цифры, никак не привязанные к конкретной свече.
+// Полная дата/время для перекрестия: использует Intl.DateTimeFormat
+// с учётом локали пользователя — «пт, 24 июл. 2026 г., 14:00» для ru.
+// Для статических подписей оси X используется fmtDate + fmtTime (ниже).
+function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
+  const { ms: shifted } = shiftedMs(ms, tz);
+  const d = new Date(shifted);
+  const f = new Intl.DateTimeFormat(locale, {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+    timeZone: 'UTC',
+  });
+  return f.format(d);
+}
+// Статическая подпись оси X: DD.MM (коротко, без года — меток много).
 function fmtDate(ms: number, tz: TimezoneId): string {
   const { d, mo } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
@@ -86,7 +102,7 @@ function dayKey(ms: number, tz: TimezoneId): number {
   const { y, mo, d } = zonedParts(ms, tz);
   return y * 10000 + mo * 100 + d;
 }
-// Дата + время для подсказки свечи.
+// Статическая подпись оси X: DD.MM HH:MM.
 function fmtDateTime(ms: number, tz: TimezoneId): string {
   const { d, mo, h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
@@ -161,7 +177,7 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
 }
 
 export default function OrderflowPage() {
-  const { t, timezone } = useI18n();
+  const { t, timezone, locale } = useI18n();
   // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
   // после монтирования (иначе ломается гидрация).
   const [range, setRange] = useState<string>("1d");
@@ -495,8 +511,7 @@ export default function OrderflowPage() {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, plotH);
       ctx.stroke();
-      // Первая метка новых суток показывает дату (реже время само по себе
-      // превращается в бессмысленно повторяющееся «03:00» на каждой полуночи).
+      // Первая метка новых суток показывает дату, иначе только время.
       const day = dayKey(ms, timezone);
       const isDayStep = timeStep >= 86400000;
       const isNewDay = day !== lastDay;
@@ -667,7 +682,7 @@ export default function OrderflowPage() {
       // не в отдельной всплывающей подсказке, чтобы не закрывать свечи/стены.
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
-      const timeLabel = fmtDateTime(cndl ? cndl.t : ms, timezone);
+      const timeLabel = fmtCrosshairLabel(cndl ? cndl.t : ms, timezone, locale);
       ctx.font = "11px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
       const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
@@ -716,7 +731,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, t, range, timezone]);
+  }, [data, minT, gamma, clusters, showLiq, t, range, timezone, locale]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
