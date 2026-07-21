@@ -125,9 +125,14 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
   }
 }
 
+// Все биржи, для которых коллектор умеет собирать свечи (OHLCV).
+// Не зависит от cfg.exchanges — свечи собираются для spot и futures,
+// чтобы при переключении между биржами в UI свечи не пропадали.
+const CANDLE_EXCHANGES = ["binance-futures", "binance-spot"];
+
 async function fetchAndStoreCandles() {
   const seen = new Set();
-  for (const exchange of cfg.exchanges) {
+  for (const exchange of CANDLE_EXCHANGES) {
     for (const symbol of cfg.symbols) {
       for (const interval of CANDLE_INTERVALS) {
         const key = `${exchange}|${symbol}|${interval}`;
@@ -139,7 +144,9 @@ async function fetchAndStoreCandles() {
   }
 }
 
-// Заполняет свечи из истории, если таблица пуста — тянет за весь ретеншн.
+// Заполняет свечи из истории, если таблица пуста. Если таблицу уже наполнил
+// API-роут (on-demand fetch), пропускает — обычный цикл fetchAndStoreCandles
+// дозаполнит недостающие символы/биржи/интервалы.
 async function backfillCandles() {
   try {
     const exists = await pool.query(`SELECT 1 FROM "ObCandle" LIMIT 1`);
@@ -550,10 +557,20 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
-    if (total || rollupDeleted) {
+    // Свечи (ObCandle) — не партиционированы, чистим DELETE-ом по CANDLE_RETENTION_DAYS
+    let candlesDeleted = 0;
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObCandle" WHERE "t" < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.candleRetentionDays)],
+      );
+      candlesDeleted = r.rowCount ?? 0;
+    }
+    if (total || rollupDeleted || candlesDeleted) {
       console.log(
         `[prune] сброшено ${total} партиций (снапшоты: ${cfg.rawRetention}д, сделки: ${cfg.tradeRetentionDays}д); ` +
-        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д)`,
+        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д); ` +
+        `удалено ${candlesDeleted} свечей (retention: ${cfg.candleRetentionDays}д)`,
       );
     }
   } catch (err) {
@@ -607,6 +624,7 @@ const server = http.createServer((req, res) => {
       depthPct: cfg.depthPct,
       retentionDays: cfg.retentionDays,
       tradeRetentionDays: cfg.tradeRetentionDays,
+      candleRetentionDays: cfg.candleRetentionDays,
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
       minCoins: Object.fromEntries(minCoinsMap),

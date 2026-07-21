@@ -34,8 +34,11 @@ const CANDLE_INTERVAL: Record<string, string> = {
   "1w": "1w",
 };
 
-// Свечи для наложения поверх heatmap. Читаются из БД (таблица ObCandle,
-// заполняется collector-сервисом). Если данных нет — возвращается пустой массив.
+// Свечи для наложения поверх heatmap. Читаются из БД (таблица ObCandle),
+// заполняется collector-сервисом. Никаких on-demand запросов к Binance —
+// синхронизацией свечей занимается collector.
+// Если в БД ещё нет данных (collector не успел) — возвращаем пустой массив;
+// live-обновление (3с) подтянет их при следующем опросе.
 export async function fetchOrderflowCandles(
   symbol: string,
   exchange: string,
@@ -44,6 +47,7 @@ export async function fetchOrderflowCandles(
   toMs: number,
 ): Promise<OfCandle[]> {
   const interval = CANDLE_INTERVAL[range] ?? "1m";
+
   try {
     const rows = await prisma.obCandle.findMany({
       where: {
@@ -55,6 +59,7 @@ export async function fetchOrderflowCandles(
       orderBy: { t: "asc" },
       select: { t: true, o: true, h: true, l: true, c: true },
     });
+
     return rows.map((r) => ({
       t: r.t.getTime(),
       o: r.o,

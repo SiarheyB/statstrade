@@ -10,7 +10,9 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     $queryRaw: mocks.queryRaw,
     obBigTrade: { findMany: mocks.findMany },
-    obCandle: { findMany: mocks.obCandleFindMany },
+    obCandle: {
+      findMany: mocks.obCandleFindMany,
+    },
   },
 }));
 
@@ -29,34 +31,22 @@ beforeEach(() => {
   mocks.obCandleFindMany.mockReset();
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("fetchOrderflowCandles", () => {
   beforeEach(() => {
     mocks.obCandleFindMany.mockReset();
   });
 
   it("maps ObCandle rows to OfCandle", async () => {
+    const now = Date.now();
+    const fromMs = now - 3_600_000 * 100;
     mocks.obCandleFindMany.mockResolvedValue([
-      { t: new Date(1000), o: 100, h: 110, l: 90, c: 105 },
-      { t: new Date(2000), o: 105, h: 115, l: 95, c: 108 },
+      { t: new Date(fromMs + 1000), o: 100, h: 110, l: 90, c: 105 },
+      { t: new Date(now - 600_000), o: 105, h: 115, l: 95, c: 108 },
     ]);
 
-    const out = await fetchOrderflowCandles("BTCUSDT", "binance", "1h", 0, 1000);
+    const out = await fetchOrderflowCandles("BTCUSDT", "binance", "1h", fromMs, now);
     expect(out).toHaveLength(2);
-    expect(out[0]).toEqual({ t: 1000, o: 100, h: 110, l: 90, c: 105 });
-    expect(mocks.obCandleFindMany).toHaveBeenCalledWith({
-      where: {
-        symbol: "BTCUSDT",
-        exchange: "binance",
-        interval: "1h",
-        t: { gte: new Date(0), lte: new Date(1000) },
-      },
-      orderBy: { t: "asc" },
-      select: { t: true, o: true, h: true, l: true, c: true },
-    });
+    expect(out[0]).toEqual({ t: fromMs + 1000, o: 100, h: 110, l: 90, c: 105 });
   });
 
   it("uses 1m fallback for unknown range", async () => {

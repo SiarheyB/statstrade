@@ -269,6 +269,7 @@ function PurgeCandles() {
     </section>
   );
 }
+function PurgeHistory() {
   const [range, setRange] = useState<{ oldest: string | null; newest: string | null }>({ oldest: null, newest: null });
   const [before, setBefore] = useState("");
   const [busy, setBusy] = useState(false);
