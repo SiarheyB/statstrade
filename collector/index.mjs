@@ -23,6 +23,7 @@ const cfg = {
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
   rawRetention: Number(process.env.RAW_RETENTION_DAYS ?? 30),     // сырые данные хранить 30 дней
   rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
+  candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
   metricsToken: process.env.COLLECTOR_METRICS_TOKEN ?? "",
@@ -35,6 +36,128 @@ if (!cfg.databaseUrl) {
 
 const pool = new pg.Pool({ connectionString: cfg.databaseUrl, max: 4 });
 const RUN_MS = Number(process.env.RUN_MS ?? 0);
+
+// === Свечи (OHLCV) ===
+// Таймфреймы свечей, которые собираем. Совпадает с TF_MS в API-роуте orderflow.
+const CANDLE_INTERVALS = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"];
+const CANDLE_MS = {
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
+
+// Binance API base URL по бирже (только Binance пока).
+function klinesUrl(exchange) {
+  if (exchange === "binance-futures") return "https://fapi.binance.com/fapi/v1/klines";
+  if (exchange === "binance-spot") return "https://api.binance.com/api/v3/klines";
+  return null;
+}
+
+// Запрашивает и сохраняет свечи одной пары (symbol × exchange × interval).
+// Узнаёт последнюю сохранённую свечу и тянет от неё (или с начала ретеншна).
+async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
+  const urlBase = klinesUrl(exchange);
+  if (!urlBase) return; // неподдерживаемая биржа — пропускаем
+
+  // Последняя свеча в БД
+  const last = await pool.query(
+    `SELECT MAX("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+    [symbol, exchange, interval],
+  );
+  const lastTs = last.rows[0]?.ts ? new Date(last.rows[0].ts).getTime() : 0;
+  const now = Date.now();
+  const startMs = lastTs > 0 ? lastTs : now - cfg.candleRetentionDays * 86_400_000;
+
+  // Не запрашиваем, если последняя свеча моложе интервала (ещё не завершилась)
+  const intervalMs = CANDLE_MS[interval] ?? 3600_000;
+  if (lastTs > 0 && now - lastTs < intervalMs) return;
+
+  // Binance limit = 1500 свечей. Если окно шире — тянем последовательно.
+  let fromMs = startMs;
+  let total = 0;
+  while (fromMs < now) {
+    const toMs = Math.min(fromMs + intervalMs * 1500, now);
+    const url = `${urlBase}?symbol=${symbol}&interval=${interval}&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
+    let res;
+    try {
+      res = await fetch(url);
+    } catch (err) {
+      console.error(`[candles] fetch error ${exchange}:${symbol} ${interval}: ${err.message}`);
+      break;
+    }
+    if (!res.ok) {
+      console.error(`[candles] HTTP ${res.status} ${exchange}:${symbol} ${interval}`);
+      break;
+    }
+    const raw = await res.json();
+    if (!Array.isArray(raw) || raw.length === 0) break;
+
+    // Batched upsert
+    const values = [];
+    const params = [];
+    for (let i = 0; i < raw.length; i++) {
+      const k = raw[i];
+      const b = params.length;
+      values.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9})`);
+      params.push(symbol, exchange, interval, new Date(Number(k[0])), Number(k[1]), Number(k[2]), Number(k[3]), Number(k[4]), Number(k[5]));
+    }
+    try {
+      await pool.query(`
+        INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+        VALUES ${values.join(",")}
+        ON CONFLICT ("symbol","exchange","interval","t") DO NOTHING
+      `, params);
+    } catch (err) {
+      console.error(`[candles] upsert error ${exchange}:${symbol} ${interval}: ${err.message}`);
+      break;
+    }
+    total += raw.length;
+    // Двигаем fromMs на последний timestamp полученной свечи
+    fromMs = Number(raw[raw.length - 1][0]) + 1;
+    if (fromMs >= now) break;
+  }
+  if (total > 0) {
+    console.log(`[candles] ${exchange}:${symbol} ${interval}: +${total} свечей`);
+  }
+}
+
+// Все биржи, для которых коллектор умеет собирать свечи (OHLCV).
+// Не зависит от cfg.exchanges — свечи собираются для spot и futures,
+// чтобы при переключении между биржами в UI свечи не пропадали.
+const CANDLE_EXCHANGES = ["binance-futures", "binance-spot"];
+
+async function fetchAndStoreCandles() {
+  const seen = new Set();
+  for (const exchange of CANDLE_EXCHANGES) {
+    for (const symbol of cfg.symbols) {
+      for (const interval of CANDLE_INTERVALS) {
+        const key = `${exchange}|${symbol}|${interval}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        await fetchAndStoreCandlesFor(symbol, exchange, interval);
+      }
+    }
+  }
+}
+
+// Заполняет свечи из истории, если таблица пуста. Если таблицу уже наполнил
+// API-роут (on-demand fetch), пропускает — обычный цикл fetchAndStoreCandles
+// дозаполнит недостающие символы/биржи/интервалы.
+async function backfillCandles() {
+  try {
+    const exists = await pool.query(`SELECT 1 FROM "ObCandle" LIMIT 1`);
+    if (exists.rowCount > 0) return;
+    console.log("[candles] бэкафилл из Binance…");
+    await fetchAndStoreCandles();
+    console.log("[candles] бэкафилл завершён");
+  } catch (err) {
+    console.error(`[candles] бэкафилл ошибка: ${err.message}`);
+  }
+}
 
 // Шаг ценового бина под символ. Приоритет: ENV BIN_SIZE_<SYMBOL> → карта
 // дефолтов → запасной cfg.binSize. Дефолты подобраны под типичную цену (~4 б.п.).
@@ -434,10 +557,20 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
-    if (total || rollupDeleted) {
+    // Свечи (ObCandle) — не партиционированы, чистим DELETE-ом по CANDLE_RETENTION_DAYS
+    let candlesDeleted = 0;
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObCandle" WHERE "t" < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.candleRetentionDays)],
+      );
+      candlesDeleted = r.rowCount ?? 0;
+    }
+    if (total || rollupDeleted || candlesDeleted) {
       console.log(
         `[prune] сброшено ${total} партиций (снапшоты: ${cfg.rawRetention}д, сделки: ${cfg.tradeRetentionDays}д); ` +
-        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д)`,
+        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д); ` +
+        `удалено ${candlesDeleted} свечей (retention: ${cfg.candleRetentionDays}д)`,
       );
     }
   } catch (err) {
@@ -491,6 +624,7 @@ const server = http.createServer((req, res) => {
       depthPct: cfg.depthPct,
       retentionDays: cfg.retentionDays,
       tradeRetentionDays: cfg.tradeRetentionDays,
+      candleRetentionDays: cfg.candleRetentionDays,
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
       minCoins: Object.fromEntries(minCoinsMap),
@@ -547,7 +681,7 @@ if (isMain) {
 console.log(
   `[start] collector feeds=${feeds.length} (${feeds.map((f) => `${f.exchange}:${f.symbol}`).join(", ")}) ` +
     `bin=$${cfg.binSize} snapshot=${cfg.snapshotMs}ms depth=±${cfg.depthPct * 100}% ` +
-    `retention: snap=${cfg.retentionDays}d trades=${cfg.tradeRetentionDays}d`,
+    `retention: snap=${cfg.retentionDays}d trades=${cfg.tradeRetentionDays}d candles=${cfg.candleRetentionDays}d`,
 );
 for (const f of feeds) f.book.connect();
 for (const tf of tradeFeeds) tf.trades.connect();
@@ -563,11 +697,17 @@ const flushTimer = startRollupFlushBeat();
 const pruneTimer = setInterval(pruneOld, 3600_000);
 setTimeout(pruneOld, 10_000);
 
+// Свечи — раз в 60 секунд, первый запуск через 15с (после бэкафилла)
+const candleTimer = setInterval(fetchAndStoreCandles, 60_000);
+setTimeout(fetchAndStoreCandles, 15_000);
+setTimeout(backfillCandles, 30_000);
+
 async function shutdown() {
   clearInterval(writeTimer);
   clearInterval(flushTimer);
   clearInterval(pruneTimer);
   clearInterval(configTimer);
+  clearInterval(candleTimer);
   for (const f of feeds) f.book.close();
   for (const tf of tradeFeeds) tf.trades.close();
   server.close();
@@ -581,5 +721,5 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 } // end isMain
 
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
-export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup };
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };

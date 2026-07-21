@@ -162,7 +162,7 @@ export default function OrderflowPage() {
   // после монтирования (иначе ломается гидрация).
   const [range, setRange] = useState<string>("1d");
   const [symbol, setSymbol] = useState("BTCUSDT");
-  const [exchange, setExchange] = useState("binance-spot");
+  const [exchange, setExchange] = useState("binance-futures");
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

@@ -159,10 +159,116 @@ export default function AdminCollectorConfig() {
       </section>
 
       <PurgeHistory />
+      <PurgeCandles />
     </div>
   );
 }
 
+function PurgeCandles() {
+  const [range, setRange] = useState<{ oldest: string | null; newest: string | null }>({ oldest: null, newest: null });
+  const [before, setBefore] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const res = await fetch("/api/admin/collector/purge-candles");
+    if (res.ok) setRange(await res.json());
+  }, []);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await fetch("/api/admin/collector/purge-candles");
+      if (res.ok && alive) setRange(await res.json());
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Пресеты: «первые N месяцев» = удалить всё старше (самая старая дата + N мес.).
+  const presetMonths = (n: number): string | null => {
+    if (!range.oldest) return null;
+    const d = new Date(range.oldest);
+    d.setMonth(d.getMonth() + n);
+    return d.toISOString();
+  };
+
+  async function purge(beforeIso: string) {
+    if (!beforeIso) return;
+    const human = new Date(beforeIso).toLocaleString("ru-RU");
+    if (!confirm(`Удалить все свечи (OHLCV) старше ${human}? Действие необратимо.`)) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const res = await fetch("/api/admin/collector/purge-candles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ before: beforeIso }),
+      });
+      const d = await res.json();
+      if (res.ok) {
+        setResult(`Удалено свечей: ${d.deleted}. Коллектор заново заполнит историю.`);
+        await load();
+      } else {
+        setResult(`Ошибка: ${d.error ?? res.status}`);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleString("ru-RU") : "—");
+
+  return (
+    <section>
+      <h2 className="text-lg font-medium">Очистка свечей (OHLCV)</h2>
+      <p className="mt-1 text-sm text-muted">
+        Свечи хранятся в таблице ObCandle — сюда пишет коллектор из Binance klines API.
+        Автоочистки нет; удалённые свечи коллектор заново заполнит при следующем запуске.
+      </p>
+      <div className="mt-2 text-xs text-faint">
+        Свечи в БД: с <b className="text-fg">{fmt(range.oldest)}</b> по <b className="text-fg">{fmt(range.newest)}</b>
+      </div>
+
+      <div className="mt-4 card p-4 max-w-xl space-y-3">
+        <div className="flex flex-wrap gap-2">
+          {([["первый месяц", 1], ["первые 3 месяца", 3], ["первые 6 месяцев", 6], ["первый год", 12]] as const).map(
+            ([label, n]) => {
+              const iso = presetMonths(n);
+              return (
+                <button
+                  key={n}
+                  disabled={!iso || busy}
+                  onClick={() => iso && purge(iso)}
+                  className="input-base text-sm py-1.5 px-3 hover:border-border-strong disabled:opacity-40"
+                >
+                  Удалить {label}
+                </button>
+              );
+            },
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-muted">или до даты:</span>
+          <input
+            type="datetime-local"
+            className="input-base text-sm py-1.5"
+            value={before}
+            onChange={(e) => setBefore(e.target.value)}
+          />
+          <button
+            disabled={!before || busy}
+            onClick={() => before && purge(new Date(before).toISOString())}
+            className="input-base text-sm py-1.5 px-3 inline-flex items-center gap-1.5 text-loss border-loss/40 hover:border-loss disabled:opacity-40"
+          >
+            <AlertTriangle size={14} /> Удалить
+          </button>
+        </div>
+        {result && <div className="text-xs text-muted">{result}</div>}
+      </div>
+    </section>
+  );
+}
 function PurgeHistory() {
   const [range, setRange] = useState<{ oldest: string | null; newest: string | null }>({ oldest: null, newest: null });
   const [before, setBefore] = useState("");

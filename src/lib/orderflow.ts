@@ -34,10 +34,11 @@ const CANDLE_INTERVAL: Record<string, string> = {
   "1w": "1w",
 };
 
-// Свечи для наложения поверх heatmap. Пока только Binance USDⓈ-M Futures
-// (как и collector); другие биржи добавим вместе с мультибиржевым сбором.
-// Свечи как ценовой референс берём с Binance USDⓈ-M Futures независимо от
-// выбранной биржи стакана (цена BTC/ETH практически совпадает между площадками).
+// Свечи для наложения поверх heatmap. Читаются из БД (таблица ObCandle),
+// заполняется collector-сервисом. Никаких on-demand запросов к Binance —
+// синхронизацией свечей занимается collector.
+// Если в БД ещё нет данных (collector не успел) — возвращаем пустой массив;
+// live-обновление (3с) подтянет их при следующем опросе.
 export async function fetchOrderflowCandles(
   symbol: string,
   exchange: string,
@@ -46,27 +47,25 @@ export async function fetchOrderflowCandles(
   toMs: number,
 ): Promise<OfCandle[]> {
   const interval = CANDLE_INTERVAL[range] ?? "1m";
-  // Spot — со спотового API, фьючерсы/агрегат — с фьючерсного.
-  const url =
-    exchange === "binance-spot"
-      ? `https://api.binance.com/api/v3/klines?symbol=${symbol}` +
-        `&interval=${interval}&startTime=${fromMs}&endTime=${toMs}&limit=1500`
-      : `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}` +
-        `&interval=${interval}&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
+
   try {
-    const res = await fetch(url, {
-      headers: { accept: "application/json" },
-      cache: "no-store",
-      signal: AbortSignal.timeout(8000),
+    const rows = await prisma.obCandle.findMany({
+      where: {
+        symbol,
+        exchange,
+        interval,
+        t: { gte: new Date(fromMs), lte: new Date(toMs) },
+      },
+      orderBy: { t: "asc" },
+      select: { t: true, o: true, h: true, l: true, c: true },
     });
-    if (!res.ok) return [];
-    const raw = (await res.json()) as unknown[][];
-    return raw.map((k) => ({
-      t: Number(k[0]),
-      o: Number(k[1]),
-      h: Number(k[2]),
-      l: Number(k[3]),
-      c: Number(k[4]),
+
+    return rows.map((r) => ({
+      t: r.t.getTime(),
+      o: r.o,
+      h: r.h,
+      l: r.l,
+      c: r.c,
     }));
   } catch {
     return [];

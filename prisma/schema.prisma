@@ -277,6 +277,26 @@ model ObBigTrade {
   @@index([symbol, exchange, t])
 }
 
+// OHLCV candles collected from Binance REST API by the collector service.
+// One row per (symbol, exchange, interval, open_time). Stored pre-computed for
+// all timeframes used by the orderflow chart (5m, 15m, 1h, 4h, 12h, 1d, 1w).
+// Much smaller than orderbook data — regular table, not partitioned.
+// Pruned by the collector via DELETE on t older than CANDLE_RETENTION_DAYS.
+model ObCandle {
+  symbol   String
+  exchange String   // binance-futures or binance-spot
+  interval String   // 5m, 15m, 1h, 4h, 12h, 1d, 1w
+  t        DateTime @db.Timestamptz(3) // candle open time (UTC)
+  o        Float    // open price
+  h        Float    // high price
+  l        Float    // low price
+  c        Float    // close price
+  v        Float    @default(0) // volume in base asset
+
+  @@id([symbol, exchange, interval, t])
+  @@index([symbol, exchange, interval, t])
+}
+
 // Aggregated crypto news from external RSS sources. Global (not per-user);
 // Orderbook heatmap snapshots — written by the standalone collector service
 // (collector/), one row per non-empty price bin per snapshot. Global market

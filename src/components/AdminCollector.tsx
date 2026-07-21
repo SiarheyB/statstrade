@@ -52,6 +52,7 @@ type CollectorMeta = {
     depthPct: number;
     retentionDays: number;
     tradeRetentionDays: number;
+    candleRetentionDays: number;
     feeds: CollectorFeed[];
   };
 };
@@ -195,6 +196,7 @@ export default function AdminCollector() {
             <span className="text-muted">{t("admin.collector.depth", { pct: (col.data.depthPct * 100).toFixed(1) })}</span>
             <span className="text-muted">{t("admin.collector.retention", { days: col.data.retentionDays })}</span>
             <span className="text-muted">{t("admin.collector.tradeRetention", { days: col.data.tradeRetentionDays })}</span>
+            <span className="text-muted">{t("admin.collector.candleRetention", { days: col.data.candleRetentionDays ?? 365 })}</span>
           </>
         )}
         {!col?.ok && <span className="text-faint">{col?.error}</span>}
