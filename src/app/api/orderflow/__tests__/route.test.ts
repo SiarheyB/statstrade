@@ -3,6 +3,16 @@ import { asUser, asGuest, mockGetAuthUser } from "@/lib/__tests__/helpers/routeM
 import { GET } from "@/app/api/orderflow/route";
 
 vi.mock("@/lib/orderflow", () => ({
+  CANDLES_IN_WINDOW: {
+    "5m": 400,
+    "15m": 400,
+    "1h": 800,
+    "4h": 800,
+    "12h": 800,
+    "1d": 365,
+    "1w": 200,
+  },
+  DEFAULT_CANDLES: 300,
   computeOrderflow: vi.fn().mockResolvedValue({ bins: [], maxVol: 0 }),
   fetchOrderflowCandles: vi.fn().mockResolvedValue([]),
   computeDelta: vi.fn().mockResolvedValue({ series: [] }),

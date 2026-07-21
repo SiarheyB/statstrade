@@ -129,7 +129,16 @@ export async function fetchOrderflowCandles(
     }
   }
 
-  // If everything failed, return an empty array – the UI will render an empty series.
+  // If everything failed, return whatever we have from the DB even if less than expected.
+  if (rows.length > 0) {
+    return rows.map(r => ({
+      t: r.t.getTime(),
+      o: r.o,
+      h: r.h,
+      l: r.l,
+      c: r.c,
+    }));
+  }
   return [];
 }
 

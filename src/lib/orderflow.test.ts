@@ -22,8 +22,8 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("@/lib/db", () => ({}));
 
-vi.mock("@/lib/orderflow", () => {
-  const actual = vi.importActual("@/lib/orderflow");
+vi.mock("@/lib/orderflow", async () => {
+  const actual = await vi.importActual("@/lib/orderflow");
   return {
     ...actual,
     buildPayload: vi.fn(),
