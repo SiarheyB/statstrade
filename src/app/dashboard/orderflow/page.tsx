@@ -340,6 +340,17 @@ export default function OrderflowPage() {
     "1w": "7d",
   };
 
+  // Маппинг таймфреймов → периоды для divergence / imbalance / absorption API
+  const rangeToIndicatorPeriod: Record<string, string> = {
+    "5m": "1h",
+    "15m": "1h",
+    "1h": "1h",
+    "4h": "4h",
+    "12h": "12h",
+    "1d": "24h",
+    "1w": "7d",
+  };
+
   // Volume Profile data fetch — при смене symbol/exchange/range.
   const loadVolumeProfile = useCallback(async () => {
     setVpLoading(true);
@@ -368,7 +379,7 @@ export default function OrderflowPage() {
     setDivLoading(true);
     setDivError(null);
     try {
-      const res = await fetch(`/api/orderflow/divergence?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      const res = await fetch(`/api/orderflow/divergence?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Error" }));
         setDivError(err.error ?? "Error");
@@ -390,7 +401,7 @@ export default function OrderflowPage() {
     setImbalanceLoading(true);
     setImbalanceError(null);
     try {
-      const res = await fetch(`/api/orderflow/imbalance?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      const res = await fetch(`/api/orderflow/imbalance?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Error" }));
         setImbalanceError(err.error ?? "Error");
@@ -415,7 +426,7 @@ export default function OrderflowPage() {
     setAbsorptionLoading(true);
     setAbsorptionError(null);
     try {
-      const res = await fetch(`/api/orderflow/absorption?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      const res = await fetch(`/api/orderflow/absorption?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Error" }));
         setAbsorptionError(err.error ?? "Error");
