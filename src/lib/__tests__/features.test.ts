@@ -22,6 +22,7 @@ describe('features - FEATURE_DEFAULTS', () => {
       'mentorMode',
       'volumeProfile',
       'divergenceScanner',
+      'imbalanceIndicator',
     ]);
   });
 
@@ -73,6 +74,12 @@ describe('features - FEATURE_DEFAULTS', () => {
     expect(FEATURE_DEFAULTS.divergenceScanner.lookbackBars).toBe(50);
     expect(FEATURE_DEFAULTS.divergenceScanner.minDivergenceBars).toBe(5);
     expect(FEATURE_DEFAULTS.divergenceScanner.maxDivergenceBars).toBe(30);
+  });
+
+  it('imbalanceIndicator has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.highImbalanceThreshold).toBe(0.7);
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.lowImbalanceThreshold).toBe(-0.7);
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.speedWindowMs).toBe(60000);
   });
 });
 

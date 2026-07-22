@@ -163,6 +163,13 @@ const en: Dict = {
   "of.thStatus": "Status",
   "of.confirmed": "Confirmed",
   "of.pending": "Pending",
+  "of.imbalanceTitle": "Bid/Ask Imbalance",
+  "of.imbalanceHint": "Imbalance ratio: (ask - bid) / (bid + ask). Negative = bid dominance (green), positive = ask dominance (red).",
+  "of.noImbalance": "No imbalance data yet",
+  "of.alerts": "alerts",
+  "of.speedOfTape": "Speed of Tape",
+  "of.speedOfTapeHint": "Number of trades per minute. Spikes = high activity.",
+  "of.noSpeedOfTape": "No speed-of-tape data yet",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -1129,6 +1136,13 @@ const ru: Dict = {
   "of.thStatus": "Статус",
   "of.confirmed": "Подтверждена",
   "of.pending": "Ожидание",
+  "of.imbalanceTitle": "Bid/Ask Imbalance",
+  "of.imbalanceHint": "Дисбаланс: (ask - bid) / (bid + ask). Отрицательный = доминируют bid (зелёный), положительный = ask (красный).",
+  "of.noImbalance": "Данных дисбаланса пока нет",
+  "of.alerts": "сигналов",
+  "of.speedOfTape": "Speed of Tape",
+  "of.speedOfTapeHint": "Количество сделок в минуту. Всплески = высокая активность.",
+  "of.noSpeedOfTape": "Данных Speed of Tape пока нет",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

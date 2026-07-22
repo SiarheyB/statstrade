@@ -2,7 +2,7 @@
 
 > **Дата**: 2026-07-22
 > **Автор**: Аналитический отдел TradeStats
-> **Статус**: ✅ Feature 1-2 завершены (→ Feature 3)
+> **Статус**: ✅ Feature 1-3 завершены (→ Feature 4)
 > **Стиль торговли**: уровни, пробои, ложные пробои, ложный пробой границ боковиков по тренду
 
 ---
@@ -645,15 +645,15 @@ export type SpeedSpike = {
 
 ### 4.10 Шаги выполнения
 
-- [ ] **1. Добавить типы** — Imbalance, ImbalanceAlert, SpeedOfTape
-- [ ] **2. Реализовать `computeImbalance()`** (использует computeBA)
-- [ ] **3. Реализовать `computeSpeedOfTape()`**
-- [ ] **4. Написать unit-тесты**
-- [ ] **5. Создать API-роут**
-- [ ] **6. Создать компонент ImbalanceHeatmap**
-- [ ] **7. Интегрировать в orderflow page**
-- [ ] **8. Написать component-тесты**
-- [ ] **9. Проверить сборку и тесты**
+- [x] **1. Добавить типы** — Imbalance, ImbalanceAlert, SpeedOfTape
+- [x] **2. Реализовать `computeImbalance()`** (использует computeBA)
+- [x] **3. Реализовать `computeSpeedOfTape()`**
+- [x] **4. Написать unit-тесты** — 10 тестов
+- [x] **5. Создать API-роут** — /api/orderflow/imbalance
+- [x] **6. Создать компонент ImbalanceHeatmap** — Recharts
+- [x] **7. Интегрировать в orderflow page**
+- [x] **8. Написать component-тесты** — 7 тестов
+- [x] **9. Проверить сборку и тесты** — 976/976 ✅
 
 ---
 
@@ -1050,12 +1050,12 @@ Feature 2: Divergence Scanner
   [x] Тесты
 
 Feature 3: Bid/Ask Imbalance + Speed of Tape
-  [ ] Типы в orderflow.ts
-  [ ] computeImbalance() + computeSpeedOfTape()
-  [ ] api/orderflow/imbalance/route.ts
-  [ ] components/ImbalanceHeatmap.tsx
-  [ ] page.tsx integration
-  [ ] Тесты
+  [x] Типы в orderflow.ts
+  [x] computeImbalance() + computeSpeedOfTape()
+  [x] api/orderflow/imbalance/route.ts
+  [x] components/ImbalanceHeatmap.tsx
+  [x] page.tsx integration
+  [x] Тесты
 
 Feature 4: Absorption Pattern Detector
   [ ] Типы в orderflow.ts

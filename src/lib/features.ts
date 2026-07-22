@@ -96,6 +96,22 @@ export const FEATURE_DEFAULTS = {
     minDivergenceBars: 5,
     maxDivergenceBars: 30,
   },
+  imbalanceIndicator: {
+    label: "Bid/Ask Imbalance + Speed of Tape",
+    description:
+      "Показывает на странице Orderflow дисбаланс между лимитными ордерами на покупку и продажу (Bid/Ask Imbalance) и скорость торговли (Speed of Tape). Imbalance = (ask - bid) / (bid + ask), от -1 (только bid) до +1 (только ask). Speed of Tape — количество сделок в минуту. Использует данные ObSnapshot и ObTrade из коллектора.",
+    fieldHelp: {
+      highImbalanceThreshold:
+        "Порог высокого дисбаланса (0..1). Когда ask/(bid+ask) > этого порога — сигнал high_imbalance. Разумный диапазон: 0.6-0.8.",
+      lowImbalanceThreshold:
+        "Порог низкого дисбаланса (-1..0). Когда ask/(bid+ask) < этого порога — сигнал low_imbalance. Разумный диапазон: -0.8 - -0.6.",
+      speedWindowMs:
+        "Окно в миллисекундах для подсчёта Speed of Tape. 60000 = 1 минута. Меньше = чувствительнее, но больше шума. Разумный диапазон: 30000-300000.",
+    },
+    highImbalanceThreshold: 0.7,
+    lowImbalanceThreshold: -0.7,
+    speedWindowMs: 60000,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

@@ -8,7 +8,8 @@ import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
-import type { DivergenceSignal } from "@/lib/orderflow";
+import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
+import type { DivergenceSignal, Imbalance, SpeedOfTape } from "@/lib/orderflow";
 
 type ObHeatmap = {
   priceMin: number;
@@ -212,6 +213,11 @@ export default function OrderflowPage() {
   const [divLoading, setDivLoading] = useState(false);
   const [divError, setDivError] = useState<string | null>(null);
   const [showDivergence, setShowDivergence] = useState(true);
+  // Imbalance + Speed of Tape
+  const [imbalanceData, setImbalanceData] = useState<Imbalance | null>(null);
+  const [speedData, setSpeedData] = useState<SpeedOfTape | null>(null);
+  const [imbalanceLoading, setImbalanceLoading] = useState(false);
+  const [imbalanceError, setImbalanceError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -371,6 +377,31 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
+  // Imbalance + Speed of Tape data fetch — при смене symbol/exchange/range.
+  const loadImbalance = useCallback(async () => {
+    setImbalanceLoading(true);
+    setImbalanceError(null);
+    try {
+      const res = await fetch(`/api/orderflow/imbalance?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setImbalanceError(err.error ?? "Error");
+        setImbalanceData(null);
+        setSpeedData(null);
+        return;
+      }
+      const d = await res.json();
+      setImbalanceData(d.imbalance);
+      setSpeedData(d.speedOfTape);
+    } catch {
+      setImbalanceError("Network error");
+      setImbalanceData(null);
+      setSpeedData(null);
+    } finally {
+      setImbalanceLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
   // Загружаем Volume Profile при монтировании и смене symbol/exchange.
   useEffect(() => {
     loadVolumeProfile();
@@ -380,6 +411,11 @@ export default function OrderflowPage() {
   useEffect(() => {
     loadDivergence();
   }, [loadDivergence]);
+
+  // Загружаем Imbalance при монтировании и смене symbol/exchange/range.
+  useEffect(() => {
+    loadImbalance();
+  }, [loadImbalance]);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -1239,6 +1275,9 @@ export default function OrderflowPage() {
           <div className="mt-3">
             <VolumeProfile data={vpData} loading={vpLoading} error={vpError} />
           </div>
+
+          {/* Imbalance + Speed of Tape */}
+          <ImbalanceHeatmap data={imbalanceData} loading={imbalanceLoading} error={imbalanceError} />
 
           {/* Divergence Scanner */}
           <div className="mt-3">
