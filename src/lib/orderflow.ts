@@ -1070,3 +1070,187 @@ export async function computeSpeedOfTape(
 
   return { times, tradesPerMin, maxSpeed, avgSpeed, spikes };
 }
+
+// ─── Feature 4: Absorption Pattern Detector ────────────────────────────────
+
+export type AbsorptionSignal = {
+  t: number;                    // ms таймстемп первой свечи паттерна
+  price: number;                // средняя цена (mid)
+  range: number;                // диапазон (high - low) в пунктах
+  volume: number;               // объём (buyVol + sellVol)
+  avgVolume: number;            // средний объём за N предыдущих свечей
+  volumeMultiplier: number;     // volume / avgVolume
+  deltaRatio: number;           // |buy - sell| / (buy + sell), 0..1
+  duration: number;             // количество свечей паттерна
+  strength: number;             // 1-5
+  label: string;                // "Absorption", "Strong Absorption"
+};
+
+export type AbsorptionResult = {
+  signals: AbsorptionSignal[];
+  activeCount: number;
+};
+
+/**
+ * Absorption Pattern Detector — ищет свечи/группы свечей, где цена
+ * торгуется в узком диапазоне, но объём сделок аномально высок,
+ * а дельта около нуля. Это признак накопления/распределения: крупный
+ * игрок "впитывает" ликвидность, не давая цене уйти.
+ *
+ * Использует ObFootprint (buyVol, sellVol) и ObCandle (high, low).
+ */
+export async function computeAbsorption(
+  symbol: string,
+  exchange: string,
+  range: string,
+  fromMs: number,
+  toMs: number,
+  opts?: {
+    minVolumeMultiplier?: number; // объём в N раз выше среднего
+    maxRangeBars?: number;        // макс. диапазон в свечах
+    maxDeltaRatio?: number;       // макс. |delta| / volume
+    minCandles?: number;          // мин. длительность паттерна
+    lookback?: number;            // сколько свечей для среднего объёма
+  },
+): Promise<AbsorptionResult | null> {
+  const minVolumeMultiplier = opts?.minVolumeMultiplier ?? 2.0;
+  const maxRangeBars = opts?.maxRangeBars ?? 3;
+  const maxDeltaRatio = opts?.maxDeltaRatio ?? 0.15;
+  const minCandles = opts?.minCandles ?? 2;
+  const lookback = opts?.lookback ?? 10;
+
+  // 1. Получаем свечи.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  if (candles.length < lookback + minCandles) return null;
+
+  // 2. Получаем footprint (buyVol, sellVol) для каждой свечи.
+  // Группируем ObFootprint по свечным интервалам.
+  const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 60_000;
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+
+  // Считаем колонку свечи и сумму buy/sell для каждой.
+  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${stepMs})::int`;
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+
+  const fpRows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+    SELECT ${colExpr} AS col,
+           SUM("buyVol")::float8 AS buy,
+           SUM("sellVol")::float8 AS sell
+    FROM "ObFootprint"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+    GROUP BY col
+    ORDER BY col
+  `;
+
+  if (fpRows.length === 0) return null;
+
+  // Маппим footprint к свечам.
+  const candleCount = candles.length;
+  const candleVol = new Array(candleCount).fill(0);
+  const candleBuy = new Array(candleCount).fill(0);
+  const candleSell = new Array(candleCount).fill(0);
+  const candleRange = candles.map((c) => c.h - c.l);
+
+  for (const r of fpRows) {
+    const c = Math.max(0, Math.min(candleCount - 1, r.col));
+    candleBuy[c] += r.buy;
+    candleSell[c] += r.sell;
+    candleVol[c] += r.buy + r.sell;
+  }
+
+  // 3. Ищем absorption-паттерны.
+  const signals: AbsorptionSignal[] = [];
+  let i = lookback;
+  while (i < candleCount) {
+    // Проверяем: узкий диапазон?
+    const avgRange = candleRange.slice(i - lookback, i).reduce((a, b) => a + b, 0) / lookback;
+    if (avgRange <= 0 || candleRange[i] > avgRange * maxRangeBars) {
+      i++;
+      continue;
+    }
+
+    // Объём выше среднего?
+    const avgVol = candleVol.slice(i - lookback, i).reduce((a, b) => a + b, 0) / lookback;
+    if (avgVol <= 0 || candleVol[i] < avgVol * minVolumeMultiplier) {
+      i++;
+      continue;
+    }
+
+    // Дельта около нуля?
+    const totalVol = candleBuy[i] + candleSell[i];
+    if (totalVol <= 0) { i++; continue; }
+    const deltaRatio = Math.abs(candleBuy[i] - candleSell[i]) / totalVol;
+    if (deltaRatio > maxDeltaRatio) {
+      i++;
+      continue;
+    }
+
+    // Нашли начало паттерна — расширяем пока условия выполняются.
+    const startIdx = i;
+    let j = i + 1;
+    while (j < candleCount) {
+      const jAvgRange = candleRange.slice(j - lookback, j).reduce((a, b) => a + b, 0) / lookback;
+      const jAvgVol = candleVol.slice(j - lookback, j).reduce((a, b) => a + b, 0) / lookback;
+      const jVol = candleBuy[j] + candleSell[j];
+      const jDelta = jVol > 0 ? Math.abs(candleBuy[j] - candleSell[j]) / jVol : 1;
+
+      if (jAvgRange <= 0 || candleRange[j] > jAvgRange * maxRangeBars) break;
+      if (jAvgVol <= 0 || jVol < jAvgVol * minVolumeMultiplier) break;
+      if (jDelta > maxDeltaRatio) break;
+      j++;
+    }
+    const duration = j - startIdx;
+
+    if (duration >= minCandles) {
+      // Собираем статистику за весь паттерн.
+      let totalBuy = 0, totalSell = 0, totalVolPat = 0, maxPrice = -Infinity, minPrice = Infinity;
+      for (let k = startIdx; k < j; k++) {
+        totalBuy += candleBuy[k];
+        totalSell += candleSell[k];
+        totalVolPat += candleVol[k];
+        if (candles[k].h > maxPrice) maxPrice = candles[k].h;
+        if (candles[k].l < minPrice) minPrice = candles[k].l;
+      }
+      const avgVolPat = candleVol.slice(startIdx - lookback, startIdx).reduce((a, b) => a + b, 0) / lookback;
+      const volMult = avgVolPat > 0 ? totalVolPat / (avgVolPat * duration) : 0;
+      const patDelta = totalVolPat > 0 ? Math.abs(totalBuy - totalSell) / totalVolPat : 0;
+      const patRange = maxPrice - minPrice;
+      const avgRangePat = candleRange.slice(startIdx - lookback, startIdx).reduce((a, b) => a + b, 0) / lookback;
+
+      // Сила сигнала: 1-5
+      let strength = 1;
+      if (volMult > 4) strength += 2;
+      else if (volMult > 3) strength += 1;
+      if (patDelta < 0.05) strength += 1; // очень чистая дельта
+      if (patRange < avgRangePat * 0.5) strength += 1; // очень узкий диапазон
+      if (duration >= 4) strength += 1;
+      strength = Math.min(5, Math.max(1, strength));
+
+      signals.push({
+        t: candles[startIdx].t,
+        price: (maxPrice + minPrice) / 2,
+        range: patRange,
+        volume: totalVolPat,
+        avgVolume: avgVolPat * duration,
+        volumeMultiplier: volMult,
+        deltaRatio: patDelta,
+        duration,
+        strength,
+        label: strength >= 4 ? "Strong Absorption" : "Absorption",
+      });
+
+      i = j; // Пропускаем свечи паттерна.
+    } else {
+      i++;
+    }
+  }
+
+  // Активные: последние 3 свечи
+  const activeCount = signals.filter((s) => {
+    const idx = candles.findIndex((c) => c.t === s.t);
+    return idx >= 0 && idx >= candleCount - 3;
+  }).length;
+
+  return { signals, activeCount };
+}

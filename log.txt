@@ -1,0 +1,428 @@
+ GET /dashboard/orderflow 200 in 3.0s (next.js: 247ms, proxy.ts: 99ms, applicati
+on-code: 2.7s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard/trades 307 in 1710ms (next.js: 1328ms, proxy.ts: 6ms, applicatio
+n-code: 375ms)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"].exchangeAccount.findMan
+y()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\[root-of-the-ser
+ver]__1g5-bp-._.js:1506:172
+
+  1503 }
+  1504 async function runDueSyncs() {
+  1505     const now = Date.now();
+→ 1506     const accounts = await __TURBOPACK__imported__module__$5b$project$5d2
+f$src$2f$lib$2f$db$2e$ts__$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"
+].exchangeAccount.findMany(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+[scheduler] tick error:
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"].exchangeAccount.findMan
+y()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\[root-of-the-ser
+ver]__1g5-bp-._.js:1506:172
+
+  1503 }
+  1504 async function runDueSyncs() {
+  1505     const now = Date.now();
+→ 1506     const accounts = await __TURBOPACK__imported__module__$5b$project$5d2
+f$src$2f$lib$2f$db$2e$ts__$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"
+].exchangeAccount.findMany(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 17ms, proxy.ts: 3ms, application-code: 4.1
+s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 4ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 3ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 2ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 3ms, proxy.ts: 2ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 3ms, proxy.ts: 2ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 4ms, proxy.ts: 4ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 2ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"].exchangeAccount.findMan
+y()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\[root-of-the-ser
+ver]__1g5-bp-._.js:1506:172
+
+  1503 }
+  1504 async function runDueSyncs() {
+  1505     const now = Date.now();
+→ 1506     const accounts = await __TURBOPACK__imported__module__$5b$project$5d2
+f$src$2f$lib$2f$db$2e$ts__$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"
+].exchangeAccount.findMany(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+[scheduler] tick error:
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"].exchangeAccount.findMan
+y()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\[root-of-the-ser
+ver]__1g5-bp-._.js:1506:172
+
+  1503 }
+  1504 async function runDueSyncs() {
+  1505     const now = Date.now();
+→ 1506     const accounts = await __TURBOPACK__imported__module__$5b$project$5d2
+f$src$2f$lib$2f$db$2e$ts__$5b$instrumentation$5d$__$28$ecmascript$29$__["prisma"
+].exchangeAccount.findMany(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 3ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+n in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q.
+_.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$li
+b$2f$db$2e$ts__$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUniqu
+e(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 2ms, application-code: 4.1s
+)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts_
+_$5b$app$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique()` invocatio
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 3ms, application-code: 4.1s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__
+$28$ecmascript$29$__["prisma"].user.findUnique()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q._.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$ap
+p$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 2ms, application-code: 4.1s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__
+$28$ecmascript$29$__["prisma"].user.findUnique()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q._.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$ap
+p$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 3ms, proxy.ts: 4ms, application-code: 4.1s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__
+$28$ecmascript$29$__["prisma"].user.findUnique()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q._.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$ap
+p$2d$rsc$5d$__$28$ecmascript$29$__["prisma"].user.findUnique(
+Can't reach database server at `localhost:5432`
+
+Please make sure your database server is running at `localhost:5432`.
+ GET /dashboard 307 in 4.1s (next.js: 2ms, proxy.ts: 2ms, application-code: 4.1s)
+prisma:error
+Invalid `__TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$db$2e$ts__$5b$app$2d$rsc$5d$__
+$28$ecmascript$29$__["prisma"].user.findUnique()` invocation in
+C:\Users\Sergey\IdeaProjects\statstrade\.next\dev\server\chunks\ssr\src_10g897q._.js:98:151
+
+  95 const hit = versionCache.get(userId);
+  96 const now = Date.now();
+  97 if (hit && now - hit.at < VERSION_CACHE_MS) return hit.v;
+→ 98 const row = await __TURBOPACK__imported__module__$5b$project$5d2f$src$2f$lib$2f$

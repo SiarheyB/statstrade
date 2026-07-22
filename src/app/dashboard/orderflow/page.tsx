@@ -7,9 +7,11 @@ import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneF
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
+import { drawAbsorptionMarkers } from "@/components/AbsorptionOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
+import AbsorptionPanel from "@/components/AbsorptionPanel";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
-import type { DivergenceSignal, Imbalance, SpeedOfTape } from "@/lib/orderflow";
+import type { DivergenceSignal, Imbalance, SpeedOfTape, AbsorptionSignal } from "@/lib/orderflow";
 
 type ObHeatmap = {
   priceMin: number;
@@ -218,6 +220,11 @@ export default function OrderflowPage() {
   const [speedData, setSpeedData] = useState<SpeedOfTape | null>(null);
   const [imbalanceLoading, setImbalanceLoading] = useState(false);
   const [imbalanceError, setImbalanceError] = useState<string | null>(null);
+  // Absorption Pattern Detector
+  const [absorptionSignals, setAbsorptionSignals] = useState<AbsorptionSignal[]>([]);
+  const [absorptionLoading, setAbsorptionLoading] = useState(false);
+  const [absorptionError, setAbsorptionError] = useState<string | null>(null);
+  const [showAbsorption, setShowAbsorption] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -286,6 +293,7 @@ export default function OrderflowPage() {
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
       if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
+      if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
     } catch {
       // ignore
     }
@@ -298,12 +306,12 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showAbsorption }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showAbsorption]);
 
   // Доступные символы/биржи из реально собранных данных.
   useEffect(() => {
@@ -402,6 +410,28 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
+  // Absorption Pattern Detector data fetch — при смене symbol/exchange/range.
+  const loadAbsorption = useCallback(async () => {
+    setAbsorptionLoading(true);
+    setAbsorptionError(null);
+    try {
+      const res = await fetch(`/api/orderflow/absorption?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setAbsorptionError(err.error ?? "Error");
+        setAbsorptionSignals([]);
+        return;
+      }
+      const d = await res.json();
+      setAbsorptionSignals(d.absorption?.signals ?? []);
+    } catch {
+      setAbsorptionError("Network error");
+      setAbsorptionSignals([]);
+    } finally {
+      setAbsorptionLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
   // Загружаем Volume Profile при монтировании и смене symbol/exchange.
   useEffect(() => {
     loadVolumeProfile();
@@ -416,6 +446,11 @@ export default function OrderflowPage() {
   useEffect(() => {
     loadImbalance();
   }, [loadImbalance]);
+
+  // Загружаем Absorption при монтировании и смене symbol/exchange/range.
+  useEffect(() => {
+    loadAbsorption();
+  }, [loadAbsorption]);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -740,6 +775,11 @@ export default function OrderflowPage() {
 
     ctx.restore();
 
+    // Маркеры absorption (узкий диапазон + объём + дельта~0) — поверх свечей.
+    if (showAbsorption && absorptionSignals.length) {
+      drawAbsorptionMarkers(ctx, sx, sy, plotX, plotW, plotH, absorptionSignals, candles);
+    }
+
     // Маркеры дивергенции (цена vs дельта/CVD) — поверх свечей.
     if (showDivergence && divergenceSignals.length) {
       drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, divergenceSignals);
@@ -853,7 +893,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, t, range, timezone, locale]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, t, range, timezone, locale]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -1191,6 +1231,19 @@ export default function OrderflowPage() {
             </span>
           </button>
           <button
+            onClick={() => setShowAbsorption((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
+              showAbsorption ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
+            }`}
+            title={t("of.hintAbsorption") || "Absorption Pattern Detector — narrow range + high volume + near-zero delta"}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showAbsorption ? "bg-accent border-accent" : "border-border-strong"}`} />
+            Absorption
+            <span title={t("of.hintAbsorption") || "Absorption — detects accumulation/distribution patterns"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
             onClick={() => setLive((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"
@@ -1282,6 +1335,11 @@ export default function OrderflowPage() {
           {/* Divergence Scanner */}
           <div className="mt-3">
             <DivergenceHistory signals={divergenceSignals} loading={divLoading} error={divError} />
+          </div>
+
+          {/* Absorption Pattern Detector */}
+          <div className="mt-3">
+            <AbsorptionPanel signals={absorptionSignals} loading={absorptionLoading} error={absorptionError} />
           </div>
 
           {/* Лента крупных рыночных ордеров */}

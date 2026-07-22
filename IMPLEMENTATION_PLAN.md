@@ -2,7 +2,7 @@
 
 > **Дата**: 2026-07-22
 > **Автор**: Аналитический отдел TradeStats
-> **Статус**: ✅ Feature 1-3 завершены (→ Feature 4)
+> **Статус**: ✅ Feature 1-4 завершены (→ Feature 5)
 > **Стиль торговли**: уровни, пробои, ложные пробои, ложный пробой границ боковиков по тренду
 
 ---
@@ -767,11 +767,11 @@ export type AbsorptionResult = {
 
 ### 5.10 Шаги выполнения
 
-- [ ] **1. Добавить типы** — AbsorptionSignal, AbsorptionResult
-- [ ] **2. Реализовать `computeAbsorption()`**
-- [ ] **3. Создать API-роут**
-- [ ] **4. Интегрировать в orderflow page**
-- [ ] **5. Написать тесты**
+- [x] **1. Добавить типы** — AbsorptionSignal, AbsorptionResult
+- [x] **2. Реализовать `computeAbsorption()`** — использует ObFootprint и ObCandle
+- [x] **3. Создать API-роут** — `/api/orderflow/absorption` с кэшем 12с
+- [x] **4. Интегрировать в orderflow page** — AbsorptionOverlay + AbsorptionPanel + тоггл
+- [x] **5. Написать тесты** — 10 unit, 9 API, 4 overlay, 7 panel = 30 тестов
 
 ---
 
