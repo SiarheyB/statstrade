@@ -170,6 +170,14 @@ const en: Dict = {
   "of.speedOfTape": "Speed of Tape",
   "of.speedOfTapeHint": "Number of trades per minute. Spikes = high activity.",
   "of.noSpeedOfTape": "No speed-of-tape data yet",
+  "of.absorptionTitle": "Absorption Patterns",
+  "of.hintAbsorption": "Narrow range + high volume + near-zero delta. Signals accumulation/distribution.",
+  "of.noAbsorption": "No absorption patterns detected",
+  "of.thRange": "Range",
+  "of.thVolMult": "Vol ×",
+  "of.thDeltaRatio": "|Δ|/V",
+  "of.thDuration": "Dur",
+  "of.thLabel": "Label",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -1143,6 +1151,14 @@ const ru: Dict = {
   "of.speedOfTape": "Speed of Tape",
   "of.speedOfTapeHint": "Количество сделок в минуту. Всплески = высокая активность.",
   "of.noSpeedOfTape": "Данных Speed of Tape пока нет",
+  "of.absorptionTitle": "Паттерны поглощения",
+  "of.hintAbsorption": "Узкий диапазон + высокий объём + дельта ~0. Признак накопления/распределения.",
+  "of.noAbsorption": "Паттернов поглощения не найдено",
+  "of.thRange": "Диап",
+  "of.thVolMult": "Об ×",
+  "of.thDeltaRatio": "|Δ|/V",
+  "of.thDuration": "Длт",
+  "of.thLabel": "Метка",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",
