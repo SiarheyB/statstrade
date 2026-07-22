@@ -28,8 +28,22 @@ export function drawDrawings(
   ctx.clip();
 
   for (const d of drawings) {
-    const pts: DrawingPoint[] = JSON.parse(d.points);
-    if (pts.length < 1) continue;
+    // Validate d.points before attempting to parse
+    if (!d.points || typeof d.points !== 'string') {
+      continue;
+    }
+
+    let pts: DrawingPoint[];
+    try {
+      pts = JSON.parse(d.points);
+      // Validate that pts is an array of DrawingPoint objects
+      if (!Array.isArray(pts) || pts.length === 0) {
+        continue;
+      }
+    } catch {
+      // If JSON parsing fails, skip this drawing
+      continue;
+    }
 
     const isSelected = d.id === selectedId;
     const color = d.color;
@@ -161,8 +175,22 @@ export function findDrawingAt(
   // Идём в обратном порядке — верхний рисунок (последний созданный) выбирается первым
   for (let i = drawings.length - 1; i >= 0; i--) {
     const d = drawings[i];
-    const pts: DrawingPoint[] = JSON.parse(d.points);
-    if (pts.length < 1) continue;
+    // Validate d.points before attempting to parse
+    if (!d.points || typeof d.points !== 'string') {
+      continue;
+    }
+
+    let pts: DrawingPoint[];
+    try {
+      pts = JSON.parse(d.points);
+      // Validate that pts is an array of DrawingPoint objects
+      if (!Array.isArray(pts) || pts.length === 0) {
+        continue;
+      }
+    } catch {
+      // If JSON parsing fails, skip this drawing
+      continue;
+    }
 
     const screenPts = pts.map((p) => ({ x: sx(p.t), y: sy(p.price) }));
 

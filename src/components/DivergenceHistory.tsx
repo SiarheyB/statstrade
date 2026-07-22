@@ -30,8 +30,6 @@ function fmtTime(ms: number, tz: string): string {
 type SortKey = "strength" | "t" | "type" | "bars" | "label";
 type SortDir = "asc" | "desc";
 
-// ─── Type display helpers ──────────────────────────────────────────────────
-
 const TYPE_COLORS: Record<string, string> = {
   regular_bearish: "text-loss",
   regular_bullish: "text-profit",
@@ -46,7 +44,7 @@ const TYPE_ARROW: Record<string, string> = {
   hidden_bullish: "⇑",
 };
 
-// ─── Component ─────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────
 
 export default function DivergenceHistory({
   signals,
@@ -163,65 +161,67 @@ export default function DivergenceHistory({
         {t("of.divergenceHint") || "Divergence between price and delta/CVD"}
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs tabular-nums">
-          <thead>
-            <tr className="text-faint text-left border-b border-border/50">
-              <th className={thClass} onClick={() => toggleSort("t")}>
-                {t("of.thTime")} <SortIcon k="t" />
-              </th>
-              <th className={thClass} onClick={() => toggleSort("type")}>
-                {t("of.thType") || "Type"} <SortIcon k="type" />
-              </th>
-              <th className={thRight} onClick={() => toggleSort("strength")}>
-                {t("of.thStrength") || "Str"} <SortIcon k="strength" />
-              </th>
-              <th className={thRight}>
-                {t("of.thPrice")}
-              </th>
-              <th className={thRight}>
-                {t("of.thDelta") || "Δ"}
-              </th>
-              <th className={thRight} onClick={() => toggleSort("bars")}>
-                {t("of.thBars") || "Bars"} <SortIcon k="bars" />
-              </th>
-              <th className={thClass}>
-                {t("of.thStatus") || "Status"}
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((sig) => (
-              <tr key={sig.id} className="border-b border-border/20">
-                <td className="text-faint py-0.5 pr-3 whitespace-nowrap">
-                  {fmtTime(sig.t, timezone)}
-                </td>
-                <td className={`py-0.5 pr-3 ${TYPE_COLORS[sig.type] ?? "text-fg"}`}>
-                  {TYPE_ARROW[sig.type] ?? ""} {sig.label}
-                </td>
-                <td className="text-fg py-0.5 pr-3 text-right font-medium">
-                  {sig.strength}
-                </td>
-                <td className="text-fg py-0.5 pr-3 text-right">
-                  {fmtP(sig.pricePeak)} → {fmtP(sig.priceTrough)}
-                </td>
-                <td className="text-faint py-0.5 pr-3 text-right">
-                  {fmtDelta(sig.deltaPeak)} → {fmtDelta(sig.deltaTrough)}
-                </td>
-                <td className="text-faint py-0.5 pr-3 text-right">
-                  {sig.bars}
-                </td>
-                <td className="py-0.5 pr-3">
-                  {sig.confirmed ? (
-                    <span className="text-profit text-[11px]">{t("of.confirmed") || "Confirmed"}</span>
-                  ) : (
-                    <span className="text-faint/70 text-[11px]">{t("of.pending") || "Pending"}</span>
-                  )}
-                </td>
+      <div className="min-h-[20px] min-w-[300px] w-full h-full">
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs tabular-nums">
+            <thead>
+              <tr className="text-faint text-left border-b border-border/50">
+                <th className={thClass} onClick={() => toggleSort("t")}>
+                  {t("of.thTime")} <SortIcon k="t" />
+                </th>
+                <th className={thClass} onClick={() => toggleSort("type")}>
+                  {t("of.thType") || "Type"} <SortIcon k="type" />
+                </th>
+                <th className={thRight} onClick={() => toggleSort("strength")}>
+                  {t("of.thStrength") || "Str"} <SortIcon k="strength" />
+                </th>
+                <th className={thRight}>
+                  {t("of.thPrice")}
+                </th>
+                <th className={thRight}>
+                  {t("of.thDelta") || "Δ"}
+                </th>
+                <th className={thRight} onClick={() => toggleSort("bars")}>
+                  {t("of.thBars") || "Bars"} <SortIcon k="bars" />
+                </th>
+                <th className={thClass}>
+                  {t("of.thStatus") || "Status"}
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {sorted.map((sig) => (
+                <tr key={sig.id} className="border-b border-border/20">
+                  <td className="text-faint py-0.5 pr-3 whitespace-nowrap">
+                    {fmtTime(sig.t, timezone)}
+                  </td>
+                  <td className={`py-0.5 pr-3 ${TYPE_COLORS[sig.type] ?? "text-fg"}`}>
+                    {TYPE_ARROW[sig.type] ?? ""} {sig.label}
+                  </td>
+                  <td className="text-fg py-0.5 pr-3 text-right font-medium">
+                    {sig.strength}
+                  </td>
+                  <td className="text-fg py-0.5 pr-3 text-right">
+                    {fmtP(sig.pricePeak)} → {fmtP(sig.priceTrough)}
+                  </td>
+                  <td className="text-faint py-0.5 pr-3 text-right">
+                    {fmtDelta(sig.deltaPeak)} → {fmtDelta(sig.deltaTrough)}
+                  </td>
+                  <td className="text-faint py-0.5 pr-3 text-right">
+                    {sig.bars}
+                  </td>
+                  <td className="py-0.5 pr-3">
+                    {sig.confirmed ? (
+                      <span className="text-profit text-[11px]">{t("of.confirmed") || "Confirmed"}</span>
+                    ) : (
+                      <span className="text-faint/70 text-[11px]">{t("of.pending") || "Pending"}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

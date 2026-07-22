@@ -1,19 +1,9 @@
 "use client";
 
 import { useMemo } from "react";
-import { HelpCircle } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  ResponsiveContainer,
-  Tooltip,
-  CartesianGrid,
-  Cell,
-  ReferenceLine,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Cell, ReferenceLine } from "recharts";
 import { useI18n } from "@/lib/i18n/provider";
+import { HelpCircle } from "lucide-react";
 import type { Imbalance } from "@/lib/orderflow";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -99,7 +89,9 @@ export default function ImbalanceHeatmap({
           {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
           <HelpCircle size={12} className="text-faint shrink-0" />
         </div>
-        <div className="text-sm text-loss">{error}</div>
+        <div className="text-sm text-loss">
+          {error}
+        </div>
       </div>
     );
   }
@@ -112,83 +104,52 @@ export default function ImbalanceHeatmap({
           {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
           <HelpCircle size={12} className="text-faint shrink-0" />
         </div>
-        <div className="text-xs text-faint">{t("of.noImbalance") || "No imbalance data"}</div>
+        <div className="text-xs text-faint">
+          {t("of.noImbalance") || "No imbalance data"}
+        </div>
       </div>
     );
   }
-
-  return <ImbalanceChart data={data} />;
-}
-
-// ─── Chart ────────────────────────────────────────────────────────────────
-
-function ImbalanceChart({ data }: { data: Imbalance }) {
-  const { t } = useI18n();
-
-  const chartData = useMemo(() => {
-    return data.times.map((t, i) => ({
-      time: t,
-      ratio: data.ratio[i] ?? 0,
-      fullBid: data.fullBid[i] ?? 0,
-      fullAsk: data.fullAsk[i] ?? 0,
-    }));
-  }, [data]);
-
-  const maxAbs = useMemo(
-    () => Math.max(0.01, ...data.ratio.map((r) => Math.abs(r))),
-    [data.ratio],
-  );
-
-  const alertCount = data.alerts.length;
 
   return (
     <div className="card p-3 mt-3">
       <div className="text-xs font-medium text-muted mb-1 inline-flex items-center gap-1.5">
         {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
-        <span title={t("of.imbalanceHint") || "Bid/Ask Imbalance — ratio of ask to bid volume. -1 = only bids, 0 = equal, +1 = only asks."} className="inline-flex cursor-help">
-          <HelpCircle size={12} className="text-faint shrink-0" />
-        </span>
+        <HelpCircle size={12} className="text-faint shrink-0" />
       </div>
-      <div className="text-[11px] text-faint mb-2">
-        {t("of.imbalanceHint") || "Imbalance ratio: ask dominance (red) / bid dominance (green)"}
-        {alertCount > 0 && (
-          <span className="ml-2 text-accent">
-            &middot; {alertCount} {t("of.alerts") || "alerts"}
-          </span>
-        )}
-      </div>
-
-      <div className="h-20 w-full">
-        <ResponsiveContainer width="100%" height="100%">
+      {data && data.alerts && data.alerts.length > 0 && (
+        <div className="text-xs text-muted mb-2">
+          {data.alerts.length} {t("of.alerts") || "alerts"}
+        </div>
+      )}
+      <div className="min-h-[20px] min-w-[300px] w-full h-full">
+        <ResponsiveContainer width="100%" height="100%" min-width="300px" min-height="20px">
           <BarChart
-            data={chartData}
+            data={data.times.map((t, i) => ({ time: t, ratio: data.ratio[i] ?? 0 }))}
             margin={{ top: 4, right: 4, left: 4, bottom: 0 }}
-            barCategoryGap={1}
           >
             <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
             <XAxis
               dataKey="time"
               type="number"
-              domain={["dataMin", "dataMax"]}
+              domain={[data.times[0], data.times[data.times.length - 1]]}
               tickFormatter={fmtTime}
               tick={{ fill: AXIS, fontSize: 9 }}
-              tickLine={false}
-              axisLine={false}
-              hide
+              stroke={GRID}
+              minTickGap={30}
             />
             <YAxis
               type="number"
-              domain={[-maxAbs * 1.1, maxAbs * 1.1]}
-              tick={{ fill: AXIS, fontSize: 9 }}
+              domain={[-1.1, 1.1]}
               tickFormatter={(v: number) => v.toFixed(1)}
-              tickLine={false}
-              axisLine={false}
+              tick={{ fill: AXIS, fontSize: 9 }}
+              stroke={GRID}
               width={30}
             />
             <Tooltip content={<ImbalanceTooltip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
             <ReferenceLine y={0} stroke={ZERO_LINE} strokeWidth={1} />
             <Bar dataKey="ratio" isAnimationActive={false} minPointSize={1}>
-              {chartData.map((entry, idx) => (
+              {data.times.map((entry, idx) => (
                 <Cell key={idx} fill={barColor(entry.ratio)} />
               ))}
             </Bar>
