@@ -21,6 +21,7 @@ describe('features - FEATURE_DEFAULTS', () => {
       'playbooks',
       'mentorMode',
       'volumeProfile',
+      'divergenceScanner',
     ]);
   });
 
@@ -65,6 +66,13 @@ describe('features - FEATURE_DEFAULTS', () => {
   it('volumeProfile has correct defaults', () => {
     expect(FEATURE_DEFAULTS.volumeProfile.bins).toBe(100);
     expect(FEATURE_DEFAULTS.volumeProfile.valueAreaPct).toBe(0.7);
+  });
+
+  it('divergenceScanner has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.divergenceScanner.minStrength).toBe(2);
+    expect(FEATURE_DEFAULTS.divergenceScanner.lookbackBars).toBe(50);
+    expect(FEATURE_DEFAULTS.divergenceScanner.minDivergenceBars).toBe(5);
+    expect(FEATURE_DEFAULTS.divergenceScanner.maxDivergenceBars).toBe(30);
   });
 });
 

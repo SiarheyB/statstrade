@@ -77,6 +77,25 @@ export const FEATURE_DEFAULTS = {
     bins: 100,
     valueAreaPct: 0.7,
   },
+  divergenceScanner: {
+    label: "Divergence Scanner (price vs delta/CVD)",
+    description:
+      "Показывает на странице Orderflow маркеры дивергенции между движением цены и дельтой/CVD. Regular Bearish: цена делает HH (higher high), а дельта — LH (lower high) — сигнал разворота вниз. Regular Bullish: цена LL, дельта HL — сигнал разворота вверх. Hidden: продолжение тренда. Использует данные ObCandle (свечи) и ObTrade (дельта) из коллектора.",
+    fieldHelp: {
+      minStrength:
+        "Минимальная сила дивергенции (1-5). Сила = min(5, floor(bars/3) + 1). Больше = сильнее сигнал, но меньше находок. Разумный диапазон: 2-4.",
+      lookbackBars:
+        "Сколько свечей назад искать экстремумы для поиска дивергенций. Больше = шире поиск, но выше нагрузка. Разумный диапазон: 20-100.",
+      minDivergenceBars:
+        "Минимальное расстояние между экстремумами (в свечах). Меньше значение = больше ложных сигналов. Разумный диапазон: 3-10.",
+      maxDivergenceBars:
+        "Максимальное расстояние между экстремумами (в свечах). Больше = шире поиск. Разумный диапазон: 20-50.",
+    },
+    minStrength: 2,
+    lookbackBars: 50,
+    minDivergenceBars: 5,
+    maxDivergenceBars: 30,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

@@ -6,6 +6,9 @@ import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
+import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
+import DivergenceHistory from "@/components/DivergenceHistory";
+import type { DivergenceSignal } from "@/lib/orderflow";
 
 type ObHeatmap = {
   priceMin: number;
@@ -204,6 +207,11 @@ export default function OrderflowPage() {
   const [vpData, setVpData] = useState<VPData | null>(null);
   const [vpLoading, setVpLoading] = useState(false);
   const [vpError, setVpError] = useState<string | null>(null);
+  // Divergence Scanner
+  const [divergenceSignals, setDivergenceSignals] = useState<DivergenceSignal[]>([]);
+  const [divLoading, setDivLoading] = useState(false);
+  const [divError, setDivError] = useState<string | null>(null);
+  const [showDivergence, setShowDivergence] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -271,6 +279,7 @@ export default function OrderflowPage() {
       if (typeof s.live === "boolean") setLive(s.live);
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
+      if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
     } catch {
       // ignore
     }
@@ -283,7 +292,7 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence }),
       );
     } catch {
       // ignore
@@ -340,10 +349,37 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
+  // Divergence Scanner data fetch — при смене symbol/exchange/range.
+  const loadDivergence = useCallback(async () => {
+    setDivLoading(true);
+    setDivError(null);
+    try {
+      const res = await fetch(`/api/orderflow/divergence?symbol=${symbol}&exchange=${exchange}&period=${range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setDivError(err.error ?? "Error");
+        setDivergenceSignals([]);
+        return;
+      }
+      const d = await res.json();
+      setDivergenceSignals(d.divergence?.signals ?? []);
+    } catch {
+      setDivError("Network error");
+      setDivergenceSignals([]);
+    } finally {
+      setDivLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
   // Загружаем Volume Profile при монтировании и смене symbol/exchange.
   useEffect(() => {
     loadVolumeProfile();
   }, [loadVolumeProfile]);
+
+  // Загружаем Divergence Scanner при монтировании и смене symbol/exchange/range.
+  useEffect(() => {
+    loadDivergence();
+  }, [loadDivergence]);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -668,6 +704,11 @@ export default function OrderflowPage() {
 
     ctx.restore();
 
+    // Маркеры дивергенции (цена vs дельта/CVD) — поверх свечей.
+    if (showDivergence && divergenceSignals.length) {
+      drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, divergenceSignals);
+    }
+
     // Линия текущей цены.
     const last = candles.length ? candles[candles.length - 1].c : hm.price;
     const yp = sy(last);
@@ -776,7 +817,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, t, range, timezone, locale]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, t, range, timezone, locale]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -1101,6 +1142,19 @@ export default function OrderflowPage() {
             </span>
           </button>
           <button
+            onClick={() => setShowDivergence((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
+              showDivergence ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
+            }`}
+            title={t("of.hintDivergence") || "Divergence Scanner — show/hide price vs delta divergence markers"}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showDivergence ? "bg-accent border-accent" : "border-border-strong"}`} />
+            Divergence
+            <span title={t("of.hintDivergence") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
             onClick={() => setLive((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"
@@ -1184,6 +1238,11 @@ export default function OrderflowPage() {
           {/* Volume Profile */}
           <div className="mt-3">
             <VolumeProfile data={vpData} loading={vpLoading} error={vpError} />
+          </div>
+
+          {/* Divergence Scanner */}
+          <div className="mt-3">
+            <DivergenceHistory signals={divergenceSignals} loading={divLoading} error={divError} />
           </div>
 
           {/* Лента крупных рыночных ордеров */}
