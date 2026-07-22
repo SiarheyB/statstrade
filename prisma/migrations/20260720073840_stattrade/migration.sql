@@ -1,0 +1,1 @@
+-- This migration was applied to the database but the local file was missing

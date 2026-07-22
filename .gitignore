@@ -53,3 +53,4 @@ docs/local/
 *.tsbuildinfo
 next-env.d.ts
 logs/
+log.txt

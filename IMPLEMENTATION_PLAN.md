@@ -2,7 +2,7 @@
 
 > **Дата**: 2026-07-22
 > **Автор**: Аналитический отдел TradeStats
-> **Статус**: ✅ Feature 1-4 завершены (→ Feature 5)
+> **Статус**: ✅ Feature 1-5 завершены (→ Feature 6)
 > **Стиль торговли**: уровни, пробои, ложные пробои, ложный пробой границ боковиков по тренду
 
 ---
@@ -843,13 +843,13 @@ model UserLevel {
 
 ### 6.7 Шаги выполнения
 
-- [ ] **1. Добавить модель UserLevel в schema.prisma**
-- [ ] **2. Создать миграцию**
-- [ ] **3. Реализовать `src/lib/levels.ts`** — CRUD, валидация
-- [ ] **4. Создать API-роут** — CRUD /api/orderflow/levels
-- [ ] **5. Создать компонент LevelOverlay** — рисование уровней на canvas
-- [ ] **6. Интегрировать в orderflow page**
-- [ ] **7. Написать тесты**
+- [x] **1. Добавить модель UserLevel в schema.prisma**
+- [x] **2. Создать миграцию**
+- [x] **3. Реализовать `src/lib/levels.ts`** — CRUD, валидация
+- [x] **4. Создать API-роут** — CRUD /api/orderflow/levels
+- [x] **5. Создать компонент LevelOverlay** — рисование уровней на canvas
+- [x] **6. Интегрировать в orderflow page**
+- [x] **7. Написать тесты**
 
 ---
 
@@ -906,7 +906,7 @@ export type ClusterAnomaly = {
 
 ```
 src/lib/
-  └── levels.ts                 ⏳ Feature 5
+  └── drawings.ts                 ✅ Feature 5
 
 src/components/
   ├── VolumeProfile.tsx          ⏳ Feature 1
@@ -914,8 +914,8 @@ src/components/
   ├── DivergenceOverlay.tsx      ⏳ Feature 2
   ├── DivergenceHistory.tsx      ⏳ Feature 2
   ├── ImbalanceHeatmap.tsx       ⏳ Feature 3
-  ├── LevelOverlay.tsx           ⏳ Feature 5
-  └── LevelStats.tsx             ⏳ Feature 5
+  ├── LevelOverlay.tsx           ✅ Feature 5
+  └── LevelStats.tsx             🟡 (отложено — аналитика)
 
 src/app/api/
   ├── orderflow/volume-profile/route.ts              ⏳ Feature 1
@@ -926,8 +926,8 @@ src/app/api/
   ├── orderflow/imbalance/__tests__/route.test.ts    ⏳ Feature 3
   ├── orderflow/absorption/route.ts                  ⏳ Feature 4
   ├── orderflow/absorption/__tests__/route.test.ts   ⏳ Feature 4
-  ├── orderflow/levels/route.ts                      ⏳ Feature 5
-  ├── orderflow/levels/__tests__/route.test.ts       ⏳ Feature 5
+  ├── orderflow/levels/route.ts                      ✅ Feature 5
+  ├── orderflow/levels/__tests__/route.test.ts       ✅ Feature 5
   └── orderflow/cluster-search/route.ts              ⏳ Feature 6
 
 src/lib/__tests__/
@@ -935,7 +935,7 @@ src/lib/__tests__/
   ├── divergence.test.ts          ⏳ Feature 2
   ├── imbalance.test.ts           ⏳ Feature 3
   ├── absorption.test.ts          ⏳ Feature 4
-  └── levels.test.ts              ⏳ Feature 5
+  └── levels.test.ts              ✅ Feature 5
 
 src/components/__tests__/
   ├── VolumeProfile.test.tsx           ⏳ Feature 1
@@ -947,8 +947,8 @@ src/components/__tests__/
 ```
 src/lib/orderflow.ts              ⏳ Features 1, 2, 3, 4, 6
 src/app/dashboard/orderflow/page.tsx ⏳ Features 1, 2, 3, 4, 5, 6
-prisma/schema.prisma              ⏳ Feature 6 (UserLevel)
-prisma/migrations/                ⏳ Feature 6 (новая миграция)
+prisma/schema.prisma              ✅ Feature 5 (UserLevel)
+prisma/migrations/                ✅ Feature 5 (новая миграция)
 ```
 
 ### 8.3 Итого

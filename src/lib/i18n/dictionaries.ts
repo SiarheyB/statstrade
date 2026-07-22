@@ -179,6 +179,14 @@ const en: Dict = {
   "of.thDeltaRatio": "|Δ|/V",
   "of.thDuration": "Dur",
   "of.thLabel": "Label",
+  "of.levels": "Levels",
+  "of.hintLevels": "Mark key price levels on the chart",
+  "of.drawings": "Drawings",
+  "of.hintDrawings": "Trend lines, horizontal lines, rectangles",
+  "of.drawingEditor": "Drawing Editor",
+  "of.color": "Color",
+  "of.lineWidth": "Width",
+  "of.delete": "Delete",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -1161,6 +1169,14 @@ const ru: Dict = {
   "of.thDeltaRatio": "|Δ|/V",
   "of.thDuration": "Длт",
   "of.thLabel": "Метка",
+  "of.levels": "Уровни",
+  "of.hintLevels": "Отмечайте ключевые ценовые уровни на графике",
+  "of.drawings": "Рисунки",
+  "of.hintDrawings": "Трендовые линии, горизонтальные линии, прямоугольники",
+  "of.drawingEditor": "Редактор рисунка",
+  "of.color": "Цвет",
+  "of.lineWidth": "Толщина",
+  "of.delete": "Удалить",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

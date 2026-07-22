@@ -1,17 +1,20 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle } from "lucide-react";
+import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle, Pencil } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawAbsorptionMarkers } from "@/components/AbsorptionOverlay";
+import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import AbsorptionPanel from "@/components/AbsorptionPanel";
+import DrawingToolbar from "@/components/DrawingToolbar";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import type { DivergenceSignal, Imbalance, SpeedOfTape, AbsorptionSignal } from "@/lib/orderflow";
+import type { DrawingRow, DrawingToolType, DrawingPoint } from "@/lib/drawings";
 
 type ObHeatmap = {
   priceMin: number;
@@ -225,6 +228,15 @@ export default function OrderflowPage() {
   const [absorptionLoading, setAbsorptionLoading] = useState(false);
   const [absorptionError, setAbsorptionError] = useState<string | null>(null);
   const [showAbsorption, setShowAbsorption] = useState(true);
+  // Drawing tools (TradingView-style)
+  const [drawings, setDrawings] = useState<DrawingRow[]>([]);
+  const [drawingsLoading, setDrawingsLoading] = useState(false);
+  const [drawingsError, setDrawingsError] = useState<string | null>(null);
+  const [showDrawings, setShowDrawings] = useState(true);
+  const [activeTool, setActiveTool] = useState<DrawingToolType | null>(null);
+  const [drawingPoints, setDrawingPoints] = useState<DrawingPoint[]>([]);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [showDrawingEditor, setShowDrawingEditor] = useState(false);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -294,6 +306,7 @@ export default function OrderflowPage() {
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
       if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
       if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
+      if (typeof s.showDrawings === "boolean") setShowDrawings(s.showDrawings);
     } catch {
       // ignore
     }
@@ -306,12 +319,12 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showAbsorption }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showAbsorption, showDrawings }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showAbsorption]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showAbsorption, showDrawings]);
 
   // Доступные символы/биржи из реально собранных данных.
   useEffect(() => {
@@ -443,6 +456,46 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
+  // Drawing tools data fetch — при смене symbol/exchange.
+  const loadDrawings = useCallback(async () => {
+    setDrawingsLoading(true);
+    setDrawingsError(null);
+    try {
+      const res = await fetch(`/api/orderflow/drawings?symbol=${symbol}&exchange=${exchange}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setDrawingsError(err.error ?? "Error");
+        setDrawings([]);
+        return;
+      }
+      const d = await res.json();
+      setDrawings(d.drawings ?? []);
+    } catch {
+      setDrawingsError("Network error");
+      setDrawings([]);
+    } finally {
+      setDrawingsLoading(false);
+    }
+  }, [symbol, exchange]);
+
+  // Сохранить рисунок через API
+  const saveDrawing = useCallback(async (toolType: DrawingToolType, pts: DrawingPoint[]) => {
+    try {
+      const res = await fetch("/api/orderflow/drawings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, exchange, toolType, points: pts }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.drawing) {
+        setDrawings(prev => [...prev, d.drawing]);
+      }
+    } catch {
+      // ignore
+    }
+  }, [symbol, exchange]);
+
   // Загружаем Volume Profile при монтировании и смене symbol/exchange.
   useEffect(() => {
     loadVolumeProfile();
@@ -462,6 +515,11 @@ export default function OrderflowPage() {
   useEffect(() => {
     loadAbsorption();
   }, [loadAbsorption]);
+
+  // Загружаем drawings при монтировании и смене symbol/exchange.
+  useEffect(() => {
+    loadDrawings();
+  }, [loadDrawings]);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -786,6 +844,11 @@ export default function OrderflowPage() {
 
     ctx.restore();
 
+    // Инструменты рисования (TradingView-style) — поверх свечей, под маркерами.
+    if (showDrawings && drawings.length) {
+      drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId);
+    }
+
     // Маркеры absorption (узкий диапазон + объём + дельта~0) — поверх свечей.
     if (showAbsorption && absorptionSignals.length) {
       drawAbsorptionMarkers(ctx, sx, sy, plotX, plotW, plotH, absorptionSignals, candles);
@@ -904,7 +967,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, t, range, timezone, locale]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale]);
 
   // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
@@ -1069,6 +1132,13 @@ export default function OrderflowPage() {
     hoverRef.current = { mx, my };
     const drag = dragRef.current;
     const lay = layoutRef.current;
+    // Drawing mode: показываем перекрестье
+    if (activeTool && lay && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const cv = canvasRef.current;
+      if (cv) cv.style.cursor = "crosshair";
+      draw();
+      return;
+    }
     if (drag && lay) {
       if (drag.mode === "zoomY") {
         // Ценовая шкала: тянем вверх → приближаем (выше), вниз → отдаляем. Якорь — центр.
@@ -1103,8 +1173,21 @@ export default function OrderflowPage() {
       const lay2 = layoutRef.current;
       const cv = canvasRef.current;
       if (lay2 && cv) {
-        cv.style.cursor =
-          mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "crosshair";
+        if (!activeTool && drawings.length > 0) {
+          // Проверяем, есть ли рисунок под курсором
+          const v = viewRef.current;
+          if (v) {
+            const xspan = v.t1 - v.t0 || 1;
+            const yspan = v.y1 - v.y0 || 1;
+            const sxLocal = (ms: number) => lay2.plotX + ((ms - v.t0) / xspan) * lay2.plotW;
+            const syLocal = (p: number) => lay2.plotH - ((p - v.y0) / yspan) * lay2.plotH;
+            const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay2.plotX, lay2.plotW, lay2.plotH);
+            cv.style.cursor = hit ? "pointer" : "default";
+          }
+        } else {
+          cv.style.cursor =
+            mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
+        }
       }
       draw();
     }
@@ -1116,13 +1199,70 @@ export default function OrderflowPage() {
   }
   function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const lay = layoutRef.current;
+    if (!lay) {
+      if (viewRef.current) {
+        dragRef.current = { mx, my, mode: "pan" as const, view: { ...viewRef.current } };
+      }
+      return;
+    }
+
+    // Drawing mode: активный инструмент и клик внутри области графика
+    if (activeTool && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const v = viewRef.current;
+      if (!v) return;
+      const xspan = v.t1 - v.t0 || 1;
+      const yspan = v.y1 - v.y0 || 1;
+      const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+      const price = v.y1 - (my / lay.plotH) * yspan;
+
+      if (activeTool === "horizontal_line" || activeTool === "horizontal_ray") {
+        // Одна точка — сразу сохраняем
+        saveDrawing(activeTool, [{ t: Math.round(t), price }]);
+        setActiveTool(null);
+        return;
+      }
+
+      // trend_line или rectangle — две точки
+      if (drawingPoints.length === 0) {
+        setDrawingPoints([{ t: Math.round(t), price }]);
+      } else {
+        saveDrawing(activeTool, [...drawingPoints, { t: Math.round(t), price }]);
+        setDrawingPoints([]);
+      }
+      return;
+    }
+
+    // Selection mode: клик по существующему рисунку (без активного инструмента)
+    if (!activeTool && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const v = viewRef.current;
+      if (v) {
+        const xspan = v.t1 - v.t0 || 1;
+        const yspan = v.y1 - v.y0 || 1;
+        const sxLocal = (ms: number) => lay.plotX + ((ms - v.t0) / xspan) * lay.plotW;
+        const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
+        const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
+        if (hit) {
+          setSelectedDrawingId(hit.id);
+          setShowDrawingEditor(true);
+          return;
+        }
+      }
+    }
+    // Клик мимо рисунка → снимаем выделение
+    if (selectedDrawingId && !activeTool) {
+      setSelectedDrawingId(null);
+      setShowDrawingEditor(false);
+    }
+
+    // Обычный режим: pan/zoom
     if (viewRef.current) {
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const lay = layoutRef.current;
-      const mode: "pan" | "zoomX" | "zoomY" =
+      const v2 = viewRef.current;
+      const mode2: "pan" | "zoomX" | "zoomY" =
         lay && mx >= lay.plotX + lay.plotW ? "zoomY" : lay && my >= lay.plotH - 8 ? "zoomX" : "pan";
-      dragRef.current = { mx, my, mode, view: { ...viewRef.current } };
+      dragRef.current = { mx, my, mode: mode2, view: { ...v2 } };
     }
   }
   function onUp() {
@@ -1229,6 +1369,19 @@ export default function OrderflowPage() {
             </span>
           </button>
           <button
+            onClick={() => setShowDrawings((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
+              showDrawings ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
+            }`}
+            title={t("of.hintDrawings") || "Drawings — show/hide chart drawings"}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showDrawings ? "bg-accent border-accent" : "border-border-strong"}`} />
+            {t("of.drawings") || "Drawings"}
+            <span title={t("of.hintDrawings") || "Drawings — trend lines, horizontal lines, rectangles"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
             onClick={() => setShowDivergence((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
               showDivergence ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
@@ -1315,17 +1468,105 @@ export default function OrderflowPage() {
         <div className="card p-10 text-center text-muted">{t("of.empty")}</div>
       ) : (
         <>
-          <div className="card p-2" style={{ background: "#0a0b10" }}>
-            <canvas
-              ref={canvasRef}
-              className="w-full cursor-crosshair"
-              style={{ height: "min(72vh, 720px)" }}
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onMouseDown={onDown}
-              onMouseUp={onUp}
-              onDoubleClick={onDouble}
-            />
+          <div className="card p-2 relative" style={{ background: "#0a0b10" }}>
+            {/* Drawing Editor — плавающая панель над графиком */}
+            {showDrawingEditor && selectedDrawingId && (() => {
+              const d = drawings.find(dd => dd.id === selectedDrawingId);
+              if (!d) return null;
+              return (
+                <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 p-2 bg-[#0a0b10]/90 border-b border-border/30 text-xs">
+                  <span className="text-muted font-medium mr-1">{t("of.drawingEditor")}</span>
+                  <button
+                    className="ml-auto text-faint hover:text-fg p-0.5"
+                    onClick={() => { setSelectedDrawingId(null); setShowDrawingEditor(false); }}
+                    title="Закрыть"
+                  >
+                    ✕
+                  </button>
+                  <label className="flex items-center gap-1 text-faint">
+                    {t("of.color")}
+                    <input
+                      type="color"
+                      value={d.color}
+                      onChange={async (ev) => {
+                        const newColor = ev.target.value;
+                        try {
+                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ color: newColor }),
+                          });
+                          if (res.ok) {
+                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, color: newColor } : dd));
+                          }
+                        } catch (err) {
+                          console.error("Failed to update color", err);
+                        }
+                      }}
+                      className="w-6 h-6 rounded border border-border/30 cursor-pointer"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-faint">
+                    {t("of.lineWidth")}
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={d.lineWidth}
+                      onChange={async (ev) => {
+                        const newWidth = Number(ev.target.value);
+                        try {
+                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ lineWidth: newWidth }),
+                          });
+                          if (res.ok) {
+                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, lineWidth: newWidth } : dd));
+                          }
+                        } catch (err) {
+                          console.error("Failed to update width", err);
+                        }
+                      }}
+                      className="w-14"
+                    />
+                    <span className="tabular-nums text-faint">{d.lineWidth}</span>
+                  </label>
+                  <button
+                    className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, { method: "DELETE" });
+                        if (res.ok) {
+                          setDrawings(prev => prev.filter(dd => dd.id !== d.id));
+                          setSelectedDrawingId(null);
+                          setShowDrawingEditor(false);
+                        }
+                      } catch (err) {
+                        console.error("Failed to delete drawing", err);
+                      }
+                    }}
+                  >
+                    {t("of.delete")}
+                  </button>
+                </div>
+              );
+            })()}
+            <div className="flex gap-2">
+              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
+              <div className="flex-1 min-w-0">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full"
+                  style={{ height: "min(72vh, 720px)" }}
+                  onMouseMove={onMove}
+                  onMouseLeave={onLeave}
+                  onMouseDown={onDown}
+                  onMouseUp={onUp}
+                  onDoubleClick={onDouble}
+                />
+              </div>
+            </div>
             <div className="mt-1 border-t border-border/40 pt-1">
               <canvas ref={deltaRef} className="w-full" style={{ height: 110 }} />
             </div>
