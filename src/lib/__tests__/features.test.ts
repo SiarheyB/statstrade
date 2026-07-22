@@ -20,6 +20,7 @@ describe('features - FEATURE_DEFAULTS', () => {
       'monteCarlo',
       'playbooks',
       'mentorMode',
+      'volumeProfile',
     ]);
   });
 
@@ -59,6 +60,11 @@ describe('features - FEATURE_DEFAULTS', () => {
 
   it('mentorMode has correct defaults', () => {
     expect(FEATURE_DEFAULTS.mentorMode.maxLinksPerUser).toBe(5);
+  });
+
+  it('volumeProfile has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.volumeProfile.bins).toBe(100);
+    expect(FEATURE_DEFAULTS.volumeProfile.valueAreaPct).toBe(0.7);
   });
 });
 

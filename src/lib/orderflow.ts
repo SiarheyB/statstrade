@@ -534,3 +534,163 @@ export async function computeOrderflow(
     profileBid, profileAsk, profileMax,
   };
 }
+
+// ─── Volume Profile (POC, VAL, VAH) ─────────────────────────────────────────
+
+export type VolumeProfileLevel = {
+  price: number;       // центр бина
+  volume: number;      // суммарный объём на этом уровне
+  isPoc: boolean;      // true = Point of Control
+  isVa: boolean;       // true = внутри Value Area
+  pct: number;         // процент от maxVolume (0-100)
+};
+
+export type VolumeProfile = {
+  poc: number;           // Point of Control (цена)
+  vah: number;           // Value Area High
+  val: number;           // Value Area Low
+  levels: VolumeProfileLevel[];
+  totalVolume: number;
+  pocVolume: number;     // объём на POC
+  valueAreaVolume: number; // объём внутри VA
+  valueAreaPct: number;  // 0.7 (настраивается)
+  binSize: number;       // шаг цены
+};
+
+// Выбор интервала свечей в зависимости от длины периода.
+function vpInterval(periodMs: number): string {
+  if (periodMs <= 24 * 3_600_000) return "1h";
+  if (periodMs <= 7 * 24 * 3_600_000) return "4h";
+  return "1d";
+}
+
+// Volume Profile — горизонтальный профиль объёмов, показывающий распределение
+// торгового объёма по ценовым уровням за выбранный период.
+// Алгоритм:
+//   1. Читаем ObCandle за период (цена high/low + volume)
+//   2. Распределяем volume равномерно по ценовым уровням (price bins), которых
+//      коснулась свеча (high → low)
+//   3. Находим POC = уровень с максимальным объёмом
+//   4. Вычисляем Value Area = 70% total volume, расширяясь от POC вверх/вниз
+//   5. Возвращаем { poc, vah, val, levels[], totalVolume }
+export async function computeVolumeProfile(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  opts?: { bins?: number; valueAreaPct?: number },
+): Promise<VolumeProfile | null> {
+  const bins = opts?.bins ?? 100;
+  const valueAreaPct = opts?.valueAreaPct ?? 0.7;
+
+  const interval = vpInterval(toMs - fromMs);
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+
+  // 1. Читаем свечи за период.
+  const candles = await prisma.$queryRaw<
+    { t: Date; h: number; l: number; c: number; v: number }[]
+  >`
+    SELECT "t", "h", "l", "c", "v"
+    FROM "ObCandle"
+    WHERE "symbol" = ${symbol}
+      AND "interval" = ${interval}
+      AND "t" >= ${new Date(fromMs)}
+      AND "t" <= ${new Date(toMs)}
+      ${exFilter}
+    ORDER BY "t" ASC
+  `;
+
+  if (candles.length === 0) return null;
+
+  // 2. Определяем ценовой диапазон.
+  let priceMin = Infinity;
+  let priceMax = -Infinity;
+  let totalVolume = 0;
+  for (const c of candles) {
+    if (c.h > priceMax) priceMax = c.h;
+    if (c.l < priceMin) priceMin = c.l;
+    totalVolume += c.v;
+  }
+  const pad = (priceMax - priceMin) * 0.02 || priceMax * 0.005;
+  priceMin -= pad;
+  priceMax += pad;
+  const span = priceMax - priceMin || 1;
+  const binSize = span / bins;
+
+  // 3. Распределяем объём по бинам (равномерно по всему диапазону high-low свечи).
+  const levels = new Array(bins).fill(0);
+  for (const c of candles) {
+    if (c.v <= 0) continue;
+    const loBin = Math.max(0, Math.min(bins - 1, Math.floor((c.l - priceMin) / span * bins)));
+    const hiBin = Math.max(0, Math.min(bins - 1, Math.floor((c.h - priceMin) / span * bins)));
+    const count = hiBin - loBin + 1;
+    const volPerBin = c.v / count;
+    for (let b = loBin; b <= hiBin; b++) {
+      levels[b] += volPerBin;
+    }
+  }
+
+  // 4. Находим POC (Point of Control).
+  let pocIdx = 0;
+  let maxLevelVol = 0;
+  for (let b = 0; b < bins; b++) {
+    if (levels[b] > maxLevelVol) {
+      maxLevelVol = levels[b];
+      pocIdx = b;
+    }
+  }
+  const poc = priceMin + (pocIdx + 0.5) * binSize;
+  const pocVolume = levels[pocIdx];
+
+  // 5. Вычисляем Value Area (расширяемся от POC, пока не наберём valueAreaPct).
+  const target = totalVolume * valueAreaPct;
+  let vaVolume = levels[pocIdx];
+  let vaLo = pocIdx;
+  let vaHi = pocIdx;
+  // Расширяемся вверх и вниз, выбирая уровень с большим объёмом.
+  while (vaVolume < target) {
+    const nextLo = vaLo - 1;
+    const nextHi = vaHi + 1;
+    const loVol = nextLo >= 0 ? levels[nextLo] : -1;
+    const hiVol = nextHi < bins ? levels[nextHi] : -1;
+
+    if (loVol < 0 && hiVol < 0) break; // вышли за границы
+    if (loVol >= hiVol && loVol >= 0) {
+      vaLo = nextLo;
+      vaVolume += loVol;
+    } else if (hiVol >= 0) {
+      vaHi = nextHi;
+      vaVolume += hiVol;
+    } else {
+      break;
+    }
+  }
+  const vah = priceMin + (vaHi + 0.5) * binSize;
+  const val = priceMin + (vaLo + 0.5) * binSize;
+
+  // 6. Строим массив уровней.
+  const maxVol = maxLevelVol || 1;
+  const resultLevels: VolumeProfileLevel[] = [];
+  for (let b = 0; b < bins; b++) {
+    const price = priceMin + (b + 0.5) * binSize;
+    resultLevels.push({
+      price,
+      volume: levels[b],
+      isPoc: b === pocIdx,
+      isVa: b >= vaLo && b <= vaHi,
+      pct: (levels[b] / maxVol) * 100,
+    });
+  }
+
+  return {
+    poc,
+    vah,
+    val,
+    levels: resultLevels,
+    totalVolume,
+    pocVolume,
+    valueAreaVolume: vaVolume,
+    valueAreaPct,
+    binSize,
+  };
+}

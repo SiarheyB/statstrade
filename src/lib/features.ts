@@ -64,6 +64,19 @@ export const FEATURE_DEFAULTS = {
     },
     maxLinksPerUser: 5,
   },
+  volumeProfile: {
+    label: "Volume Profile (POC, VAH, VAL)",
+    description:
+      "Показывает на странице orderflow горизонтальный профиль объёмов (Volume Profile): распределение торгового объёма по ценовым уровням за выбранный период. POC (Point of Control) — цена с максимальным объёмом, VAH/VAL — границы Value Area (70% объёма). Использует данные ObCandle (свечи) из коллектора.",
+    fieldHelp: {
+      bins:
+        "Количество ценовых уровней (price bins) в профиле. Больше — детальнее, но выше нагрузка на сервер и больше данных для отрисовки. Разумный диапазон: 50–200.",
+      valueAreaPct:
+        "Доля общего объёма, которая считается Value Area (в процентах). 70 = 70% объёма. Стандарт рынка — 68–70%. Разумный диапазон: 50–90.",
+    },
+    bins: 100,
+    valueAreaPct: 0.7,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

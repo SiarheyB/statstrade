@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
+import VolumeProfile from "@/components/VolumeProfile";
+import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 
 type ObHeatmap = {
   priceMin: number;
@@ -198,6 +200,10 @@ export default function OrderflowPage() {
   const [metaExchanges, setMetaExchanges] = useState<string[]>(FALLBACK_EXCHANGES);
   // Живые пороги «крупных лимиток» из CollectorConfig (fallback — bigLimitFor).
   const [metaMinCoins, setMetaMinCoins] = useState<Record<string, number>>({});
+  // Volume Profile
+  const [vpData, setVpData] = useState<VPData | null>(null);
+  const [vpLoading, setVpLoading] = useState(false);
+  const [vpError, setVpError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -299,6 +305,45 @@ export default function OrderflowPage() {
       }
     })();
   }, []);
+
+  // Маппинг таймфреймов карты ордеров → периоды Volume Profile
+  const rangeToVpPeriod: Record<string, string> = {
+    "5m": "1h",
+    "15m": "1h",
+    "1h": "1h",
+    "4h": "4h",
+    "12h": "12h",
+    "1d": "24h",
+    "1w": "7d",
+  };
+
+  // Volume Profile data fetch — при смене symbol/exchange/range.
+  const loadVolumeProfile = useCallback(async () => {
+    setVpLoading(true);
+    setVpError(null);
+    try {
+      const vpPeriod = rangeToVpPeriod[range] ?? "24h";
+      const res = await fetch(`/api/orderflow/volume-profile?symbol=${symbol}&exchange=${exchange}&period=${vpPeriod}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setVpError(err.error ?? "Error");
+        setVpData(null);
+        return;
+      }
+      const d = await res.json();
+      setVpData(d.volumeProfile);
+    } catch {
+      setVpError("Network error");
+      setVpData(null);
+    } finally {
+      setVpLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
+  // Загружаем Volume Profile при монтировании и смене symbol/exchange.
+  useEffect(() => {
+    loadVolumeProfile();
+  }, [loadVolumeProfile]);
 
   // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
   useEffect(() => {
@@ -1136,6 +1181,11 @@ export default function OrderflowPage() {
           </div>
           <div className="mt-1 text-[11px] text-faint">{t("of.zoomHint")}</div>
 
+          {/* Volume Profile */}
+          <div className="mt-3">
+            <VolumeProfile data={vpData} loading={vpLoading} error={vpError} />
+          </div>
+
           {/* Лента крупных рыночных ордеров */}
           <div className="card p-3 mt-3">
             <div className="text-xs font-medium text-muted">{t("of.bigTrades")}</div>
@@ -1186,6 +1236,7 @@ export default function OrderflowPage() {
             <span>{t("of.maxWall")}: {fmtVal(hm.maxVal)}</span>
             <span className="text-faint/70">{t("of.zoomHint")}</span>
           </div>
+
         </>
       )}
     </div>

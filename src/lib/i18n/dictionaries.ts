@@ -142,6 +142,17 @@ const en: Dict = {
   "of.hintBrightness": "Display brightness of the heatmap — does not change the data, only how vivid the walls look.",
   "of.hintRefresh": "Reload data now.",
 
+  // volume profile
+  "of.volumeProfile": "Volume Profile",
+  "of.noVolumeProfile": "No volume profile data yet — try a longer period.",
+  "of.vpPoc": "POC",
+  "of.vpVah": "VAH",
+  "of.vpVal": "VAL",
+  "of.vpVolume": "Vol",
+  "of.vpHvn": "HVN",
+  "of.vpLvn": "LVN",
+  "of.vpValueArea": "Value Area ({pct}%)",
+
   // liquidation map
   "liq.title": "Liquidation heatmap",
   "liq.subtitle": "Estimated leverage liquidation levels, computed from futures candles. Binance · Bybit · OKX.",
@@ -1085,6 +1096,17 @@ const ru: Dict = {
   "of.hintMinSize": "Скрывает стены ликвидности мельче этой доли от самой крупной стены — отсекает шум, остаются только крупные стены.",
   "of.hintBrightness": "Яркость отображения карты — не меняет данные, только насыщенность свечения стен.",
   "of.hintRefresh": "Перезагрузить данные сейчас.",
+
+  // volume profile
+  "of.volumeProfile": "Volume Profile",
+  "of.noVolumeProfile": "Данных Volume Profile пока нет — попробуйте больший период.",
+  "of.vpPoc": "POC",
+  "of.vpVah": "VAH",
+  "of.vpVal": "VAL",
+  "of.vpVolume": "Объём",
+  "of.vpHvn": "HVN",
+  "of.vpLvn": "LVN",
+  "of.vpValueArea": "Value Area ({pct}%)",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",
