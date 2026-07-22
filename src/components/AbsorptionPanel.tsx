@@ -65,7 +65,7 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
           </span>
           {signals.length > 0 && (
             <span className="text-[11px] text-faint">
-              {signals.length} found
+              {t("of.found", { n: signals.length })}
             </span>
           )}
         </div>

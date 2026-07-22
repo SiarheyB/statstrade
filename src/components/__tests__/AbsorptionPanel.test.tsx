@@ -9,12 +9,13 @@ import type { AbsorptionSignal } from '@/lib/orderflow';
 // Mock i18n hook
 vi.mock('@/lib/i18n/provider', () => ({
   useI18n: () => ({
-    t: (key: string) => {
+    t: (key: string, vars?: Record<string, string | number>) => {
       const m: Record<string, string> = {
         'of.absorptionTitle': 'Absorption Patterns',
         'of.hintAbsorption': 'Narrow range + high volume + near-zero delta',
         'common.loading': 'Loading...',
         'of.noAbsorption': 'No absorption patterns detected',
+        'of.found': '{n} found',
         'of.thTime': 'Time',
         'of.thStrength': 'Str',
         'of.thPrice': 'Price',
@@ -24,7 +25,13 @@ vi.mock('@/lib/i18n/provider', () => ({
         'of.thDuration': 'Dur',
         'of.thLabel': 'Label',
       };
-      return m[key] ?? key;
+      let val = m[key] ?? key;
+      if (vars) {
+        for (const [k, v] of Object.entries(vars)) {
+          val = val.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v));
+        }
+      }
+      return val;
     },
     timezone: 'UTC',
   }),
