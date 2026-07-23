@@ -16,6 +16,25 @@ import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSync } from "@/components/SyncProvider";
+import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchangeIds";
+
+// Ключевые слова, указывающие на ошибку прав доступа API-ключа.
+// Если syncError содержит хотя бы одно из них — показываем пользователю
+// специальное предупреждение со ссылкой на страницу управления API ключами биржи.
+const PERMISSION_ERROR_KEYWORDS = [
+  "permission",
+  "No permission",
+  "access",
+  "forbidden",
+  "Forbidden",
+  "HTTP 403",
+  "HTTP 401",
+  "API key",
+  "invalid key",
+  "InvalidKey",
+  "signature",
+  "InvalidSignature",
+];
 
 type Account = {
   id: string;
@@ -307,9 +326,11 @@ export default function AccountsPage() {
                   </button>
                 )}
                 {a.syncError && !progress[a.id] && (
-                  <span className="text-loss truncate max-w-md" title={a.syncError}>
-                    {a.syncError}
-                  </span>
+                  <PermissionErrorBanner
+                    error={a.syncError}
+                    exchange={a.exchange}
+                    isMt={isMtSource(a.source)}
+                  />
                 )}
               </div>
 
@@ -385,6 +406,7 @@ function AccountForm({
   const { t } = useI18n();
   const [ccxtOpts, setCcxtOpts] = useState<ExchangeOpt[]>(FALLBACK_CCXT);
   const [exchange, setExchange] = useState("binance");
+  const [guideMap, setGuideMap] = useState<Record<string, string> | null>(null);
   const [label, setLabel] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [apiSecret, setApiSecret] = useState("");
@@ -414,6 +436,20 @@ function AccountForm({
       // Если текущий выбор пропал из включённых — переключаемся на первую доступную.
       const ids = [...d.exchanges.map((e: ExchangeOpt) => e.id), ...MT_SOURCES.map((m) => m.id)];
       setExchange((prev) => (ids.includes(prev) ? prev : d.exchanges[0]?.id ?? "binance"));
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // Загружаем гайды подключения для бирж
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const res = await fetch("/api/exchange-guides");
+      if (!res.ok || !alive) return;
+      const d = await res.json();
+      if (d.guides && alive) setGuideMap(d.guides);
     })();
     return () => {
       alive = false;
@@ -537,6 +573,13 @@ function AccountForm({
                 </option>
               ))}
             </select>
+            {/* Показываем гайд подключения, если выбран CCXT-обменник */}
+            {!isMt && guideMap?.[exchange] && (
+              <div className="mt-2 rounded-lg bg-surface-2/40 border border-border px-3 py-2.5 text-xs text-muted whitespace-pre-wrap leading-relaxed">
+                <div className="font-medium text-fg mb-1">Как настроить API ключ:</div>
+                {guideMap[exchange]}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-xs text-muted mb-1">{t("acc.form.label")}</label>
@@ -721,6 +764,77 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
     >
       {exchange.slice(0, 3)}
     </span>
+  );
+}
+
+/**
+ * Проверяет, содержит ли текст ошибки признаки проблем с правами API-ключа.
+ */
+function isPermissionError(error: string): boolean {
+  const lower = error.toLowerCase();
+  return PERMISSION_ERROR_KEYWORDS.some((kw) => lower.includes(kw.toLowerCase()));
+}
+
+/**
+ * Компонент для отображения ошибки синхронизации.
+ * Если ошибка связана с правами API-ключа — показывает предупреждение
+ * со ссылкой на страницу управления API ключами биржи.
+ */
+function PermissionErrorBanner({
+  error,
+  exchange,
+  isMt,
+}: {
+  error: string;
+  exchange: string;
+  isMt: boolean;
+}) {
+  const { t } = useI18n();
+  const isPerm = !isMt && isPermissionError(error);
+
+  if (!isPerm) {
+    return (
+      <span className="text-loss truncate max-w-md" title={error}>
+        {error}
+      </span>
+    );
+  }
+
+  const docsUrl = isExchangeId(exchange) ? SUPPORTED_EXCHANGES[exchange]?.docsUrl : null;
+  const exchangeName = isExchangeId(exchange) ? SUPPORTED_EXCHANGES[exchange]?.name : exchange;
+
+  return (
+    <div className="mt-1 w-full rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-xs">
+      <div className="flex items-start gap-2">
+        <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />
+        <div className="min-w-0">
+          <p className="font-medium text-warn">
+            Ошибка прав доступа API-ключа {exchangeName}
+          </p>
+          <p className="text-muted mt-0.5">
+            Скорее всего у API-ключa {exchangeName} недостаточно разрешений.
+            Убедитесь, что ключ создан с правами <strong>«Read Only»</strong> и
+            имеет доступ к истории сделок.
+          </p>
+          {docsUrl && (
+            <a
+              href={docsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 mt-1.5 text-accent hover:text-accent/80 underline underline-offset-2"
+            >
+              Открыть страницу управления API ключами {exchangeName}
+            </a>
+          )}
+          <details className="mt-1.5">
+            <summary className="cursor-pointer text-faint hover:text-muted text-[11px]">
+              Техническая информация
+            </summary>
+            <p className="mt-1 text-faint text-[11px] font-mono break-all">{error}</p>
+          </details>
+        </div>
+      </div>
+    </div>
   );
 }
 

@@ -15,7 +15,7 @@ const LINKS = [
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
-  { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
+    { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
   { href: "/admin/support", key: "admin.nav.support", icon: Headset },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
