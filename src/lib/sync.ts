@@ -223,6 +223,23 @@ async function fetchTrades(
     return fills;
   }
 
+  // MEXC: forward stream from the floor, per-symbol. MEXC supports startTime
+  // natively (unlike Binance), so the simple forward cursor works best.
+  if (exchangeId === "mexc") {
+    let cursor = sinceFloor;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
+      if (!trades.length) break;
+      collect(trades);
+      const last = trades[trades.length - 1] as { timestamp?: number };
+      const next = Number(last.timestamp) + 1;
+      if (!Number.isFinite(next) || next <= cursor) break;
+      cursor = next;
+      if (trades.length < PAGE_LIMIT) break;
+    }
+    return fills;
+  }
+
   // Binance futures: API returns only a bounded window (and the last 7 days by
   // default). Walk back in 7-day windows from now down to the floor.
   if (kind === "swap") {
@@ -456,7 +473,7 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
         const label = symbol || kind;
         const errMsg = formatCCXTError(err);
         errors.push(`${label}: ${errMsg}`);
-        logger.error("sync", accountId, "TASK_FAILED", `Failed to sync ${label}`, { exchangeId, kind, symbol, error: errMsg, stack: (err as Error).stack });
+        logger.error("sync", accountId, "TASK_FAILED", `Failed to sync ${label}: ${errMsg}`, { exchangeId, kind, symbol, error: errMsg, stack: (err as Error).stack });
       }
       cursor++;
       if (cursor % 20 === 0) {
