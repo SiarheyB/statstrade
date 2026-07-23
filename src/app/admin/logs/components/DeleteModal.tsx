@@ -3,6 +3,8 @@ interface DeleteModalProps {
   onClose: () => void;
   onConfirm: () => void;
   deletingIds: string[];
+  deleteAll?: boolean;
+  totalCount?: number;
   error?: string | null;
   success?: boolean;
 }
@@ -12,6 +14,8 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
   onClose,
   onConfirm,
   deletingIds,
+  deleteAll,
+  totalCount,
   error,
   success,
 }) => {
@@ -50,18 +54,24 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
                   Успешно удалено
                 </h3>
                 <p className="mt-2 text-center text-sm text-muted">
-                  Удалено записей: {deletingIds.length}
+                  {deleteAll
+                    ? `Удалены все записи`
+                    : `Удалено записей: ${deletingIds.length}`}
                 </p>
               </>
             ) : (
               <>
                 <h3 className="text-lg font-medium text-fg">
-                  Удаление логов
+                  {deleteAll ? 'Очистка всех логов' : 'Удаление логов'}
                 </h3>
                 <p className="mt-2 text-sm text-muted">
-                  Вы уверены, что хотите удалить <strong>{deletingIds.length}</strong>
-                  {' '}
-                  записей? Это действие нельзя отменить.
+                  {deleteAll ? (
+                    <>Вы уверены, что хотите удалить <strong>все</strong> записи логов? Это действие нельзя отменить.</>
+                  ) : (
+                    <>Вы уверены, что хотите удалить <strong>{deletingIds.length}</strong>
+                    {' '}
+                    записей? Это действие нельзя отменить.</>
+                  )}
                 </p>
               </>
             )}
@@ -78,7 +88,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 text-sm font-medium text-muted bg-surface border border-border rounded-md hover:bg-surface-2"
               >
-                Отмена
+                {success ? 'Закрыть' : 'Отмена'}
               </button>
 
               {!success && (
@@ -87,7 +97,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
                   onClick={onConfirm}
                   className="px-4 py-2 text-sm font-medium text-white bg-loss border border-transparent rounded-md hover:opacity-90"
                 >
-                  Удалить
+                  {deleteAll ? 'Очистить всё' : 'Удалить'}
                 </button>
               )}
             </div>

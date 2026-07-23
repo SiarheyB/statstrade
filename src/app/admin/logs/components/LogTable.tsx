@@ -17,8 +17,6 @@ export const LogTable: React.FC<{
   loading?: boolean;
   onDelete?: (ids: string[]) => void;
 }> = ({ logs, loading, onDelete }) => {
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const toggleSelect = (id: string) => {
@@ -43,16 +41,10 @@ export const LogTable: React.FC<{
 
   const handleDelete = () => {
     if (selectedIds.size === 0) return;
-    setDeleteIds(Array.from(selectedIds));
-    setDeleteModalOpen(true);
-  };
-
-  const handleConfirmDelete = () => {
     if (onDelete) {
-      onDelete(deleteIds);
+      onDelete(Array.from(selectedIds));
     }
     setSelectedIds(new Set());
-    setDeleteModalOpen(false);
   };
 
   if (loading && logs.length === 0) {
@@ -163,44 +155,6 @@ export const LogTable: React.FC<{
           </tbody>
         </table>
       </div>
-
-      {deleteModalOpen && (
-        <div className="fixed inset-0 z-50 overflow-y-auto">
-          <div className="flex min-h-full items-center justify-center p-4">
-            <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={() => setDeleteModalOpen(false)} />
-            <div className="relative w-full max-w-md bg-surface rounded-lg shadow-xl border border-border">
-              <div className="p-6">
-                <h3 className="text-lg font-medium text-fg">
-                  Удаление логов
-                </h3>
-                <p className="mt-2 text-sm text-muted">
-                  Вы уверены, что хотите удалить <strong>{deleteIds.length}</strong>
-                  {' '}
-                  записей? Это действие нельзя отменить.
-                </p>
-
-                <div className="mt-6 flex justify-end space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => setDeleteModalOpen(false)}
-                    className="px-4 py-2 text-sm font-medium text-muted bg-surface border border-border rounded-md hover:bg-surface-2"
-                  >
-                    Отмена
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleConfirmDelete}
-                    className="px-4 py-2 text-sm font-medium text-white bg-loss border border-transparent rounded-md hover:opacity-90"
-                  >
-                    Удалить
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

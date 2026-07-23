@@ -7,6 +7,7 @@ import { DeleteModal } from './components/DeleteModal';
 import AdminErrors from '@/components/AdminErrors';
 import { useState, useEffect, useCallback } from 'react';
 import clsx from 'clsx';
+import { Trash2 } from 'lucide-react';
 
 type Tab = 'logs' | 'errors';
 
@@ -41,6 +42,7 @@ export default function LogsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
+  const [deleteAll, setDeleteAll] = useState(false);
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleteSuccess, setDeleteSuccess] = useState<boolean>(false);
@@ -84,6 +86,15 @@ export default function LogsPage() {
 
   const handleDelete = (ids: string[]) => {
     setDeleteIds(ids);
+    setDeleteAll(false);
+    setDeleteError(null);
+    setDeleteSuccess(false);
+    setDeleteModalOpen(true);
+  };
+
+  const handleDeleteAll = () => {
+    setDeleteIds([]);
+    setDeleteAll(true);
     setDeleteError(null);
     setDeleteSuccess(false);
     setDeleteModalOpen(true);
@@ -96,7 +107,7 @@ export default function LogsPage() {
       const res = await fetch('/api/admin/logs', {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: deleteIds }),
+        body: deleteAll ? JSON.stringify({ all: true }) : JSON.stringify({ ids: deleteIds }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -106,6 +117,7 @@ export default function LogsPage() {
       await fetchLogs();
       setDeleteModalOpen(false);
       setDeleteIds([]);
+      setDeleteAll(false);
     } catch (err: any) {
       setDeleteError(err.message || 'Не удалось удалить логи');
       console.error('Error deleting logs:', err);
@@ -114,6 +126,7 @@ export default function LogsPage() {
 
   const handleCancelDelete = () => {
     setDeleteIds([]);
+    setDeleteAll(false);
     setDeleteModalOpen(false);
     setDeleteError(null);
     setDeleteSuccess(false);
@@ -154,7 +167,18 @@ export default function LogsPage() {
                 </div>
               )}
 
-              <LogFilters filters={filters} onChange={handleFiltersChange} />
+              <div className="flex items-center justify-between gap-4 mb-4">
+                <LogFilters filters={filters} onChange={handleFiltersChange} />
+                {total > 0 && (
+                  <button
+                    onClick={handleDeleteAll}
+                    className="shrink-0 px-3 py-2 text-sm font-medium text-loss border border-loss/40 rounded-md hover:bg-loss/10 transition-colors inline-flex items-center gap-1.5"
+                  >
+                    <Trash2 size={14} />
+                    Очистить всё
+                  </button>
+                )}
+              </div>
 
               <LogTable logs={logs} loading={loading} onDelete={handleDelete} />
 
@@ -176,6 +200,8 @@ export default function LogsPage() {
                 onClose={handleCancelDelete}
                 onConfirm={handleConfirmDelete}
                 deletingIds={deleteIds}
+                deleteAll={deleteAll}
+                totalCount={total}
                 error={deleteError}
                 success={deleteSuccess}
               />

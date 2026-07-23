@@ -90,6 +90,11 @@ export class LogService {
     });
   }
 
+  static async deleteAll(): Promise<{ count: number }> {
+    const result = await prisma.importLog.deleteMany({});
+    return { count: result.count };
+  }
+
   static async cleanupOlderThan(days: number): Promise<{ count: number }> {
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - days);

@@ -85,8 +85,8 @@ export async function GET(req: Request) {
 
 /**
  * DELETE /api/admin/logs
- * Delete multiple log entries by IDs
- * Request body: { ids: ["123", "456", "..."] }
+ * Delete multiple log entries by IDs, or all logs when `{ all: true }`.
+ * Request body: { ids: ["123", "456", "..."] } or { all: true }
  */
 export async function DELETE(req: Request) {
   // Check admin auth
@@ -108,10 +108,22 @@ export async function DELETE(req: Request) {
   }
 
   const body = await req.json();
+
+  // Delete all logs
+  if (body.all === true) {
+    try {
+      const result = await LogService.deleteAll();
+      return NextResponse.json({ success: true, deletedCount: result.count });
+    } catch (error) {
+      console.error("Error deleting all logs:", error);
+      return NextResponse.json({ error: "Failed to delete all logs" }, { status: 500 });
+    }
+  }
+
   const ids = (Array.isArray(body.ids) ? body.ids : []) as string[];
 
   if (!ids.length) {
-    return NextResponse.json({ error: "ids array is required" }, { status: 400 });
+    return NextResponse.json({ error: "ids array or all:true is required" }, { status: 400 });
   }
 
   // Validate all IDs are UUIDs
