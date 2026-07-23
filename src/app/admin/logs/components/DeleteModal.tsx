@@ -27,13 +27,13 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
         />
 
         {/* Modal */}
-        <div className="relative w-full max-w-md bg-white rounded-lg shadow-xl">
+        <div className="relative w-full max-w-md bg-surface rounded-lg shadow-xl border border-border">
           <div className="p-6">
             {success ? (
               <>
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-profit/15">
                   <svg
-                    className="h-6 w-6 text-green-600"
+                    className="h-6 w-6 text-profit"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -46,19 +46,19 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
                     />
                   </svg>
                 </div>
-                <h3 className="mt-4 text-center text-lg font-medium text-gray-900">
+                <h3 className="mt-4 text-center text-lg font-medium text-fg">
                   Успешно удалено
                 </h3>
-                <p className="mt-2 text-center text-sm text-gray-500">
+                <p className="mt-2 text-center text-sm text-muted">
                   Удалено записей: {deletingIds.length}
                 </p>
               </>
             ) : (
               <>
-                <h3 className="text-lg font-medium text-gray-900">
+                <h3 className="text-lg font-medium text-fg">
                   Удаление логов
                 </h3>
-                <p className="mt-2 text-sm text-gray-500">
+                <p className="mt-2 text-sm text-muted">
                   Вы уверены, что хотите удалить <strong>{deletingIds.length}</strong>
                   {' '}
                   записей? Это действие нельзя отменить.
@@ -67,7 +67,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
             )}
 
             {error && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-red-700 text-sm">
+              <div className="mt-4 p-3 bg-loss/10 border border-loss/20 rounded text-loss text-sm">
                 {error}
               </div>
             )}
@@ -76,7 +76,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50"
+                className="px-4 py-2 text-sm font-medium text-muted bg-surface border border-border rounded-md hover:bg-surface-2"
               >
                 Отмена
               </button>
@@ -85,7 +85,7 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
                 <button
                   type="button"
                   onClick={onConfirm}
-                  className="px-4 py-2 text-sm font-medium text-white bg-red-600 border border-transparent rounded-md hover:bg-red-700"
+                  className="px-4 py-2 text-sm font-medium text-white bg-loss border border-transparent rounded-md hover:opacity-90"
                 >
                   Удалить
                 </button>

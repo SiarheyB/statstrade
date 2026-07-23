@@ -1,4 +1,4 @@
-import { DeleteModal } from './DeleteModal';
+import { useState } from 'react';
 
 interface LogRow {
   id: string;
@@ -57,7 +57,7 @@ export const LogTable: React.FC<{
 
   if (loading && logs.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500">
+      <div className="text-center py-8 text-muted">
         Загрузка логов...
       </div>
     );
@@ -65,7 +65,7 @@ export const LogTable: React.FC<{
 
   if (logs.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500">
+      <div className="text-center py-8 text-muted">
         Логи не найдены
       </div>
     );
@@ -74,22 +74,22 @@ export const LogTable: React.FC<{
   return (
     <div className="space-y-4">
       {selectedIds.size > 0 && (
-        <div className="flex items-center justify-between bg-blue-50 p-3 rounded border border-blue-200">
-          <span className="text-blue-700">
+        <div className="flex items-center justify-between bg-accent/10 p-3 rounded border border-accent/20">
+          <span className="text-accent">
             Выбрано: {selectedIds.size}
           </span>
           <button
             onClick={handleDelete}
-            className="px-3 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors"
+            className="px-3 py-1 bg-loss text-white rounded hover:opacity-90 transition-colors"
           >
             Удалить выбранные
           </button>
         </div>
       )}
 
-      <div className="overflow-x-auto border border-gray-200 rounded-lg">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
+      <div className="overflow-x-auto border border-border rounded-lg">
+        <table className="min-w-full divide-y divide-border">
+          <thead className="bg-surface-2">
             <tr>
               <th className="px-4 py-3 text-left">
                 <input
@@ -99,29 +99,29 @@ export const LogTable: React.FC<{
                   className="rounded"
                 />
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Время
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Уровень
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Модуль
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Аккаунт
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Событие
               </th>
-              <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              <th className="px-4 py-3 text-left text-xs font-medium text-faint uppercase tracking-wider">
                 Сообщение
               </th>
             </tr>
           </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
+          <tbody className="divide-y divide-border">
             {logs.map((log) => (
-              <tr key={log.id} className="hover:bg-gray-50">
+              <tr key={log.id} className="hover:bg-surface-2/50">
                 <td className="px-4 py-3">
                   <input
                     type="checkbox"
@@ -130,32 +130,32 @@ export const LogTable: React.FC<{
                     className="rounded"
                   />
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-fg">
                   {new Date(log.timestamp).toLocaleString('ru-RU')}
                 </td>
                 <td className="px-4 py-3 whitespace-nowrap">
                   <span
                     className={`px-2 py-1 text-xs rounded-full ${
                       log.level === 'error'
-                        ? 'bg-red-100 text-red-800'
+                        ? 'bg-loss/15 text-loss'
                         : log.level === 'warn'
-                        ? 'bg-yellow-100 text-yellow-800'
-                        : 'bg-green-100 text-green-800'
+                        ? 'bg-warning/15 text-warning'
+                        : 'bg-profit/15 text-profit'
                     }`}
                   >
                     {log.level}
                   </span>
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-fg">
                   {log.module}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-muted">
                   {log.accountId || '—'}
                 </td>
-                <td className="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                <td className="px-4 py-3 whitespace-nowrap text-sm text-fg">
                   {log.eventType}
                 </td>
-                <td className="px-4 py-3 text-sm text-gray-700 max-w-xs truncate">
+                <td className="px-4 py-3 text-sm text-muted max-w-xs truncate">
                   {log.message}
                 </td>
               </tr>
@@ -164,15 +164,43 @@ export const LogTable: React.FC<{
         </table>
       </div>
 
-      <DeleteModal
-        open={deleteModalOpen}
-        onClose={() => setDeleteModalOpen(false)}
-        onConfirm={handleConfirmDelete}
-        deletingIds={deleteIds}
-      />
+      {deleteModalOpen && (
+        <div className="fixed inset-0 z-50 overflow-y-auto">
+          <div className="flex min-h-full items-center justify-center p-4">
+            <div className="fixed inset-0 bg-black/50 transition-opacity" onClick={() => setDeleteModalOpen(false)} />
+            <div className="relative w-full max-w-md bg-surface rounded-lg shadow-xl border border-border">
+              <div className="p-6">
+                <h3 className="text-lg font-medium text-fg">
+                  Удаление логов
+                </h3>
+                <p className="mt-2 text-sm text-muted">
+                  Вы уверены, что хотите удалить <strong>{deleteIds.length}</strong>
+                  {' '}
+                  записей? Это действие нельзя отменить.
+                </p>
+
+                <div className="mt-6 flex justify-end space-x-3">
+                  <button
+                    type="button"
+                    onClick={() => setDeleteModalOpen(false)}
+                    className="px-4 py-2 text-sm font-medium text-muted bg-surface border border-border rounded-md hover:bg-surface-2"
+                  >
+                    Отмена
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleConfirmDelete}
+                    className="px-4 py-2 text-sm font-medium text-white bg-loss border border-transparent rounded-md hover:opacity-90"
+                  >
+                    Удалить
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
-
-// Import useState at the end to avoid react-hooks/rules-of-hooks lint issues
-import { useState } from 'react';
