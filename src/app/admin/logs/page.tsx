@@ -4,9 +4,11 @@ import { LogFilters } from './components/LogFilters';
 import { LogTable } from './components/LogTable';
 import { Pagination } from './components/Pagination';
 import { DeleteModal } from './components/DeleteModal';
+import AdminErrors from '@/components/AdminErrors';
 import { useState, useEffect, useCallback } from 'react';
+import clsx from 'clsx';
 
-// Dynamic configuration removed - uses default dynamic behavior;
+type Tab = 'logs' | 'errors';
 
 // Собираем query-string из page/limit/filters, отбрасывая пустые значения.
 function buildQuery(page: number, limit: number, filters: Record<string, any>): string {
@@ -24,7 +26,13 @@ function buildQuery(page: number, limit: number, filters: Record<string, any>): 
   return params.toString();
 }
 
+const TABS: { key: Tab; label: string }[] = [
+  { key: 'logs', label: 'Логи импорта' },
+  { key: 'errors', label: 'Логи ошибок' },
+];
+
 export default function LogsPage() {
+  const [tab, setTab] = useState<Tab>('logs');
   const [logs, setLogs] = useState<any[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -57,8 +65,8 @@ export default function LogsPage() {
   }, [page, limit, filters]);
 
   useEffect(() => {
-    fetchLogs();
-  }, [fetchLogs]);
+    if (tab === 'logs') fetchLogs();
+  }, [fetchLogs, tab]);
 
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
@@ -111,50 +119,72 @@ export default function LogsPage() {
     setDeleteSuccess(false);
   };
 
-  if (loading && logs.length === 0 && total === 0) {
-    return (
-      <div className="p-6">
-        <h1 className="text-2xl font-bold mb-4">Логи импорта</h1>
-        <p className="text-gray-500">Загрузка...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-6">Логи импорта</h1>
-
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6">
-          <p>{error}</p>
-        </div>
-      )}
-
-      <LogFilters filters={filters} onChange={handleFiltersChange} />
-
-      <LogTable logs={logs} loading={loading} onDelete={handleDelete} />
-
-      <div className="mt-4 flex justify-between items-center">
-        <p className="text-sm text-gray-600">
-          Показано {logs.length} из {total} записей
-        </p>
-        <Pagination
-          page={page}
-          limit={limit}
-          total={total}
-          onPageChange={handlePageChange}
-          onLimitChange={handleLimitChange}
-        />
+      {/* Tabs */}
+      <div className="flex items-center gap-1 mb-6 border-b border-border">
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={clsx(
+              'px-4 py-2.5 text-sm font-medium transition-colors relative',
+              tab === t.key
+                ? 'text-accent'
+                : 'text-muted hover:text-fg',
+            )}
+          >
+            {t.label}
+            {tab === t.key && (
+              <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-accent rounded-full" />
+            )}
+          </button>
+        ))}
       </div>
 
-      <DeleteModal
-        open={deleteModalOpen}
-        onClose={handleCancelDelete}
-        onConfirm={handleConfirmDelete}
-        deletingIds={deleteIds}
-        error={deleteError}
-        success={deleteSuccess}
-      />
+      {tab === 'logs' ? (
+        <>
+          {loading && logs.length === 0 && total === 0 ? (
+            <p className="text-muted">Загрузка...</p>
+          ) : (
+            <>
+              {error && (
+                <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6">
+                  <p>{error}</p>
+                </div>
+              )}
+
+              <LogFilters filters={filters} onChange={handleFiltersChange} />
+
+              <LogTable logs={logs} loading={loading} onDelete={handleDelete} />
+
+              <div className="mt-4 flex justify-between items-center">
+                <p className="text-sm text-muted">
+                  Показано {logs.length} из {total} записей
+                </p>
+                <Pagination
+                  page={page}
+                  limit={limit}
+                  total={total}
+                  onPageChange={handlePageChange}
+                  onLimitChange={handleLimitChange}
+                />
+              </div>
+
+              <DeleteModal
+                open={deleteModalOpen}
+                onClose={handleCancelDelete}
+                onConfirm={handleConfirmDelete}
+                deletingIds={deleteIds}
+                error={deleteError}
+                success={deleteSuccess}
+              />
+            </>
+          )}
+        </>
+      ) : (
+        <AdminErrors />
+      )}
     </div>
   );
 }
