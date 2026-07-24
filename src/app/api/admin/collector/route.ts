@@ -32,6 +32,12 @@ type FeedRow = {
 type SeriesRow = { exchange: string; minute: Date; c: number };
 type PreviewRow = { price: number; bidVol: number; askVol: number };
 
+type RetentionAges = {
+  snapshot: { oldestT: string | null; cleanupInMs: number | null } | null;
+  trade: { oldestT: string | null; cleanupInMs: number | null } | null;
+  candle: { oldestT: string | null; cleanupInMs: number | null } | null;
+};
+
 async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; error?: string }> {
   const base = process.env.COLLECTOR_URL;
   const token = process.env.COLLECTOR_METRICS_TOKEN;
@@ -50,6 +56,22 @@ async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; e
   } catch (err) {
     return { ok: false, error: (err as Error).message };
   }
+}
+
+/** Посчитать, сколько мс осталось до очистки данных по retention.
+ *  Использует epochStart из RetentionEpoch (когда начался отсчёт) вместо
+ *  MIN(t) данных — так отсчёт не зависит от бэкфилла и показывает реальное
+ *  время до следующей очистки. */
+function computeCleanup(
+  epochStart: string | null,
+  now: Date,
+  retentionDays: number,
+): { oldestT: string; cleanupInMs: number } | null {
+  if (!epochStart) return null;
+  const epoch = new Date(epochStart);
+  const cutoff = new Date(epoch.getTime() + retentionDays * 86_400_000);
+  const cleanupInMs = cutoff.getTime() - now.getTime();
+  return { oldestT: epochStart, cleanupInMs: Math.max(0, cleanupInMs) };
 }
 
 // Список фидов — из маленькой ObRollupBucket (не сканируем сырые таблицы).
@@ -112,6 +134,7 @@ type HeavyStats = {
   series: SeriesRow[];
   tableStats: { tbl: string; last_min: number; last_t: Date | null }[];
   collector: Awaited<ReturnType<typeof fetchCollectorMetrics>>;
+  retentionAges: RetentionAges;
 };
 const HEAVY_TTL_MS = 10_000;
 let heavyCache: { at: number; data: HeavyStats } | null = null;
@@ -216,7 +239,37 @@ async function getHeavyStats(): Promise<HeavyStats> {
     );
 
     const collector = await fetchCollectorMetrics();
-    const data: HeavyStats = { feeds, series, tableStats, collector };
+
+    // Отсчёт до очистки — через RetentionEpoch (эпохи, которые ведёт коллектор
+    // в таблице RetentionEpoch). Если коллектор ещё не обновлён и не отдаёт
+    // epochs — fallback на uptime коллектора (стартовое время). Это точнее
+    // MIN(t) из ObCandle, т.к. бэкфилл свечей заполняет до границы ретеншна.
+    const colData = (collector.ok ? collector.data : undefined) as
+      | { retentionDays: number; tradeRetentionDays: number; candleRetentionDays: number; uptimeMs?: number; epochs?: Record<string, { epochStart: string; retentionDays: number }> }
+      | undefined;
+    let retentionAges: RetentionAges = { snapshot: null, trade: null, candle: null };
+    if (colData) {
+      const epochs = colData.epochs ?? {};
+      const now = new Date();
+      const hasEpochs = epochs.snapshot || epochs.trade || epochs.candle;
+      if (hasEpochs) {
+        retentionAges = {
+          snapshot: computeCleanup(epochs.snapshot?.epochStart ?? null, now, colData.retentionDays),
+          trade: computeCleanup(epochs.trade?.epochStart ?? null, now, colData.tradeRetentionDays),
+          candle: computeCleanup(epochs.candle?.epochStart ?? null, now, colData.candleRetentionDays),
+        };
+      } else if (colData.uptimeMs != null) {
+        // Fallback: стартовое время коллектора как эпоха для всех трёх категорий
+        const collectorStart = new Date(now.getTime() - colData.uptimeMs).toISOString();
+        retentionAges = {
+          snapshot: computeCleanup(collectorStart, now, colData.retentionDays),
+          trade: computeCleanup(collectorStart, now, colData.tradeRetentionDays),
+          candle: computeCleanup(collectorStart, now, colData.candleRetentionDays),
+        };
+      }
+    }
+
+    const data: HeavyStats = { feeds, series, tableStats, collector, retentionAges };
     heavyCache = { at: Date.now(), data };
     return data;
   })().finally(() => {
@@ -234,7 +287,7 @@ export async function GET(req: Request) {
   const previewExchange = url.searchParams.get("exchange");
 
   try {
-    const { feeds, series, tableStats, collector } = await getHeavyStats();
+    const { feeds, series, tableStats, collector, retentionAges } = await getHeavyStats();
 
     // Live-превью: последний снимок выбранного (или первого) фида.
     let preview: { symbol: string; exchange: string; t: Date | null; bins: PreviewRow[] } | null = null;
@@ -257,7 +310,7 @@ export async function GET(req: Request) {
       preview = { symbol: target.symbol, exchange: target.exchange, t: tRow[0]?.t ?? null, bins };
     }
 
-    return NextResponse.json({ now: new Date().toISOString(), feeds, series, tableStats, collector, preview });
+    return NextResponse.json({ now: new Date().toISOString(), feeds, series, tableStats, collector, preview, retentionAges });
   } catch (err) {
     return serverError((err as Error).message);
   }

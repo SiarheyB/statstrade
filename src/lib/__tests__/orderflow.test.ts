@@ -4,11 +4,13 @@ const mocks = vi.hoisted(() => ({
   queryRaw: vi.fn(),
   findMany: vi.fn(),
   obCandleFindMany: vi.fn(),
+  executeRaw: vi.fn(), // для $executeRaw (сохранение свечей с Binance в БД)
 }));
 
 vi.mock("@/lib/db", () => ({
   prisma: {
     $queryRaw: mocks.queryRaw,
+    $executeRaw: mocks.executeRaw,
     obBigTrade: { findMany: mocks.findMany },
     obCandle: {
       findMany: mocks.obCandleFindMany,
@@ -29,6 +31,7 @@ beforeEach(() => {
   mocks.queryRaw.mockReset();
   mocks.findMany.mockReset();
   mocks.obCandleFindMany.mockReset();
+  mocks.executeRaw.mockReset();
 });
 
 describe("fetchOrderflowCandles", () => {

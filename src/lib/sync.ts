@@ -4,6 +4,7 @@ import { decrypt } from "./crypto";
 import { bumpStatsVersion } from "./statsCache";
 import { rebuildTradeGroups } from "./analytics/materialize";
 import { convertUnknownFees } from "./feeConvert";
+import { logger } from "./logger";
 import {
   createExchange,
   fetchBalanceUsdt,
@@ -43,7 +44,7 @@ const REQUIRES_SYMBOL: Record<ExchangeId, boolean> = {
   kucoin: false,
   bitget: false,
   gate: false,
-  mexc: false,
+  mexc: true,  // MEXC требует symbol — fetchMyTrades без symbol падает с ошибкой
   htx: false,
 };
 
@@ -132,6 +133,20 @@ const MAX_LOOKBACK_DAYS: Partial<Record<ExchangeId, number>> = { bybit: 720 };
 // steps (newest first) instead of one forward stream from `since`.
 const WINDOW_DAYS: Partial<Record<ExchangeId, number>> = { bybit: 7 };
 
+// Extract meaningful CCXT error details (HTTP status, response text, etc.)
+function formatCCXTError(err: unknown): string {
+  const e = err as Record<string, unknown> & Error;
+  let msg = e.message ?? String(err);
+  // CCXT often wraps HTTP errors with response metadata
+  const response = e.response as Record<string, unknown> | undefined;
+  if (response?.status) msg += ` | HTTP ${response.status}`;
+  if (response?.statusText) msg += ` ${response.statusText}`;
+  // Some CCXT errors have a .text with the raw API response body
+  const text = response?.text ?? (e as any).body;
+  if (text && typeof text === "string" && text.length < 500) msg += ` | body: ${text}`;
+  return msg;
+}
+
 // Pull trades for one symbol (or all, when symbol is undefined). The pagination
 // strategy is exchange/market specific because Binance has no "all trades" call
 // and applies time windows that silently return nothing if used naively.
@@ -141,6 +156,7 @@ async function fetchTrades(
   sinceFloor: number,
   exchangeId: ExchangeId,
   kind: MarketKind,
+  accountId: string,
 ): Promise<NormalizedFill[]> {
   const cap = MAX_LOOKBACK_DAYS[exchangeId];
   if (cap) sinceFloor = Math.max(sinceFloor, Date.now() - cap * 86_400_000);
@@ -192,7 +208,24 @@ async function fetchTrades(
       return fills.filter((f) => f.timestamp.getTime() >= sinceFloor);
     }
 
-    // OKX etc.: one continuous forward stream from the floor.
+    // OKX / MEXC / etc.: one continuous forward stream from the floor.
+    let cursor = sinceFloor;
+    for (let page = 0; page < MAX_PAGES; page++) {
+      const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
+      if (!trades.length) break;
+      collect(trades);
+      const last = trades[trades.length - 1] as { timestamp?: number };
+      const next = Number(last.timestamp) + 1;
+      if (!Number.isFinite(next) || next <= cursor) break;
+      cursor = next;
+      if (trades.length < PAGE_LIMIT) break;
+    }
+    return fills;
+  }
+
+  // MEXC: forward stream from the floor, per-symbol. MEXC supports startTime
+  // natively (unlike Binance), so the simple forward cursor works best.
+  if (exchangeId === "mexc") {
     let cursor = sinceFloor;
     for (let page = 0; page < MAX_PAGES; page++) {
       const trades = (await exchange.fetchMyTrades(symbol, cursor, PAGE_LIMIT)) as unknown[];
@@ -289,7 +322,7 @@ async function buildPlan(
     return kinds.map((kind) => encodeTask(kind, ""));
   }
 
-  // Per-symbol exchanges (Binance): enumerate candidate pairs per kind.
+  // Per-symbol exchanges (Binance, MEXC): enumerate candidate pairs per kind.
   const tradedByKind = new Map<MarketKind, Set<string>>();
   if (phase === "incremental") {
     const fills = await prisma.fill.findMany({
@@ -360,8 +393,8 @@ async function buildPlan(
               }
             }
           }
-        } catch {
-          // balance is best-effort
+        } catch (balErr) {
+          logger.error("sync", accountId, "SPOT_BALANCE_FAILED", `Failed to fetch balance for ${exchangeId}`, { exchangeId, error: (balErr as Error).message });
         }
         for (const sym of Object.keys(markets)) {
           const m = markets[sym];
@@ -375,7 +408,9 @@ async function buildPlan(
       diag.push(`spot: ${Object.keys(markets).length} markets, ${symbols.size} pairs`);
       for (const sym of symbols) tasks.push(encodeTask("spot", sym));
     } catch (err) {
-      diag.push(`${kind} setup failed: ${(err as Error).message}`);
+      const errMsg = formatCCXTError(err);
+      diag.push(`${kind} setup failed: ${errMsg}`);
+      logger.error("sync", accountId, "BUILD_PLAN_FAILED", `Failed to load ${kind} markets for ${exchangeId}`, { exchangeId, kind, error: errMsg, stack: (err as Error).stack });
     } finally {
       if (typeof exchange.close === "function") await exchange.close().catch(() => {});
     }
@@ -430,10 +465,15 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
           await ex.loadMarkets();
           exchanges.set(kind, ex);
         }
-        const fills = await fetchTrades(ex, symbol || undefined, floor ?? baseSince, exchangeId, kind);
-        imported += await persistFills(accountId, account.exchange, fills);
+        const label = symbol || kind;
+        const fills = await fetchTrades(ex, symbol || undefined, floor ?? baseSince, exchangeId, kind, accountId);
+        const count = await persistFills(accountId, account.exchange, fills);
+        imported += count;
       } catch (err) {
-        errors.push(`${symbol || kind}: ${(err as Error).message}`);
+        const label = symbol || kind;
+        const errMsg = formatCCXTError(err);
+        errors.push(`${label}: ${errMsg}`);
+        logger.error("sync", accountId, "TASK_FAILED", `Failed to sync ${label}: ${errMsg}`, { exchangeId, kind, symbol, error: errMsg, stack: (err as Error).stack });
       }
       cursor++;
       if (cursor % 20 === 0) {
@@ -480,11 +520,12 @@ async function finishScan(
 ): Promise<void> {
   const now = new Date();
   const hardFail = errors.length > 0 && imported === 0;
+  const errorSummary = errors.length ? errors.slice(0, 5).join(" | ") : null;
   await prisma.exchangeAccount.update({
     where: { id: accountId },
     data: {
       syncStatus: hardFail ? "error" : "idle",
-      syncError: errors.length ? errors.slice(0, 5).join(" | ") : null,
+      syncError: errorSummary,
       syncPlan: null,
       syncCursor: 0,
       syncTotal: 0,
@@ -555,8 +596,8 @@ export async function syncChunk(
         data: { balance: bal, balanceAt: new Date() },
       });
     }
-  } catch {
-    // balance is best-effort; never fail the sync over it
+  } catch (balErr) {
+    logger.error("sync", accountId, "BALANCE_FAILED", `Failed to refresh balance for ${account.exchange}`, { exchange: account.exchange, error: (balErr as Error).message });
   }
 
   const diag: string[] = [];
@@ -572,17 +613,20 @@ export async function syncChunk(
       account.demoTrading,
     );
   } catch (err) {
+    const errMsg = formatCCXTError(err);
+    logger.error("sync", accountId, "SYNC_BUILD_PLAN_ERROR", `Failed to build plan for ${account.exchange}`, { exchange: account.exchange, error: errMsg, stack: (err as Error).stack });
     await prisma.exchangeAccount.update({
       where: { id: accountId },
-      data: { syncStatus: "error", syncError: (err as Error).message, syncPhase: null },
+      data: { syncStatus: "error", syncError: errMsg, syncPhase: null },
     });
-    return { status: "error", phase: null, done: 0, total: 0, imported: 0, error: (err as Error).message };
+    return { status: "error", phase: null, done: 0, total: 0, imported: 0, error: errMsg };
   }
 
   if (plan.length === 0) {
     // No tasks usually means loadMarkets/income failed (e.g. exchange blocked
     // the server IP). Surface the reason instead of silently completing.
     const why = diag.join(" | ") || "no tradable pairs found";
+    logger.error("sync", accountId, "SYNC_EMPTY_PLAN", `No tasks for ${account.exchange}`, { exchange: account.exchange, diag });
     await prisma.exchangeAccount.update({
       where: { id: accountId },
       data: {
@@ -646,8 +690,8 @@ export function kickUserSync(userId: string): void {
         const a = due[next++];
         try {
           await syncChunkGuarded(a.id);
-        } catch {
-          /* best-effort */
+        } catch (err) {
+          logger.error("sync", a.id, "KICK_USER_SYNC_FAILED", `Kick sync failed for account`, { exchange: a.exchange, error: (err as Error).message });
         }
       }
     };
@@ -702,8 +746,9 @@ export async function runDueSyncs(): Promise<{
       const a = due[next++];
       try {
         if (await syncChunkGuarded(a.id)) advanced.push(a.id);
-      } catch {
+      } catch (err) {
         failed.push(a.id);
+        logger.error("sync", a.id, "AUTO_SYNC_FAILED", `Auto-sync failed for account`, { exchange: a.exchange, error: (err as Error).message });
       }
     }
   }

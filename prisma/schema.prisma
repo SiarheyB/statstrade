@@ -298,6 +298,67 @@ model ObCandle {
   @@index([symbol, exchange, interval, t])
 }
 
+// Сторожевые метки ретеншна для коллектора. Каждая запись хранит момент
+// начала отсчёта срока хранения данных (epochStart) для одной категории:
+// "snapshot", "trade" или "candle". При первом запуске коллектора epochStart
+// устанавливается в now(), после каждой очистки (pruneOld) сдвигается на now().
+// Счётчик до очистки в админке считается как:
+//   cleanupInMs = (epochStart + retentionDays * 86400000) - now()
+// Это даёт внятный отсчёт независимо от бэкфилла — например, свечи 365 дн
+// на системе возрастом 5 дней покажут «через 360 д», а не «очистка сейчас».
+model RetentionEpoch {
+  id            String   @id @default(cuid())
+  category      String   @unique // "snapshot" | "trade" | "candle"
+  epochStart    DateTime @map("epoch_start") @db.Timestamptz(3)
+  retentionDays Int      @map("retention_days")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  @@map("RetentionEpoch")
+}
+
+// UserDrawing — created by direct DB migration, not yet in tracked schema.
+// Added here to resolve Prisma migration drift. Types match the existing DB columns.
+model UserDrawing {
+  id        String   @id
+  userId    String
+  symbol    String
+  exchange  String
+  toolType  String
+  points    String
+  color     String   @default("#e6b800")
+  lineWidth Int      @default(2)
+  fillColor String?
+  label     String?
+  createdAt DateTime @default(now()) @db.Timestamp
+  updatedAt DateTime @updatedAt @db.Timestamp
+  deletedAt DateTime? @db.Timestamp
+
+  @@index([userId, symbol, exchange])
+  @@map("UserDrawing")
+}
+
+// UserLevel — created by direct DB migration, not yet in tracked schema.
+// Added here to resolve Prisma migration drift. Types match the existing DB columns.
+model UserLevel {
+  id        String   @id
+  userId    String
+  symbol    String
+  exchange  String
+  price     Float
+  type      String
+  label     String?
+  strength  Int      @default(1)
+  timeframe String?
+  color     String?
+  createdAt DateTime @default(now()) @db.Timestamp
+  updatedAt DateTime @updatedAt @db.Timestamp
+  deletedAt DateTime? @db.Timestamp
+
+  @@unique([userId, symbol, exchange, price, type])
+  @@index([userId, symbol, exchange])
+  @@map("UserLevel")
+}
+
 // Aggregated crypto news from external RSS sources. Global (not per-user);
 // Orderbook heatmap snapshots — written by the standalone collector service
 // (collector/), one row per non-empty price bin per snapshot. Global market

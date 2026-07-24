@@ -6,6 +6,9 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 
+// Сколько свечей вставлять за один batch (чтобы не перегружать Prisma/$executeRaw).
+const CANDLE_INSERT_BATCH = 100;
+
 export type ObHeatmap = {
   priceMin: number;
   priceMax: number;
@@ -64,6 +67,13 @@ export async function fetchOrderflowCandles(
 ): Promise<OfCandle[]> {
   const interval = CANDLE_INTERVAL[range] ?? "1m";
 
+  // URL для запросов к Binance (используется и при fallback, и при live-обновлении)
+  const urlBase = exchange === "binance-futures"
+    ? "https://fapi.binance.com/fapi/v1/klines"
+    : exchange === "binance-spot"
+      ? "https://api.binance.com/api/v3/klines"
+      : null;
+
   // Try to get existing candles from the local DB (ObCandle table)
   // Prisma returns t as Date, so we use a separate type and convert to OfCandle.
   interface ObCandleRow { t: Date; o: number; h: number; l: number; c: number; }
@@ -90,33 +100,103 @@ export async function fetchOrderflowCandles(
   // direct Binance request to fill the gaps.
   const expected = CANDLES_IN_WINDOW[range] ?? 300;
   if (rows.length >= expected) {
-    return rows.map(r => ({
+    const result = rows.map(r => ({
       t: r.t.getTime(),
       o: r.o,
       h: r.h,
       l: r.l,
       c: r.c,
     }));
+
+    // ═══════════════════════════════════════════════════════════════════
+    // В LIVE-режиме формирующаяся свеча должна обновляться в реальном
+    // времени. Даже если в БД достаточно свечей, дозапрашиваем последние
+    // 2 свечи с Binance, чтобы обновить h/l/c/v текущей свечи.
+    // Это лёгкий запрос (2 свечи) — не перегружает ни Binance, ни БД.
+    // ═══════════════════════════════════════════════════════════════════
+    if (result.length > 0 && urlBase) {
+      try {
+        const latestUrl = `${urlBase}?symbol=${symbol}&interval=${interval}&limit=2`;
+        const latestRes = await fetch(latestUrl);
+        if (latestRes.ok) {
+          const latestRaw = await latestRes.json() as (string | number)[][];
+          if (latestRaw.length > 0) {
+            // Сохраняем последние свечи в БД
+            for (let i = 0; i < latestRaw.length; i += CANDLE_INSERT_BATCH) {
+              const batch = latestRaw.slice(i, i + CANDLE_INSERT_BATCH);
+              const batchRows = batch.map((k) => Prisma.sql`
+                (${symbol}, ${exchange}, ${interval}, ${new Date(Number(k[0]))},
+                 ${Number(k[1])}, ${Number(k[2])}, ${Number(k[3])}, ${Number(k[4])}, ${Number(k[5])})
+              `);
+              await prisma.$executeRaw(
+                Prisma.sql`INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+                           VALUES ${Prisma.join(batchRows)}
+                           ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+                             "h" = EXCLUDED."h",
+                             "l" = EXCLUDED."l",
+                             "c" = EXCLUDED."c",
+                             "v" = EXCLUDED."v"`,
+              );
+            }
+            // Обновляем последнюю свечу в результате, если её timestamp совпадает
+            const latestBinance = latestRaw[latestRaw.length - 1];
+            const latestT = Number(latestBinance[0]);
+            const lastIdx = result.length - 1;
+            if (result[lastIdx].t === latestT) {
+              result[lastIdx] = {
+                t: latestT,
+                o: Number(latestBinance[1]),
+                h: Number(latestBinance[2]),
+                l: Number(latestBinance[3]),
+                c: Number(latestBinance[4]),
+              };
+            }
+          }
+        }
+      } catch {
+        // Тихая ошибка — свечи из БД уже есть, просто не смогли обновить
+      }
+    }
+
+    return result;
   }
 
   // -----– Direct Binance fallback – mirrors the original implementation ----------
-  const urlBase = exchange === "binance-futures"
-    ? "https://fapi.binance.com/fapi/v1/klines"
-    : exchange === "binance-spot"
-      ? "https://api.binance.com/api/v3/klines"
-      : null;
-
   if (urlBase) {
     const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
       + `&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
     try {
       const res = await fetch(url);
       if (res.ok) {
-        const raw = await res.json();
+        const raw = await res.json() as (string | number)[][];
+        // ═══════════════════════════════════════════════════════════════════
+        // Сохраняем полученные с биржи свечи в БД, чтобы при следующих
+        // запросах данные уже были в ObCandle и не приходилось снова лезть
+        // на Binance. Коллектор тоже заполняет эту таблицу, но если он
+        // перезапущен или не успел — API дозаполнит самостоятельно.
+        // ═══════════════════════════════════════════════════════════════════
+        try {
+          for (let i = 0; i < raw.length; i += CANDLE_INSERT_BATCH) {
+            const batch = raw.slice(i, i + CANDLE_INSERT_BATCH);
+            const rows = batch.map((k) => Prisma.sql`
+              (${symbol}, ${exchange}, ${interval}, ${new Date(Number(k[0]))},
+               ${Number(k[1])}, ${Number(k[2])}, ${Number(k[3])}, ${Number(k[4])}, ${Number(k[5])})
+            `);
+            await prisma.$executeRaw(
+              Prisma.sql`INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+                         VALUES ${Prisma.join(rows)}
+                         ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+                           "h" = EXCLUDED."h",
+                           "l" = EXCLUDED."l",
+                           "c" = EXCLUDED."c",
+                           "v" = EXCLUDED."v"`,
+            );
+          }
+        } catch (dbErr) {
+          console.error(`[fetchOrderflowCandles] DB save error: ${(dbErr as Error).message}`);
+        }
         // Convert Binance K‑line response to OfCandle shape.
-        // Binance returns prices as strings — convert to numbers so the
-        // chart rendering code gets numeric comparisons (k.c >= k.o).
-        return raw.map((k: (string | number)[]) => ({
+        return raw.map((k) => ({
           t: Number(k[0]), // open time (ms)
           o: Number(k[1]), // open
           h: Number(k[2]), // high

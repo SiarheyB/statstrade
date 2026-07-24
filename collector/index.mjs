@@ -63,18 +63,43 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
   const urlBase = klinesUrl(exchange);
   if (!urlBase) return; // неподдерживаемая биржа — пропускаем
 
+  const now = Date.now();
+  const retentionStart = now - cfg.candleRetentionDays * 86_400_000;
+  const intervalMs = CANDLE_MS[interval] ?? 3600_000;
+
   // Последняя свеча в БД
   const last = await pool.query(
     `SELECT MAX("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
     [symbol, exchange, interval],
   );
   const lastTs = last.rows[0]?.ts ? new Date(last.rows[0].ts).getTime() : 0;
-  const now = Date.now();
-  const startMs = lastTs > 0 ? lastTs : now - cfg.candleRetentionDays * 86_400_000;
 
-  // Не запрашиваем, если последняя свеча моложе интервала (ещё не завершилась)
-  const intervalMs = CANDLE_MS[interval] ?? 3600_000;
-  if (lastTs > 0 && now - lastTs < intervalMs) return;
+  // Если таблица не пуста — проверяем, достаточно ли глубоко уходит история.
+  // Если самая старая свеча новее, чем retentionStart + 1 час — значит,
+  // исторических данных не хватает, и нужно начать заполнение с границы
+  // ретеншна, а не от последней свечи. ON CONFLICT DO UPDATE ниже
+  // обновит h/l/c/v существующих свечей, так что формирующаяся свеча
+  // получит актуальные данные.
+  let startMs;
+  if (lastTs > 0) {
+    const oldest = await pool.query(
+      `SELECT MIN("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+      [symbol, exchange, interval],
+    );
+    const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
+    if (oldestTs > retentionStart + 3600_000) {
+      startMs = retentionStart; // не хватает истории — начинаем с границы ретеншна
+    } else {
+      startMs = lastTs; // нормальный режим: только новые свечи
+    }
+  } else {
+    startMs = retentionStart; // таблица пуста — заполняем с границы ретеншна
+  }
+
+  // Не запрашиваем, только если последняя свеча моложе 30 секунд (данные
+  // всё равно не успели измениться). Для формирующейся свечи (1–4 мин)
+  // запрашиваем, чтобы обновить h/l/c/v через ON CONFLICT DO UPDATE.
+  if (lastTs > 0 && now - lastTs < 30_000 && startMs === lastTs) return;
 
   // Binance limit = 1500 свечей. Если окно шире — тянем последовательно.
   let fromMs = startMs;
@@ -109,7 +134,11 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
       await pool.query(`
         INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
         VALUES ${values.join(",")}
-        ON CONFLICT ("symbol","exchange","interval","t") DO NOTHING
+        ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+          "h" = EXCLUDED."h",
+          "l" = EXCLUDED."l",
+          "c" = EXCLUDED."c",
+          "v" = EXCLUDED."v"
       `, params);
     } catch (err) {
       console.error(`[candles] upsert error ${exchange}:${symbol} ${interval}: ${err.message}`);
@@ -144,13 +173,19 @@ async function fetchAndStoreCandles() {
   }
 }
 
-// Заполняет свечи из истории, если таблица пуста. Если таблицу уже наполнил
-// API-роут (on-demand fetch), пропускает — обычный цикл fetchAndStoreCandles
-// дозаполнит недостающие символы/биржи/интервалы.
+// Заполняет свечи из истории, если в таблице не хватает исторических данных.
+// Проверяет самую старую свечу: если она новее, чем retentionStart + 1 час —
+// запускает полное заполнение. Сама `fetchAndStoreCandlesFor` тоже проверяет
+// глубину истории при каждом запуске, но здесь мы форсируем полный цикл
+// сразу при старте, чтобы не ждать 70+ итераций по 60 секунд.
 async function backfillCandles() {
   try {
-    const exists = await pool.query(`SELECT 1 FROM "ObCandle" LIMIT 1`);
-    if (exists.rowCount > 0) return;
+    const oldest = await pool.query(`SELECT MIN("t") as ts FROM "ObCandle"`);
+    const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
+    const retentionStart = Date.now() - cfg.candleRetentionDays * 86_400_000;
+    // Если самая старая свеча достаточно старая (в пределах 1 часа от границы
+    // ретеншна) — бэкафилл не нужен, обычный цикл дозаполнит.
+    if (oldestTs > 0 && oldestTs <= retentionStart + 3600_000) return;
     console.log("[candles] бэкафилл из Binance…");
     await fetchAndStoreCandles();
     console.log("[candles] бэкафилл завершён");
@@ -505,19 +540,77 @@ async function writeSnapshot() {
 // Rollup (ObSnapshotRollup, ObRollupBucket) — не партиционированы, чистятся
 // DELETE из админ-панели (см. /api/admin/collector/purge).
 const PARTITIONED_TABLES = ["ObSnapshot", "ObTrade", "ObFootprint", "ObBigTrade"];
+
+/** Создать/обновить сторожевые метки ретеншна.
+ *  При первом запуске — создаёт с epoch_start = NOW().
+ *  При повторных — обновляет retention_days из .env, но НЕ трогает epoch_start
+ *  (чтобы отсчёт не сбрасывался при смене конфига). */
+async function ensureRetentionEpochs() {
+  const categories = [
+    { category: "snapshot", days: cfg.retentionDays },
+    { category: "trade",    days: cfg.tradeRetentionDays },
+    { category: "candle",   days: cfg.candleRetentionDays },
+  ];
+  for (const { category, days } of categories) {
+    // Вставка только если нет записи
+    await pool.query(
+      `INSERT INTO "RetentionEpoch" ("id", "category", "epoch_start", "retention_days", "updated_at")
+       VALUES (gen_random_uuid()::text, $1, NOW(), $2, NOW())
+       ON CONFLICT ("category") DO NOTHING`,
+      [category, days],
+    );
+    // Обновить retention_days из .env, если изменился (epoch_start не трогаем)
+    await pool.query(
+      `UPDATE "RetentionEpoch"
+       SET "retention_days" = $2, "updated_at" = NOW()
+       WHERE "category" = $1 AND "retention_days" <> $2`,
+      [category, days],
+    );
+  }
+}
+
+/** Обновить epoch_start для категории после очистки. */
+async function updateEpoch(category, retentionDays) {
+  await pool.query(
+    `UPDATE "RetentionEpoch"
+     SET "epoch_start" = NOW(), "retention_days" = $2, "updated_at" = NOW()
+     WHERE "category" = $1`,
+    [category, retentionDays],
+  );
+}
+
+/** Прочитать все epoch из БД и вернуть Map<category, {epochStart, retentionDays}>. */
+let epochsCache = null;
+let epochsCacheAt = 0;
+async function getEpochs() {
+  const now = Date.now();
+  if (epochsCache && now - epochsCacheAt < 60_000) return epochsCache;
+  const { rows } = await pool.query(
+    `SELECT category, epoch_start, retention_days FROM "RetentionEpoch"`,
+  );
+  const map = {};
+  for (const row of rows) {
+    map[row.category] = { epochStart: row.epoch_start, retentionDays: row.retention_days };
+  }
+  epochsCache = map;
+  epochsCacheAt = now;
+  return map;
+}
+
 async function pruneOld() {
   try {
     for (const tbl of PARTITIONED_TABLES) {
       await pool.query(`SELECT ob_ensure_partitions($1, 7)`, [tbl]);
     }
-    let total = 0;
+    let snapDropped = 0;
+    let tradeDropped = 0;
     // Snapshot-таблица — отдельный ретеншн (короткий, данные тяжёлые)
     {
       const r = await pool.query(
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
         ["ObSnapshot", String(cfg.rawRetention)],
       );
-      total += r.rows[0]?.n ?? 0;
+      snapDropped = r.rows[0]?.n ?? 0;
     }
     // Сделки, футпринт, крупные ордера — другой ретеншн (дольше, легковеснее)
     {
@@ -525,22 +618,23 @@ async function pruneOld() {
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
         ["ObTrade", String(cfg.tradeRetentionDays)],
       );
-      total += r.rows[0]?.n ?? 0;
+      tradeDropped += r.rows[0]?.n ?? 0;
     }
     {
       const r = await pool.query(
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
         ["ObFootprint", String(cfg.tradeRetentionDays)],
       );
-      total += r.rows[0]?.n ?? 0;
+      tradeDropped += r.rows[0]?.n ?? 0;
     }
     {
       const r = await pool.query(
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
         ["ObBigTrade", String(cfg.tradeRetentionDays)],
       );
-      total += r.rows[0]?.n ?? 0;
+      tradeDropped += r.rows[0]?.n ?? 0;
     }
+    const total = snapDropped + tradeDropped;
     // Rollup‑таблицы — НЕ партиционированы, чистим DELETE‑ом по ROLLUP_RETENTION_DAYS
     let rollupDeleted = 0;
     {
@@ -566,6 +660,13 @@ async function pruneOld() {
       );
       candlesDeleted = r.rowCount ?? 0;
     }
+    // Обновляем epoch только если что-то реально удалили — иначе отсчёт
+    // сбрасывался бы каждый час, и пользователь всегда видел бы полный retention.
+    if (snapDropped) await updateEpoch("snapshot", cfg.retentionDays);
+    if (tradeDropped || rollupDeleted) {
+      await updateEpoch("trade", cfg.tradeRetentionDays);
+    }
+    if (candlesDeleted) await updateEpoch("candle", cfg.candleRetentionDays);
     if (total || rollupDeleted || candlesDeleted) {
       console.log(
         `[prune] сброшено ${total} партиций (снапшоты: ${cfg.rawRetention}д, сделки: ${cfg.tradeRetentionDays}д); ` +
@@ -579,7 +680,7 @@ async function pruneOld() {
 }
 
 // Healthcheck для платформы хостинга.
-const server = http.createServer((req, res) => {
+const server = http.createServer(async (req, res) => {
   const url = (req.url ?? "").split("?")[0];
   if (url === "/health" || url === "/") {
     const status = feeds.map((f) => ({ feed: `${f.exchange}:${f.symbol}`, synced: f.book.synced, ...f.book.stats }));
@@ -616,6 +717,9 @@ const server = http.createServer((req, res) => {
         lastWriteAgoMs,
       };
     });
+    // Добавляем epoch-данные для отсчёта очистки (асинхронно, кэшируется).
+    // Если запрос не удался — отдаём ответ без epochs.
+    const epochs = await getEpochs().catch(() => ({}));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
       healthy: feeds.some((f) => f.book.synced),
@@ -628,6 +732,7 @@ const server = http.createServer((req, res) => {
       noiseMinNotional: cfg.noiseMinNotional,
       bigNotional: cfg.bigNotional,
       minCoins: Object.fromEntries(minCoinsMap),
+      epochs,
       feeds: feedMetrics,
     }));
   } else {
@@ -695,7 +800,10 @@ const configTimer = setInterval(loadCollectorConfig, 30_000);
 const writeTimer = setInterval(writeSnapshot, cfg.snapshotMs);
 const flushTimer = startRollupFlushBeat();
 const pruneTimer = setInterval(pruneOld, 3600_000);
-setTimeout(pruneOld, 10_000);
+setTimeout(async () => {
+  await ensureRetentionEpochs();
+  await pruneOld();
+}, 10_000);
 
 // Свечи — раз в 60 секунд, первый запуск через 15с (после бэкафилла)
 const candleTimer = setInterval(fetchAndStoreCandles, 60_000);

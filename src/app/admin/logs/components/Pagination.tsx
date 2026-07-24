@@ -23,7 +23,6 @@ export const Pagination: React.FC<PaginationProps> = ({
     if (totalPages <= 7) {
       for (let i = 1; i <= totalPages; i++) pages.push(i);
     } else {
-      // Show first page, last page, and ellipsis
       pages.push(1);
       if (page > 4) pages.push('...');
       for (let i = Math.max(2, page - 1); i <= Math.min(totalPages - 1, page + 1); i++) {
@@ -36,10 +35,10 @@ export const Pagination: React.FC<PaginationProps> = ({
   };
 
   return (
-    <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 border-t pt-4">
+    <div className="flex flex-col sm:flex-row justify-between items-center gap-4 mt-6 border-t border-border pt-4">
       {/* Pages */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-gray-700">Страница:</span>
+        <span className="text-sm text-muted">Страница:</span>
         {getPageNumbers().map((pageNum, index) =>
           typeof pageNum === 'number' ? (
             <button
@@ -47,14 +46,14 @@ export const Pagination: React.FC<PaginationProps> = ({
               onClick={() => onPageChange(pageNum)}
               className={`w-8 h-8 rounded text-sm font-medium transition-colors ${
                 page === pageNum
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  ? 'bg-accent text-white'
+                  : 'bg-surface-2 text-muted hover:bg-surface-2/70'
               }`}
             >
               {pageNum}
             </button>
           ) : (
-            <span key={`ellipsis-${index}`} className="px-2 text-gray-400">
+            <span key={`ellipsis-${index}`} className="px-2 text-faint">
               ...
             </span>
           )
@@ -63,11 +62,11 @@ export const Pagination: React.FC<PaginationProps> = ({
 
       {/* Limit */}
       <div className="flex items-center gap-2">
-        <span className="text-sm text-gray-700">На страницу:</span>
+        <span className="text-sm text-muted">На страницу:</span>
         <select
           value={limit}
           onChange={(e) => onLimitChange(Number(e.target.value))}
-          className="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          className="input-base"
         >
           {[10, 20, 50, 100].map((option) => (
             <option key={option} value={option}>
@@ -78,7 +77,7 @@ export const Pagination: React.FC<PaginationProps> = ({
       </div>
 
       {/* Total */}
-      <div className="text-sm text-gray-600">
+      <div className="text-sm text-muted">
         Всего записей: {total}
       </div>
     </div>

@@ -29,6 +29,12 @@ type FeedRow = {
 };
 type SeriesRow = { exchange: string; minute: string; c: number };
 type TableStat = { tbl: string; last_min: number; last_t: string | null };
+type RetentionAge = { oldestT: string; cleanupInMs: number } | null;
+type RetentionAges = {
+  snapshot: RetentionAge;
+  trade: RetentionAge;
+  candle: RetentionAge;
+};
 type CollectorFeed = {
   feed: string;
   exchange: string;
@@ -63,6 +69,7 @@ type Payload = {
   series: SeriesRow[];
   tableStats: TableStat[];
   collector: CollectorMeta;
+  retentionAges: RetentionAges;
   preview: { symbol: string; exchange: string; t: string | null; bins: PreviewBin[] } | null;
 };
 
@@ -80,6 +87,21 @@ function fmtUptime(ms: number, t: T): string {
   if (s < 60) return t("admin.lag.sec", { n: s });
   if (s < 3600) return t("admin.lag.min", { n: Math.floor(s / 60) });
   return t("admin.lag.hour", { n: Math.round((s / 3600) * 10) / 10 });
+}
+
+/** Форматировать оставшееся время до очистки в компактную строку (например «23ч»). */
+function fmtCleanup(ms: number | null, t: T): string {
+  if (ms == null) return t("admin.collector.cleanupNone");
+  // Если данные уже на границе ретеншна — очистка произойдёт при ближайшем
+  // pruneOld (раз в час). Показываем «1 ч» вместо «очистка сейчас», чтобы не
+  // смущать — это штатное состояние, не авария.
+  if (ms <= 3_600_000) return t("admin.lag.hour", { n: 1 });
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return t("admin.lag.min", { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t("admin.lag.hour", { n: hours });
+  const days = Math.round(hours / 24);
+  return t("admin.lag.day", { n: days });
 }
 
 export default function AdminCollector() {
@@ -194,9 +216,21 @@ export default function AdminCollector() {
             <span className="text-muted">{t("admin.collector.uptime", { v: fmtUptime(col.data.uptimeMs, t) })}</span>
             <span className="text-muted">{t("admin.collector.snapshotEvery", { ms: col.data.snapshotMs })}</span>
             <span className="text-muted">{t("admin.collector.depth", { pct: (col.data.depthPct * 100).toFixed(1) })}</span>
-            <span className="text-muted">{t("admin.collector.retention", { days: col.data.retentionDays })}</span>
-            <span className="text-muted">{t("admin.collector.tradeRetention", { days: col.data.tradeRetentionDays })}</span>
-            <span className="text-muted">{t("admin.collector.candleRetention", { days: col.data.candleRetentionDays ?? 365 })}</span>
+            <RetentionSpan
+              label={t("admin.collector.retention", { days: col.data.retentionDays })}
+              age={data?.retentionAges?.snapshot ?? null}
+              t={t}
+            />
+            <RetentionSpan
+              label={t("admin.collector.tradeRetention", { days: col.data.tradeRetentionDays })}
+              age={data?.retentionAges?.trade ?? null}
+              t={t}
+            />
+            <RetentionSpan
+              label={t("admin.collector.candleRetention", { days: col.data.candleRetentionDays ?? 365 })}
+              age={data?.retentionAges?.candle ?? null}
+              t={t}
+            />
           </>
         )}
         {!col?.ok && <span className="text-faint">{col?.error}</span>}
@@ -358,6 +392,21 @@ function Sparkbars({ data, t, nf }: { data: { minute: number; c: number }[]; t: 
         />
       ))}
     </div>
+  );
+}
+
+// Компактный блок: метка ретеншна + отсчёт до очистки.
+function RetentionSpan({ label, age, t }: { label: string; age: RetentionAge; t: T }) {
+  const cleanup = age ? fmtCleanup(age.cleanupInMs, t) : null;
+  return (
+    <span className="text-muted" title={cleanup ? t("admin.collector.cleanupLabel", { time: cleanup }) : undefined}>
+      {label}
+      {cleanup && (
+        <span className="text-faint ml-1">
+          · {cleanup}
+        </span>
+      )}
+    </span>
   );
 }
 

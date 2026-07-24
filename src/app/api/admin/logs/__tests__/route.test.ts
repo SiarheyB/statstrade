@@ -151,7 +151,7 @@ describe('DELETE /api/admin/logs', () => {
     const response = await DELETE(request);
     expect(response.status).toBe(400);
     const data = await response.json();
-    expect(data.error).toBe('ids array is required');
+    expect(data.error).toBe('ids array or all:true is required');
   });
 
   it('deletes logs and returns success', async () => {
