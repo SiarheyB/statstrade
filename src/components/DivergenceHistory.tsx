@@ -44,6 +44,20 @@ const TYPE_ARROW: Record<string, string> = {
   hidden_bullish: "⇑",
 };
 
+const TYPE_HINT_KEY: Record<string, string> = {
+  regular_bearish: "of.regularBearishHint",
+  regular_bullish: "of.regularBullishHint",
+  hidden_bearish: "of.hiddenBearishHint",
+  hidden_bullish: "of.hiddenBullishHint",
+};
+
+const TYPE_LABEL_KEY: Record<string, string> = {
+  regular_bearish: "of.regularBearish",
+  regular_bullish: "of.regularBullish",
+  hidden_bearish: "of.hiddenBearish",
+  hidden_bullish: "of.hiddenBullish",
+};
+
 // ─── Component ────────────────────────────────────────────────────────────
 
 export default function DivergenceHistory({
@@ -199,7 +213,9 @@ export default function DivergenceHistory({
                     {fmtTime(sig.t, timezone)}
                   </td>
                   <td className={`py-0.5 pr-3 ${TYPE_COLORS[sig.type] ?? "text-fg"}`}>
-                    {TYPE_ARROW[sig.type] ?? ""} {sig.label}
+                    <span title={t(TYPE_HINT_KEY[sig.type]) || ""} className="cursor-help">
+                      {TYPE_ARROW[sig.type] ?? ""} {t(TYPE_LABEL_KEY[sig.type]) || sig.label}
+                    </span>
                   </td>
                   <td className="text-fg py-0.5 pr-3 text-right font-medium">
                     {sig.strength}

@@ -147,10 +147,13 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
                   <td className="text-faint py-0.5 pr-3 text-right">{(sig.deltaRatio * 100).toFixed(0)}%</td>
                   <td className="text-faint py-0.5 pr-3 text-right">{sig.duration}</td>
                   <td className="text-right py-0.5">
-                    <span className={`text-[10px] ${
-                      sig.strength >= 4 ? "text-[rgba(180,140,255,0.95)] font-semibold" : "text-faint"
-                    }`}>
-                      {sig.label}
+                    <span
+                      title={sig.strength >= 4 ? t("of.strongAbsorptionHint") : t("of.absorptionLabelHint")}
+                      className={`text-[10px] cursor-help ${
+                        sig.strength >= 4 ? "text-[rgba(180,140,255,0.95)] font-semibold" : "text-faint"
+                      }`}
+                    >
+                      {sig.strength >= 4 ? t("of.strongAbsorptionLabel") : t("of.absorptionLabel")}
                     </span>
                   </td>
                 </tr>

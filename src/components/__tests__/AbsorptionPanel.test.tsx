@@ -13,6 +13,10 @@ vi.mock('@/lib/i18n/provider', () => ({
       const m: Record<string, string> = {
         'of.absorptionTitle': 'Absorption Patterns',
         'of.hintAbsorption': 'Narrow range + high volume + near-zero delta',
+        'of.absorptionLabel': 'Absorption',
+        'of.strongAbsorptionLabel': 'Strong Absorption',
+        'of.absorptionLabelHint': 'Absorption (strength 1-3)',
+        'of.strongAbsorptionHint': 'Strong Absorption (strength 4-5)',
         'common.loading': 'Loading...',
         'of.noAbsorption': 'No absorption patterns detected',
         'of.found': '{n} found',

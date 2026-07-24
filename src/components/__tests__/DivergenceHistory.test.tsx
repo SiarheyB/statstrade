@@ -15,6 +15,14 @@ const mockT = vi.fn((key: string) => {
     "of.divergenceTitle": "Divergence Scanner",
     "of.divergenceHint": "Divergence between price and delta/CVD",
     "of.noDivergence": "No divergences detected",
+    "of.regularBearish": "Regular Bearish",
+    "of.regularBullish": "Regular Bullish",
+    "of.hiddenBearish": "Hidden Bearish",
+    "of.hiddenBullish": "Hidden Bullish",
+    "of.regularBearishHint": "Price makes HH, delta makes LH",
+    "of.regularBullishHint": "Price makes LL, delta makes HL",
+    "of.hiddenBearishHint": "Continuation pattern in downtrend",
+    "of.hiddenBullishHint": "Continuation pattern in uptrend",
     "of.thTime": "Time",
     "of.thType": "Type",
     "of.thStrength": "Str",
@@ -102,29 +110,29 @@ describe("DivergenceHistory", () => {
 
   it("sorts by strength descending by default", () => {
     const sigs = [
-      makeSignal({ id: "s1", strength: 2, label: "Weak" }),
-      makeSignal({ id: "s2", strength: 5, label: "Strong" }),
+      makeSignal({ id: "s1", strength: 2 }),
+      makeSignal({ id: "s2", strength: 5 }),
     ];
     render(<DivergenceHistory signals={sigs} loading={false} error={null} />);
-    // Strong должен быть перед Weak — ищем в порядке DOM.
+    // Strength 5 должен быть перед Strength 2 — ищем в порядке DOM.
     const rows = screen.getAllByRole("row");
     // row 0 = header, row 1 = first data row, row 2 = second data row.
-    expect(rows[1].textContent).toContain("Strong");
-    expect(rows[2].textContent).toContain("Weak");
+    expect(rows[1].textContent).toContain("5");
+    expect(rows[2].textContent).toContain("2");
   });
 
   it("toggles sort direction on header click", () => {
     const sigs = [
-      makeSignal({ id: "s1", strength: 2, label: "Weak" }),
-      makeSignal({ id: "s2", strength: 5, label: "Strong" }),
+      makeSignal({ id: "s1", strength: 2 }),
+      makeSignal({ id: "s2", strength: 5 }),
     ];
     render(<DivergenceHistory signals={sigs} loading={false} error={null} />);
     // Кликаем на заголовок Str для сортировки по возрастанию.
     const strHeader = screen.getByText("Str");
     fireEvent.click(strHeader);
-    // Теперь слабый должен быть первым.
+    // Теперь слабый (2) должен быть первым.
     const rows = screen.getAllByRole("row");
-    expect(rows[1].textContent).toContain("Weak");
-    expect(rows[2].textContent).toContain("Strong");
+    expect(rows[1].textContent).toContain("2");
+    expect(rows[2].textContent).toContain("5");
   });
 });
