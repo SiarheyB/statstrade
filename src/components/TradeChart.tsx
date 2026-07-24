@@ -75,8 +75,13 @@ function buildSchematic(trade: SerializedTrade): Candle[] {
   return candles;
 }
 
+function isForex(market: string): boolean {
+  return market === "forex" || market === "metal" || market === "cfd";
+}
+
 export function TradeChart({ trade }: { trade: SerializedTrade }) {
   const { t } = useI18n();
+
   const schematic = useMemo(() => buildSchematic(trade), [trade]);
   const [data, setData] = useState<Candle[] | null>(
     () => candleCache.get(trade.id) ?? null,
@@ -91,6 +96,13 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
   const exitT = new Date(trade.exitTime).getTime();
 
   useEffect(() => {
+    // Forex/CFD markets don't have real candle data — skip fetching.
+    if (isForex(trade.market)) {
+      noRealData.add(trade.id);
+      setReal(false);
+      setLoading(false);
+      return;
+    }
     if (candleCache.has(trade.id)) {
       setData(candleCache.get(trade.id)!);
       setReal(true);
@@ -145,7 +157,7 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [trade.id]);
+  }, [trade.id, trade.market]);
 
   // Fetch partial closes (exit fills) for this trade
   useEffect(() => {
@@ -181,6 +193,49 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
       >
         <span className="h-3 w-3 rounded-full border-2 border-faint/40 border-t-accent animate-spin" />
         {t("trades.chart.loading")}
+      </div>
+    );
+  }
+
+  // Forex/CFD — no real candle data available, show a stylised placeholder.
+  if (isForex(trade.market)) {
+    return (
+      <div style={{ height: H }} className="w-full relative overflow-hidden">
+        <svg viewBox={`0 0 ${W} ${H}`} width="100%" height="100%" className="absolute inset-0">
+          <defs>
+            <linearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#242b3a" stopOpacity="0.3" />
+              <stop offset="100%" stopColor="#242b3a" stopOpacity="0.05" />
+            </linearGradient>
+          </defs>
+          {/* Grid lines */}
+          {[0.2, 0.4, 0.5, 0.6, 0.8].map((f, i) => (
+            <line key={i} x1={PAD_L} x2={W - PAD_R} y1={H * f} y2={H * f} stroke={GRID} strokeDasharray="3 3" strokeOpacity={0.5} />
+          ))}
+          {/* Faint decorative candles */}
+          {Array.from({ length: 14 }, (_, i) => {
+            const x = PAD_L + 20 + i * 22;
+            const h = 30 + ((i * 7 + i * i) % 50);
+            const up = i % 3 !== 0;
+            const color = up ? PROFIT : LOSS;
+            return (
+              <g key={i} opacity={0.15}>
+                <line x1={x} x2={x} y1={H * 0.2} y2={H * 0.2 + h} stroke={color} strokeWidth={1.5} />
+                <rect x={x - 4} y={H * 0.2 + (up ? 0 : h - 12)} width={8} height={12} fill={color} rx={1} />
+              </g>
+            );
+          })}
+          {/* Fade overlay at bottom */}
+          <rect x={0} y={H * 0.55} width={W} height={H * 0.45} fill="url(#fade)" />
+          {/* Centered notice */}
+          <g>
+            <rect x={W / 2 - 140} y={H / 2 - 28} width={280} height={56} rx={12} fill="#1a1f2e" opacity={0.92} />
+            <text x={W / 2} y={H / 2 - 8} textAnchor="middle" fill="#5c6577" fontSize={22} fontFamily="sans-serif">📊</text>
+            <text x={W / 2} y={H / 2 + 18} textAnchor="middle" fill="#5c6577" fontSize={13} fontFamily="sans-serif" fontWeight="500">
+              {t("trades.chart.forexUnavailable")}
+            </text>
+          </g>
+        </svg>
       </div>
     );
   }

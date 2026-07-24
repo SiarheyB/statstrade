@@ -58,6 +58,15 @@ export function fmtNum(value: number, digits = 2): string {
   });
 }
 
+/** Like fmtNum but only sets maximumFractionDigits — trailing zeros after
+ *  the decimal point are stripped. e.g. 1300 → "1 300", 1300.0001 → "1 300,0001". */
+export function fmtNumSmart(value: number, maxDigits = 4): string {
+  if (!Number.isFinite(value)) return "—";
+  return value.toLocaleString(numLocale(), {
+    maximumFractionDigits: maxDigits,
+  });
+}
+
 export function fmtPrice(value: number): string {
   if (!Number.isFinite(value)) return "—";
   if (value === 0) return "0.00";

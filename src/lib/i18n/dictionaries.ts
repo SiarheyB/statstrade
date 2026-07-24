@@ -511,6 +511,7 @@ const en: Dict = {
   "trades.chart.mae": "MAE",
   "trades.chart.captured": "captured",
   "trades.chart.partial": "partial",
+  "trades.chart.forexUnavailable": "Not available for forex/CFD market",
 
   // accounts
   "acc.title": "Exchanges",
@@ -1526,6 +1527,7 @@ const ru: Dict = {
   "trades.chart.mae": "MAE",
   "trades.chart.captured": "захвачено",
   "trades.chart.partial": "частичное",
+  "trades.chart.forexUnavailable": "Недоступно для рынка форекс/CFD",
 
   "acc.title": "Биржи",
   "acc.subtitle": "Подключите аккаунты по read-only API-ключам",

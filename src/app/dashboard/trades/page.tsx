@@ -6,11 +6,12 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
-import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtSymbol, canonSymbol } from "@/lib/format";
+import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtNumSmart, fmtSymbol, canonSymbol } from "@/lib/format";
 import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
 import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
+import { zonedParts } from "@/lib/timezone";
 import { useSync } from "@/components/SyncProvider";
 
 type SortKey = "entryTime" | "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
@@ -33,7 +34,7 @@ function marketShort(market: string): string {
 }
 
 export default function TradesPage() {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
   const { anySyncing, completedAt, syncAll } = useSync();
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -431,10 +432,16 @@ export default function TradesPage() {
                           {marketShort(tr.market)}
                         </Term>
                       </td>
-                      <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.entryTime)}</td>
-                      <td className="px-3 py-2 text-muted whitespace-nowrap">{fmtDate(tr.exitTime)}</td>
+                      <td className="px-3 py-2 text-muted whitespace-nowrap text-center leading-tight">
+                        <div>{fmtDate(tr.entryTime)}</div>
+                        <div className="text-[10px] text-faint/70">{fmtTime(tr.entryTime, timezone)}</div>
+                      </td>
+                      <td className="px-3 py-2 text-muted whitespace-nowrap text-center leading-tight">
+                        <div>{fmtDate(tr.exitTime)}</div>
+                        <div className="text-[10px] text-faint/70">{fmtTime(tr.exitTime, timezone)}</div>
+                      </td>
                       <td className="px-3 py-2 text-muted">{fmtDuration(tr.durationMs)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-muted">{tr.lots != null ? fmtNum(tr.lots, 2) : fmtNum(tr.qty, 4)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-muted">{tr.lots != null ? fmtNumSmart(tr.lots, 2) : fmtNumSmart(tr.qty, 4)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.entryPrice)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.exitPrice)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${tr.returnPct >= 0 ? "text-profit" : "text-loss"}`}>{fmtPct(tr.returnPct)}</td>
@@ -520,7 +527,7 @@ export default function TradesPage() {
             <TradeChart trade={{ ...chart.trade, stopLoss: annOf(chart.trade).stopLoss }} />
             <div className="mt-2 flex items-center justify-between text-xs">
               <span className="text-faint">
-                {fmtDate(chart.trade.entryTime)} → {fmtDate(chart.trade.exitTime)}
+                {fmtDate(chart.trade.entryTime)} {fmtTime(chart.trade.entryTime, timezone)} → {fmtDate(chart.trade.exitTime)} {fmtTime(chart.trade.exitTime, timezone)}
               </span>
               <span className={chart.trade.netPnl >= 0 ? "text-profit" : "text-loss"}>
                 {fmtUsd(chart.trade.netPnl, { sign: true })}
@@ -729,17 +736,26 @@ function sortVal(tr: SerializedTrade, key: SortKey): number {
   return tr[key];
 }
 
-// Realized R-multiple, measured in dollar terms where the stop distance × qty is 1R.
-// Exiting exactly at the stop yields -1R (before fees). Uses netPnl so fees are
-// correctly counted as part of the trade outcome.
+// R-multiple: 1R = |entryPrice - stopLoss| (pure price distance, no qty).
+// grossR = priceMove / 1R, then fees are subtracted in R units.
+// e.g. entry=10, stop=8 → 1R=2. exit=16 → grossR=6/2=3R. Fees=5, qty=100
+// → feeR=5/(2*100)=0.025R → netR=3-0.025=2.975R.
 function rrOf(tr: SerializedTrade, stopLoss: number | null): number | null {
   if (stopLoss == null) return null;
-  const risk = Math.abs(tr.entryPrice - stopLoss) * tr.qty;
-  if (risk <= 0) return null;
-  return tr.netPnl / risk;
+  const oneR = Math.abs(tr.entryPrice - stopLoss);
+  if (oneR <= 0) return null;
+  const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
+  const grossR = priceMove / oneR;
+  const feeR = tr.fees / (oneR * tr.qty);
+  return grossR - feeR;
 }
 
 function fmtRR(rr: number | null): string {
   if (rr == null) return "—";
   return `${rr > 0 ? "+" : ""}${rr.toFixed(2)}R`;
+}
+
+function fmtTime(iso: string, tz: string): string {
+  const { h, mi } = zonedParts(new Date(iso).getTime(), tz);
+  return `${String(h).padStart(2, "0")}:${String(mi).padStart(2, "0")}`;
 }
