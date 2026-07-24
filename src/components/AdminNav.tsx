@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
+import NotificationBell from "@/components/NotificationBell";
 
 // Навигация админ-панели. Раздел отделён от пользовательского дашборда: своя
 // шапка, доступ только администраторам (см. admin/layout.tsx).
@@ -17,6 +18,7 @@ const LINKS = [
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
     { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
+  { href: "/admin/announcements", key: "admin.nav.announcements", icon: Megaphone },
   { href: "/admin/support", key: "admin.nav.support", icon: Headset },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
@@ -84,15 +86,18 @@ export default function AdminNav({ email }: { email: string }) {
 
   const body = (onNavigate: () => void) => (
     <>
-      <div className={clsx("flex items-center h-16 border-b border-border shrink-0", collapsed ? "justify-center px-2" : "px-3 gap-2")}>
+      <div className={clsx("flex items-center shrink-0 border-b border-border", collapsed ? "flex-col h-auto py-2 gap-1" : "h-16 px-3 gap-2")}>
         {collapsed ? (
-          <button
-            onClick={toggle}
-            className="p-1.5 text-muted hover:text-fg transition"
-            aria-label="expand sidebar"
-          >
-            <PanelLeftOpen size={18} />
-          </button>
+          <>
+            <button
+              onClick={toggle}
+              className="p-1.5 text-muted hover:text-fg transition"
+              aria-label="expand sidebar"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+            <NotificationBell collapsed />
+          </>
         ) : (
           <>
             <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent shrink-0">
@@ -100,6 +105,7 @@ export default function AdminNav({ email }: { email: string }) {
             </span>
             <span className="font-semibold">{t("admin.title")}</span>
             <div className="flex-1" />
+            <NotificationBell />
             <button
               onClick={toggle}
               className="p-1.5 text-muted hover:text-fg transition shrink-0"
@@ -233,7 +239,7 @@ export default function AdminNav({ email }: { email: string }) {
       </div>
 
       <aside className={clsx(
-          "hidden md:flex shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0 transition-[width] duration-300 ease-premium overflow-hidden",
+          "hidden md:flex shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0 z-50 transition-[width] duration-300 ease-premium overflow-hidden",
           collapsed ? "w-14" : "w-60",
         )}>
         {body(() => {})}

@@ -641,3 +641,27 @@ model ShareLink {
   @@index([userId])
 }
 
+model Announcement {
+  id        String   @id @default(cuid())
+  title     String
+  body      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  reads     AnnouncementRead[]
+
+  @@map("Announcement")
+}
+
+model AnnouncementRead {
+  id             String   @id @default(cuid())
+  userId         String
+  announcementId String
+  readAt         DateTime @default(now())
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, announcementId])
+  @@index([userId])
+  @@map("AnnouncementRead")
+}
+

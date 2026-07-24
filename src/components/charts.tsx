@@ -44,8 +44,8 @@ function TooltipBox({ children }: { children: React.ReactNode }) {
 export function EquityChart({ data }: { data: EquityPoint[] }) {
   if (data.length === 0) return <Empty />;
   return (
-    <div className="min-h-[72px] min-w-[300px] w-full h-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="min-h-[300px] min-w-[300px] w-full">
+      <ResponsiveContainer width="100%" height={300}>
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="eq" x1="0" y1="0" x2="0" y2="1">
@@ -309,8 +309,8 @@ export function DrawdownChart({ data }: { data: EquityPoint[] }) {
     return { t: p.t, dd: peak > 0 ? ((p.equity - peak) / peak) * 100 : 0 };
   });
   return (
-    <div className="min-h-[64px] min-w-[300px] w-full h-full">
-      <ResponsiveContainer width="100%" height="100%">
+    <div className="min-h-[200px] min-w-[300px] w-full">
+      <ResponsiveContainer width="100%" height={200}>
         <AreaChart data={pts} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
             <linearGradient id="dd" x1="0" y1="0" x2="0" y2="1">

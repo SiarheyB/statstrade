@@ -35,7 +35,7 @@ describe('AdminNav', () => {
     vi.clearAllMocks();
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
-      json: () => Promise.resolve({ count: 3 }),
+      json: () => Promise.resolve({ count: 3, announcements: [] }),
     });
   });
 
@@ -82,6 +82,7 @@ describe('AdminNav', () => {
 
   it('shows unread badge when count > 0', async () => {
     const mockFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ announcements: [] }) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ count: 7 }) })
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ count: 0 }) });
 
