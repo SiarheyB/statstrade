@@ -1318,7 +1318,7 @@ export default function OrderflowPage() {
       const lay2 = layoutRef.current;
       const cv = canvasRef.current;
       if (lay2 && cv) {
-        if (!activeTool && drawings.length > 0) {
+        if (!activeTool && showDrawings && drawings.length > 0) {
           const v = viewRef.current;
           if (v) {
             const xspan = v.t1 - v.t0 || 1;
@@ -1391,7 +1391,7 @@ export default function OrderflowPage() {
       return;
     }
 
-    if (!activeTool && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+    if (!activeTool && showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
       const v = viewRef.current;
       if (v) {
         const xspan = v.t1 - v.t0 || 1;
@@ -1571,17 +1571,6 @@ export default function OrderflowPage() {
             </span>
           </button>
           <button
-            onClick={() => setShowDrawings((v) => !v)}
-            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showDrawings ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
-            title={t("of.hintDrawings") || "Drawings — show/hide chart drawings"}
-          >
-            <span className={`h-3 w-3 rounded-sm border ${showDrawings ? "bg-accent border-accent" : "border-border-strong"}`} />
-            {t("of.drawings") || "Drawings"}
-            <span title={t("of.hintDrawings") || "Drawings — trend lines, horizontal lines, rectangles"} className="inline-flex cursor-help">
-              <HelpCircle size={12} className="text-faint shrink-0" />
-            </span>
-          </button>
-          <button
             onClick={() => setShowDivergence((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showDivergence ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
             title={t("of.hintDivergence") || "Divergence Scanner — show/hide price vs delta divergence markers"}
@@ -1745,7 +1734,7 @@ export default function OrderflowPage() {
               );
             })()}
             <div className="flex gap-2">
-              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} />
+              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} />
               <div className="flex-1 min-w-0">
                 <canvas
                   ref={canvasRef}
