@@ -250,6 +250,16 @@ export default function OrderflowPage() {
   const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
   const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
   const drawingDragRef = useRef<{ drawingId: string; dx: number; dy: number; originalPoints: DrawingPoint[] } | null>(null);
+  const drawingResizeRef = useRef<{
+    drawingId: string;
+    cornerIdx: number; // 0=TL,1=TR,2=BL,3=BR
+    // Исходные границы прямоугольника
+    origMinT: number;
+    origMaxT: number;
+    origMinPrice: number;
+    origMaxPrice: number;
+    originalPoints: DrawingPoint[];
+  } | null>(null);
   const snappedRef = useRef<{ t: number; price: number } | null>(null);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
@@ -828,19 +838,29 @@ export default function OrderflowPage() {
 
     if (showDrawings && drawings.length) {
       const dd = drawingDragRef.current;
+      const rs = drawingResizeRef.current;
       if (dd) {
-        // Применяем смещение drag к рисуемому рисунку (без setDrawings — без лага)
-        const adjusted = drawings.map(d => {
-          if (d.id !== dd.drawingId) return d;
-          try {
-            const pts = JSON.parse(d.points) as DrawingPoint[];
-            const shifted = pts.map(p => ({
-              t: Math.round(p.t + dd.dx),
-              price: p.price - dd.dy,
-            }));
-            return { ...d, points: JSON.stringify(shifted) };
-          } catch { return d; }
-        });
+        let adjusted: DrawingRow[];
+        if (rs) {
+          // RESIZE: используем новые точки напрямую (не offset)
+          adjusted = drawings.map(d => {
+            if (d.id !== dd.drawingId) return d;
+            return { ...d, points: JSON.stringify(dd.originalPoints) };
+          });
+        } else {
+          // DRAG: применяем смещение к оригинальным точкам
+          adjusted = drawings.map(d => {
+            if (d.id !== dd.drawingId) return d;
+            try {
+              const pts = JSON.parse(d.points) as DrawingPoint[];
+              const shifted = pts.map(p => ({
+                t: Math.round(p.t + dd.dx),
+                price: p.price - dd.dy,
+              }));
+              return { ...d, points: JSON.stringify(shifted) };
+            } catch { return d; }
+          });
+        }
         drawDrawings(ctx, sx, sy, plotX, plotW, plotH, adjusted, selectedDrawingId);
       } else {
         drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId);
@@ -1190,6 +1210,48 @@ export default function OrderflowPage() {
         if (v) {
           const xspan = v.t1 - v.t0 || 1;
           const yspan = v.y1 - v.y0 || 1;
+          const cv = canvasRef.current;
+          // === RESIZE прямоугольника ===
+          if (drawingResizeRef.current) {
+            // Вычисляем позицию мыши в координатах графика
+            let tChart = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+            let priceChart = v.y1 - (my / lay.plotH) * yspan;
+            if (magnet && data?.candles?.length) {
+              const snapped = snapToCandle(tChart, priceChart, data.candles);
+              snappedRef.current = snapped;
+              tChart = snapped.t;
+              priceChart = snapped.price;
+            }
+            const rs = drawingResizeRef.current;
+            // Вычисляем новые границы прямоугольника
+            let newT1: number, newT2: number, newP1: number, newP2: number;
+            switch (rs.cornerIdx) {
+              case 0: // TL — фиксирован BR
+                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
+                newP1 = priceChart; newP2 = rs.origMinPrice;
+                break;
+              case 1: // TR — фиксирован BL
+                newT1 = rs.origMinT; newT2 = Math.round(tChart);
+                newP1 = priceChart; newP2 = rs.origMinPrice;
+                break;
+              case 2: // BL — фиксирован TR
+                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
+                newP1 = rs.origMaxPrice; newP2 = priceChart;
+                break;
+              default: // 3 BR — фиксирован TL
+                newT1 = rs.origMinT; newT2 = Math.round(tChart);
+                newP1 = rs.origMaxPrice; newP2 = priceChart;
+                break;
+            }
+            drawingDragRef.current = {
+              drawingId: drawingResizeRef.current.drawingId,
+              dx: 0, dy: 0,
+              originalPoints: [{ t: newT1, price: newP1 }, { t: newT2, price: newP2 }],
+            };
+            if (cv) cv.style.cursor = "nwse-resize";
+            draw();
+            return;
+          }
           // Смещение в координатах графика от начальной точки
           const dx = (mx - drag.mx) / lay.plotW * xspan;
           const dy = (my - drag.my) / lay.plotH * yspan;
@@ -1265,7 +1327,12 @@ export default function OrderflowPage() {
             const syLocal = (p: number) => lay2.plotH - ((p - v.y0) / yspan) * lay2.plotH;
             const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay2.plotX, lay2.plotW, lay2.plotH);
             if (hit) {
-              cv.style.cursor = "pointer";
+              // Если это угол прямоугольника — курсор resize
+              if (hit.pointIdx >= 0 && hit.pointIdx <= 3) {
+                cv.style.cursor = "nwse-resize";
+              } else {
+                cv.style.cursor = "pointer";
+              }
             } else {
               // Даже если есть рисунки, на краях графика показываем resize-курсоры
               cv.style.cursor =
@@ -1283,6 +1350,7 @@ export default function OrderflowPage() {
   function onLeave() {
     hoverRef.current = null;
     dragRef.current = null;
+    drawingResizeRef.current = null;
     draw();
   }
   function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
@@ -1334,13 +1402,34 @@ export default function OrderflowPage() {
         if (hit) {
           setSelectedDrawingId(hit.id);
           setShowDrawingEditor(true);
-          // Initialize drag state for moving the selected drawing
           const hitDrawing = drawings.find(d => d.id === hit.id);
           let originalPoints: DrawingPoint[] = [];
           if (hitDrawing?.points) {
             try { originalPoints = JSON.parse(hitDrawing.points); } catch { /* ignore */ }
           }
           drawingDragRef.current = null;
+          drawingResizeRef.current = null;
+          // Если это прямоугольник и клик по углу — запускаем resize
+          if (hitDrawing?.toolType === "rectangle" && hit.pointIdx >= 0 && hit.pointIdx <= 3 && originalPoints.length >= 2) {
+            const minT = Math.min(originalPoints[0].t, originalPoints[1].t);
+            const maxT = Math.max(originalPoints[0].t, originalPoints[1].t);
+            const minPrice = Math.min(originalPoints[0].price, originalPoints[1].price);
+            const maxPrice = Math.max(originalPoints[0].price, originalPoints[1].price);
+            drawingResizeRef.current = {
+              drawingId: hit.id,
+              cornerIdx: hit.pointIdx,
+              origMinT: minT,
+              origMaxT: maxT,
+              origMinPrice: minPrice,
+              origMaxPrice: maxPrice,
+              originalPoints,
+            };
+            if (!dragRef.current) {
+              dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
+            }
+            return;
+          }
+          // Иначе — обычный drag всего рисунка
           if (!dragRef.current) {
             dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
           }
@@ -1351,6 +1440,7 @@ export default function OrderflowPage() {
     if (selectedDrawingId && !activeTool) {
       setSelectedDrawingId(null);
       setShowDrawingEditor(false);
+      drawingResizeRef.current = null;
     }
 
     if (viewRef.current) {
@@ -1361,22 +1451,33 @@ export default function OrderflowPage() {
     }
   }
   function onUp() {
-    // Сохраняем финальную позицию рисунка после drag
     const dd = drawingDragRef.current;
+    const rs = drawingResizeRef.current;
     if (dd && dd.originalPoints.length > 0) {
-      const newPoints = dd.originalPoints.map(p => ({
-        t: Math.round(p.t + dd.dx),
-        price: p.price - dd.dy,
-      }));
-      updateDrawing(dd.drawingId, newPoints);
-      // Обновляем локальное состояние без перерисовки (draw уже показал финал)
-      setDrawings(prev => prev.map(d =>
-        d.id === dd.drawingId
-          ? { ...d, points: JSON.stringify(newPoints) }
-          : d
-      ));
+      if (rs) {
+        // RESIZE: точки уже содержат новые координаты (не offset)
+        updateDrawing(dd.drawingId, dd.originalPoints);
+        setDrawings(prev => prev.map(d =>
+          d.id === dd.drawingId
+            ? { ...d, points: JSON.stringify(dd.originalPoints) }
+            : d
+        ));
+      } else {
+        // DRAG: применяем offset к исходным точкам
+        const newPoints = dd.originalPoints.map(p => ({
+          t: Math.round(p.t + dd.dx),
+          price: p.price - dd.dy,
+        }));
+        updateDrawing(dd.drawingId, newPoints);
+        setDrawings(prev => prev.map(d =>
+          d.id === dd.drawingId
+            ? { ...d, points: JSON.stringify(newPoints) }
+            : d
+        ));
+      }
     }
     drawingDragRef.current = null;
+    drawingResizeRef.current = null;
     dragRef.current = null;
   }
   function onDouble() {

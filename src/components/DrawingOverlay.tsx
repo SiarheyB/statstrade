@@ -174,7 +174,8 @@ function drawPriceLabel(ctx: CanvasRenderingContext2D, x: number, y: number, pri
 
 const HIT_RADIUS = 6; // px — радиус попадания в линию
 
-/** Найти рисунок под курсором. Возвращает { id, pointIdx } или null. */
+/** Найти рисунок под курсором. Возвращает { id, pointIdx } или null.
+ *  Для rectangle: pointIdx = -1 (край), 0..3 (угол: TL, TR, BL, BR). */
 export function findDrawingAt(
   mx: number,
   my: number,
@@ -229,7 +230,19 @@ export function findDrawingAt(
         const x1 = Math.max(screenPts[0].x, screenPts[1].x);
         const y0 = Math.min(screenPts[0].y, screenPts[1].y);
         const y1 = Math.max(screenPts[0].y, screenPts[1].y);
-        // Проверяем попадание в контур прямоугольника
+        // Сначала проверяем углы (resize-хендлы)
+        const corners: Array<{ x: number; y: number }> = [
+          { x: x0, y: y0 }, // TL
+          { x: x1, y: y0 }, // TR
+          { x: x0, y: y1 }, // BL
+          { x: x1, y: y1 }, // BR
+        ];
+        for (let ci = 0; ci < 4; ci++) {
+          if (Math.hypot(mx - corners[ci].x, my - corners[ci].y) < HIT_RADIUS + 2) {
+            return { id: d.id, pointIdx: ci };
+          }
+        }
+        // Потом проверяем контур
         if (pointNearRectEdge(mx, my, x0, y0, x1, y1, HIT_RADIUS)) {
           return { id: d.id, pointIdx: -1 };
         }
