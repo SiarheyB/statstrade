@@ -39,6 +39,7 @@ model User {
   annotations  TradeAnnotation[]
   playbooks    Playbook[]
   shareLinks   ShareLink[]
+  drawings     UserDrawing[]
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -318,8 +319,9 @@ model RetentionEpoch {
 // UserDrawing — created by direct DB migration, not yet in tracked schema.
 // Added here to resolve Prisma migration drift. Types match the existing DB columns.
 model UserDrawing {
-  id        String   @id
+  id        String   @id @default(cuid())
   userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   symbol    String
   exchange  String
   toolType  String
@@ -624,3 +626,4 @@ model ShareLink {
 
   @@index([userId])
 }
+

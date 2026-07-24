@@ -614,3 +614,723 @@ export async function computeOrderflow(
     profileBid, profileAsk, profileMax,
   };
 }
+
+// ─── Volume Profile (POC, VAL, VAH) ─────────────────────────────────────────
+
+export type VolumeProfileLevel = {
+  price: number;       // центр бина
+  volume: number;      // суммарный объём на этом уровне
+  isPoc: boolean;      // true = Point of Control
+  isVa: boolean;       // true = внутри Value Area
+  pct: number;         // процент от maxVolume (0-100)
+};
+
+export type VolumeProfile = {
+  poc: number;           // Point of Control (цена)
+  vah: number;           // Value Area High
+  val: number;           // Value Area Low
+  levels: VolumeProfileLevel[];
+  totalVolume: number;
+  pocVolume: number;     // объём на POC
+  valueAreaVolume: number; // объём внутри VA
+  valueAreaPct: number;  // 0.7 (настраивается)
+  binSize: number;       // шаг цены
+};
+
+// Выбор интервала свечей в зависимости от длины периода.
+function vpInterval(periodMs: number): string {
+  if (periodMs <= 24 * 3_600_000) return "1h";
+  if (periodMs <= 7 * 24 * 3_600_000) return "4h";
+  return "1d";
+}
+
+// Volume Profile — горизонтальный профиль объёмов, показывающий распределение
+// торгового объёма по ценовым уровням за выбранный период.
+// Алгоритм:
+//   1. Читаем ObCandle за период (цена high/low + volume)
+//   2. Распределяем volume равномерно по ценовым уровням (price bins), которых
+//      коснулась свеча (high → low)
+//   3. Находим POC = уровень с максимальным объёмом
+//   4. Вычисляем Value Area = 70% total volume, расширяясь от POC вверх/вниз
+//   5. Возвращаем { poc, vah, val, levels[], totalVolume }
+export async function computeVolumeProfile(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  opts?: { bins?: number; valueAreaPct?: number },
+): Promise<VolumeProfile | null> {
+  const bins = opts?.bins ?? 100;
+  const valueAreaPct = opts?.valueAreaPct ?? 0.7;
+
+  const interval = vpInterval(toMs - fromMs);
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+
+  // 1. Читаем свечи за период.
+  const candles = await prisma.$queryRaw<
+    { t: Date; h: number; l: number; c: number; v: number }[]
+  >`
+    SELECT "t", "h", "l", "c", "v"
+    FROM "ObCandle"
+    WHERE "symbol" = ${symbol}
+      AND "interval" = ${interval}
+      AND "t" >= ${new Date(fromMs)}
+      AND "t" <= ${new Date(toMs)}
+      ${exFilter}
+    ORDER BY "t" ASC
+  `;
+
+  if (candles.length === 0) return null;
+
+  // 2. Определяем ценовой диапазон.
+  let priceMin = Infinity;
+  let priceMax = -Infinity;
+  let totalVolume = 0;
+  for (const c of candles) {
+    if (c.h > priceMax) priceMax = c.h;
+    if (c.l < priceMin) priceMin = c.l;
+    totalVolume += c.v;
+  }
+  const pad = (priceMax - priceMin) * 0.02 || priceMax * 0.005;
+  priceMin -= pad;
+  priceMax += pad;
+  const span = priceMax - priceMin || 1;
+  const binSize = span / bins;
+
+  // 3. Распределяем объём по бинам (равномерно по всему диапазону high-low свечи).
+  const levels = new Array(bins).fill(0);
+  for (const c of candles) {
+    if (c.v <= 0) continue;
+    const loBin = Math.max(0, Math.min(bins - 1, Math.floor((c.l - priceMin) / span * bins)));
+    const hiBin = Math.max(0, Math.min(bins - 1, Math.floor((c.h - priceMin) / span * bins)));
+    const count = hiBin - loBin + 1;
+    const volPerBin = c.v / count;
+    for (let b = loBin; b <= hiBin; b++) {
+      levels[b] += volPerBin;
+    }
+  }
+
+  // 4. Находим POC (Point of Control).
+  let pocIdx = 0;
+  let maxLevelVol = 0;
+  for (let b = 0; b < bins; b++) {
+    if (levels[b] > maxLevelVol) {
+      maxLevelVol = levels[b];
+      pocIdx = b;
+    }
+  }
+  const poc = priceMin + (pocIdx + 0.5) * binSize;
+  const pocVolume = levels[pocIdx];
+
+  // 5. Вычисляем Value Area (расширяемся от POC, пока не наберём valueAreaPct).
+  const target = totalVolume * valueAreaPct;
+  let vaVolume = levels[pocIdx];
+  let vaLo = pocIdx;
+  let vaHi = pocIdx;
+  // Расширяемся вверх и вниз, выбирая уровень с большим объёмом.
+  while (vaVolume < target) {
+    const nextLo = vaLo - 1;
+    const nextHi = vaHi + 1;
+    const loVol = nextLo >= 0 ? levels[nextLo] : -1;
+    const hiVol = nextHi < bins ? levels[nextHi] : -1;
+
+    if (loVol < 0 && hiVol < 0) break; // вышли за границы
+    if (loVol >= hiVol && loVol >= 0) {
+      vaLo = nextLo;
+      vaVolume += loVol;
+    } else if (hiVol >= 0) {
+      vaHi = nextHi;
+      vaVolume += hiVol;
+    } else {
+      break;
+    }
+  }
+  const vah = priceMin + (vaHi + 0.5) * binSize;
+  const val = priceMin + (vaLo + 0.5) * binSize;
+
+  // 6. Строим массив уровней.
+  const maxVol = maxLevelVol || 1;
+  const resultLevels: VolumeProfileLevel[] = [];
+  for (let b = 0; b < bins; b++) {
+    const price = priceMin + (b + 0.5) * binSize;
+    resultLevels.push({
+      price,
+      volume: levels[b],
+      isPoc: b === pocIdx,
+      isVa: b >= vaLo && b <= vaHi,
+      pct: (levels[b] / maxVol) * 100,
+    });
+  }
+
+  return {
+    poc,
+    vah,
+    val,
+    levels: resultLevels,
+    totalVolume,
+    pocVolume,
+    valueAreaVolume: vaVolume,
+    valueAreaPct,
+    binSize,
+  };
+}
+
+// ─── Divergence Scanner (цена vs дельта/CVD) ─────────────────────────────────
+
+export type DivergenceType =
+  | "regular_bullish"
+  | "regular_bearish"
+  | "hidden_bullish"
+  | "hidden_bearish";
+
+export type DivergenceSignal = {
+  id: string;
+  type: DivergenceType;
+  strength: number; // 1-5
+  t: number; // ms таймстемп второго экстремума (цена)
+  pricePeak: number; // цена экстремума A
+  priceTrough: number; // цена экстремума B
+  deltaPeak: number; // дельта на экстремуме A
+  deltaTrough: number; // дельта на экстремуме B
+  bars: number; // расстояние между экстремумами в свечах
+  confirmed: boolean;
+  label: string; // "Regular Bearish", "Hidden Bullish" и т.д.
+};
+
+export type DivergenceResult = {
+  signals: DivergenceSignal[];
+  activeCount: number; // неподтверждённые (последние N свечей)
+  totalCount: number;
+};
+
+// Обнаруживает дивергенции между ценой и дельтой/CVD.
+// Алгоритм:
+//   1. Читает свечи (ObCandle) и дельту (ObTrade) за период
+//   2. Синхронизирует дельту со свечами (суммирует дельту по корзинам внутри свечи)
+//   3. Находит экстремумы цены (peaks/troughs)
+//   4. Для каждой пары соседних экстремумов сравнивает цену и дельту
+//   5. Классифицирует: regular/hidden, bullish/bearish
+export async function computeDivergence(
+  symbol: string,
+  exchange: string,
+  range: string,
+  fromMs: number,
+  toMs: number,
+  opts?: {
+    minStrength?: number;
+    lookbackBars?: number;
+    minDivergenceBars?: number;
+    maxDivergenceBars?: number;
+  },
+): Promise<DivergenceResult | null> {
+  const minStrength = opts?.minStrength ?? 2;
+  const lookbackBars = opts?.lookbackBars ?? 50;
+  const minBars = opts?.minDivergenceBars ?? 5;
+  const maxBars = opts?.maxDivergenceBars ?? 30;
+
+  // 1. Получаем свечи и дельту.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  if (candles.length < minBars) return null;
+
+  const deltaSeries = await computeDelta(symbol, exchange, fromMs, toMs);
+  if (!deltaSeries) return null;
+
+  // 2. Синхронизируем дельту со свечами: для каждой свечи суммируем дельту
+  //    из корзин delta, попадающих в её временной диапазон.
+  const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 60_000;
+  const candleCount = Math.min(candles.length, lookbackBars);
+  const startIdx = candles.length - candleCount;
+  const candleDelta = new Array(candleCount).fill(0);
+  const candleHigh = new Array(candleCount).fill(0);
+  const candleLow = new Array(candleCount).fill(Infinity);
+
+  for (let i = 0; i < candleCount; i++) {
+    const ci = startIdx + i;
+    const c = candles[ci];
+    const cStart = c.t;
+    const cEnd = c.t + stepMs;
+
+    // Суммируем дельту по всем корзинам, попадающим в свечу.
+    for (let j = 0; j < deltaSeries.times.length; j++) {
+      if (deltaSeries.times[j] >= cStart && deltaSeries.times[j] < cEnd) {
+        candleDelta[i] += deltaSeries.delta[j];
+      }
+    }
+
+    candleHigh[i] = c.h;
+    candleLow[i] = c.l;
+  }
+
+  // 3. Находим экстремумы цены.
+  const peaks: number[] = [];
+  const troughs: number[] = [];
+
+  for (let i = 1; i < candleCount - 1; i++) {
+    if (candleHigh[i] > candleHigh[i - 1] && candleHigh[i] > candleHigh[i + 1]) {
+      peaks.push(i);
+    }
+    if (candleLow[i] < candleLow[i - 1] && candleLow[i] < candleLow[i + 1]) {
+      troughs.push(i);
+    }
+  }
+
+  // 4. Обнаруживаем дивергенции на peaks.
+  const signals: DivergenceSignal[] = [];
+
+  for (let p = 0; p < peaks.length - 1; p++) {
+    const i1 = peaks[p];
+    const i2 = peaks[p + 1];
+    const bars = i2 - i1;
+    if (bars < minBars || bars > maxBars) continue;
+
+    const priceChange = candleHigh[i2] - candleHigh[i1];
+    const deltaChange = candleDelta[i2] - candleDelta[i1];
+
+    // Regular Bearish: цена делает HH, дельта делает LH
+    if (priceChange > 0 && deltaChange < 0) {
+      const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
+      const ci = startIdx + i2;
+      signals.push({
+        id: `rb-${ci}-${candles[ci].t}`,
+        type: "regular_bearish",
+        strength,
+        t: candles[ci].t,
+        pricePeak: candleHigh[i2],
+        priceTrough: candleHigh[i1],
+        deltaPeak: candleDelta[i1],
+        deltaTrough: candleDelta[i2],
+        bars,
+        confirmed: false,
+        label: "Regular Bearish",
+      });
+    }
+
+    // Hidden Bullish: цена делает LH, дельта делает HH
+    if (priceChange < 0 && deltaChange > 0) {
+      const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
+      const ci = startIdx + i2;
+      signals.push({
+        id: `hb-${ci}-${candles[ci].t}`,
+        type: "hidden_bullish",
+        strength,
+        t: candles[ci].t,
+        pricePeak: candleHigh[i1],
+        priceTrough: candleHigh[i2],
+        deltaPeak: candleDelta[i1],
+        deltaTrough: candleDelta[i2],
+        bars,
+        confirmed: false,
+        label: "Hidden Bullish",
+      });
+    }
+  }
+
+  // 5. Обнаруживаем дивергенции на troughs.
+  for (let t = 0; t < troughs.length - 1; t++) {
+    const i1 = troughs[t];
+    const i2 = troughs[t + 1];
+    const bars = i2 - i1;
+    if (bars < minBars || bars > maxBars) continue;
+
+    const priceChange = candleLow[i2] - candleLow[i1];
+    const deltaChange = candleDelta[i2] - candleDelta[i1];
+
+    // Regular Bullish: цена делает LL, дельта делает HL
+    if (priceChange < 0 && deltaChange > 0) {
+      const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
+      const ci = startIdx + i2;
+      signals.push({
+        id: `rbu-${ci}-${candles[ci].t}`,
+        type: "regular_bullish",
+        strength,
+        t: candles[ci].t,
+        pricePeak: candleLow[i1],
+        priceTrough: candleLow[i2],
+        deltaPeak: candleDelta[i1],
+        deltaTrough: candleDelta[i2],
+        bars,
+        confirmed: false,
+        label: "Regular Bullish",
+      });
+    }
+
+    // Hidden Bearish: цена делает HL, дельта делает LL
+    if (priceChange > 0 && deltaChange < 0) {
+      const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
+      const ci = startIdx + i2;
+      signals.push({
+        id: `hbe-${ci}-${candles[ci].t}`,
+        type: "hidden_bearish",
+        strength,
+        t: candles[ci].t,
+        pricePeak: candleLow[i1],
+        priceTrough: candleLow[i2],
+        deltaPeak: candleDelta[i1],
+        deltaTrough: candleDelta[i2],
+        bars,
+        confirmed: false,
+        label: "Hidden Bearish",
+      });
+    }
+  }
+
+  // 6. Фильтруем по minStrength.
+  const filtered = signals.filter((s) => s.strength >= minStrength);
+
+  // 7. Активные: сигналы в последних lookbackBars/4 свечей.
+  const activeThreshold = candleCount * 0.25;
+  const activeCount = filtered.filter((s) => {
+    const idx = ((s.t - candles[0].t) / stepMs) - startIdx;
+    return idx >= candleCount - activeThreshold;
+  }).length;
+
+  return {
+    signals: filtered,
+    activeCount,
+    totalCount: filtered.length,
+  };
+}
+
+// ─── Feature 3: Bid/Ask Imbalance + Speed of Tape ─────────────────────────
+
+export type ImbalanceAlert = {
+  t: number;
+  type: "high_imbalance" | "low_imbalance" | "imbalance_flip";
+  value: number;
+  message: string;
+};
+
+export type Imbalance = {
+  times: number[];
+  ratio: number[]; // (ask - bid) / (bid + ask), -1..1
+  fullBid: number[];
+  fullAsk: number[];
+  nearBid: number[];
+  nearAsk: number[];
+  alerts: ImbalanceAlert[];
+};
+
+export type SpeedOfTape = {
+  times: number[];
+  tradesPerMin: number[];
+  maxSpeed: number;
+  avgSpeed: number;
+  spikes: { t: number; speed: number; threshold: number }[];
+};
+
+/**
+ * Преобразует BaSeries (0..1 ratio) в Imbalance (-1..1 ratio).
+ * - ratio = (ask - bid) / (bid + ask) → -1 (только bid) .. 0 (равно) .. +1 (только ask)
+ * - Ищет алерты: high_imbalance (>0.7), low_imbalance (<-0.7), imbalance_flip (переход через 0)
+ */
+export async function computeImbalance(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  cols = 240,
+): Promise<Imbalance | null> {
+  const ba = await computeBA(symbol, exchange, fromMs, toMs, cols);
+  if (!ba) return null;
+
+  const n = ba.times.length;
+  const fullBid = new Array(n).fill(0);
+  const fullAsk = new Array(n).fill(0);
+  const nearBid = new Array(n).fill(0);
+  const nearAsk = new Array(n).fill(0);
+  const ratio = ba.full.map((r, i) => {
+    // ba.full = bid/(bid+ask), 0..1
+    const bid = r;
+    const ask = 1 - r;
+    // fullBid/fullAsk — восстановленные объёмы (пропорциональные)
+    fullBid[i] = bid;
+    fullAsk[i] = ask;
+    // near: то же для near ratio
+    const nr = ba.near[i];
+    nearBid[i] = nr;
+    nearAsk[i] = 1 - nr;
+    // imbalance = (ask - bid) / (bid + ask) = (1 - 2*bid) / 1 = 1 - 2*bid
+    return 1 - 2 * bid;
+  });
+
+  // Поиск алертов.
+  const alerts: ImbalanceAlert[] = [];
+  const HIGH_THRESHOLD = 0.7;
+  const LOW_THRESHOLD = -0.7;
+  let prevRatio = ratio[0] ?? 0;
+  for (let i = 0; i < n; i++) {
+    const r = ratio[i];
+    if (r > HIGH_THRESHOLD) {
+      alerts.push({
+        t: ba.times[i],
+        type: "high_imbalance",
+        value: r,
+        message: `Высокий дисбаланс: ask=${((1 + r) / 2 * 100).toFixed(0)}%`,
+      });
+    } else if (r < LOW_THRESHOLD) {
+      alerts.push({
+        t: ba.times[i],
+        type: "low_imbalance",
+        value: r,
+        message: `Низкий дисбаланс: bid=${((1 - r) / 2 * 100).toFixed(0)}%`,
+      });
+    }
+    // Переход через 0 (flip).
+    if (i > 0 && prevRatio * r < 0) {
+      alerts.push({
+        t: ba.times[i],
+        type: "imbalance_flip",
+        value: r,
+        message: prevRatio < 0 ? "Bid→Ask flip" : "Ask→Bid flip",
+      });
+    }
+    prevRatio = r;
+  }
+
+  return {
+    times: ba.times,
+    ratio,
+    fullBid,
+    fullAsk,
+    nearBid,
+    nearAsk,
+    alerts,
+  };
+}
+
+/**
+ * Speed of Tape — количество сделок в минуту по данным ObTrade.
+ * Читает ObTrade за период, группирует по минутным бакетам.
+ */
+export async function computeSpeedOfTape(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  bucketMs = 60_000, // 1 минута
+): Promise<SpeedOfTape | null> {
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+  const xspan = toMs - fromMs || 1;
+  const cols = Math.max(1, Math.ceil(xspan / bucketMs));
+
+  // Считаем количество сделок в каждом бакете.
+  const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+
+  const rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
+    SELECT ${bucketExpr} AS bucket, COUNT(*)::int AS cnt
+    FROM "ObTrade"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+    GROUP BY bucket
+    ORDER BY bucket
+  `;
+
+  if (rows.length === 0) return null;
+
+  // Заполняем массив.
+  const tradesPerMin = new Array(cols).fill(0);
+  for (const r of rows) {
+    const c = Math.max(0, Math.min(cols - 1, r.bucket));
+    tradesPerMin[c] += r.cnt;
+  }
+
+  const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
+
+  // Статистика.
+  const maxSpeed = Math.max(...tradesPerMin);
+  const avgSpeed = tradesPerMin.reduce((a, b) => a + b, 0) / cols;
+
+  // Всплески: > 2σ от среднего.
+  const stdDev = Math.sqrt(tradesPerMin.reduce((sum, v) => sum + (v - avgSpeed) ** 2, 0) / cols);
+  const threshold = avgSpeed + 2 * stdDev;
+  const spikes = tradesPerMin
+    .map((v, i) => (v > threshold ? { t: times[i], speed: v, threshold } : null))
+    .filter((s): s is NonNullable<typeof s> => s !== null);
+
+  return { times, tradesPerMin, maxSpeed, avgSpeed, spikes };
+}
+
+// ─── Feature 4: Absorption Pattern Detector ────────────────────────────────
+
+export type AbsorptionSignal = {
+  t: number;                    // ms таймстемп первой свечи паттерна
+  price: number;                // средняя цена (mid)
+  range: number;                // диапазон (high - low) в пунктах
+  volume: number;               // объём (buyVol + sellVol)
+  avgVolume: number;            // средний объём за N предыдущих свечей
+  volumeMultiplier: number;     // volume / avgVolume
+  deltaRatio: number;           // |buy - sell| / (buy + sell), 0..1
+  duration: number;             // количество свечей паттерна
+  strength: number;             // 1-5
+  label: string;                // "Absorption", "Strong Absorption"
+};
+
+export type AbsorptionResult = {
+  signals: AbsorptionSignal[];
+  activeCount: number;
+};
+
+/**
+ * Absorption Pattern Detector — ищет свечи/группы свечей, где цена
+ * торгуется в узком диапазоне, но объём сделок аномально высок,
+ * а дельта около нуля. Это признак накопления/распределения: крупный
+ * игрок "впитывает" ликвидность, не давая цене уйти.
+ *
+ * Использует ObFootprint (buyVol, sellVol) и ObCandle (high, low).
+ */
+export async function computeAbsorption(
+  symbol: string,
+  exchange: string,
+  range: string,
+  fromMs: number,
+  toMs: number,
+  opts?: {
+    minVolumeMultiplier?: number; // объём в N раз выше среднего
+    maxRangeBars?: number;        // макс. диапазон в свечах
+    maxDeltaRatio?: number;       // макс. |delta| / volume
+    minCandles?: number;          // мин. длительность паттерна
+    lookback?: number;            // сколько свечей для среднего объёма
+  },
+): Promise<AbsorptionResult | null> {
+  const minVolumeMultiplier = opts?.minVolumeMultiplier ?? 2.0;
+  const maxRangeBars = opts?.maxRangeBars ?? 3;
+  const maxDeltaRatio = opts?.maxDeltaRatio ?? 0.15;
+  const minCandles = opts?.minCandles ?? 2;
+  const lookback = opts?.lookback ?? 10;
+
+  // 1. Получаем свечи.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  if (candles.length < lookback + minCandles) return null;
+
+  // 2. Получаем footprint (buyVol, sellVol) для каждой свечи.
+  // Группируем ObFootprint по свечным интервалам.
+  const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 60_000;
+  const from = new Date(fromMs);
+  const to = new Date(toMs);
+
+  // Считаем колонку свечи и сумму buy/sell для каждой.
+  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${stepMs})::int`;
+  const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+
+  const fpRows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+    SELECT ${colExpr} AS col,
+           SUM("buyVol")::float8 AS buy,
+           SUM("sellVol")::float8 AS sell
+    FROM "ObFootprint"
+    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+    GROUP BY col
+    ORDER BY col
+  `;
+
+  if (fpRows.length === 0) return null;
+
+  // Маппим footprint к свечам.
+  const candleCount = candles.length;
+  const candleVol = new Array(candleCount).fill(0);
+  const candleBuy = new Array(candleCount).fill(0);
+  const candleSell = new Array(candleCount).fill(0);
+  const candleRange = candles.map((c) => c.h - c.l);
+
+  for (const r of fpRows) {
+    const c = Math.max(0, Math.min(candleCount - 1, r.col));
+    candleBuy[c] += r.buy;
+    candleSell[c] += r.sell;
+    candleVol[c] += r.buy + r.sell;
+  }
+
+  // 3. Ищем absorption-паттерны.
+  const signals: AbsorptionSignal[] = [];
+  let i = lookback;
+  while (i < candleCount) {
+    // Проверяем: узкий диапазон?
+    const avgRange = candleRange.slice(i - lookback, i).reduce((a, b) => a + b, 0) / lookback;
+    if (avgRange <= 0 || candleRange[i] > avgRange * maxRangeBars) {
+      i++;
+      continue;
+    }
+
+    // Объём выше среднего?
+    const avgVol = candleVol.slice(i - lookback, i).reduce((a, b) => a + b, 0) / lookback;
+    if (avgVol <= 0 || candleVol[i] < avgVol * minVolumeMultiplier) {
+      i++;
+      continue;
+    }
+
+    // Дельта около нуля?
+    const totalVol = candleBuy[i] + candleSell[i];
+    if (totalVol <= 0) { i++; continue; }
+    const deltaRatio = Math.abs(candleBuy[i] - candleSell[i]) / totalVol;
+    if (deltaRatio > maxDeltaRatio) {
+      i++;
+      continue;
+    }
+
+    // Нашли начало паттерна — расширяем пока условия выполняются.
+    const startIdx = i;
+    let j = i + 1;
+    while (j < candleCount) {
+      const jAvgRange = candleRange.slice(j - lookback, j).reduce((a, b) => a + b, 0) / lookback;
+      const jAvgVol = candleVol.slice(j - lookback, j).reduce((a, b) => a + b, 0) / lookback;
+      const jVol = candleBuy[j] + candleSell[j];
+      const jDelta = jVol > 0 ? Math.abs(candleBuy[j] - candleSell[j]) / jVol : 1;
+
+      if (jAvgRange <= 0 || candleRange[j] > jAvgRange * maxRangeBars) break;
+      if (jAvgVol <= 0 || jVol < jAvgVol * minVolumeMultiplier) break;
+      if (jDelta > maxDeltaRatio) break;
+      j++;
+    }
+    const duration = j - startIdx;
+
+    if (duration >= minCandles) {
+      // Собираем статистику за весь паттерн.
+      let totalBuy = 0, totalSell = 0, totalVolPat = 0, maxPrice = -Infinity, minPrice = Infinity;
+      for (let k = startIdx; k < j; k++) {
+        totalBuy += candleBuy[k];
+        totalSell += candleSell[k];
+        totalVolPat += candleVol[k];
+        if (candles[k].h > maxPrice) maxPrice = candles[k].h;
+        if (candles[k].l < minPrice) minPrice = candles[k].l;
+      }
+      const avgVolPat = candleVol.slice(startIdx - lookback, startIdx).reduce((a, b) => a + b, 0) / lookback;
+      const volMult = avgVolPat > 0 ? totalVolPat / (avgVolPat * duration) : 0;
+      const patDelta = totalVolPat > 0 ? Math.abs(totalBuy - totalSell) / totalVolPat : 0;
+      const patRange = maxPrice - minPrice;
+      const avgRangePat = candleRange.slice(startIdx - lookback, startIdx).reduce((a, b) => a + b, 0) / lookback;
+
+      // Сила сигнала: 1-5
+      let strength = 1;
+      if (volMult > 4) strength += 2;
+      else if (volMult > 3) strength += 1;
+      if (patDelta < 0.05) strength += 1; // очень чистая дельта
+      if (patRange < avgRangePat * 0.5) strength += 1; // очень узкий диапазон
+      if (duration >= 4) strength += 1;
+      strength = Math.min(5, Math.max(1, strength));
+
+      signals.push({
+        t: candles[startIdx].t,
+        price: (maxPrice + minPrice) / 2,
+        range: patRange,
+        volume: totalVolPat,
+        avgVolume: avgVolPat * duration,
+        volumeMultiplier: volMult,
+        deltaRatio: patDelta,
+        duration,
+        strength,
+        label: strength >= 4 ? "Strong Absorption" : "Absorption",
+      });
+
+      i = j; // Пропускаем свечи паттерна.
+    } else {
+      i++;
+    }
+  }
+
+  // Активные: последние 3 свечи
+  const activeCount = signals.filter((s) => {
+    const idx = candles.findIndex((c) => c.t === s.t);
+    return idx >= 0 && idx >= candleCount - 3;
+  }).length;
+
+  return { signals, activeCount };
+}

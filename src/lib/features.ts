@@ -64,6 +64,54 @@ export const FEATURE_DEFAULTS = {
     },
     maxLinksPerUser: 5,
   },
+  volumeProfile: {
+    label: "Volume Profile (POC, VAH, VAL)",
+    description:
+      "Показывает на странице orderflow горизонтальный профиль объёмов (Volume Profile): распределение торгового объёма по ценовым уровням за выбранный период. POC (Point of Control) — цена с максимальным объёмом, VAH/VAL — границы Value Area (70% объёма). Использует данные ObCandle (свечи) из коллектора.",
+    fieldHelp: {
+      bins:
+        "Количество ценовых уровней (price bins) в профиле. Больше — детальнее, но выше нагрузка на сервер и больше данных для отрисовки. Разумный диапазон: 50–200.",
+      valueAreaPct:
+        "Доля общего объёма, которая считается Value Area (в процентах). 70 = 70% объёма. Стандарт рынка — 68–70%. Разумный диапазон: 50–90.",
+    },
+    bins: 100,
+    valueAreaPct: 0.7,
+  },
+  divergenceScanner: {
+    label: "Divergence Scanner (price vs delta/CVD)",
+    description:
+      "Показывает на странице Orderflow маркеры дивергенции между движением цены и дельтой/CVD. Regular Bearish: цена делает HH (higher high), а дельта — LH (lower high) — сигнал разворота вниз. Regular Bullish: цена LL, дельта HL — сигнал разворота вверх. Hidden: продолжение тренда. Использует данные ObCandle (свечи) и ObTrade (дельта) из коллектора.",
+    fieldHelp: {
+      minStrength:
+        "Минимальная сила дивергенции (1-5). Сила = min(5, floor(bars/3) + 1). Больше = сильнее сигнал, но меньше находок. Разумный диапазон: 2-4.",
+      lookbackBars:
+        "Сколько свечей назад искать экстремумы для поиска дивергенций. Больше = шире поиск, но выше нагрузка. Разумный диапазон: 20-100.",
+      minDivergenceBars:
+        "Минимальное расстояние между экстремумами (в свечах). Меньше значение = больше ложных сигналов. Разумный диапазон: 3-10.",
+      maxDivergenceBars:
+        "Максимальное расстояние между экстремумами (в свечах). Больше = шире поиск. Разумный диапазон: 20-50.",
+    },
+    minStrength: 2,
+    lookbackBars: 50,
+    minDivergenceBars: 5,
+    maxDivergenceBars: 30,
+  },
+  imbalanceIndicator: {
+    label: "Bid/Ask Imbalance + Speed of Tape",
+    description:
+      "Показывает на странице Orderflow дисбаланс между лимитными ордерами на покупку и продажу (Bid/Ask Imbalance) и скорость торговли (Speed of Tape). Imbalance = (ask - bid) / (bid + ask), от -1 (только bid) до +1 (только ask). Speed of Tape — количество сделок в минуту. Использует данные ObSnapshot и ObTrade из коллектора.",
+    fieldHelp: {
+      highImbalanceThreshold:
+        "Порог высокого дисбаланса (0..1). Когда ask/(bid+ask) > этого порога — сигнал high_imbalance. Разумный диапазон: 0.6-0.8.",
+      lowImbalanceThreshold:
+        "Порог низкого дисбаланса (-1..0). Когда ask/(bid+ask) < этого порога — сигнал low_imbalance. Разумный диапазон: -0.8 - -0.6.",
+      speedWindowMs:
+        "Окно в миллисекундах для подсчёта Speed of Tape. 60000 = 1 минута. Меньше = чувствительнее, но больше шума. Разумный диапазон: 30000-300000.",
+    },
+    highImbalanceThreshold: 0.7,
+    lowImbalanceThreshold: -0.7,
+    speedWindowMs: 60000,
+  },
 } as const;
 
 export type FeatureConfigValue<K extends FeatureKey> = {

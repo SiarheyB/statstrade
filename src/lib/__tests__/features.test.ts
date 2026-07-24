@@ -20,6 +20,9 @@ describe('features - FEATURE_DEFAULTS', () => {
       'monteCarlo',
       'playbooks',
       'mentorMode',
+      'volumeProfile',
+      'divergenceScanner',
+      'imbalanceIndicator',
     ]);
   });
 
@@ -59,6 +62,24 @@ describe('features - FEATURE_DEFAULTS', () => {
 
   it('mentorMode has correct defaults', () => {
     expect(FEATURE_DEFAULTS.mentorMode.maxLinksPerUser).toBe(5);
+  });
+
+  it('volumeProfile has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.volumeProfile.bins).toBe(100);
+    expect(FEATURE_DEFAULTS.volumeProfile.valueAreaPct).toBe(0.7);
+  });
+
+  it('divergenceScanner has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.divergenceScanner.minStrength).toBe(2);
+    expect(FEATURE_DEFAULTS.divergenceScanner.lookbackBars).toBe(50);
+    expect(FEATURE_DEFAULTS.divergenceScanner.minDivergenceBars).toBe(5);
+    expect(FEATURE_DEFAULTS.divergenceScanner.maxDivergenceBars).toBe(30);
+  });
+
+  it('imbalanceIndicator has correct defaults', () => {
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.highImbalanceThreshold).toBe(0.7);
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.lowImbalanceThreshold).toBe(-0.7);
+    expect(FEATURE_DEFAULTS.imbalanceIndicator.speedWindowMs).toBe(60000);
   });
 });
 

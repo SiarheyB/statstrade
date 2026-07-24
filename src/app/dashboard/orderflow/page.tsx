@@ -1,9 +1,48 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Layers, RefreshCw, HelpCircle, Filter, AlertTriangle } from "lucide-react";
+import {
+  Layers,
+  RefreshCw,
+  HelpCircle,
+  Filter,
+  AlertTriangle,
+  Pencil,
+  ArrowUp,
+  ArrowDown,
+  ArrowRight,
+  TrendingUp,
+  Square,
+  Minus,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import { zonedParts, shiftedMs, type TimezoneId, normalizeTimezone, getTimezoneFromCookie } from "@/lib/timezone";
+import {
+  zonedParts,
+  shiftedMs,
+  type TimezoneId,
+  normalizeTimezone,
+  getTimezoneFromCookie,
+} from "@/lib/timezone";
+import VolumeProfile from "@/components/VolumeProfile";
+import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
+import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
+import { drawAbsorptionMarkers } from "@/components/AbsorptionOverlay";
+import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
+import DivergenceHistory from "@/components/DivergenceHistory";
+import AbsorptionPanel from "@/components/AbsorptionPanel";
+import DrawingToolbar from "@/components/DrawingToolbar";
+import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
+import type {
+  DivergenceSignal,
+  Imbalance,
+  SpeedOfTape,
+  AbsorptionSignal,
+} from "@/lib/orderflow";
+import type {
+  DrawingRow,
+  DrawingToolType,
+  DrawingPoint,
+} from "@/lib/drawings";
 
 type ObHeatmap = {
   priceMin: number;
@@ -39,19 +78,14 @@ type Resp = {
 };
 
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
-// Сколько свечей показываем ПО УМОЛЧАНИЮ (недавние). Данных грузится больше —
-// остальное открывается прокруткой влево (история, как в ClusterBtc).
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
-// Максимальное увеличение по вертикали (цена) и горизонтали (время). ZOOM_IN_LIMIT = 1
 const ZOOM_IN_LIMIT = 1;
 const ZOOM_OUT_LIMIT = 2;
 
-// Порог «только крупные лимитки» в монетах базового актива. Показываем его в UI
-// рядом с Яркостью. Значения — дефолты коллектора (позже придут из настроек в БД).
 const BIG_LIMIT_COINS: Record<string, number> = { BTCUSDT: 500, ETHUSDT: 5000 };
 const DEFAULT_BIG_LIMIT_COINS = 500;
 function bigLimitFor(symbol: string): number {
@@ -74,9 +108,6 @@ function fmtTime(ms: number, tz: TimezoneId): string {
   const p = (z: number) => String(z).padStart(2, "0");
   return `${p(h)}:${p(mi)}`;
 }
-// Полная дата/время для перекрестия: использует Intl.DateTimeFormat
-// с учётом локали пользователя — «пт, 24 июл. 2026 г., 14:00» для ru.
-// Для статических подписей оси X используется fmtDate + fmtTime (ниже).
 function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
   const { ms: shifted } = shiftedMs(ms, tz);
   const d = new Date(shifted);
@@ -92,7 +123,6 @@ function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
   });
   return f.format(d);
 }
-// Статическая подпись оси X: DD.MM (коротко, без года — меток много).
 function fmtDate(ms: number, tz: TimezoneId): string {
   const { d, mo } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
@@ -102,22 +132,15 @@ function dayKey(ms: number, tz: TimezoneId): number {
   const { y, mo, d } = zonedParts(ms, tz);
   return y * 10000 + mo * 100 + d;
 }
-// Статическая подпись оси X: DD.MM HH:MM.
 function fmtDateTime(ms: number, tz: TimezoneId): string {
   const { d, mo, h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
   return `${p(d)}.${p(mo + 1)} ${p(h)}:${p(mi)}`;
 }
-// Базовый актив пары (BTCUSDT → BTC) для подписи объёма лимиток.
 function baseAsset(symbol: string): string {
   return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
 }
 
-// «Круглый» шаг цены (1-2-5 × 10^n) под примерно nLines делений видимого
-// диапазона. Сетка привязывается к этим АБСОЛЮТНЫМ уровням цены, а не к долям
-// текущего окна — иначе при пане/зуме линии остаются на тех же 6 фиксированных
-// экранных позициях и просто переподписываются, а должны реально «ехать»
-// вместе со свечами.
 function niceStep(raw: number): number {
   if (!Number.isFinite(raw) || raw <= 0) return 1;
   const exp = Math.floor(Math.log10(raw));
@@ -127,24 +150,18 @@ function niceStep(raw: number): number {
   return niceFrac * base;
 }
 
-// «Круглые» шаги времени (мс) для сетки/подписей оси X — фиксированный набор
-// человекопонятных интервалов, ближайший даёт ~nLines делений видимого окна.
 const TIME_STEPS_MS = [
-  1000, 5000, 15000, 30000, // секунды
-  60000, 5 * 60000, 15 * 60000, 30 * 60000, // минуты
-  3600000, 2 * 3600000, 4 * 3600000, 6 * 3600000, 12 * 3600000, // часы
-  86400000, 2 * 86400000, 7 * 86400000, 30 * 86400000, // дни/недели/месяц
+  1000, 5000, 15000, 30000,
+  60000, 5 * 60000, 15 * 60000, 30 * 60000,
+  3600000, 2 * 3600000, 4 * 3600000, 6 * 3600000, 12 * 3600000,
+  86400000, 2 * 86400000, 7 * 86400000, 30 * 86400000,
 ];
 function niceTimeStep(xspan: number, maxLines = 8): number {
   for (const s of TIME_STEPS_MS) if (xspan / s <= maxLines) return s;
   return TIME_STEPS_MS[TIME_STEPS_MS.length - 1];
 }
 
-// Heatmap лимитных ордеров в стиле ClusterBtc/Bookmap: тёмный фон, «стены»
-// рисуются как серые блочные плитки (без полутонов и без синеватого оттенка,
-// как в ClusterBtc), яркость = объём лимиток на уровне. minT — порог отображения
-// (скрыть мелочь), gamma — кривая яркости.
-const WALL_LEVELS = 8; // квантование яркости на N ступеней — чёткие блоки вместо гладкого градиента
+const WALL_LEVELS = 8;
 function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasElement {
   const cv = document.createElement("canvas");
   cv.width = hm.cols;
@@ -155,17 +172,15 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
     const col = hm.grid[c];
     for (let b = 0; b < hm.bins; b++) {
       const lin = hm.maxVal ? col[b] / hm.maxVal : 0;
-      const row = hm.bins - 1 - b; // высокая цена сверху
+      const row = hm.bins - 1 - b;
       const idx = (row * hm.cols + c) * 4;
       if (lin < minT) {
         img.data[idx + 3] = 0;
         continue;
       }
       let t = Math.pow(lin, gamma);
-      // Квантование в дискретные ступени яркости — плитки с чёткими краями
-      // между уровнями, как блоки в ClusterBtc, вместо гладкого градиента.
       t = Math.round(t * WALL_LEVELS) / WALL_LEVELS;
-      const g = 170 + Math.round(75 * t); // чистый серый, без синеватого оттенка
+      const g = 170 + Math.round(75 * t);
       img.data[idx] = g;
       img.data[idx + 1] = g;
       img.data[idx + 2] = g;
@@ -178,52 +193,86 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
 
 export default function OrderflowPage() {
   const { t, timezone, locale } = useI18n();
-  // Дефолты детерминированы для SSR; сохранённые настройки подгружаются в эффекте
-  // после монтирования (иначе ломается гидрация).
   const [range, setRange] = useState<string>("1d");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [exchange, setExchange] = useState("binance-futures");
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // Слайдеры фильтрации: порог отображения (%) и яркость (%).
   const [minPct, setMinPct] = useState(20);
   const [brightness, setBrightness] = useState(55);
   const [live, setLive] = useState(true);
   const [clusters, setClusters] = useState(true);
-  // Показывать ли heatmap «истории лимитных ордеров» поверх свечей.
   const [showLiq, setShowLiq] = useState(true);
   const [hydrated, setHydrated] = useState(false);
   const [metaSymbols, setMetaSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [metaExchanges, setMetaExchanges] = useState<string[]>(FALLBACK_EXCHANGES);
-  // Живые пороги «крупных лимиток» из CollectorConfig (fallback — bigLimitFor).
   const [metaMinCoins, setMetaMinCoins] = useState<Record<string, number>>({});
+  const [vpData, setVpData] = useState<VPData | null>(null);
+  const [vpLoading, setVpLoading] = useState(false);
+  const [vpError, setVpError] = useState<string | null>(null);
+  const [divergenceSignals, setDivergenceSignals] = useState<DivergenceSignal[]>([]);
+  const [divLoading, setDivLoading] = useState(false);
+  const [divError, setDivError] = useState<string | null>(null);
+  const [showDivergence, setShowDivergence] = useState(true);
+  const [imbalanceData, setImbalanceData] = useState<Imbalance | null>(null);
+  const [speedData, setSpeedData] = useState<SpeedOfTape | null>(null);
+  const [imbalanceLoading, setImbalanceLoading] = useState(false);
+  const [imbalanceError, setImbalanceError] = useState<string | null>(null);
+  const [absorptionSignals, setAbsorptionSignals] = useState<AbsorptionSignal[]>([]);
+  const [absorptionLoading, setAbsorptionLoading] = useState(false);
+  const [absorptionError, setAbsorptionError] = useState<string | null>(null);
+  const [showAbsorption, setShowAbsorption] = useState(true);
+  const [drawings, setDrawings] = useState<DrawingRow[]>([]);
+  const [drawingsLoading, setDrawingsLoading] = useState(false);
+  const [drawingsError, setDrawingsError] = useState<string | null>(null);
+  const [showDrawings, setShowDrawings] = useState(true);
+  const [activeTool, setActiveTool] = useState<DrawingToolType | null>(null);
+  const [drawingPoints, setDrawingPoints] = useState<DrawingPoint[]>([]);
+  const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
+  const [showDrawingEditor, setShowDrawingEditor] = useState(false);
+  const [magnet, setMagnet] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
   const baRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
-  // Видимая область (zoom/pan). null = автодиапазон по данным.
   const viewRef = useRef<{ t0: number; t1: number; y0: number; y1: number } | null>(null);
-  // mode: pan (внутри графика), zoomY (правая ценовая шкала), zoomX (нижняя шкала времени).
-  const dragRef = useRef<{ mx: number; my: number; mode: "pan" | "zoomX" | "zoomY"; view: { t0: number; t1: number; y0: number; y1: number } } | null>(null);
+  const dragRef = useRef<({
+    mx: number;
+    my: number;
+    mode: "pan" | "zoomX" | "zoomY";
+    view: { t0: number; t1: number; y0: number; y1: number };
+    drawingId?: string;
+    originalPoints?: Array<{ t: number; price: number }>;
+  }) | null>(null);
   const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
-  // Полные границы данных + шаг свечи — для ограничения зума.
   const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
+  const drawingDragRef = useRef<{ drawingId: string; dx: number; dy: number; originalPoints: DrawingPoint[] } | null>(null);
+  const drawingResizeRef = useRef<{
+    drawingId: string;
+    cornerIdx: number; // 0=TL,1=TR,2=BL,3=BR
+    // Исходные границы прямоугольника
+    origMinT: number;
+    origMaxT: number;
+    origMinPrice: number;
+    origMaxPrice: number;
+    originalPoints: DrawingPoint[];
+  } | null>(null);
+  const snappedRef = useRef<{ t: number; price: number } | null>(null);
 
-  const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]); // 1.0 → 0.2
+  const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
   const minT = useMemo(() => minPct / 100, [minPct]);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const tz = timezone; // Используем локальный timezone (куки)
+      const tz = timezone;
       const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${tz}`);
       const d = await res.json();
       if (!res.ok) {
-        // Если timezone не поддерживается на сервере — логирование и повторный запрос без timezone
         if (res.status === 400 && d.error?.includes("timezone")) {
           console.warn("[orderflow] timezone rejected by server, retrying without tz");
           const res2 = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}`);
@@ -237,7 +286,7 @@ export default function OrderflowPage() {
         return;
       }
       offRef.current = null;
-      viewRef.current = null; // сброс zoom/pan при смене диапазона/символа/биржи
+      viewRef.current = null;
       setData(d);
     } catch (e) {
       setError("Network error");
@@ -251,40 +300,38 @@ export default function OrderflowPage() {
     load();
   }, [load]);
 
-  // Подгрузка сохранённых настроек после монтирования (один раз).
   useEffect(() => {
     try {
       const s = JSON.parse(localStorage.getItem("orderflow.settings") || "{}");
       if (typeof s.range === "string") setRange(s.range);
       if (typeof s.symbol === "string") setSymbol(s.symbol);
-      // Вариант «все биржи» убран из меню; сохранённое ранее "all" сбрасываем
-      // на дефолт, чтобы не остался невыбираемый пункт.
       if (typeof s.exchange === "string" && s.exchange !== "all") setExchange(s.exchange);
       if (typeof s.minPct === "number") setMinPct(s.minPct);
       if (typeof s.brightness === "number") setBrightness(s.brightness);
       if (typeof s.live === "boolean") setLive(s.live);
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
+      if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
+      if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
+      if (typeof s.showDrawings === "boolean") setShowDrawings(s.showDrawings);
     } catch {
       // ignore
     }
     setHydrated(true);
   }, []);
 
-  // Сохраняем настройки между сессиями (после первичной подгрузки).
   useEffect(() => {
     if (!hydrated) return;
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showAbsorption, showDrawings }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showAbsorption, showDrawings]);
 
-  // Доступные символы/биржи из реально собранных данных.
   useEffect(() => {
     (async () => {
       try {
@@ -300,7 +347,216 @@ export default function OrderflowPage() {
     })();
   }, []);
 
-  // Live-обновление: тихо перезапрашиваем каждые 3с (без спиннера/мигания).
+  const rangeToVpPeriod: Record<string, string> = {
+    "5m": "1h",
+    "15m": "1h",
+    "1h": "1h",
+    "4h": "4h",
+    "12h": "12h",
+    "1d": "24h",
+    "1w": "7d",
+  };
+
+  const rangeToIndicatorPeriod: Record<string, string> = {
+    "5m": "1h",
+    "15m": "1h",
+    "1h": "1h",
+    "4h": "4h",
+    "12h": "12h",
+    "1d": "24h",
+    "1w": "7d",
+  };
+
+  const loadVolumeProfile = useCallback(async () => {
+    setVpLoading(true);
+    setVpError(null);
+    try {
+      const vpPeriod = rangeToVpPeriod[range] ?? "24h";
+      const res = await fetch(`/api/orderflow/volume-profile?symbol=${symbol}&exchange=${exchange}&period=${vpPeriod}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setVpError(err.error ?? "Error");
+        setVpData(null);
+        return;
+      }
+      const d = await res.json();
+      setVpData(d.volumeProfile);
+    } catch {
+      setVpError("Network error");
+      setVpData(null);
+    } finally {
+      setVpLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
+  const loadDivergence = useCallback(async () => {
+    setDivLoading(true);
+    setDivError(null);
+    try {
+      const res = await fetch(`/api/orderflow/divergence?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setDivError(err.error ?? "Error");
+        setDivergenceSignals([]);
+        return;
+      }
+      const d = await res.json();
+      setDivergenceSignals(d.divergence?.signals ?? []);
+    } catch {
+      setDivError("Network error");
+      setDivergenceSignals([]);
+    } finally {
+      setDivLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
+  const loadImbalance = useCallback(async () => {
+    setImbalanceLoading(true);
+    setImbalanceError(null);
+    try {
+      const res = await fetch(`/api/orderflow/imbalance?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setImbalanceError(err.error ?? "Error");
+        setImbalanceData(null);
+        setSpeedData(null);
+        return;
+      }
+      const d = await res.json();
+      setImbalanceData(d.imbalance);
+      setSpeedData(d.speedOfTape);
+    } catch {
+      setImbalanceError("Network error");
+      setImbalanceData(null);
+      setSpeedData(null);
+    } finally {
+      setImbalanceLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
+  const loadAbsorption = useCallback(async () => {
+    setAbsorptionLoading(true);
+    setAbsorptionError(null);
+    try {
+      const res = await fetch(`/api/orderflow/absorption?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setAbsorptionError(err.error ?? "Error");
+        setAbsorptionSignals([]);
+        return;
+      }
+      const d = await res.json();
+      setAbsorptionSignals(d.absorption?.signals ?? []);
+    } catch {
+      setAbsorptionError("Network error");
+      setAbsorptionSignals([]);
+    } finally {
+      setAbsorptionLoading(false);
+    }
+  }, [symbol, exchange, range]);
+
+  const loadDrawings = useCallback(async () => {
+    setDrawingsLoading(true);
+    setDrawingsError(null);
+    try {
+      const res = await fetch(`/api/orderflow/drawings?symbol=${symbol}&exchange=${exchange}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setDrawingsError(err.error ?? "Error");
+        setDrawings([]);
+        return;
+      }
+      const d = await res.json();
+      setDrawings(d.drawings ?? []);
+    } catch {
+      setDrawingsError("Network error");
+      setDrawings([]);
+    } finally {
+      setDrawingsLoading(false);
+    }
+  }, [symbol, exchange]);
+
+  const saveDrawing = useCallback(async (toolType: DrawingToolType, pts: DrawingPoint[]) => {
+    try {
+      const res = await fetch("/api/orderflow/drawings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, exchange, toolType, points: pts }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "unknown error");
+        console.error("[drawings] save failed:", res.status, errText);
+        return;
+      }
+      const d = await res.json();
+      if (d.drawing) {
+        setDrawings(prev => [...prev, d.drawing]);
+      }
+    } catch (err) {
+      console.error("[drawings] save error:", err);
+    }
+  }, [symbol, exchange]);
+
+  const updateDrawing = useCallback(async (id: string, pts: DrawingPoint[]) => {
+    try {
+      const res = await fetch(`/api/orderflow/drawings?id=${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points: pts }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.drawing) {
+        setDrawings(prev => prev.map(drawing =>
+          drawing.id === id ? { ...drawing, points: d.drawing.points } : drawing
+        ));
+      }
+    } catch (err) {
+      console.error("Failed to update drawing:", err);
+    }
+  }, []);
+
+  /** Привязка точки к haй/лою ближайшей свечи, если включён магнит. */
+  function snapToCandle(t: number, price: number, candles: Candle[]): { t: number; price: number } {
+    if (!magnet || !candles.length) return { t, price };
+    // Ищем ближайшую свечу по времени
+    let nearest = candles[0];
+    let minDist = Math.abs(t - candles[0].t);
+    for (const c of candles) {
+      const d = Math.abs(t - c.t);
+      if (d < minDist) { minDist = d; nearest = c; }
+    }
+    const step = candles.length > 1 ? candles[1].t - candles[0].t : 60000;
+    const snapTimeThreshold = step * 0.5;
+    if (minDist >= snapTimeThreshold) return { t, price };
+    const range = nearest.h - nearest.l || 1;
+    const snapPriceThreshold = range * 0.3;
+    const distHigh = Math.abs(price - nearest.h);
+    const distLow = Math.abs(price - nearest.l);
+    const snappedPrice = distHigh < snapPriceThreshold ? nearest.h : distLow < snapPriceThreshold ? nearest.l : price;
+    return { t: nearest.t, price: snappedPrice };
+  }
+
+  useEffect(() => {
+    loadVolumeProfile();
+  }, [loadVolumeProfile]);
+
+  useEffect(() => {
+    loadDivergence();
+  }, [loadDivergence]);
+
+  useEffect(() => {
+    loadImbalance();
+  }, [loadImbalance]);
+
+  useEffect(() => {
+    loadAbsorption();
+  }, [loadAbsorption]);
+
+  useEffect(() => {
+    loadDrawings();
+  }, [loadDrawings]);
+
   useEffect(() => {
     if (!live) return;
     let cancelled = false;
@@ -341,13 +597,12 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const PP = 76; // ширина левой панели профиля объёма
+    const PP = 76;
     const plotX = PADL + PP;
     const plotW = W - plotX - PADR;
     const plotH = H - PADB;
     layoutRef.current = { plotX, plotW, plotH };
 
-    // Полный диапазон по данным.
     const fullT0 = data.from;
     const fullT1 = data.to;
     let fYMin = hm.priceMin;
@@ -356,12 +611,8 @@ export default function OrderflowPage() {
       if (k.l < fYMin) fYMin = k.l;
       if (k.h > fYMax) fYMax = k.h;
     }
-    // Полные границы + шаг свечи — для ограничения зума в onWheel.
     const candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
-    // Видимая область: текущий view либо, по умолчанию, недавние ~VISIBLE свечей
-    // (влево прокручивается вся загруженная история). Диапазон цены — по видимому
-    // окну, а не по всей истории, иначе свежие свечи сожмутся в полоску.
     if (!viewRef.current) {
       const visible = VISIBLE_CANDLES[range] ?? DEFAULT_VISIBLE;
       const t0 = Math.max(fullT0, fullT1 - visible * candleStep);
@@ -389,16 +640,11 @@ export default function OrderflowPage() {
     const yspan = yMax - yMin || 1;
     const sy = (p: number) => plotH - ((p - yMin) / yspan) * plotH;
 
-    // Зажимаем heatmap в границы графика — иначе при сильном зуме картинка
-    // вылезает за пределы плота (перекрывая левую панель профиля или уходя
-    // за правый край). Подписи/панель профиля рисуются отдельно, без клипа.
     ctx.save();
     ctx.beginPath();
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
 
-    // Heatmap (offscreen, перестраивается при смене данных/слайдеров).
-    // Рисуем только если включена «История лимитных ордеров».
     if (showLiq) {
       const key = `${data.from}:${data.to}:${minT}:${gamma}`;
       if (!offRef.current || offRef.current.key !== key) {
@@ -408,7 +654,6 @@ export default function OrderflowPage() {
       const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
       const hmYTop = sy(hm.priceMax);
       const hmYBot = sy(hm.priceMin);
-      // Без сглаживания — «стены» чёткие (как в ClusterBtc), а не размытые полосы.
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(
         offRef.current.canvas,
@@ -417,9 +662,6 @@ export default function OrderflowPage() {
       );
       ctx.imageSmoothingEnabled = true;
 
-      // Подписи объёма на крупных «стенах» лимиток — при достаточном зуме.
-      // Помечаем вертикальные локальные максимумы (центр стены), чтобы не
-      // дублировать число на каждом бине одной полосы. Текст тёмный — полосы светлые.
       if (hm.maxVal > 0) {
         const colSpanMs = ((hm.times[1] ?? t0) - (hm.times[0] ?? t0)) || xspan / hm.cols;
         const cellW = (colSpanMs / xspan) * plotW;
@@ -436,7 +678,6 @@ export default function OrderflowPage() {
             for (let b = 0; b < hm.bins; b++) {
               const val = col[b];
               if (val / hm.maxVal < 0.2) continue;
-              // Локальный максимум по цене И по времени → одна подпись на «стену».
               if ((b > 0 && col[b - 1] > val) || (b < hm.bins - 1 && col[b + 1] > val)) continue;
               if ((hm.grid[c - 1]?.[b] ?? 0) > val || (hm.grid[c + 1]?.[b] ?? 0) > val) continue;
               const price = hm.priceMin + ((b + 0.5) / hm.bins) * (hm.priceMax - hm.priceMin);
@@ -453,7 +694,6 @@ export default function OrderflowPage() {
     }
     ctx.restore();
 
-    // Левая панель: профиль текущей ликвидности (bid зелёный / ask красный).
     if (hm.profileMax > 0) {
       const pb = hm.profileBid;
       const pa = hm.profileAsk;
@@ -469,7 +709,6 @@ export default function OrderflowPage() {
         ctx.fillStyle = pb[b] >= pa[b] ? "rgba(22,199,132,0.75)" : "rgba(234,57,67,0.75)";
         ctx.fillRect(PADL, y - binH / 2, len, Math.max(1, binH));
       }
-      // Разделитель панели.
       ctx.strokeStyle = "rgba(255,255,255,0.08)";
       ctx.beginPath();
       ctx.moveTo(plotX - 1, 0);
@@ -477,10 +716,6 @@ export default function OrderflowPage() {
       ctx.stroke();
     }
 
-    // Ценовая сетка + подписи (справа). Линии привязаны к «круглым» абсолютным
-    // уровням цены (шаг из niceStep) — при пане/зуме позиция каждой линии
-    // пересчитывается через sy() и реально едет вместе со свечами, а не остаётся
-    // на фиксированных 6 экранных позициях.
     ctx.font = "10px ui-sans-serif, system-ui";
     ctx.textAlign = "left";
     const priceStep = niceStep(yspan / 6);
@@ -497,8 +732,6 @@ export default function OrderflowPage() {
       ctx.fillText(fmtP(price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, y + 3)));
     }
 
-    // Вертикальные линии сетки + подписи времени — та же логика: привязаны к
-    // круглым отметкам времени (шаг из niceTimeStep), а не к долям окна.
     const timeStep = niceTimeStep(xspan);
     const timeStart = Math.ceil(t0 / timeStep) * timeStep;
     ctx.textAlign = "center";
@@ -511,7 +744,6 @@ export default function OrderflowPage() {
       ctx.moveTo(x, 0);
       ctx.lineTo(x, plotH);
       ctx.stroke();
-      // Первая метка новых суток показывает дату, иначе только время.
       const day = dayKey(ms, timezone);
       const isDayStep = timeStep >= 86400000;
       const isNewDay = day !== lastDay;
@@ -522,30 +754,17 @@ export default function OrderflowPage() {
     }
     ctx.textAlign = "left";
 
-    // Зажимаем кластеры и свечи в границы графика — при сильном зуме бары/тени
-    // иначе вылезают за верх/низ/края плота, перекрывая шкалы.
     ctx.save();
     ctx.beginPath();
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
 
-    // Footprint-кластеры (как в ClusterBtc): у каждой свечи СПРАВА от её оси —
-    // горизонтальная гистограмма объёмов по ценовым уровням. Длина бара = объём
-    // (нормирован по самому объёмному уровню этой свечи, чтобы профиль всегда был
-    // читаем), цвет по дельте уровня (buy≥sell → зелёный, иначе красный).
     const fp = data.footprint;
     const colW = fp ? (fp.interval / xspan) * plotW : 0;
     if (clusters && fp && fp.maxVol > 0 && fp.candles.length) {
-      // Ключевой момент детализации: цены футпринта мелкие, а диапазон по экрану
-      // большой, поэтому «сырой» уровень = доли пикселя и сливается. Агрегируем
-      // уровни в ПИКСЕЛЬНЫЕ строки фиксированной высоты — кластер читаем при любом
-      // зуме/масштабе. Высота строки растёт, когда колонка широкая (больше места).
       const rowPx = colW >= 80 ? 12 : colW >= 50 ? 10 : colW >= 32 ? 8 : 6;
-      // Бары не должны доходить до следующей свечи: оставляем зазор ≥3× тени
-      // перед её телом (тело = 3× тени, рисуется слева от оси следующей свечи).
       const wickW = Math.min(3, Math.max(1, colW * 0.05));
       const maxBarW = Math.max(4, colW - wickW * 3 - wickW * 3 - 2);
-      // Числа объёма показываем, когда строка достаточно высокая для текста.
       const showNums = rowPx >= 8;
       const fontPx = Math.min(11, Math.max(7, rowPx - 1));
       if (showNums) {
@@ -554,9 +773,8 @@ export default function OrderflowPage() {
         ctx.textBaseline = "middle";
       }
       for (const fc of fp.candles) {
-        const x0 = sx(fc.t + fp.interval / 2); // ось свечи
+        const x0 = sx(fc.t + fp.interval / 2);
         if (x0 < plotX - colW || x0 > plotX + plotW + colW) continue;
-        // Складываем уровни в строки по пиксельной координате.
         const rows = new Map<number, { buy: number; sell: number }>();
         for (const lvl of fc.levels) {
           if (lvl.buy + lvl.sell <= 0) continue;
@@ -574,9 +792,8 @@ export default function OrderflowPage() {
           const vol = r.buy + r.sell;
           const len = Math.max(1, (vol / cMax) * maxBarW);
           const y = ri * rowPx;
-          ctx.fillStyle = r.buy >= r.sell ? "rgba(15,136,90,0.6)" : "rgba(160,39,46,0.6)"; // на 3 тона темнее, более прозрачные
+          ctx.fillStyle = r.buy >= r.sell ? "rgba(15,136,90,0.6)" : "rgba(160,39,46,0.6)";
           ctx.fillRect(x0 + 1, y, len, Math.max(1, rowPx - 0.6));
-          // Число объёма — поверх самого бара (если влезает по длине).
           if (showNums) {
             const label = fmtVal(vol);
             const w = ctx.measureText(label).width;
@@ -591,11 +808,8 @@ export default function OrderflowPage() {
       ctx.textBaseline = "alphabetic";
     }
 
-    // Свечи поверх. При включённых кластерах тело свечи рисуем СЛЕВА от её оси,
-    // а гистограмму кластеров — справа (как в ClusterBtc), чтобы они не наезжали.
     if (candles.length > 1) {
       const stepMs = candles[1].t - candles[0].t;
-      // Тень (фитиль) — тонкая линия, тело — ровно в 3 раза шире тени.
       const wickW = clusters
         ? Math.min(3, Math.max(1, (stepMs / xspan) * plotW * 0.05))
         : 1;
@@ -615,15 +829,86 @@ export default function OrderflowPage() {
         ctx.stroke();
         const yo = sy(k.o);
         const yc = sy(k.c);
-        const bodyX = clusters ? x - cw - 1 : x - cw / 2; // тело слева от оси при кластерах
+        const bodyX = clusters ? x - cw - 1 : x - cw / 2;
         ctx.fillRect(bodyX, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
       }
       ctx.lineWidth = 1;
     }
-
     ctx.restore();
 
-    // Линия текущей цены.
+    if (showDrawings && drawings.length) {
+      const dd = drawingDragRef.current;
+      const rs = drawingResizeRef.current;
+      if (dd) {
+        let adjusted: DrawingRow[];
+        if (rs) {
+          // RESIZE: используем новые точки напрямую (не offset)
+          adjusted = drawings.map(d => {
+            if (d.id !== dd.drawingId) return d;
+            return { ...d, points: JSON.stringify(dd.originalPoints) };
+          });
+        } else {
+          // DRAG: применяем смещение к оригинальным точкам
+          adjusted = drawings.map(d => {
+            if (d.id !== dd.drawingId) return d;
+            try {
+              const pts = JSON.parse(d.points) as DrawingPoint[];
+              const shifted = pts.map(p => ({
+                t: Math.round(p.t + dd.dx),
+                price: p.price - dd.dy,
+              }));
+              return { ...d, points: JSON.stringify(shifted) };
+            } catch { return d; }
+          });
+        }
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, adjusted, selectedDrawingId);
+      } else {
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId);
+      }
+    }
+
+    // Live-preview при рисовании: от первой точки до курсора
+    if (activeTool && drawingPoints.length === 1) {
+      const hov = hoverRef.current;
+      if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my >= 0 && hov.my <= plotH) {
+        const x1 = sx(drawingPoints[0].t);
+        const y1 = sy(drawingPoints[0].price);
+        // Если магнит включён — рисуем preview к snapped позиции
+        let x2 = hov.mx;
+        let y2 = hov.my;
+        if (magnet && snappedRef.current) {
+          x2 = sx(snappedRef.current.t);
+          y2 = sy(snappedRef.current.price);
+        }
+        ctx.save();
+        ctx.strokeStyle = "#e6b800";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.globalAlpha = 0.6;
+        if (activeTool === "trend_line") {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        } else if (activeTool === "rectangle") {
+          const rx0 = Math.min(x1, x2);
+          const rx1 = Math.max(x1, x2);
+          const ry0 = Math.min(y1, y2);
+          const ry1 = Math.max(y1, y2);
+          ctx.strokeRect(rx0, ry0, rx1 - rx0, ry1 - ry0);
+        }
+        ctx.restore();
+      }
+    }
+
+    if (showAbsorption && absorptionSignals.length) {
+      drawAbsorptionMarkers(ctx, sx, sy, plotX, plotW, plotH, absorptionSignals, candles);
+    }
+
+    if (showDivergence && divergenceSignals.length) {
+      drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, divergenceSignals);
+    }
+
     const last = candles.length ? candles[candles.length - 1].c : hm.price;
     const yp = sy(last);
     if (yp >= 0 && yp <= plotH) {
@@ -640,74 +925,76 @@ export default function OrderflowPage() {
       ctx.fillText(fmtP(last), plotX + plotW + 5, yp + 3);
     }
 
-    // Кросхейр + тултип.
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
+      // Если активен инструмент рисования и магнит — смещаем перекрестие к snapped позиции
+      let cx = hov.mx;
+      let cy = hov.my;
+      if (activeTool && magnet && snappedRef.current) {
+        cx = sx(snappedRef.current.t);
+        cy = sy(snappedRef.current.price);
+      }
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
-      ctx.moveTo(hov.mx, 0);
-      ctx.lineTo(hov.mx, plotH);
-      ctx.moveTo(plotX, hov.my);
-      ctx.lineTo(plotX + plotW, hov.my);
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, plotH);
+      ctx.moveTo(plotX, cy);
+      ctx.lineTo(plotX + plotW, cy);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Если магнит активен — рисуем маркер притягивания
+      if (activeTool && magnet && snappedRef.current) {
+        ctx.fillStyle = "#e6b800";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
 
-      const ms = t0 + ((hov.mx - plotX) / plotW) * xspan;
-      const priceH = yMin + (1 - hov.my / plotH) * yspan;
-      // Ячейка грида под курсором — ТОЧНО той же трансформацией, какой картинка
-      // heatmap рисуется в drawImage (края = центры крайних колонок). Раньше
-      // колонка бралась «по ближайшему центру времени» — на границах полос это
-      // давало соседнюю (пустую) ячейку: полоса под курсором есть, а тултип
-      // говорил, что лимиток нет.
+      const ms = t0 + ((cx - plotX) / plotW) * xspan;
+      const priceH = yMin + (1 - cy / plotH) * yspan;
+
       const hmX0 = sx(hm.times[0] ?? t0);
       const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
-      // Курсор должен реально попадать в отрисованную область heatmap по X и Y —
-      // иначе Math.min/max ниже "прижимают" индекс к крайней колонке/бину, и
-      // подсказка про стену всплывала даже далеко за пределами картинки.
       const insideHeatmap =
-        hov.mx >= Math.min(hmX0, hmX1) && hov.mx <= Math.max(hmX0, hmX1) &&
+        cx >= Math.min(hmX0, hmX1) && cx <= Math.max(hmX0, hmX1) &&
         priceH >= hm.priceMin && priceH <= hm.priceMax;
       const colIdx = Math.max(0, Math.min(hm.cols - 1,
-        Math.floor(((hov.mx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
+        Math.floor(((cx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
       const vol = insideHeatmap ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
 
       ctx.fillStyle = "#e6b800";
-      ctx.fillRect(plotX + plotW, hov.my - 7, PADR, 14);
+      ctx.fillRect(plotX + plotW, cy - 7, PADR, 14);
       ctx.fillStyle = "#08080d";
-      ctx.fillText(fmtP(priceH), plotX + plotW + 5, hov.my + 3);
+      ctx.fillText(fmtP(priceH), plotX + plotW + 5, cy + 3);
 
-      // Время наведённой свечи показываем на нижней оси (как цена справа) —
-      // не в отдельной всплывающей подсказке, чтобы не закрывать свечи/стены.
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
       const timeLabel = fmtCrosshairLabel(cndl ? cndl.t : ms, timezone, locale);
       ctx.font = "11px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
       const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
-      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, hov.mx));
+      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, cx));
       ctx.fillStyle = "#e6b800";
       ctx.fillRect(timeBoxX - timeBoxW / 2, plotH, timeBoxW, PADB - 1);
       ctx.fillStyle = "#08080d";
       ctx.fillText(timeLabel, timeBoxX, H - 6);
       ctx.textAlign = "left";
 
-      // Наведение на «стену» лимитных ордеров → подсказка про лимитный ордер и
-      // объём монет на уровне. Без стены отдельную подсказку не рисуем — время
-      // уже подписано на оси, дублировать его во всплывающем окне незачем.
       const base = baseAsset(data.symbol);
-      // Стену показываем только если она реально отрисована — т.е. выше порога
-      // «Мин. размер» (minT). Иначе на «пустом» месте всплывала ложная подсказка.
       const hasWall = showLiq && insideHeatmap && hm.maxVal > 0 && vol / hm.maxVal >= minT;
       if (hasWall) {
         const lines = [
           t("of.tipLimitOrder"),
           `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
         ];
-        // Крупный читаемый шрифт тултипа (по умолчанию canvas брал остаточные 10px,
-        // на больших мониторах это было слишком мелко). Размер бокса считаем по
-        // реальной ширине текста, чтобы строки не обрезались.
         const tipPx = 14;
         const lineH = 20;
         const padX = 12;
@@ -717,10 +1004,10 @@ export default function OrderflowPage() {
         for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
         const boxW = Math.ceil(textW) + padX * 2;
         const boxH = padY * 2 + lines.length * lineH;
-        let bx = hov.mx + 16;
-        let by = hov.my + 16;
-        if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 16;
-        if (by + boxH > plotH) by = hov.my - boxH - 16;
+        let bx = cx + 16;
+        let by = cy + 16;
+        if (bx + boxW > plotX + plotW) bx = cx - boxW - 16;
+        if (by + boxH > plotH) by = cy - boxH - 16;
         ctx.fillStyle = "rgba(16,18,26,0.96)";
         ctx.strokeStyle = "rgba(255,255,255,0.18)";
         ctx.fillRect(bx, by, boxW, boxH);
@@ -731,9 +1018,8 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, t, range, timezone, locale]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet]);
 
-  // Нижняя панель: дельта (гистограмма) + кумулятивная дельта (линия).
   const drawDelta = useCallback(() => {
     const cv = deltaRef.current;
     if (!cv || !data) return;
@@ -749,7 +1035,7 @@ export default function OrderflowPage() {
     ctx.fillRect(0, 0, W, H);
 
     const d = data.delta;
-    const plotX = 8 + 76; // выравнивание с основным графиком (PADL + панель профиля)
+    const plotX = 8 + 76;
     const plotW = W - plotX - 64;
     if (!d || d.delta.length === 0) {
       ctx.fillStyle = "#6b7384";
@@ -775,14 +1061,12 @@ export default function OrderflowPage() {
       if (v >= 0) ctx.fillRect(x - bw / 2, mid - h, bw, h);
       else ctx.fillRect(x - bw / 2, mid, bw, h);
     }
-    // Нулевая линия.
     ctx.strokeStyle = "rgba(255,255,255,0.12)";
     ctx.beginPath();
     ctx.moveTo(plotX, mid);
     ctx.lineTo(plotX + plotW, mid);
     ctx.stroke();
 
-    // CVD (кумулятивная дельта) — линия в своём масштабе.
     const cvdMin = Math.min(...d.cvd);
     const cvdMax = Math.max(...d.cvd);
     const cspan = cvdMax - cvdMin || 1;
@@ -806,7 +1090,6 @@ export default function OrderflowPage() {
     ctx.fillText(`CVD ${d.cvd[n - 1] >= 0 ? "+" : "-"}${fmtVal(Math.abs(d.cvd[n - 1]))}`, plotX + plotW + 5, 12);
   }, [data, t]);
 
-  // B/A панель: доля bid во времени (полная глубина и в пределах ±1%). 0.5 = баланс.
   const drawBA = useCallback(() => {
     const cv = baRef.current;
     if (!cv || !data) return;
@@ -834,9 +1117,8 @@ export default function OrderflowPage() {
     const t1 = viewRef.current?.t1 ?? data.to;
     const xspan = t1 - t0 || 1;
     const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
-    const sy = (v: number) => H - 4 - v * (H - 8); // 0..1
+    const sy = (v: number) => H - 4 - v * (H - 8);
 
-    // Зона >0.5 (бид-перевес) зелёная, <0.5 (аск) красная — заливка фона.
     ctx.fillStyle = "rgba(22,199,132,0.06)";
     ctx.fillRect(plotX, sy(1), plotW, sy(0.5) - sy(1));
     ctx.fillStyle = "rgba(234,57,67,0.06)";
@@ -853,7 +1135,7 @@ export default function OrderflowPage() {
       ctx.beginPath();
       let started = false;
       for (let i = 0; i < vals.length; i++) {
-        if (data.ba!.full[i] === 0.5 && data.ba!.near[i] === 0.5) continue; // пропуск пустых корзин
+        if (data.ba!.full[i] === 0.5 && data.ba!.near[i] === 0.5) continue;
         const x = sx(ba.times[i]);
         const y = sy(vals[i]);
         if (!started) { ctx.moveTo(x, y); started = true; }
@@ -862,8 +1144,8 @@ export default function OrderflowPage() {
       ctx.stroke();
       ctx.lineWidth = 1;
     };
-    line(ba.full, "#5b8def"); // полная глубина
-    line(ba.near, "#e6b800"); // ±1%
+    line(ba.full, "#5b8def");
+    line(ba.near, "#e6b800");
 
     ctx.font = "10px ui-sans-serif, system-ui";
     ctx.fillStyle = "#8a93a6";
@@ -889,6 +1171,12 @@ export default function OrderflowPage() {
     drawBA();
   }, [draw, drawDelta, drawBA]);
 
+  // Принудительный перерисовка при изменении рисунков (saveDrawing асинхронный,
+  // и может не успеть к моменту вызова draw() из эффекта выше)
+  useEffect(() => {
+    redrawAll();
+  }, [drawings, redrawAll]);
+
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -896,9 +1184,110 @@ export default function OrderflowPage() {
     hoverRef.current = { mx, my };
     const drag = dragRef.current;
     const lay = layoutRef.current;
+    if (activeTool && lay && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const cv = canvasRef.current;
+      if (cv) cv.style.cursor = "crosshair";
+      // Обновляем snappedRef для preview-линии
+      if (data?.candles) {
+        const v = viewRef.current;
+        if (v) {
+          const xspan = v.t1 - v.t0 || 1;
+          const yspan = v.y1 - v.y0 || 1;
+          const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+          const price = v.y1 - (my / lay.plotH) * yspan;
+          snappedRef.current = snapToCandle(t, price, data.candles);
+        }
+      } else {
+        snappedRef.current = null;
+      }
+      draw();
+      return;
+    }
     if (drag && lay) {
-      if (drag.mode === "zoomY") {
-        // Ценовая шкала: тянем вверх → приближаем (выше), вниз → отдаляем. Якорь — центр.
+      // Check if we're dragging a selected drawing
+      if (dragRef.current?.drawingId) {
+        const v = viewRef.current;
+        if (v) {
+          const xspan = v.t1 - v.t0 || 1;
+          const yspan = v.y1 - v.y0 || 1;
+          const cv = canvasRef.current;
+          // === RESIZE прямоугольника ===
+          if (drawingResizeRef.current) {
+            // Вычисляем позицию мыши в координатах графика
+            let tChart = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+            let priceChart = v.y1 - (my / lay.plotH) * yspan;
+            if (magnet && data?.candles?.length) {
+              const snapped = snapToCandle(tChart, priceChart, data.candles);
+              snappedRef.current = snapped;
+              tChart = snapped.t;
+              priceChart = snapped.price;
+            }
+            const rs = drawingResizeRef.current;
+            // Вычисляем новые границы прямоугольника
+            let newT1: number, newT2: number, newP1: number, newP2: number;
+            switch (rs.cornerIdx) {
+              case 0: // TL — фиксирован BR
+                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
+                newP1 = priceChart; newP2 = rs.origMinPrice;
+                break;
+              case 1: // TR — фиксирован BL
+                newT1 = rs.origMinT; newT2 = Math.round(tChart);
+                newP1 = priceChart; newP2 = rs.origMinPrice;
+                break;
+              case 2: // BL — фиксирован TR
+                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
+                newP1 = rs.origMaxPrice; newP2 = priceChart;
+                break;
+              default: // 3 BR — фиксирован TL
+                newT1 = rs.origMinT; newT2 = Math.round(tChart);
+                newP1 = rs.origMaxPrice; newP2 = priceChart;
+                break;
+            }
+            drawingDragRef.current = {
+              drawingId: drawingResizeRef.current.drawingId,
+              dx: 0, dy: 0,
+              originalPoints: [{ t: newT1, price: newP1 }, { t: newT2, price: newP2 }],
+            };
+            if (cv) cv.style.cursor = "nwse-resize";
+            draw();
+            return;
+          }
+          // Смещение в координатах графика от начальной точки
+          const dx = (mx - drag.mx) / lay.plotW * xspan;
+          const dy = (my - drag.my) / lay.plotH * yspan;
+          // Если магнит включён — притягиваем опорную точку рисунка к свече
+          if (magnet && data?.candles?.length) {
+            const orig = dragRef.current.originalPoints ?? [];
+            if (orig.length > 0) {
+              const anchor = orig[0];
+              const endT = anchor.t + dx;
+              const endPrice = anchor.price - dy;
+              const snapped = snapToCandle(endT, endPrice, data.candles);
+              // Пересчитываем offset так, чтобы опорная точка оказалась на snapped позиции
+              const snappedDx = snapped.t - anchor.t;
+              const snappedDy = anchor.price - snapped.price;
+              // Ещё раз обновляем snappedRef (для отрисовки маркера)
+              snappedRef.current = snapped;
+              drawingDragRef.current = {
+                drawingId: dragRef.current.drawingId,
+                dx: snappedDx,
+                dy: snappedDy,
+                originalPoints: dragRef.current.originalPoints ?? [],
+              };
+              draw();
+              return;
+            }
+          }
+          drawingDragRef.current = {
+            drawingId: dragRef.current.drawingId,
+            dx,
+            dy,
+            originalPoints: dragRef.current.originalPoints ?? [],
+          };
+          draw();
+          return;
+        }
+      } else if (drag.mode === "zoomY") {
         const f = Math.exp((my - drag.my) * 0.006);
         const cy = (drag.view.y0 + drag.view.y1) / 2;
         const b = boundsRef.current;
@@ -907,7 +1296,6 @@ export default function OrderflowPage() {
         const span = Math.min(maxP, Math.max(minP, (drag.view.y1 - drag.view.y0) * f));
         viewRef.current = { ...drag.view, y0: cy - span / 2, y1: cy + span / 2 };
       } else if (drag.mode === "zoomX") {
-        // Шкала времени: тянем вправо → приближаем (шире), влево → отдаляем. Якорь — центр.
         const f = Math.exp(-(mx - drag.mx) * 0.006);
         const cx = (drag.view.t0 + drag.view.t1) / 2;
         const b = boundsRef.current;
@@ -930,8 +1318,31 @@ export default function OrderflowPage() {
       const lay2 = layoutRef.current;
       const cv = canvasRef.current;
       if (lay2 && cv) {
-        cv.style.cursor =
-          mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "crosshair";
+        if (!activeTool && showDrawings && drawings.length > 0) {
+          const v = viewRef.current;
+          if (v) {
+            const xspan = v.t1 - v.t0 || 1;
+            const yspan = v.y1 - v.y0 || 1;
+            const sxLocal = (ms: number) => lay2.plotX + ((ms - v.t0) / xspan) * lay2.plotW;
+            const syLocal = (p: number) => lay2.plotH - ((p - v.y0) / yspan) * lay2.plotH;
+            const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay2.plotX, lay2.plotW, lay2.plotH);
+            if (hit) {
+              // Если это угол прямоугольника — курсор resize
+              if (hit.pointIdx >= 0 && hit.pointIdx <= 3) {
+                cv.style.cursor = "nwse-resize";
+              } else {
+                cv.style.cursor = "pointer";
+              }
+            } else {
+              // Даже если есть рисунки, на краях графика показываем resize-курсоры
+              cv.style.cursor =
+                mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
+            }
+          }
+        } else {
+          cv.style.cursor =
+            mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
+        }
       }
       draw();
     }
@@ -939,31 +1350,141 @@ export default function OrderflowPage() {
   function onLeave() {
     hoverRef.current = null;
     dragRef.current = null;
+    drawingResizeRef.current = null;
     draw();
   }
   function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const lay = layoutRef.current;
+    if (!lay) {
+      if (viewRef.current) {
+        dragRef.current = { mx, my, mode: "pan", view: { ...viewRef.current } };
+      }
+      return;
+    }
+
+    if (activeTool && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const v = viewRef.current;
+      if (!v) return;
+      const xspan = v.t1 - v.t0 || 1;
+      const yspan = v.y1 - v.y0 || 1;
+      const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+      const price = v.y1 - (my / lay.plotH) * yspan;
+      const candles = data?.candles ?? [];
+      const snapped = snapToCandle(t, price, candles);
+
+      if (activeTool === "horizontal_line" || activeTool === "horizontal_ray") {
+        saveDrawing(activeTool, [{ t: Math.round(snapped.t), price: snapped.price }]);
+        setActiveTool(null);
+        return;
+      }
+
+      if (drawingPoints.length === 0) {
+        setDrawingPoints([{ t: Math.round(snapped.t), price: snapped.price }]);
+      } else {
+        saveDrawing(activeTool, [...drawingPoints, { t: Math.round(snapped.t), price: snapped.price }]);
+        setDrawingPoints([]);
+        setActiveTool(null);
+      }
+      return;
+    }
+
+    if (!activeTool && showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+      const v = viewRef.current;
+      if (v) {
+        const xspan = v.t1 - v.t0 || 1;
+        const yspan = v.y1 - v.y0 || 1;
+        const sxLocal = (ms: number) => lay.plotX + ((ms - v.t0) / xspan) * lay.plotW;
+        const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
+        const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
+        if (hit) {
+          setSelectedDrawingId(hit.id);
+          setShowDrawingEditor(true);
+          const hitDrawing = drawings.find(d => d.id === hit.id);
+          let originalPoints: DrawingPoint[] = [];
+          if (hitDrawing?.points) {
+            try { originalPoints = JSON.parse(hitDrawing.points); } catch { /* ignore */ }
+          }
+          drawingDragRef.current = null;
+          drawingResizeRef.current = null;
+          // Если это прямоугольник и клик по углу — запускаем resize
+          if (hitDrawing?.toolType === "rectangle" && hit.pointIdx >= 0 && hit.pointIdx <= 3 && originalPoints.length >= 2) {
+            const minT = Math.min(originalPoints[0].t, originalPoints[1].t);
+            const maxT = Math.max(originalPoints[0].t, originalPoints[1].t);
+            const minPrice = Math.min(originalPoints[0].price, originalPoints[1].price);
+            const maxPrice = Math.max(originalPoints[0].price, originalPoints[1].price);
+            drawingResizeRef.current = {
+              drawingId: hit.id,
+              cornerIdx: hit.pointIdx,
+              origMinT: minT,
+              origMaxT: maxT,
+              origMinPrice: minPrice,
+              origMaxPrice: maxPrice,
+              originalPoints,
+            };
+            if (!dragRef.current) {
+              dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
+            }
+            return;
+          }
+          // Иначе — обычный drag всего рисунка
+          if (!dragRef.current) {
+            dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
+          }
+          return;
+        }
+      }
+    }
+    if (selectedDrawingId && !activeTool) {
+      setSelectedDrawingId(null);
+      setShowDrawingEditor(false);
+      drawingResizeRef.current = null;
+    }
+
     if (viewRef.current) {
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const lay = layoutRef.current;
-      const mode: "pan" | "zoomX" | "zoomY" =
+      const v2 = viewRef.current;
+      const mode2: "pan" | "zoomX" | "zoomY" =
         lay && mx >= lay.plotX + lay.plotW ? "zoomY" : lay && my >= lay.plotH - 8 ? "zoomX" : "pan";
-      dragRef.current = { mx, my, mode, view: { ...viewRef.current } };
+      dragRef.current = { mx, my, mode: mode2, view: { ...v2 } };
     }
   }
   function onUp() {
+    const dd = drawingDragRef.current;
+    const rs = drawingResizeRef.current;
+    if (dd && dd.originalPoints.length > 0) {
+      if (rs) {
+        // RESIZE: точки уже содержат новые координаты (не offset)
+        updateDrawing(dd.drawingId, dd.originalPoints);
+        setDrawings(prev => prev.map(d =>
+          d.id === dd.drawingId
+            ? { ...d, points: JSON.stringify(dd.originalPoints) }
+            : d
+        ));
+      } else {
+        // DRAG: применяем offset к исходным точкам
+        const newPoints = dd.originalPoints.map(p => ({
+          t: Math.round(p.t + dd.dx),
+          price: p.price - dd.dy,
+        }));
+        updateDrawing(dd.drawingId, newPoints);
+        setDrawings(prev => prev.map(d =>
+          d.id === dd.drawingId
+            ? { ...d, points: JSON.stringify(newPoints) }
+            : d
+        ));
+      }
+    }
+    drawingDragRef.current = null;
+    drawingResizeRef.current = null;
     dragRef.current = null;
   }
   function onDouble() {
-    viewRef.current = null; // сброс к автодиапазону
+    viewRef.current = null;
     redrawAll();
   }
 
-  // Колесо/свайп: пропорциональный zoom ОБЕИХ осей (время X и цена Y) одним
-  // коэффициентом вокруг курсора — как в ClusterBtc. Величину зума берём из
-  // доминирующего направления жеста (deltaY у мыши, deltaX/Y у трекпада).
-  // Shift+колесо — только по времени (X), точечная подстройка ширины.
   useEffect(() => {
     const cv = canvasRef.current;
     if (!cv) return;
@@ -980,14 +1501,12 @@ export default function OrderflowPage() {
       const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
       const fy = Math.min(1, Math.max(0, my / plotH));
       const b = boundsRef.current;
-// ZOOM_IN_LIMIT/ZOOM_OUT_LIMIT объявлены на уровне модуля (см. const ZOOM_IN_LIMIT).
       const maxTSpan = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
       const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
       const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
       const minPSpan = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
       const clamp = (val: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, val));
 
-      // Время (X) — всегда; цена (Y) — кроме Shift (тогда только ширина).
       const tcur = v.t0 + fx * (v.t1 - v.t0);
       const tspan = clamp((v.t1 - v.t0) * factor, minTSpan, maxTSpan);
       let next = { ...v, t0: tcur - fx * tspan, t1: tcur + (1 - fx) * tspan };
@@ -1033,9 +1552,7 @@ export default function OrderflowPage() {
           </select>
           <button
             onClick={() => setShowLiq((v) => !v)}
-            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
-              showLiq ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
-            }`}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showLiq ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
           >
             <span className={`h-3 w-3 rounded-sm border ${showLiq ? "bg-accent border-accent" : "border-border-strong"}`} />
             {t("of.showLiq")}
@@ -1045,9 +1562,7 @@ export default function OrderflowPage() {
           </button>
           <button
             onClick={() => setClusters((v) => !v)}
-            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
-              clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"
-            }`}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${clusters ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
           >
             <span className={`h-3 w-3 rounded-sm border ${clusters ? "bg-accent border-accent" : "border-border-strong"}`} />
             {t("of.clusters")}
@@ -1056,10 +1571,30 @@ export default function OrderflowPage() {
             </span>
           </button>
           <button
+            onClick={() => setShowDivergence((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showDivergence ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
+            title={t("of.hintDivergence") || "Divergence Scanner — show/hide price vs delta divergence markers"}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showDivergence ? "bg-accent border-accent" : "border-border-strong"}`} />
+            Divergence
+            <span title={t("of.hintDivergence") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
+            onClick={() => setShowAbsorption((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showAbsorption ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
+            title={t("of.hintAbsorption") || "Absorption Pattern Detector — narrow range + high volume + near-zero delta"}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showAbsorption ? "bg-accent border-accent" : "border-border-strong"}`} />
+            Absorption
+            <span title={t("of.hintAbsorption") || "Absorption — detects accumulation/distribution patterns"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
             onClick={() => setLive((v) => !v)}
-            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${
-              live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"
-            }`}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"}`}
           >
             <span className={`h-2 w-2 rounded-full ${live ? "bg-profit animate-pulse" : "bg-faint"}`} />
             LIVE
@@ -1094,7 +1629,6 @@ export default function OrderflowPage() {
           <input type="range" min={0} max={100} value={brightness} onChange={(e) => setBrightness(Number(e.target.value))} className="accent-accent w-40" />
         </label>
         {(() => {
-          // Порог выбранного рынка; 0 = режим «отбирать всё» → подпись не нужна.
           const thr =
             metaMinCoins[`${symbol.toUpperCase()}|${exchange.endsWith("-futures") ? "futures" : "spot"}`] ??
             bigLimitFor(symbol);
@@ -1116,17 +1650,104 @@ export default function OrderflowPage() {
         <div className="card p-10 text-center text-muted">{t("of.empty")}</div>
       ) : (
         <>
-          <div className="card p-2" style={{ background: "#0a0b10" }}>
-            <canvas
-              ref={canvasRef}
-              className="w-full cursor-crosshair"
-              style={{ height: "min(72vh, 720px)" }}
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onMouseDown={onDown}
-              onMouseUp={onUp}
-              onDoubleClick={onDouble}
-            />
+          <div className="card p-2 relative" style={{ background: "#0a0b10" }}>
+            {showDrawingEditor && selectedDrawingId && (() => {
+              const d = drawings.find(dd => dd.id === selectedDrawingId);
+              if (!d) return null;
+              return (
+                <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 p-2 bg-[#0a0b10]/90 border-b border-border/30 text-xs">
+                  <span className="text-muted font-medium mr-1">{t("of.drawingEditor")}</span>
+                  <button
+                    className="ml-auto text-faint hover:text-fg p-0.5"
+                    onClick={() => { setSelectedDrawingId(null); setShowDrawingEditor(false); }}
+                    title="Закрыть"
+                  >
+                    ✕
+                  </button>
+                  <label className="flex items-center gap-1 text-faint">
+                    {t("of.color")}
+                    <input
+                      type="color"
+                      value={d.color}
+                      onChange={async (ev) => {
+                        const newColor = ev.target.value;
+                        try {
+                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ color: newColor }),
+                          });
+                          if (res.ok) {
+                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, color: newColor } : dd));
+                          }
+                        } catch (err) {
+                          console.error("Failed to update color", err);
+                        }
+                      }}
+                      className="w-6 h-6 rounded border border-border/30 cursor-pointer"
+                    />
+                  </label>
+                  <label className="flex items-center gap-1 text-faint">
+                    {t("of.lineWidth")}
+                    <input
+                      type="range"
+                      min={1}
+                      max={5}
+                      value={d.lineWidth}
+                      onChange={async (ev) => {
+                        const newWidth = Number(ev.target.value);
+                        try {
+                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ lineWidth: newWidth }),
+                          });
+                          if (res.ok) {
+                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, lineWidth: newWidth } : dd));
+                          }
+                        } catch (err) {
+                          console.error("Failed to update width", err);
+                        }
+                      }}
+                      className="w-14"
+                    />
+                    <span className="tabular-nums text-faint">{d.lineWidth}</span>
+                  </label>
+                  <button
+                    className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
+                    onClick={async () => {
+                      try {
+                        const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, { method: "DELETE" });
+                        if (res.ok) {
+                          setDrawings(prev => prev.filter(dd => dd.id !== d.id));
+                          setSelectedDrawingId(null);
+                          setShowDrawingEditor(false);
+                        }
+                      } catch (err) {
+                        console.error("Failed to delete drawing", err);
+                      }
+                    }}
+                  >
+                    {t("of.delete")}
+                  </button>
+                </div>
+              );
+            })()}
+            <div className="flex gap-2">
+              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} />
+              <div className="flex-1 min-w-0">
+                <canvas
+                  ref={canvasRef}
+                  className="w-full"
+                  style={{ height: "min(72vh, 720px)" }}
+                  onMouseMove={onMove}
+                  onMouseLeave={onLeave}
+                  onMouseDown={onDown}
+                  onMouseUp={onUp}
+                  onDoubleClick={onDouble}
+                />
+              </div>
+            </div>
             <div className="mt-1 border-t border-border/40 pt-1">
               <canvas ref={deltaRef} className="w-full" style={{ height: 110 }} />
             </div>
@@ -1136,7 +1757,20 @@ export default function OrderflowPage() {
           </div>
           <div className="mt-1 text-[11px] text-faint">{t("of.zoomHint")}</div>
 
-          {/* Лента крупных рыночных ордеров */}
+          <div className="mt-3">
+            <VolumeProfile data={vpData} loading={vpLoading} error={vpError} />
+          </div>
+
+          <ImbalanceHeatmap data={imbalanceData} loading={imbalanceLoading} error={imbalanceError} />
+
+          <div className="mt-3">
+            <DivergenceHistory signals={divergenceSignals} loading={divLoading} error={divError} />
+          </div>
+
+          <div className="mt-3">
+            <AbsorptionPanel signals={absorptionSignals} loading={absorptionLoading} error={absorptionError} />
+          </div>
+
           <div className="card p-3 mt-3">
             <div className="text-xs font-medium text-muted">{t("of.bigTrades")}</div>
             <div className="text-[11px] text-faint mb-2">{t("of.bigTradesHint")}</div>
@@ -1186,6 +1820,7 @@ export default function OrderflowPage() {
             <span>{t("of.maxWall")}: {fmtVal(hm.maxVal)}</span>
             <span className="text-faint/70">{t("of.zoomHint")}</span>
           </div>
+
         </>
       )}
     </div>

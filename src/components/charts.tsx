@@ -44,7 +44,7 @@ function TooltipBox({ children }: { children: React.ReactNode }) {
 export function EquityChart({ data }: { data: EquityPoint[] }) {
   if (data.length === 0) return <Empty />;
   return (
-    <div className="h-72 w-full">
+    <div className="min-h-[72px] min-w-[300px] w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
@@ -157,7 +157,7 @@ export function DailyPnlChart({
     : data;
 
   return (
-    <div className="h-64 w-full">
+    <div className="min-h-[64px] min-w-[300px] w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData as any} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
@@ -228,7 +228,7 @@ export function BreakdownChart({
   if (data.length === 0) return <Empty />;
   const isWin = metric === "winRate";
   return (
-    <div style={{ height }} className="w-full">
+    <div style={{ height, minHeight: 240 }} className="w-full min-w-[300px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
@@ -309,7 +309,7 @@ export function DrawdownChart({ data }: { data: EquityPoint[] }) {
     return { t: p.t, dd: peak > 0 ? ((p.equity - peak) / peak) * 100 : 0 };
   });
   return (
-    <div className="h-64 w-full">
+    <div className="min-h-[64px] min-w-[300px] w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart data={pts} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <defs>
@@ -352,7 +352,7 @@ export function Histogram({
   const color = (tone?: string) =>
     tone === "profit" ? PROFIT : tone === "loss" ? LOSS : ACCENT;
   return (
-    <div style={{ height }} className="w-full">
+    <div style={{ height, minHeight: 240 }} className="w-full min-w-[300px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={data} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
