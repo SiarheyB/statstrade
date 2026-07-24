@@ -190,7 +190,8 @@ services:
       WATCHTOWER_CLEANUP: "true"
       WATCHTOWER_LABEL_ENABLE: "true"
       WATCHTOWER_POLL_INTERVAL: "120"
-    command: ["--label-enable", "--cleanup", "--interval", "120", "--stop-timeout", "30"]
+      DOCKER_API_VERSION: "1.40"
+    command: ["--label-enable", "--cleanup", "--interval", "120", "--stop-timeout", "30s"]
     networks:
       - tradestats
 
