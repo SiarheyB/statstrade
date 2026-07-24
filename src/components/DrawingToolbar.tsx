@@ -6,7 +6,7 @@
  */
 "use client";
 
-import { Minus, ArrowRight, TrendingUp, Square } from "lucide-react";
+import { Minus, ArrowRight, TrendingUp, Square, Magnet } from "lucide-react";
 import type { DrawingToolType } from "@/lib/drawings";
 
 export type { DrawingToolType };
@@ -14,6 +14,8 @@ export type { DrawingToolType };
 type Props = {
   activeTool: DrawingToolType | null;
   onSelectTool: (tool: DrawingToolType | null) => void;
+  magnet: boolean;
+  onToggleMagnet: () => void;
 };
 
 const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] = [
@@ -23,7 +25,7 @@ const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] =
   { type: "rectangle", label: "Прямоугольник", icon: <Square size={16} /> },
 ];
 
-export default function DrawingToolbar({ activeTool, onSelectTool }: Props) {
+export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet }: Props) {
   return (
     <div className="flex flex-col gap-1 py-2 px-1">
       {TOOLS.map((tool) => (
@@ -40,6 +42,20 @@ export default function DrawingToolbar({ activeTool, onSelectTool }: Props) {
           {tool.icon}
         </button>
       ))}
+      {/* Разделитель */}
+      <div className="w-6 h-px bg-border-strong my-1 mx-auto" />
+      {/* Кнопка магнита */}
+      <button
+        onClick={onToggleMagnet}
+        className={`flex items-center justify-center w-8 h-8 rounded transition-colors ${
+          magnet
+            ? "bg-accent/20 text-accent border border-accent/40"
+            : "text-muted hover:text-fg hover:bg-bg-muted border border-transparent"
+        }`}
+        title={magnet ? "Привязка к свечам (вкл)" : "Привязка к свечам (выкл)"}
+      >
+        <Magnet size={16} />
+      </button>
     </div>
   );
 }

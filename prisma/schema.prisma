@@ -319,8 +319,9 @@ model RetentionEpoch {
 // UserDrawing — created by direct DB migration, not yet in tracked schema.
 // Added here to resolve Prisma migration drift. Types match the existing DB columns.
 model UserDrawing {
-  id        String   @id
+  id        String   @id @default(cuid())
   userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   symbol    String
   exchange  String
   toolType  String
@@ -626,23 +627,3 @@ model ShareLink {
   @@index([userId])
 }
 
-// Инструменты рисования на графике orderflow (как в TradingView).
-// Хранит точки/координаты, стиль линии и тип инструмента.
-model UserDrawing {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  symbol    String   // BTCUSDT
-  exchange  String   // binance-futures
-  toolType  String   // trend_line | horizontal_line | horizontal_ray | rectangle
-  points    String   // JSON: [{t: timestamp_ms, price: number}, ...]
-  color     String   @default("#e6b800")
-  lineWidth Int      @default(2)
-  fillColor String?  // для заливки rectangle
-  label     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  deletedAt DateTime?
-
-  @@index([userId, symbol, exchange])
-}

@@ -95,9 +95,10 @@ export function drawDrawings(
       }
       case "horizontal_ray": {
         const ry = screenPts[0].y;
+        const rx = screenPts[0].x;
         if (ry < 0 || ry > plotH) break;
         ctx.beginPath();
-        ctx.moveTo(plotX, ry);
+        ctx.moveTo(rx, ry);
         ctx.lineTo(plotX + plotW, ry);
         ctx.stroke();
         // Стрелка вправо
@@ -108,7 +109,9 @@ export function drawDrawings(
         ctx.closePath();
         ctx.fillStyle = color;
         ctx.fill();
-        drawHandle(ctx, plotX, ry, color, isSelected);
+        drawHandle(ctx, rx, ry, color, isSelected);
+        // Цена над точкой
+        drawPriceLabel(ctx, rx, ry, pts[0].price, color);
         break;
       }
       case "rectangle": {
@@ -155,6 +158,16 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
     ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.stroke();
   }
+}
+
+/** Подпись с ценой над точкой. */
+function drawPriceLabel(ctx: CanvasRenderingContext2D, x: number, y: number, price: number, color: string): void {
+  const label = price.toFixed(2);
+  ctx.font = "11px monospace";
+  ctx.fillStyle = color;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "bottom";
+  ctx.fillText(label, x + 4, y - 4);
 }
 
 // ─── Hit testing ─────────────────────────────────────────────────────────────

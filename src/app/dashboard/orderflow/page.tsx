@@ -231,6 +231,7 @@ export default function OrderflowPage() {
   const [drawingPoints, setDrawingPoints] = useState<DrawingPoint[]>([]);
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [showDrawingEditor, setShowDrawingEditor] = useState(false);
+  const [magnet, setMagnet] = useState(true);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -248,6 +249,8 @@ export default function OrderflowPage() {
   }) | null>(null);
   const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
   const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
+  const drawingDragRef = useRef<{ drawingId: string; dx: number; dy: number; originalPoints: DrawingPoint[] } | null>(null);
+  const snappedRef = useRef<{ t: number; price: number } | null>(null);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
   const minT = useMemo(() => minPct / 100, [minPct]);
@@ -470,13 +473,17 @@ export default function OrderflowPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ symbol, exchange, toolType, points: pts }),
       });
-      if (!res.ok) return;
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "unknown error");
+        console.error("[drawings] save failed:", res.status, errText);
+        return;
+      }
       const d = await res.json();
       if (d.drawing) {
         setDrawings(prev => [...prev, d.drawing]);
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("[drawings] save error:", err);
     }
   }, [symbol, exchange]);
 
@@ -498,6 +505,27 @@ export default function OrderflowPage() {
       console.error("Failed to update drawing:", err);
     }
   }, []);
+
+  /** Привязка точки к haй/лою ближайшей свечи, если включён магнит. */
+  function snapToCandle(t: number, price: number, candles: Candle[]): { t: number; price: number } {
+    if (!magnet || !candles.length) return { t, price };
+    // Ищем ближайшую свечу по времени
+    let nearest = candles[0];
+    let minDist = Math.abs(t - candles[0].t);
+    for (const c of candles) {
+      const d = Math.abs(t - c.t);
+      if (d < minDist) { minDist = d; nearest = c; }
+    }
+    const step = candles.length > 1 ? candles[1].t - candles[0].t : 60000;
+    const snapTimeThreshold = step * 0.5;
+    if (minDist >= snapTimeThreshold) return { t, price };
+    const range = nearest.h - nearest.l || 1;
+    const snapPriceThreshold = range * 0.3;
+    const distHigh = Math.abs(price - nearest.h);
+    const distLow = Math.abs(price - nearest.l);
+    const snappedPrice = distHigh < snapPriceThreshold ? nearest.h : distLow < snapPriceThreshold ? nearest.l : price;
+    return { t: nearest.t, price: snappedPrice };
+  }
 
   useEffect(() => {
     loadVolumeProfile();
@@ -799,7 +827,58 @@ export default function OrderflowPage() {
     ctx.restore();
 
     if (showDrawings && drawings.length) {
-      drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId);
+      const dd = drawingDragRef.current;
+      if (dd) {
+        // Применяем смещение drag к рисуемому рисунку (без setDrawings — без лага)
+        const adjusted = drawings.map(d => {
+          if (d.id !== dd.drawingId) return d;
+          try {
+            const pts = JSON.parse(d.points) as DrawingPoint[];
+            const shifted = pts.map(p => ({
+              t: Math.round(p.t + dd.dx),
+              price: p.price - dd.dy,
+            }));
+            return { ...d, points: JSON.stringify(shifted) };
+          } catch { return d; }
+        });
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, adjusted, selectedDrawingId);
+      } else {
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId);
+      }
+    }
+
+    // Live-preview при рисовании: от первой точки до курсора
+    if (activeTool && drawingPoints.length === 1) {
+      const hov = hoverRef.current;
+      if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my >= 0 && hov.my <= plotH) {
+        const x1 = sx(drawingPoints[0].t);
+        const y1 = sy(drawingPoints[0].price);
+        // Если магнит включён — рисуем preview к snapped позиции
+        let x2 = hov.mx;
+        let y2 = hov.my;
+        if (magnet && snappedRef.current) {
+          x2 = sx(snappedRef.current.t);
+          y2 = sy(snappedRef.current.price);
+        }
+        ctx.save();
+        ctx.strokeStyle = "#e6b800";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.globalAlpha = 0.6;
+        if (activeTool === "trend_line") {
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+        } else if (activeTool === "rectangle") {
+          const rx0 = Math.min(x1, x2);
+          const rx1 = Math.max(x1, x2);
+          const ry0 = Math.min(y1, y2);
+          const ry1 = Math.max(y1, y2);
+          ctx.strokeRect(rx0, ry0, rx1 - rx0, ry1 - ry0);
+        }
+        ctx.restore();
+      }
     }
 
     if (showAbsorption && absorptionSignals.length) {
@@ -828,33 +907,53 @@ export default function OrderflowPage() {
 
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
+      // Если активен инструмент рисования и магнит — смещаем перекрестие к snapped позиции
+      let cx = hov.mx;
+      let cy = hov.my;
+      if (activeTool && magnet && snappedRef.current) {
+        cx = sx(snappedRef.current.t);
+        cy = sy(snappedRef.current.price);
+      }
       ctx.strokeStyle = "rgba(255,255,255,0.35)";
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
-      ctx.moveTo(hov.mx, 0);
-      ctx.lineTo(hov.mx, plotH);
-      ctx.moveTo(plotX, hov.my);
-      ctx.lineTo(plotX + plotW, hov.my);
+      ctx.moveTo(cx, 0);
+      ctx.lineTo(cx, plotH);
+      ctx.moveTo(plotX, cy);
+      ctx.lineTo(plotX + plotW, cy);
       ctx.stroke();
       ctx.setLineDash([]);
+      // Если магнит активен — рисуем маркер притягивания
+      if (activeTool && magnet && snappedRef.current) {
+        ctx.fillStyle = "#e6b800";
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 7, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+      }
 
-      const ms = t0 + ((hov.mx - plotX) / plotW) * xspan;
-      const priceH = yMin + (1 - hov.my / plotH) * yspan;
+      const ms = t0 + ((cx - plotX) / plotW) * xspan;
+      const priceH = yMin + (1 - cy / plotH) * yspan;
 
       const hmX0 = sx(hm.times[0] ?? t0);
       const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
       const insideHeatmap =
-        hov.mx >= Math.min(hmX0, hmX1) && hov.mx <= Math.max(hmX0, hmX1) &&
+        cx >= Math.min(hmX0, hmX1) && cx <= Math.max(hmX0, hmX1) &&
         priceH >= hm.priceMin && priceH <= hm.priceMax;
       const colIdx = Math.max(0, Math.min(hm.cols - 1,
-        Math.floor(((hov.mx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
+        Math.floor(((cx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
       const vol = insideHeatmap ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
 
       ctx.fillStyle = "#e6b800";
-      ctx.fillRect(plotX + plotW, hov.my - 7, PADR, 14);
+      ctx.fillRect(plotX + plotW, cy - 7, PADR, 14);
       ctx.fillStyle = "#08080d";
-      ctx.fillText(fmtP(priceH), plotX + plotW + 5, hov.my + 3);
+      ctx.fillText(fmtP(priceH), plotX + plotW + 5, cy + 3);
 
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
@@ -862,7 +961,7 @@ export default function OrderflowPage() {
       ctx.font = "11px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
       const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
-      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, hov.mx));
+      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, cx));
       ctx.fillStyle = "#e6b800";
       ctx.fillRect(timeBoxX - timeBoxW / 2, plotH, timeBoxW, PADB - 1);
       ctx.fillStyle = "#08080d";
@@ -885,10 +984,10 @@ export default function OrderflowPage() {
         for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
         const boxW = Math.ceil(textW) + padX * 2;
         const boxH = padY * 2 + lines.length * lineH;
-        let bx = hov.mx + 16;
-        let by = hov.my + 16;
-        if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 16;
-        if (by + boxH > plotH) by = hov.my - boxH - 16;
+        let bx = cx + 16;
+        let by = cy + 16;
+        if (bx + boxW > plotX + plotW) bx = cx - boxW - 16;
+        if (by + boxH > plotH) by = cy - boxH - 16;
         ctx.fillStyle = "rgba(16,18,26,0.96)";
         ctx.strokeStyle = "rgba(255,255,255,0.18)";
         ctx.fillRect(bx, by, boxW, boxH);
@@ -899,7 +998,7 @@ export default function OrderflowPage() {
         ctx.textBaseline = "alphabetic";
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet]);
 
   const drawDelta = useCallback(() => {
     const cv = deltaRef.current;
@@ -1052,6 +1151,12 @@ export default function OrderflowPage() {
     drawBA();
   }, [draw, drawDelta, drawBA]);
 
+  // Принудительный перерисовка при изменении рисунков (saveDrawing асинхронный,
+  // и может не успеть к моменту вызова draw() из эффекта выше)
+  useEffect(() => {
+    redrawAll();
+  }, [drawings, redrawAll]);
+
   function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     const mx = e.clientX - rect.left;
@@ -1062,56 +1167,63 @@ export default function OrderflowPage() {
     if (activeTool && lay && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
       const cv = canvasRef.current;
       if (cv) cv.style.cursor = "crosshair";
+      // Обновляем snappedRef для preview-линии
+      if (data?.candles) {
+        const v = viewRef.current;
+        if (v) {
+          const xspan = v.t1 - v.t0 || 1;
+          const yspan = v.y1 - v.y0 || 1;
+          const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+          const price = v.y1 - (my / lay.plotH) * yspan;
+          snappedRef.current = snapToCandle(t, price, data.candles);
+        }
+      } else {
+        snappedRef.current = null;
+      }
       draw();
       return;
     }
     if (drag && lay) {
       // Check if we're dragging a selected drawing
       if (dragRef.current?.drawingId) {
-        const drawingId = dragRef.current.drawingId;
-        const selectedDrawing = drawings.find(d => d.id === drawingId);
-        if (selectedDrawing && selectedDrawing.points && typeof selectedDrawing.points === 'string') {
-          // Parse points from JSON string
-          let pts: DrawingPoint[];
-          try {
-            pts = JSON.parse(selectedDrawing.points);
-            // Validate that pts is an array of DrawingPoint objects
-            if (!Array.isArray(pts) || pts.length === 0) {
-              // Invalid points data, skip this drawing
+        const v = viewRef.current;
+        if (v) {
+          const xspan = v.t1 - v.t0 || 1;
+          const yspan = v.y1 - v.y0 || 1;
+          // Смещение в координатах графика от начальной точки
+          const dx = (mx - drag.mx) / lay.plotW * xspan;
+          const dy = (my - drag.my) / lay.plotH * yspan;
+          // Если магнит включён — притягиваем опорную точку рисунка к свече
+          if (magnet && data?.candles?.length) {
+            const orig = dragRef.current.originalPoints ?? [];
+            if (orig.length > 0) {
+              const anchor = orig[0];
+              const endT = anchor.t + dx;
+              const endPrice = anchor.price - dy;
+              const snapped = snapToCandle(endT, endPrice, data.candles);
+              // Пересчитываем offset так, чтобы опорная точка оказалась на snapped позиции
+              const snappedDx = snapped.t - anchor.t;
+              const snappedDy = anchor.price - snapped.price;
+              // Ещё раз обновляем snappedRef (для отрисовки маркера)
+              snappedRef.current = snapped;
+              drawingDragRef.current = {
+                drawingId: dragRef.current.drawingId,
+                dx: snappedDx,
+                dy: snappedDy,
+                originalPoints: dragRef.current.originalPoints ?? [],
+              };
+              draw();
               return;
             }
-          } catch {
-            // If JSON parsing fails, skip this drawing
-            return;
           }
-
-          // Calculate movement delta
-          const v = viewRef.current;
-          if (v) {
-            const xspan = v.t1 - v.t0 || 1;
-            const yspan = v.y1 - v.y0 || 1;
-
-            // Convert pixel delta to chart coordinate deltas
-            const dx = (mx - drag.mx) / lay.plotW * xspan;
-            const dy = (my - drag.my) / lay.plotH * yspan;
-
-            // Update all points' positions by the delta
-            const newPoints = pts.map(point => ({
-              t: Math.round(point.t + dx),
-              price: point.price - dy,
-            }));
-
-            // Update local state for immediate visual feedback
-            setDrawings(prev => prev.map(d =>
-              d.id === drawingId ? { ...d, points: JSON.stringify(newPoints) } : d
-            ));
-
-            // Save using updateDrawing (PUT) with the drawing ID
-            updateDrawing(drawingId, newPoints);
-
-            // Update drag position for next movement calculation
-            dragRef.current = { ...dragRef.current, mx, my };
-          }
+          drawingDragRef.current = {
+            drawingId: dragRef.current.drawingId,
+            dx,
+            dy,
+            originalPoints: dragRef.current.originalPoints ?? [],
+          };
+          draw();
+          return;
         }
       } else if (drag.mode === "zoomY") {
         const f = Math.exp((my - drag.my) * 0.006);
@@ -1152,7 +1264,13 @@ export default function OrderflowPage() {
             const sxLocal = (ms: number) => lay2.plotX + ((ms - v.t0) / xspan) * lay2.plotW;
             const syLocal = (p: number) => lay2.plotH - ((p - v.y0) / yspan) * lay2.plotH;
             const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay2.plotX, lay2.plotW, lay2.plotH);
-            cv.style.cursor = hit ? "pointer" : "default";
+            if (hit) {
+              cv.style.cursor = "pointer";
+            } else {
+              // Даже если есть рисунки, на краях графика показываем resize-курсоры
+              cv.style.cursor =
+                mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
+            }
           }
         } else {
           cv.style.cursor =
@@ -1186,18 +1304,21 @@ export default function OrderflowPage() {
       const yspan = v.y1 - v.y0 || 1;
       const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
       const price = v.y1 - (my / lay.plotH) * yspan;
+      const candles = data?.candles ?? [];
+      const snapped = snapToCandle(t, price, candles);
 
       if (activeTool === "horizontal_line" || activeTool === "horizontal_ray") {
-        saveDrawing(activeTool, [{ t: Math.round(t), price }]);
+        saveDrawing(activeTool, [{ t: Math.round(snapped.t), price: snapped.price }]);
         setActiveTool(null);
         return;
       }
 
       if (drawingPoints.length === 0) {
-        setDrawingPoints([{ t: Math.round(t), price }]);
+        setDrawingPoints([{ t: Math.round(snapped.t), price: snapped.price }]);
       } else {
-        saveDrawing(activeTool, [...drawingPoints, { t: Math.round(t), price }]);
+        saveDrawing(activeTool, [...drawingPoints, { t: Math.round(snapped.t), price: snapped.price }]);
         setDrawingPoints([]);
+        setActiveTool(null);
       }
       return;
     }
@@ -1214,7 +1335,12 @@ export default function OrderflowPage() {
           setSelectedDrawingId(hit.id);
           setShowDrawingEditor(true);
           // Initialize drag state for moving the selected drawing
-          const originalPoints = hit.points?.map(p => ({ t: p.t, price: p.price })) ?? [];
+          const hitDrawing = drawings.find(d => d.id === hit.id);
+          let originalPoints: DrawingPoint[] = [];
+          if (hitDrawing?.points) {
+            try { originalPoints = JSON.parse(hitDrawing.points); } catch { /* ignore */ }
+          }
+          drawingDragRef.current = null;
           if (!dragRef.current) {
             dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
           }
@@ -1235,8 +1361,22 @@ export default function OrderflowPage() {
     }
   }
   function onUp() {
-    // Drawing updates are handled in onMove during drag
-    // Just clear the drag state on mouse up
+    // Сохраняем финальную позицию рисунка после drag
+    const dd = drawingDragRef.current;
+    if (dd && dd.originalPoints.length > 0) {
+      const newPoints = dd.originalPoints.map(p => ({
+        t: Math.round(p.t + dd.dx),
+        price: p.price - dd.dy,
+      }));
+      updateDrawing(dd.drawingId, newPoints);
+      // Обновляем локальное состояние без перерисовки (draw уже показал финал)
+      setDrawings(prev => prev.map(d =>
+        d.id === dd.drawingId
+          ? { ...d, points: JSON.stringify(newPoints) }
+          : d
+      ));
+    }
+    drawingDragRef.current = null;
     dragRef.current = null;
   }
   function onDouble() {
@@ -1504,7 +1644,7 @@ export default function OrderflowPage() {
               );
             })()}
             <div className="flex gap-2">
-              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} />
+              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} />
               <div className="flex-1 min-w-0">
                 <canvas
                   ref={canvasRef}

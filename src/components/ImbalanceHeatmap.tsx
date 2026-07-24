@@ -111,6 +111,11 @@ export default function ImbalanceHeatmap({
     );
   }
 
+  const chartData = useMemo(() =>
+    data.times.map((t, i) => ({ time: t, ratio: data.ratio[i] ?? 0 })),
+    [data],
+  );
+
   return (
     <div className="card p-3 mt-3">
       <div className="text-xs font-medium text-muted mb-1 inline-flex items-center gap-1.5">
@@ -125,7 +130,7 @@ export default function ImbalanceHeatmap({
       <div className="min-h-[20px] min-w-[300px] w-full h-full">
         <ResponsiveContainer width="100%" height="100%" min-width="300px" min-height="20px">
           <BarChart
-            data={data.times.map((t, i) => ({ time: t, ratio: data.ratio[i] ?? 0 }))}
+            data={chartData}
             margin={{ top: 4, right: 4, left: 4, bottom: 0 }}
           >
             <CartesianGrid stroke={GRID} strokeDasharray="3 3" horizontal={false} />
@@ -149,7 +154,7 @@ export default function ImbalanceHeatmap({
             <Tooltip content={<ImbalanceTooltip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
             <ReferenceLine y={0} stroke={ZERO_LINE} strokeWidth={1} />
             <Bar dataKey="ratio" isAnimationActive={false} minPointSize={1}>
-              {data.times.map((entry, idx) => (
+              {chartData.map((entry, idx) => (
                 <Cell key={idx} fill={barColor(entry.ratio)} />
               ))}
             </Bar>
