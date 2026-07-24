@@ -63,18 +63,43 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
   const urlBase = klinesUrl(exchange);
   if (!urlBase) return; // неподдерживаемая биржа — пропускаем
 
+  const now = Date.now();
+  const retentionStart = now - cfg.candleRetentionDays * 86_400_000;
+  const intervalMs = CANDLE_MS[interval] ?? 3600_000;
+
   // Последняя свеча в БД
   const last = await pool.query(
     `SELECT MAX("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
     [symbol, exchange, interval],
   );
   const lastTs = last.rows[0]?.ts ? new Date(last.rows[0].ts).getTime() : 0;
-  const now = Date.now();
-  const startMs = lastTs > 0 ? lastTs : now - cfg.candleRetentionDays * 86_400_000;
 
-  // Не запрашиваем, если последняя свеча моложе интервала (ещё не завершилась)
-  const intervalMs = CANDLE_MS[interval] ?? 3600_000;
-  if (lastTs > 0 && now - lastTs < intervalMs) return;
+  // Если таблица не пуста — проверяем, достаточно ли глубоко уходит история.
+  // Если самая старая свеча новее, чем retentionStart + 1 час — значит,
+  // исторических данных не хватает, и нужно начать заполнение с границы
+  // ретеншна, а не от последней свечи. ON CONFLICT DO UPDATE ниже
+  // обновит h/l/c/v существующих свечей, так что формирующаяся свеча
+  // получит актуальные данные.
+  let startMs;
+  if (lastTs > 0) {
+    const oldest = await pool.query(
+      `SELECT MIN("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+      [symbol, exchange, interval],
+    );
+    const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
+    if (oldestTs > retentionStart + 3600_000) {
+      startMs = retentionStart; // не хватает истории — начинаем с границы ретеншна
+    } else {
+      startMs = lastTs; // нормальный режим: только новые свечи
+    }
+  } else {
+    startMs = retentionStart; // таблица пуста — заполняем с границы ретеншна
+  }
+
+  // Не запрашиваем, только если последняя свеча моложе 30 секунд (данные
+  // всё равно не успели измениться). Для формирующейся свечи (1–4 мин)
+  // запрашиваем, чтобы обновить h/l/c/v через ON CONFLICT DO UPDATE.
+  if (lastTs > 0 && now - lastTs < 30_000 && startMs === lastTs) return;
 
   // Binance limit = 1500 свечей. Если окно шире — тянем последовательно.
   let fromMs = startMs;
@@ -109,7 +134,11 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
       await pool.query(`
         INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
         VALUES ${values.join(",")}
-        ON CONFLICT ("symbol","exchange","interval","t") DO NOTHING
+        ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+          "h" = EXCLUDED."h",
+          "l" = EXCLUDED."l",
+          "c" = EXCLUDED."c",
+          "v" = EXCLUDED."v"
       `, params);
     } catch (err) {
       console.error(`[candles] upsert error ${exchange}:${symbol} ${interval}: ${err.message}`);
@@ -144,13 +173,19 @@ async function fetchAndStoreCandles() {
   }
 }
 
-// Заполняет свечи из истории, если таблица пуста. Если таблицу уже наполнил
-// API-роут (on-demand fetch), пропускает — обычный цикл fetchAndStoreCandles
-// дозаполнит недостающие символы/биржи/интервалы.
+// Заполняет свечи из истории, если в таблице не хватает исторических данных.
+// Проверяет самую старую свечу: если она новее, чем retentionStart + 1 час —
+// запускает полное заполнение. Сама `fetchAndStoreCandlesFor` тоже проверяет
+// глубину истории при каждом запуске, но здесь мы форсируем полный цикл
+// сразу при старте, чтобы не ждать 70+ итераций по 60 секунд.
 async function backfillCandles() {
   try {
-    const exists = await pool.query(`SELECT 1 FROM "ObCandle" LIMIT 1`);
-    if (exists.rowCount > 0) return;
+    const oldest = await pool.query(`SELECT MIN("t") as ts FROM "ObCandle"`);
+    const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
+    const retentionStart = Date.now() - cfg.candleRetentionDays * 86_400_000;
+    // Если самая старая свеча достаточно старая (в пределах 1 часа от границы
+    // ретеншна) — бэкафилл не нужен, обычный цикл дозаполнит.
+    if (oldestTs > 0 && oldestTs <= retentionStart + 3600_000) return;
     console.log("[candles] бэкафилл из Binance…");
     await fetchAndStoreCandles();
     console.log("[candles] бэкафилл завершён");
