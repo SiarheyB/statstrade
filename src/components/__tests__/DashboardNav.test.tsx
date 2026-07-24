@@ -14,6 +14,11 @@ vi.mock("@/lib/i18n/provider", () => ({
   I18nProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/lib/sidebar/provider", () => ({
+  useSidebar: () => ({ collapsed: false, toggle: vi.fn() }),
+  SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 describe("DashboardNav", () => {
   beforeEach(() => {
     vi.restoreAllMocks();

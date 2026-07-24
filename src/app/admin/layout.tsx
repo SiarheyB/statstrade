@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { getAdminSession } from "@/lib/admin";
 import AdminNav from "@/components/AdminNav";
+import { SidebarProvider } from "@/lib/sidebar/provider";
 
 // Гард админ-раздела: не-админу отдаём 404 (а не 403), чтобы не раскрывать
 // существование раздела. Сессия уже гарантирована middleware (валидный JWT) —
@@ -10,9 +11,11 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   if (!session) notFound();
 
   return (
-    <div className="md:flex min-h-screen">
-      <AdminNav email={session.email} />
-      <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
-    </div>
+    <SidebarProvider>
+      <div className="md:flex min-h-screen">
+        <AdminNav email={session.email} />
+        <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
+      </div>
+    </SidebarProvider>
   );
 }

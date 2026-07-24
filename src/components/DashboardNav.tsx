@@ -25,9 +25,12 @@ import {
   LogOut,
   ShieldCheck,
   NotebookPen,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
+import { useSidebar } from "@/lib/sidebar/provider";
 import SupportButton from "@/components/SupportButton";
 import DonateButton from "@/components/DonateButton";
 
@@ -85,6 +88,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [open, setOpen] = useState(() => isSettingsRoute(pathname));
   const [newsOpen, setNewsOpen] = useState(() => isNewsRoute(pathname));
   const [serviceOpen, setServiceOpen] = useState(() => isServiceRoute(pathname));
+  const { collapsed, toggle } = useSidebar();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [supportUnread, setSupportUnread] = useState(0);
   const [errorsUnread, setErrorsUnread] = useState(0);
@@ -144,44 +148,68 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
 
   const body = (onNavigate: () => void) => (
     <>
-      <div className="flex items-center gap-2 font-semibold px-5 h-16 border-b border-border shrink-0">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
-          <BarChart3 size={18} />
-        </span>
-        TradeStats
+      <div className={clsx("flex items-center h-16 border-b border-border shrink-0", collapsed ? "justify-center px-2" : "px-3 gap-2")}>
+        {collapsed ? (
+          <button
+            onClick={toggle}
+            className="p-1.5 text-muted hover:text-fg transition"
+            aria-label="expand sidebar"
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+        ) : (
+          <>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent shrink-0">
+              <BarChart3 size={18} />
+            </span>
+            <span className="font-semibold">TradeStats</span>
+            <div className="flex-1" />
+            <button
+              onClick={toggle}
+              className="p-1.5 text-muted hover:text-fg transition shrink-0"
+              aria-label="collapse sidebar"
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          </>
+        )}
       </div>
 
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3")}>
         <button
           onClick={() => setNewsOpen((o) => !o)}
           className={clsx(
-            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            "w-full flex items-center py-2 rounded-lg text-sm transition",
+            collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
             isNewsRoute(pathname) && !newsOpen
               ? "text-accent"
               : "text-muted hover:text-fg hover:bg-surface-2",
           )}
+          title={collapsed ? t("nav.news") : undefined}
         >
           <Newspaper size={18} />
-          <span className="flex-1 text-left">{t("nav.news")}</span>
-          <ChevronDown size={15} className={clsx("transition", newsOpen && "rotate-180")} />
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.news")}</span>
+          <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", newsOpen && "rotate-180")} />
         </button>
 
         {newsOpen && (
-          <div className="ml-4 pl-3 border-l border-border space-y-1">
+          <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
             {NEWS_CHILDREN.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
                 onClick={onNavigate}
                 className={clsx(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  "flex items-center py-2 rounded-lg text-sm transition",
+                  collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                   childActive(c.href)
                     ? "bg-accent/15 text-accent"
                     : "text-muted hover:text-fg hover:bg-surface-2",
                 )}
+                title={collapsed ? t(c.key) : undefined}
               >
                 <c.icon size={16} />
-                {t(c.key)}
+                <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(c.key)}</span>
               </Link>
             ))}
           </div>
@@ -196,12 +224,14 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
               href={l.href}
               onClick={onNavigate}
               className={clsx(
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                "flex items-center py-2 rounded-lg text-sm transition",
+                collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                 active ? "bg-accent/15 text-accent" : "text-muted hover:text-fg hover:bg-surface-2",
               )}
+              title={collapsed ? t(l.key) : undefined}
             >
               <l.icon size={18} />
-              {t(l.key)}
+              <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(l.key)}</span>
             </Link>
           );
         })}
@@ -209,33 +239,37 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
         <button
           onClick={() => setServiceOpen((o) => !o)}
           className={clsx(
-            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            "w-full flex items-center py-2 rounded-lg text-sm transition",
+            collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
             isServiceRoute(pathname) && !serviceOpen
               ? "text-accent"
               : "text-muted hover:text-fg hover:bg-surface-2",
           )}
+          title={collapsed ? t("nav.service") : undefined}
         >
           <Wrench size={18} />
-          <span className="flex-1 text-left">{t("nav.service")}</span>
-          <ChevronDown size={15} className={clsx("transition", serviceOpen && "rotate-180")} />
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.service")}</span>
+          <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", serviceOpen && "rotate-180")} />
         </button>
 
         {serviceOpen && (
-          <div className="ml-4 pl-3 border-l border-border space-y-1">
+          <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
             {SERVICE_CHILDREN.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
                 onClick={onNavigate}
                 className={clsx(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  "flex items-center py-2 rounded-lg text-sm transition",
+                  collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                   childActive(c.href)
                     ? "bg-accent/15 text-accent"
                     : "text-muted hover:text-fg hover:bg-surface-2",
                 )}
+                title={collapsed ? t(c.key) : undefined}
               >
                 <c.icon size={16} />
-                {t(c.key)}
+                <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(c.key)}</span>
               </Link>
             ))}
           </div>
@@ -244,46 +278,53 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
         <button
           onClick={() => setOpen((o) => !o)}
           className={clsx(
-            "w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+            "w-full flex items-center py-2 rounded-lg text-sm transition",
+            collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
             isSettingsRoute(pathname) && !open
               ? "text-accent"
               : "text-muted hover:text-fg hover:bg-surface-2",
           )}
+          title={collapsed ? t("nav.settings") : undefined}
         >
           <Settings size={18} />
-          <span className="flex-1 text-left">{t("nav.settings")}</span>
-          <ChevronDown size={15} className={clsx("transition", open && "rotate-180")} />
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.settings")}</span>
+          <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", open && "rotate-180")} />
         </button>
 
         {open && (
-          <div className="ml-4 pl-3 border-l border-border space-y-1">
+          <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
             {SETTINGS_CHILDREN.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
                 onClick={onNavigate}
                 className={clsx(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                  "flex items-center py-2 rounded-lg text-sm transition",
+                  collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                   childActive(c.href)
                     ? "bg-accent/15 text-accent"
                     : "text-muted hover:text-fg hover:bg-surface-2",
                 )}
+                title={collapsed ? t(c.key) : undefined}
               >
                 <c.icon size={16} />
-                {t(c.key)}
+                <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(c.key)}</span>
               </Link>
             ))}
           </div>
         )}
       </nav>
 
-      <div className="p-3 border-t border-border shrink-0">
-        <div className="px-3 py-2 text-xs text-faint truncate">{email}</div>
+      <div className={clsx("border-t border-border shrink-0", collapsed ? "p-2" : "p-3")}>
+        <div className={clsx("text-xs text-faint truncate", collapsed ? "px-1.5 py-1" : "px-3 py-2")}>
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{email}</span>
+        </div>
         {isAdmin && (
           <Link
             href="/admin"
             onClick={onNavigate}
-            className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
+            className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+            title={collapsed ? t("nav.admin") : undefined}
           >
             <span className="relative inline-flex">
               <ShieldCheck size={18} />
@@ -293,20 +334,21 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
                 </span>
               )}
             </span>
-            {t("nav.admin")}
+            <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("nav.admin")}</span>
           </Link>
         )}
-        <SupportButton onOpen={onNavigate} />
-        <DonateButton onOpen={onNavigate} />
+        <SupportButton onOpen={onNavigate} collapsed={collapsed} />
+        <DonateButton onOpen={onNavigate} collapsed={collapsed} />
         <button
           onClick={() => {
             onNavigate();
             logout();
           }}
-          className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-loss hover:bg-surface-2 transition"
+          className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-loss hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+          title={collapsed ? t("nav.logout") : undefined}
         >
           <LogOut size={18} />
-          {t("nav.logout")}
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("nav.logout")}</span>
         </button>
       </div>
     </>
@@ -332,7 +374,10 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
       </div>
 
       {/* Desktop sidebar */}
-      <aside className="hidden md:flex w-60 shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0">
+      <aside className={clsx(
+          "hidden md:flex shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0 transition-[width] duration-300 ease-premium overflow-hidden",
+          collapsed ? "w-14" : "w-60",
+        )}>
         {body(() => {})}
       </aside>
 

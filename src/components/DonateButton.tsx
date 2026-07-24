@@ -5,12 +5,13 @@ import { createPortal } from "react-dom";
 import Image from "next/image";
 import { HeartHandshake, X, Copy, Check } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import clsx from "clsx";
 
 type Wallet = { id: string; network: string; coin: string; address: string; qr: string };
 
 // Кнопка «Донат» в меню + модалка со списком кошельков (сеть, адрес, QR).
 // Список грузится лениво при открытии — обычно юзер её не открывает никогда.
-export default function DonateButton({ onOpen }: { onOpen?: () => void }) {
+export default function DonateButton({ onOpen, collapsed }: { onOpen?: () => void; collapsed?: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [wallets, setWallets] = useState<Wallet[] | null>(null);
@@ -44,10 +45,11 @@ export default function DonateButton({ onOpen }: { onOpen?: () => void }) {
     <>
       <button
         onClick={openModal}
-        className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
+        className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+        title={collapsed ? t("nav.donate") : undefined}
       >
         <HeartHandshake size={18} />
-        {t("nav.donate")}
+        <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("nav.donate")}</span>
       </button>
 
       {open && createPortal(

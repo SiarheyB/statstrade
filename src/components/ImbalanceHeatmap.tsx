@@ -127,8 +127,8 @@ export default function ImbalanceHeatmap({
           {data.alerts.length} {t("of.alerts") || "alerts"}
         </div>
       )}
-      <div className="min-h-[20px] min-w-[300px] w-full h-full">
-        <ResponsiveContainer width="100%" height="100%" min-width="300px" min-height="20px">
+      <div className="w-full" style={{ height: 160 }}>
+        <ResponsiveContainer width="100%" height={160}>
           <BarChart
             data={chartData}
             margin={{ top: 4, right: 4, left: 4, bottom: 0 }}

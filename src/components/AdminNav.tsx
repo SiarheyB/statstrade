@@ -3,9 +3,10 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
+import { useSidebar } from "@/lib/sidebar/provider";
 
 // Навигация админ-панели. Раздел отделён от пользовательского дашборда: своя
 // шапка, доступ только администраторам (см. admin/layout.tsx).
@@ -36,6 +37,7 @@ const POLL_MS = 30_000;
 export default function AdminNav({ email }: { email: string }) {
   const pathname = usePathname();
   const { t } = useI18n();
+  const { collapsed, toggle } = useSidebar();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [supportUnread, setSupportUnread] = useState(0);
@@ -82,14 +84,34 @@ export default function AdminNav({ email }: { email: string }) {
 
   const body = (onNavigate: () => void) => (
     <>
-      <div className="flex items-center gap-2 font-semibold px-5 h-16 border-b border-border shrink-0">
-        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
-          <ShieldCheck size={18} />
-        </span>
-        {t("admin.title")}
+      <div className={clsx("flex items-center h-16 border-b border-border shrink-0", collapsed ? "justify-center px-2" : "px-3 gap-2")}>
+        {collapsed ? (
+          <button
+            onClick={toggle}
+            className="p-1.5 text-muted hover:text-fg transition"
+            aria-label="expand sidebar"
+          >
+            <PanelLeftOpen size={18} />
+          </button>
+        ) : (
+          <>
+            <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent shrink-0">
+              <ShieldCheck size={18} />
+            </span>
+            <span className="font-semibold">{t("admin.title")}</span>
+            <div className="flex-1" />
+            <button
+              onClick={toggle}
+              className="p-1.5 text-muted hover:text-fg transition shrink-0"
+              aria-label="collapse sidebar"
+            >
+              <PanelLeftClose size={16} />
+            </button>
+          </>
+        )}
       </div>
 
-      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+      <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3")}>
         {LINKS.map((l) => {
           if (hasChildren(l)) {
             const item = l as { children: typeof LINKS; key: string; icon: any };
@@ -98,14 +120,17 @@ export default function AdminNav({ email }: { email: string }) {
                 <button
                   type="button"
                   onClick={() => toggleGroup(item.key)}
-                  className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition"
+                  className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+                  title={collapsed ? t(item.key) : undefined}
                 >
                   <item.icon size={18} />
-                  <span className="flex-1 text-left">{t(item.key)}</span>
-                  {isGroupOpen(item.key) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t(item.key)}</span>
+                  <span className={clsx("transition-opacity duration-300 shrink-0", collapsed && "opacity-0")}>
+                    {isGroupOpen(item.key) ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                  </span>
                 </button>
                 {isGroupOpen(item.key) && (
-                  <div className="ml-4 mt-1 space-y-1 border-l border-border pl-2">
+                  <div className={clsx("mt-1 space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-2 border-l border-border")}>
                     {item.children.map((c) => {
                       const link = c as { href: string; key: string; icon: any; exact?: boolean };
                       return (
@@ -114,14 +139,16 @@ export default function AdminNav({ email }: { email: string }) {
                           href={link.href}
                           onClick={onNavigate}
                           className={clsx(
-                            "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                            "flex items-center py-2 rounded-lg text-sm transition",
+                            collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                             isActive(link.href, link.exact)
                               ? "bg-accent/15 text-accent"
                               : "text-muted hover:text-fg hover:bg-surface-2",
                           )}
+                          title={collapsed ? t(link.key) : undefined}
                         >
                           <link.icon size={16} />
-                          {t(link.key)}
+                          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(link.key)}</span>
                         </Link>
                       );
                     })}
@@ -139,11 +166,13 @@ export default function AdminNav({ email }: { email: string }) {
               href={link.href}
               onClick={onNavigate}
               className={clsx(
-                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition",
+                "flex items-center py-2 rounded-lg text-sm transition",
+                collapsed ? "px-1.5 gap-0" : "px-3 gap-3",
                 isActive(link.href, link.exact)
                   ? "bg-accent/15 text-accent"
                   : "text-muted hover:text-fg hover:bg-surface-2",
               )}
+              title={collapsed ? t(l.key) : undefined}
             >
               <span className="relative inline-flex">
                 <l.icon size={18} />
@@ -162,21 +191,24 @@ export default function AdminNav({ email }: { email: string }) {
                   );
                 })()}
               </span>
-              {t(l.key)}
+              <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t(l.key)}</span>
             </Link>
           );
         })}
       </nav>
 
-      <div className="p-3 border-t border-border shrink-0">
-        <div className="px-3 py-2 text-xs text-faint truncate">{email}</div>
+      <div className={clsx("border-t border-border shrink-0", collapsed ? "p-2" : "p-3")}>
+        <div className={clsx("text-xs text-faint truncate", collapsed ? "px-1.5 py-1" : "px-3 py-2")}>
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{email}</span>
+        </div>
         <Link
           href="/dashboard"
           onClick={onNavigate}
-          className="flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition"
+          className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+          title={collapsed ? t("admin.backToApp") : undefined}
         >
           <ArrowLeft size={18} />
-          {t("admin.backToApp")}
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("admin.backToApp")}</span>
         </Link>
       </div>
     </>
@@ -200,7 +232,10 @@ export default function AdminNav({ email }: { email: string }) {
         </span>
       </div>
 
-      <aside className="hidden md:flex w-60 shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0">
+      <aside className={clsx(
+          "hidden md:flex shrink-0 border-r border-border glass-panel flex-col h-screen sticky top-0 transition-[width] duration-300 ease-premium overflow-hidden",
+          collapsed ? "w-14" : "w-60",
+        )}>
         {body(() => {})}
       </aside>
 

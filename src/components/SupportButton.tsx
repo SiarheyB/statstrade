@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { LifeBuoy, X, Send, Plus, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import clsx from "clsx";
 
 type Ticket = {
   id: string;
@@ -19,7 +20,7 @@ const POLL_MS = 30_000;
 // Кнопка «Поддержка» в меню + модалка с тикетами: список обращений → тред
 // выбранного тикета. Один вопрос = один тикет; закрытый тикет read-only,
 // новый вопрос — кнопка «Новое обращение».
-export default function SupportButton({ onOpen }: { onOpen?: () => void }) {
+export default function SupportButton({ onOpen, collapsed }: { onOpen?: () => void; collapsed?: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [hasUnread, setHasUnread] = useState(false);
@@ -155,13 +156,14 @@ export default function SupportButton({ onOpen }: { onOpen?: () => void }) {
     <>
       <button
         onClick={openModal}
-        className="relative flex w-full items-center gap-3 px-3 py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition"
+        className={clsx("relative flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-accent hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+        title={collapsed ? t("nav.support") : undefined}
       >
         <span className="relative inline-flex">
           <LifeBuoy size={18} />
           {hasUnread && <span className="absolute -top-1 -right-1 h-2 w-2 rounded-full bg-accent" />}
         </span>
-        {t("nav.support")}
+        <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("nav.support")}</span>
       </button>
 
       {open && createPortal(

@@ -8,6 +8,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts } from "@/lib/timezone";
 import type { AbsorptionSignal } from "@/lib/orderflow";
@@ -58,20 +59,18 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
 
   return (
     <div className="card p-3">
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-muted">
-            {t("of.absorptionTitle") || "Absorption Patterns"}
-          </span>
-          {signals.length > 0 && (
-            <span className="text-[11px] text-faint">
-              {t("of.found", { n: signals.length })}
-            </span>
-          )}
-        </div>
-        <span className="text-[11px] text-faint">
-          {t("of.hintAbsorption") || "Narrow range + high volume + near-zero delta"}
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs font-medium text-muted">
+          {t("of.absorptionTitle") || "Absorption Patterns"}
         </span>
+        <span title={t("of.hintAbsorption") || "Absorption: narrow range + high volume + near-zero delta. Signals accumulation/distribution."} className="inline-flex cursor-help">
+          <HelpCircle size={12} className="text-faint shrink-0" />
+        </span>
+        {signals.length > 0 && (
+          <span className="text-[11px] text-faint">
+            {t("of.found", { n: signals.length })}
+          </span>
+        )}
       </div>
 
       {loading && (
@@ -93,28 +92,36 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
           <table className="w-full text-xs tabular-nums">
             <thead>
               <tr className="text-faint text-left border-b border-border/50">
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none" onClick={() => toggleSort("t")}>
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none" onClick={() => toggleSort("t")}
+                    title={t("of.thTimeHint") || "Candle timestamp when the absorption pattern started"}>
                   {t("of.thTime")}{arrow("t")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("strength")}>
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("strength")}
+                    title={t("of.thStrengthHint") || "Pattern strength: 1 (weak) to 5 (very strong). Based on volume multiplier, delta purity, range tightness, and duration."}>
                   {t("of.thStrength") || "Str"}{arrow("strength")}
                 </th>
-                <th className="font-medium py-1 pr-3 text-right">
+                <th className="font-medium py-1 pr-3 text-right"
+                    title={t("of.thPriceHint") || "Mid price at the start of the pattern"}>
                   {t("of.thPrice") || "Price"}
                 </th>
-                <th className="font-medium py-1 pr-3 text-right">
+                <th className="font-medium py-1 pr-3 text-right"
+                    title={t("of.thRangeHint") || "Price range (high - low) of pattern candles. A narrow range is typical for absorption."}>
                   {t("of.thRange") || "Range"}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("volumeMultiplier")}>
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("volumeMultiplier")}
+                    title={t("of.thVolMultHint") || "How many times higher the volume is compared to the average. 2× means double the typical volume — the higher, the stronger the signal."}>
                   {t("of.thVolMult") || "Vol ×"}{arrow("volumeMultiplier")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("deltaRatio")}>
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("deltaRatio")}
+                    title={t("of.thDeltaRatioHint") || "|Buy - Sell| / (Buy + Sell) — how balanced buying and selling are. 0% = perfectly balanced (strong absorption), 15% = slight imbalance."}>
                   {t("of.thDeltaRatio") || "|Δ|/V"}{arrow("deltaRatio")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("duration")}>
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("duration")}
+                    title={t("of.thDurationHint") || "How many consecutive candles the pattern spans. More candles = longer accumulation/distribution period."}>
                   {t("of.thDuration") || "Dur"}{arrow("duration")}
                 </th>
-                <th className="font-medium py-1 text-right">
+                <th className="font-medium py-1 text-right"
+                    title={t("of.thLabelHint") || "Absorption (strength 1-3) = moderate signal. Strong Absorption (strength 4-5) = high-confidence accumulation/distribution."}>
                   {t("of.thLabel") || "Label"}
                 </th>
               </tr>

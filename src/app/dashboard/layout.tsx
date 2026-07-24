@@ -3,6 +3,7 @@ import { getSession } from "@/lib/auth";
 import { isAdminSession } from "@/lib/admin";
 import DashboardNav from "@/components/DashboardNav";
 import SyncProvider from "@/components/SyncProvider";
+import { SidebarProvider } from "@/lib/sidebar/provider";
 
 export default async function DashboardLayout({
   children,
@@ -14,10 +15,12 @@ export default async function DashboardLayout({
 
   return (
     <SyncProvider>
-      <div className="md:flex min-h-screen">
-        <DashboardNav email={session.email} isAdmin={isAdminSession(session)} />
-        <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
-      </div>
+      <SidebarProvider>
+        <div className="md:flex min-h-screen">
+          <DashboardNav email={session.email} isAdmin={isAdminSession(session)} />
+          <main className="flex-1 min-w-0 overflow-x-hidden">{children}</main>
+        </div>
+      </SidebarProvider>
     </SyncProvider>
   );
 }

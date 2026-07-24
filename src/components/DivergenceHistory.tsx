@@ -157,34 +157,37 @@ export default function DivergenceHistory({
           <HelpCircle size={12} className="text-faint shrink-0" />
         </span>
       </div>
-      <div className="text-[11px] text-faint mb-2">
-        {t("of.divergenceHint") || "Divergence between price and delta/CVD"}
-      </div>
-
-      <div className="min-h-[20px] min-w-[300px] w-full h-full">
+      <div className="w-full">
         <div className="overflow-x-auto">
           <table className="w-full text-xs tabular-nums">
             <thead>
               <tr className="text-faint text-left border-b border-border/50">
-                <th className={thClass} onClick={() => toggleSort("t")}>
+                <th className={thClass} onClick={() => toggleSort("t")}
+                    title={t("of.thTimeHint") || "Candle timestamp when the divergence was detected"}>
                   {t("of.thTime")} <SortIcon k="t" />
                 </th>
-                <th className={thClass} onClick={() => toggleSort("type")}>
+                <th className={thClass} onClick={() => toggleSort("type")}
+                    title={t("of.thTypeHint") || "Divergence type: Regular Bearish, Regular Bullish, Hidden Bearish, Hidden Bullish"}>
                   {t("of.thType") || "Type"} <SortIcon k="type" />
                 </th>
-                <th className={thRight} onClick={() => toggleSort("strength")}>
+                <th className={thRight} onClick={() => toggleSort("strength")}
+                    title={t("of.thStrengthHint") || "Divergence strength: 1 (weak) to 5 (very strong). Based on the deviation between price and delta."}>
                   {t("of.thStrength") || "Str"} <SortIcon k="strength" />
                 </th>
-                <th className={thRight}>
+                <th className={thRight}
+                    title={t("of.thPriceHint") || "Price range: the peak price and trough price that define the divergence structure"}>
                   {t("of.thPrice")}
                 </th>
-                <th className={thRight}>
+                <th className={thRight}
+                    title={t("of.thDeltaHint") || "Delta values at the peak and trough points. Delta = buy volume - sell volume. A divergence occurs when price and delta move in opposite directions."}>
                   {t("of.thDelta") || "Δ"}
                 </th>
-                <th className={thRight} onClick={() => toggleSort("bars")}>
+                <th className={thRight} onClick={() => toggleSort("bars")}
+                    title={t("of.thBarsHint") || "How many candles the divergence pattern spans from start to confirmation"}>
                   {t("of.thBars") || "Bars"} <SortIcon k="bars" />
                 </th>
-                <th className={thClass}>
+                <th className={thClass}
+                    title={t("of.thStatusHint") || "Confirmed = the divergence has resolved (price moved in the expected direction). Pending = divergence detected but not yet confirmed."}>
                   {t("of.thStatus") || "Status"}
                 </th>
               </tr>

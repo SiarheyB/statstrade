@@ -209,8 +209,8 @@ function VolumeProfileChart({ data }: { data: VolumeProfile }) {
       </div>
 
       {/* Horizontal bar chart: price on Y, volume on X */}
-      <div className="min-h-[64px] min-w-[300px] w-full h-full">
-        <ResponsiveContainer width="100%" height="100%">
+      <div className="w-full">
+        <ResponsiveContainer width="100%" height={300}>
           <BarChart
             data={chartData}
             layout="vertical"

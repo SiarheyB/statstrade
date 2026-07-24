@@ -12,6 +12,11 @@ vi.mock('@/lib/i18n/provider', () => ({
   }),
 }));
 
+vi.mock('@/lib/sidebar/provider', () => ({
+  useSidebar: () => ({ collapsed: false, toggle: vi.fn() }),
+  SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 // Mock next/link and next/navigation
 vi.mock('next/link', () => ({
   default: ({ href, children, onClick, className }: any) => (
