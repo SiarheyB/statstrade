@@ -217,6 +217,9 @@ const en: Dict = {
   "liq.legendLow": "Less",
   "liq.legendHigh": "More",
   "liq.disclaimer": "Estimate from price/volume and assumed leverage tiers (like any liquidation heatmap) — not exact positions.",
+  "liq.favAdd": "Add to favourites",
+  "liq.favRemove": "Remove from favourites",
+  "liq.favEmpty": "No favourites yet",
 
   // calendar
   "cal.title": "Calendar",
@@ -1223,6 +1226,9 @@ const ru: Dict = {
   "liq.legendLow": "Меньше",
   "liq.legendHigh": "Больше",
   "liq.disclaimer": "Оценка по цене/объёму и предполагаемым плечам (как любая карта ликвидаций) — не точные позиции.",
+  "liq.favAdd": "Добавить в избранное",
+  "liq.favRemove": "Убрать из избранного",
+  "liq.favEmpty": "Нет избранных тикеров",
 
   // calendar
   "cal.title": "Календарь",

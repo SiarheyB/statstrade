@@ -108,6 +108,8 @@ export default function LiqMapPage() {
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [favorites, setFavorites] = useState<string[]>([]);
+  const [favLoading, setFavLoading] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ x0: 0, x1: 1, y0: 0, y1: 1 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -127,6 +129,47 @@ export default function LiqMapPage() {
       }
     })();
   }, []);
+
+  // Fetch favourites when exchange changes.
+  useEffect(() => {
+    (async () => {
+      setFavLoading(true);
+      try {
+        const res = await fetch(`/api/liqmap/favorites?exchange=${exchange}`);
+        if (res.ok) {
+          const d = await res.json();
+          setFavorites(Array.isArray(d.symbols) ? d.symbols : []);
+        }
+      } catch {
+        // silently ignore
+      } finally {
+        setFavLoading(false);
+      }
+    })();
+  }, [exchange]);
+
+  const toggleFavorite = useCallback(async (sym: string) => {
+    const isFav = favorites.includes(sym);
+    try {
+      if (isFav) {
+        await fetch("/api/liqmap/favorites", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exchange, symbol: sym }),
+        });
+        setFavorites((prev) => prev.filter((s) => s !== sym));
+      } else {
+        await fetch("/api/liqmap/favorites", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ exchange, symbol: sym }),
+        });
+        setFavorites((prev) => [sym, ...prev]);
+      }
+    } catch {
+      // silently ignore
+    }
+  }, [exchange, favorites]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -536,6 +579,11 @@ export default function LiqMapPage() {
           hideAll
           placeholder={t("trades.searchSymbol")}
           onChange={(v) => setSymbol(v)}
+          favorites={favorites}
+          onToggleFavorite={toggleFavorite}
+          emptyText={t("liq.favEmpty")}
+          favAddLabel={t("liq.favAdd")}
+          favRemoveLabel={t("liq.favRemove")}
         />
         <select
           value={tf}

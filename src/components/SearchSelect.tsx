@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronDown, Search } from "lucide-react";
+import { ChevronDown, Search, Star } from "lucide-react";
+import clsx from "clsx";
 
 // A searchable dropdown: shows the current value, opens a filterable list (type
 // to search, scrolls after ~10 rows). Used for long option lists like symbols.
@@ -15,6 +16,11 @@ export default function SearchSelect({
   renderLabel = (v) => v,
   className = "",
   hideAll = false,
+  favorites,
+  onToggleFavorite,
+  emptyText,
+  favAddLabel,
+  favRemoveLabel,
 }: {
   value: string;
   options: string[];
@@ -25,6 +31,11 @@ export default function SearchSelect({
   renderLabel?: (v: string) => string;
   className?: string;
   hideAll?: boolean;
+  favorites?: string[];
+  onToggleFavorite?: (symbol: string) => void;
+  emptyText?: string;
+  favAddLabel?: string;
+  favRemoveLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -42,6 +53,13 @@ export default function SearchSelect({
   const filtered = q
     ? options.filter((o) => renderLabel(o).toLowerCase().includes(q) || o.toLowerCase().includes(q))
     : options;
+  // Sort favourites to the top (preserving original order within each group).
+  const favSet = new Set(favorites ?? []);
+  const sorted = [...filtered].sort((a, b) => {
+    const af = favSet.has(a) ? 0 : 1;
+    const bf = favSet.has(b) ? 0 : 1;
+    return af - bf;
+  });
   const display = value === allValue ? allLabel : renderLabel(value);
 
   function pick(v: string) {
@@ -78,13 +96,28 @@ export default function SearchSelect({
                 {allLabel}
               </Option>
             )}
-            {filtered.map((o) => (
-              <Option key={o} active={value === o} onClick={() => pick(o)}>
-                {renderLabel(o)}
-              </Option>
-            ))}
-            {filtered.length === 0 && (
-              <div className="px-3 py-2 text-xs text-faint">—</div>
+            {sorted.map((o) => {
+              const isFav = favSet.has(o);
+              return (
+                <div key={o} className="flex items-center group">
+                  <Option active={value === o} onClick={() => pick(o)} className="flex-1 min-w-0">
+                    <span className="truncate">{renderLabel(o)}</span>
+                  </Option>
+                  {onToggleFavorite && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onToggleFavorite(o); }}
+                      className={clsx("shrink-0 px-2 py-1.5 hover:text-accent transition", isFav ? "text-accent" : "text-faint opacity-0 group-hover:opacity-100")}
+                      title={isFav ? favRemoveLabel : favAddLabel}
+                    >
+                      <Star size={13} className={isFav ? "fill-accent text-accent" : ""} />
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+            {sorted.length === 0 && (
+              <div className="px-3 py-2 text-xs text-faint">{emptyText ?? "—"}</div>
             )}
           </div>
         </div>
@@ -97,16 +130,18 @@ function Option({
   active,
   onClick,
   children,
+  className = "",
 }: {
   active: boolean;
   onClick: () => void;
   children: React.ReactNode;
+  className?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`block w-full text-left px-3 py-1.5 text-sm hover:bg-surface-2 ${
+      className={`block w-full text-left px-3 py-1.5 text-sm hover:bg-surface-2 ${className} ${
         active ? "text-accent" : "text-fg"
       }`}
     >
