@@ -32,13 +32,13 @@ export type OfCandle = { t: number; o: number; h: number; l: number; c: number }
 // вручную из админки) и пишет только крупные стены, поэтому широкое окно дёшево.
 // Ограничено лимитом Binance klines (1500 баров за запрос).
 export const CANDLES_IN_WINDOW: Record<string, number> = {
-  "5m": 400,
-  "15m": 400,
-  "1h": 800,
-  "4h": 800,
-  "12h": 800,
-  "1d": 365,
-  "1w": 200,
+  "5m": 5000,
+  "15m": 5000,
+  "1h": 5000,
+  "4h": 5000,
+  "12h": 5000,
+  "1d": 5000,
+  "1w": 5000,
 };
 export const DEFAULT_CANDLES = 300;
 
