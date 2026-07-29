@@ -252,7 +252,6 @@ export default function EconCalPage() {
                     <span className={clsx("h-2 w-2 rounded-full shrink-0", IMPACT_DOT[e.impact])} title={e.impact} />
                     <span className="flex-1 min-w-0 truncate">{e.title}</span>
                     <div className="hidden sm:flex items-center gap-3 text-xs tabular-nums shrink-0">
-                      <Val label={t("econcal.actual")} v={e.actual} highlight />
                       <Val label={t("econcal.forecast")} v={e.forecast} />
                       <Val label={t("econcal.previous")} v={e.previous} />
                     </div>
