@@ -38,17 +38,33 @@ function barColor(r: number): string {
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────
 
-function ImbalanceTooltip({ active, payload }: { active?: boolean; payload?: { payload: { time: number; ratio: number } }[] }) {
+function ImbalanceTooltip({
+  t,
+  active,
+  payload,
+}: {
+  t: (k: string, p?: Record<string, string | number>) => string;
+  active?: boolean;
+  payload?: { payload: { time: number; ratio: number } }[];
+}) {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0].payload;
-  const side = d.ratio < -0.1 ? "Bid dominance" : d.ratio > 0.1 ? "Ask dominance" : "Neutral";
+  const isBid = d.ratio < -0.1;
+  const isAsk = d.ratio > 0.1;
+  const sideKey = isBid ? "of.imbalanceBidDominance" : isAsk ? "of.imbalanceAskDominance" : "of.imbalanceNeutral";
+  const actionKey = isBid ? "of.imbalanceBidAction" : isAsk ? "of.imbalanceAskAction" : "of.imbalanceNeutralAction";
   return (
-    <div className="rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs shadow-lg">
+    <div className="rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs shadow-lg max-w-[260px]">
       <div className="text-faint">{fmtTime(d.time)}</div>
       <div className={d.ratio < 0 ? "text-profit" : d.ratio > 0 ? "text-loss" : "text-muted"}>
-        Ratio: {d.ratio.toFixed(3)}
+        {t("of.imbalanceRatio", { ratio: d.ratio.toFixed(3) })}
       </div>
-      <div className="text-faint mt-0.5">{side}</div>
+      <div className="text-faint mt-0.5">{t(sideKey)}</div>
+      {isBid || isAsk ? (
+        <div className="text-faint/70 mt-1.5 pt-1.5 border-t border-border/20 leading-tight">
+          {t(actionKey)}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -72,7 +88,7 @@ export default function ImbalanceHeatmap({
       <div className="card p-3 mt-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
-          <HelpCircle size={12} className="text-faint shrink-0" />
+          <span title={t("of.imbalanceHint")} className="inline-flex cursor-help"><HelpCircle size={12} className="text-faint shrink-0" /></span>
         </div>
         <div className="flex items-center justify-center h-16 text-sm text-faint">
           {t("common.loading")}
@@ -87,7 +103,7 @@ export default function ImbalanceHeatmap({
       <div className="card p-3 mt-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
-          <HelpCircle size={12} className="text-faint shrink-0" />
+          <span title={t("of.imbalanceHint")} className="inline-flex cursor-help"><HelpCircle size={12} className="text-faint shrink-0" /></span>
         </div>
         <div className="text-sm text-loss">
           {error}
@@ -102,7 +118,7 @@ export default function ImbalanceHeatmap({
       <div className="card p-3 mt-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
-          <HelpCircle size={12} className="text-faint shrink-0" />
+          <span title={t("of.imbalanceHint")} className="inline-flex cursor-help"><HelpCircle size={12} className="text-faint shrink-0" /></span>
         </div>
         <div className="text-xs text-faint">
           {t("of.noImbalance") || "No imbalance data"}
@@ -120,7 +136,7 @@ export default function ImbalanceHeatmap({
     <div className="card p-3 mt-3">
       <div className="text-xs font-medium text-muted mb-1 inline-flex items-center gap-1.5">
         {t("of.imbalanceTitle") || "Bid/Ask Imbalance"}
-        <HelpCircle size={12} className="text-faint shrink-0" />
+        <span title={t("of.imbalanceHint")} className="inline-flex cursor-help"><HelpCircle size={12} className="text-faint shrink-0" /></span>
       </div>
       {data && data.alerts && data.alerts.length > 0 && (
         <div className="text-xs text-muted mb-2">
@@ -151,7 +167,7 @@ export default function ImbalanceHeatmap({
               stroke={GRID}
               width={30}
             />
-            <Tooltip content={<ImbalanceTooltip />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
+            <Tooltip content={<ImbalanceTooltip t={t} />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
             <ReferenceLine y={0} stroke={ZERO_LINE} strokeWidth={1} />
             <Bar dataKey="ratio" isAnimationActive={false} minPointSize={1}>
               {chartData.map((entry, idx) => (
