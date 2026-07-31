@@ -197,8 +197,9 @@ describe("computeDivergence", () => {
     expect(rbu[0].label).toBe("Regular Bullish");
   });
 
-  it("detects Hidden Bullish Divergence (price LH, delta HH)", async () => {
-    // Цена: 110 → 115 → 112 → ... → 108 (peaks at 1 and 6: LH)
+  it("detects Hidden Bearish Divergence (price LH, delta HH)", async () => {
+    // Цена: 110 → 115 → 112 → ... → 108 (peaks at 1 and 6: LH — ниже
+    // предыдущего пика, но тренд остаётся нисходящим => hidden bearish, не bullish)
     // Дельта: 5 → 21 (HH)
     const highs = [110, 115, 112, 109, 106, 103, 108, 105, 102, 99];
     const lows = [108, 113, 110, 107, 104, 101, 106, 103, 100, 97];
@@ -211,13 +212,17 @@ describe("computeDivergence", () => {
       maxDivergenceBars: 20,
     });
     expect(result).not.toBeNull();
-    const hb = result!.signals.filter((s) => s.type === "hidden_bullish");
+    const hb = result!.signals.filter((s) => s.type === "hidden_bearish");
     expect(hb.length).toBeGreaterThanOrEqual(1);
-    expect(hb[0].label).toBe("Hidden Bullish");
+    expect(hb[0].label).toBe("Hidden Bearish");
+    // Маркер обязан анкориться к тому же экстремуму, что задаёт t (второй,
+    // более поздний пик) — иначе на графике он "улетает" от реальной свечи.
+    expect(hb[0].pricePeak).toBe(highs[6]);
   });
 
-  it("detects Hidden Bearish Divergence (price HL, delta LL)", async () => {
-    // Цена: troughs at 1 (85) and 6 (95) → HL
+  it("detects Hidden Bullish Divergence (price HL, delta LL)", async () => {
+    // Цена: troughs at 1 (85) and 6 (95) → HL — выше предыдущего минимума,
+    // тренд остаётся восходящим => hidden bullish, не bearish
     // Дельта: -8 at trough 1, -12 at trough 6 → LL
     const highs = [92, 87, 90, 93, 96, 99, 97, 100, 103, 106];
     const lows = [90, 85, 88, 91, 94, 97, 95, 98, 101, 104];
@@ -230,9 +235,10 @@ describe("computeDivergence", () => {
       maxDivergenceBars: 20,
     });
     expect(result).not.toBeNull();
-    const hbe = result!.signals.filter((s) => s.type === "hidden_bearish");
+    const hbe = result!.signals.filter((s) => s.type === "hidden_bullish");
     expect(hbe.length).toBeGreaterThanOrEqual(1);
-    expect(hbe[0].label).toBe("Hidden Bearish");
+    expect(hbe[0].label).toBe("Hidden Bullish");
+    expect(hbe[0].priceTrough).toBe(lows[6]);
   });
 
   it("filters by minStrength = 3", async () => {

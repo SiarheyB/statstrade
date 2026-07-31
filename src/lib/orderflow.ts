@@ -941,22 +941,27 @@ export async function computeDivergence(
       });
     }
 
-    // Hidden Bullish: цена делает LH, дельта делает HH
+    // Hidden Bearish: цена делает LH (продолжение нисходящего тренда),
+    // дельта делает HH. Экстремум "i2" — второй, более поздний пик, и он же
+    // задаёт t (время маркера) — pricePeak ДОЛЖЕН совпадать с i2, иначе
+    // отрисовка (DivergenceOverlay: `isBearish → sy(sig.pricePeak)`) берёт
+    // X от свечи i2, а Y — от цены совсем другой свечи (i1, до 30 баров
+    // назад), и маркер "улетает" в произвольную точку графика.
     if (priceChange < 0 && deltaChange > 0) {
       const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
       const ci = startIdx + i2;
       signals.push({
         id: `hb-${ci}-${candles[ci].t}`,
-        type: "hidden_bullish",
+        type: "hidden_bearish",
         strength,
         t: candles[ci].t,
-        pricePeak: candleHigh[i1],
-        priceTrough: candleHigh[i2],
+        pricePeak: candleHigh[i2],
+        priceTrough: candleHigh[i1],
         deltaPeak: candleDelta[i1],
         deltaTrough: candleDelta[i2],
         bars,
         confirmed: false,
-        label: "Hidden Bullish",
+        label: "Hidden Bearish",
       });
     }
   }
@@ -990,13 +995,17 @@ export async function computeDivergence(
       });
     }
 
-    // Hidden Bearish: цена делает HL, дельта делает LL
+    // Hidden Bullish: цена делает HL (продолжение восходящего тренда),
+    // дельта делает LL. Здесь poля уже согласованы с t (i2), т.к. рендер
+    // для bullish берёт sy(sig.priceTrough) = candleLow[i2] — менять не нужно,
+    // только исправляем тип/лейбл (был перепутан с hidden_bearish, см. блок
+    // на peaks выше).
     if (priceChange > 0 && deltaChange < 0) {
       const strength = Math.min(5, Math.max(1, Math.floor(bars / 3) + 1));
       const ci = startIdx + i2;
       signals.push({
         id: `hbe-${ci}-${candles[ci].t}`,
-        type: "hidden_bearish",
+        type: "hidden_bullish",
         strength,
         t: candles[ci].t,
         pricePeak: candleLow[i1],
@@ -1005,7 +1014,7 @@ export async function computeDivergence(
         deltaTrough: candleDelta[i2],
         bars,
         confirmed: false,
-        label: "Hidden Bearish",
+        label: "Hidden Bullish",
       });
     }
   }
