@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { forexAccessError } from "@/lib/forexAccess";
 import { prisma } from "@/lib/db";
 import { candleActivity } from "@/lib/forexActivity";
 
@@ -18,6 +19,8 @@ const cache = new Map<string, { at: number; data: unknown }>();
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const symbol = url.searchParams.get("symbol") ?? "EUR/USD";

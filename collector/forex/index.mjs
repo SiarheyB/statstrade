@@ -272,6 +272,7 @@ async function fetchAndStoreBatch(interval, outputsize) {
 
 // На старте: полная история по всем таймфреймам (батчами по символам).
 async function backfillAll() {
+  if (!forexEnabled) return;
   if (!cfg.twelveDataApiKey) {
     console.log("[fx/td] TWELVEDATA_API_KEY не задан — бэкафилл истории пропущен, ждём накопления тиков из Finnhub");
     backfillDone = true;
@@ -304,7 +305,7 @@ async function backfillAll() {
 // Периодический fallback-догон: подстраховка, если WS оборвался/пропустил тики.
 // Батч по символам, редкий (fallbackIntervalSec) — не расходует лимит впустую.
 async function fallbackCatchUp() {
-  if (!cfg.twelveDataApiKey) return;
+  if (!forexEnabled || !cfg.twelveDataApiKey) return;
   for (const interval of CANDLE_INTERVALS) {
     const outputsize = interval === "5m" || interval === "15m" ? 20 : 5;
     await fetchAndStoreBatch(interval, outputsize);
@@ -315,7 +316,7 @@ async function fallbackCatchUp() {
 // Бэкафилл истории для ОДНОГО символа (добавлен из админки после старта) —
 // не батчим с остальными, чтобы не пересчитывать общий cfg.symbols на лету.
 async function backfillOneSymbol(symbol) {
-  if (!cfg.twelveDataApiKey) return;
+  if (!forexEnabled || !cfg.twelveDataApiKey) return;
   console.log(`[fx/td] backfill нового символа ${symbol}…`);
   for (const interval of CANDLE_INTERVALS) {
     const twelveInterval = TF_MAP[interval];
@@ -346,6 +347,7 @@ function getSymbolState(symbol) {
 }
 
 function applyTrade(symbol, price, volume, tradeMs) {
+  if (!forexEnabled) return;
   const symState = getSymbolState(symbol);
   for (const interval of CANDLE_INTERVALS) {
     const bStart = bucketStart(tradeMs, interval);
@@ -365,6 +367,7 @@ function applyTrade(symbol, price, volume, tradeMs) {
 
 // Сброс всех «грязных» (изменившихся с прошлого сброса) свечей в БД.
 async function flushLiveCandles() {
+  if (!forexEnabled) return;
   const rows = [];
   for (const [symbol, symState] of liveCandles) {
     for (const [interval, c] of symState) {
@@ -400,6 +403,7 @@ let wsOpenedAt = 0;
 const WS_STABLE_MS = 30_000;
 
 function connectFinnhub() {
+  if (!forexEnabled) return;
   const url = `${cfg.finnhubWsUrl}?token=${cfg.finnhubApiKey}`;
   console.log(`[fx/ws] подключение к Finnhub WS…`);
 
@@ -462,7 +466,7 @@ function connectFinnhub() {
 }
 
 function scheduleReconnect() {
-  if (wsReconnectTimer) return;
+  if (!forexEnabled || wsReconnectTimer) return;
   wsReconnects++;
   wsReconnectTimer = setTimeout(() => {
     wsReconnectTimer = null;
@@ -537,6 +541,36 @@ async function syncSymbolsFromConfig() {
   }
 }
 
+// ─── Общий выключатель «Форекс» (FeatureConfig, /admin/features) ──────────
+//
+// Тот же переключатель, что видит приложение (src/lib/features.ts, ключ
+// "forex"). Полное отключение раздела в админке должно останавливать и
+// сбор данных — иначе коллектор продолжал бы бесполезно писать в БД, пока
+// раздел скрыт от всех. Нет строки в таблице — считаем включённым (тот же
+// дефолт, что и в getFeatureConfig на стороне приложения).
+
+let forexEnabled = true;
+
+async function checkForexEnabled() {
+  try {
+    const r = await pool.query(`SELECT enabled FROM "FeatureConfig" WHERE key = 'forex'`);
+    const next = r.rows.length === 0 ? true : !!r.rows[0].enabled;
+    if (next === forexEnabled) return;
+
+    forexEnabled = next;
+    if (!forexEnabled) {
+      console.log(`[fx/toggle] раздел "Форекс" выключен в админке — останавливаем сбор данных`);
+      if (ws) { try { ws.close(); } catch { /* noop */ } }
+      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+    } else {
+      console.log(`[fx/toggle] раздел "Форекс" снова включён — возобновляем сбор данных`);
+      connectFinnhub();
+    }
+  } catch (err) {
+    console.error(`[fx/toggle] ошибка чтения FeatureConfig: ${err.message}`);
+  }
+}
+
 // ─── HTTP healthcheck ────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -544,7 +578,8 @@ const server = http.createServer(async (req, res) => {
   if (url === "/health" || url === "/") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      healthy: wsConnected || backfillDone,
+      healthy: !forexEnabled || wsConnected || backfillDone,
+      forexEnabled,
       uptimeMs: Date.now() - startedAt,
       instruments: cfg.symbols.length,
       symbols: cfg.symbols,
@@ -577,11 +612,16 @@ server.listen(cfg.port, () => {
 // ─── Запуск ──────────────────────────────────────────────────────────────
 
 async function start() {
+  // -1. Общий выключатель «Форекс» из /admin/features — если раздел выключен
+  //     ещё до старта, сразу переходим в режим паузы (ничего не подключаем,
+  //     ничего не пишем), пока его не включат обратно.
+  await checkForexEnabled();
+
   // 0. Список пар из админки (FxCollectorConfig), если настроен — иначе
   //    остаётся дефолт из ENV FX_SYMBOLS (envDefaultSymbols).
   await syncSymbolsFromConfig();
 
-  console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange}`);
+  console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange} forexEnabled=${forexEnabled}`);
 
   // 1. Бэкафилл истории через Twelve Data (если задан ключ).
   backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
@@ -611,6 +651,13 @@ const configSyncTimer = setInterval(() => {
   syncSymbolsFromConfig().catch(err => console.error(`[fx/config] fatal: ${err.message}`));
 }, 60_000);
 
+// 7. Общий выключатель «Форекс» (/admin/features) — тоже раз в 60с, отдельным
+//    таймером: включение/выключение должно применяться быстро и независимо
+//    от того, успела ли отработать синхронизация списка пар.
+const toggleTimer = setInterval(() => {
+  checkForexEnabled().catch(err => console.error(`[fx/toggle] fatal: ${err.message}`));
+}, 60_000);
+
 // Статус — раз в 10 минут.
 setInterval(() => {
   console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}`);
@@ -622,6 +669,7 @@ async function shutdown() {
   clearInterval(fallbackTimer);
   clearInterval(pruneTimer);
   clearInterval(configSyncTimer);
+  clearInterval(toggleTimer);
   if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
   if (ws) ws.close();
   await flushLiveCandles().catch(() => {});

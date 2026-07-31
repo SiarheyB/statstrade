@@ -60,7 +60,10 @@ function isNewsRoute(pathname: string): boolean {
 const SERVICE_CHILDREN = [
   { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
   { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
-  { href: "/dashboard/forex", key: "nav.forex", icon: TrendingUp },
+  // featureKey: скрыт для ВСЕХ (включая админа), когда общий выключатель
+  // "forex" выключен. userOnlyFeatureKey: скрыт только для НЕ-админов, когда
+  // "forexPublicAccess" выключен (админ видит раздел в любом случае).
+  { href: "/dashboard/forex", key: "nav.forex", icon: TrendingUp, featureKey: "forex", userOnlyFeatureKey: "forexPublicAccess" },
   { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
 ];
 
@@ -78,6 +81,21 @@ const SETTINGS_CHILDREN = [
   { href: "/dashboard/accounts", key: "nav.exchanges", icon: Plug },
   { href: "/dashboard/settings/trades", key: "nav.tradeSettings", icon: Tags },
 ];
+
+// featureKey — пункт скрыт для ВСЕХ (включая админа), когда та фича
+// выключена. userOnlyFeatureKey — пункт скрыт только для НЕ-админов
+// (у админа доступ остаётся). Оба независимы: если задан featureKey и он
+// скрыт — пункт пропадает у всех вне зависимости от userOnlyFeatureKey.
+function isNavItemVisible(
+  item: { featureKey?: string; userOnlyFeatureKey?: string },
+  hiddenFeatures: Set<string>,
+  hiddenForUsersOnly: Set<string>,
+  isAdmin: boolean,
+): boolean {
+  if (item.featureKey && hiddenFeatures.has(item.featureKey)) return false;
+  if (item.userOnlyFeatureKey && !isAdmin && hiddenForUsersOnly.has(item.userOnlyFeatureKey)) return false;
+  return true;
+}
 
 function isSettingsRoute(pathname: string): boolean {
   // Risk now lives under the Service group, so exclude it here.
@@ -98,21 +116,31 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [errorsUnread, setErrorsUnread] = useState(0);
   // Скрываем пункты, привязанные к отключённой в /admin/features фиче.
   // Оптимистично показываем, пока не пришёл ответ — не мигает при обычном on.
+  // featureKey — скрыт для ВСЕХ (включая админа); userOnlyFeatureKey — скрыт
+  // только для не-админов (см. SERVICE_CHILDREN.forex выше).
   const [hiddenFeatures, setHiddenFeatures] = useState<Set<string>>(new Set());
+  const [hiddenForUsersOnly, setHiddenForUsersOnly] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const keys = Array.from(new Set(LINKS.map((l) => ("featureKey" in l ? l.featureKey : null)).filter(Boolean)));
+    const allItems = [...LINKS, ...SERVICE_CHILDREN];
+    const keys = Array.from(new Set(
+      allItems.map((l) => ("featureKey" in l ? l.featureKey : null)).filter((k): k is string => !!k),
+    ));
+    const userOnlyKeys = Array.from(new Set(
+      allItems.map((l) => ("userOnlyFeatureKey" in l ? l.userOnlyFeatureKey : null)).filter((k): k is string => !!k),
+    ));
     let alive = true;
-    Promise.all(
-      keys.map((key) =>
-        fetch(`/api/features?key=${key}`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((j) => ({ key, enabled: j?.value?.enabled ?? true })),
-      ),
-    ).then((results) => {
-      if (!alive) return;
-      setHiddenFeatures(new Set(results.filter((r) => !r.enabled).map((r) => r.key as string)));
-    });
+    const fetchDisabled = (keys: string[]) =>
+      Promise.all(
+        keys.map((key) =>
+          fetch(`/api/features?key=${key}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .then((j) => ({ key, enabled: j?.value?.enabled ?? true })),
+        ),
+      ).then((results) => new Set(results.filter((r) => !r.enabled).map((r) => r.key as string)));
+
+    fetchDisabled(keys).then((s) => alive && setHiddenFeatures(s));
+    fetchDisabled(userOnlyKeys).then((s) => alive && setHiddenForUsersOnly(s));
     return () => {
       alive = false;
     };
@@ -223,7 +251,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           </div>
         )}
 
-        {LINKS.filter((l) => !("featureKey" in l && l.featureKey && hiddenFeatures.has(l.featureKey))).map((l) => {
+        {LINKS.filter((l) => isNavItemVisible(l, hiddenFeatures, hiddenForUsersOnly, isAdmin)).map((l) => {
           const active =
             l.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(l.href);
           return (
@@ -262,7 +290,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
 
         {serviceOpen && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {SERVICE_CHILDREN.map((c) => (
+            {SERVICE_CHILDREN.filter((c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin)).map((c) => (
               <Link
                 key={c.href}
                 href={c.href}

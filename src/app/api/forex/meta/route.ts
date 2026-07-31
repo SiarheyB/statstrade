@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized } from "@/lib/api";
+import { forexAccessError } from "@/lib/forexAccess";
 
 // Карта известных валютных пар для генерации label.
 const KNOWN_PAIRS: Record<string, { base: string; quote: string; label: string }> = {
@@ -41,6 +42,8 @@ let cache: { at: number; data: unknown } | null = null;
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   if (cache && Date.now() - cache.at < TTL_MS) {
     return NextResponse.json(cache.data);

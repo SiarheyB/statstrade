@@ -32,6 +32,10 @@ export function unauthorized() {
   return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 }
 
+export function forbidden(message: string) {
+  return NextResponse.json({ error: message }, { status: 403 });
+}
+
 export function badRequest(message: string, details?: unknown) {
   return NextResponse.json({ error: message, details }, { status: 400 });
 }

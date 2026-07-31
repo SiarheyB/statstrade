@@ -13,6 +13,7 @@
 
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { forexAccessError } from "@/lib/forexAccess";
 import { createDrawing, getDrawings, updateDrawing, deleteDrawing } from "@/lib/drawings";
 import type { DrawingToolType, DrawingPoint } from "@/lib/drawings";
 
@@ -24,6 +25,8 @@ const EXCHANGE = "forex";
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const symbol = url.searchParams.get("symbol")?.toUpperCase();
@@ -44,6 +47,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   try {
     const body = await req.json();
@@ -78,6 +83,8 @@ export async function POST(req: Request) {
 export async function PUT(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
@@ -109,6 +116,8 @@ export async function PUT(req: Request) {
 export async function DELETE(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await forexAccessError(user);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const id = url.searchParams.get("id");
