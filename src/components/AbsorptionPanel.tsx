@@ -92,37 +92,45 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
           <table className="w-full text-xs tabular-nums">
             <thead>
               <tr className="text-faint text-left border-b border-border/50">
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none" onClick={() => toggleSort("t")}
-                    title={t("of.thTimeHint") || "Candle timestamp when the absorption pattern started"}>
-                  {t("of.thTime")}{arrow("t")}
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none" onClick={() => toggleSort("t")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thTimeHint") || "Candle timestamp when the absorption pattern started"}>
+                    {t("of.thTime")} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>{arrow("t")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("strength")}
-                    title={t("of.thStrengthHint") || "Pattern strength: 1 (weak) to 5 (very strong). Based on volume multiplier, delta purity, range tightness, and duration."}>
-                  {t("of.thStrength") || "Str"}{arrow("strength")}
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("strength")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thStrengthHint") || "Pattern strength: 1 (weak) to 5 (very strong). Based on volume multiplier, delta purity, range tightness, and duration."}>
+                    {t("of.thStrength") || "Str"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>{arrow("strength")}
                 </th>
-                <th className="font-medium py-1 pr-3 text-right"
-                    title={t("of.thPriceHint") || "Mid price at the start of the pattern"}>
-                  {t("of.thPrice") || "Price"}
+                <th className="font-medium py-1 pr-3 text-right">
+                  <span className="inline-flex items-center gap-1" title={t("of.thPriceHint") || "Mid price at the start of the pattern"}>
+                    {t("of.thPrice") || "Price"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
-                <th className="font-medium py-1 pr-3 text-right"
-                    title={t("of.thRangeHint") || "Price range (high - low) of pattern candles. A narrow range is typical for absorption."}>
-                  {t("of.thRange") || "Range"}
+                <th className="font-medium py-1 pr-3 text-right">
+                  <span className="inline-flex items-center gap-1" title={t("of.thRangeHint") || "Price range (high - low) of pattern candles. A narrow range is typical for absorption."}>
+                    {t("of.thRange") || "Range"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("volumeMultiplier")}
-                    title={t("of.thVolMultHint") || "How many times higher the volume is compared to the average. 2× means double the typical volume — the higher, the stronger the signal."}>
-                  {t("of.thVolMult") || "Vol ×"}{arrow("volumeMultiplier")}
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("volumeMultiplier")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thVolMultHint") || "How many times higher the volume is compared to the average. 2× means double the typical volume — the higher, the stronger the signal."}>
+                    {t("of.thVolMult") || "Vol ×"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>{arrow("volumeMultiplier")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("deltaRatio")}
-                    title={t("of.thDeltaRatioHint") || "|Buy - Sell| / (Buy + Sell) — how balanced buying and selling are. 0% = perfectly balanced (strong absorption), 15% = slight imbalance."}>
-                  {t("of.thDeltaRatio") || "|Δ|/V"}{arrow("deltaRatio")}
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("deltaRatio")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thDeltaRatioHint") || "|Buy - Sell| / (Buy + Sell) — how balanced buying and selling are. 0% = perfectly balanced (strong absorption), 15% = slight imbalance."}>
+                    {t("of.thDeltaRatio") || "|Δ|/V"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>{arrow("deltaRatio")}
                 </th>
-                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("duration")}
-                    title={t("of.thDurationHint") || "How many consecutive candles the pattern spans. More candles = longer accumulation/distribution period."}>
-                  {t("of.thDuration") || "Dur"}{arrow("duration")}
+                <th className="font-medium py-1 pr-3 cursor-pointer select-none text-right" onClick={() => toggleSort("duration")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thDurationHint") || "How many consecutive candles the pattern spans. More candles = longer accumulation/distribution period."}>
+                    {t("of.thDuration") || "Dur"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>{arrow("duration")}
                 </th>
-                <th className="font-medium py-1 text-right"
-                    title={t("of.thLabelHint") || "Absorption (strength 1-3) = moderate signal. Strong Absorption (strength 4-5) = high-confidence accumulation/distribution."}>
-                  {t("of.thLabel") || "Label"}
+                <th className="font-medium py-1 text-right">
+                  <span className="inline-flex items-center gap-1" title={t("of.thLabelHint") || "Absorption (strength 1-3) = moderate signal. Strong Absorption (strength 4-5) = high-confidence accumulation/distribution."}>
+                    {t("of.thLabel") || "Label"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
               </tr>
             </thead>

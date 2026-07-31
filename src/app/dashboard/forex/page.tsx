@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { TrendingUp, RefreshCw } from "lucide-react";
+import { TrendingUp, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import VolumeProfile from "@/components/VolumeProfile";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import { drawDrawings } from "@/components/DrawingOverlay";
+import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import type { Imbalance, DivergenceSignal, VolumeProfile as VP } from "@/lib/orderflow";
 import type { DrawingRow, DrawingToolType, DrawingPoint } from "@/lib/drawings";
 import {
@@ -50,8 +51,8 @@ type FxResp = {
 };
 
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"];
-const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
-const DEFAULT_VISIBLE = 100;
+const VISIBLE_CANDLES: Record<string, number> = { "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
+const DEFAULT_VISIBLE = 360;
 
 function parseTime(iso: string): number {
   return new Date(iso).getTime();
@@ -192,7 +193,6 @@ export default function ForexPage() {
       const res = await fetch(`/api/forex?${p}`);
       if (res.ok) {
         const d = await res.json();
-        viewRef.current = null;
         setData(d);
       }
     } catch (err) {
@@ -380,8 +380,19 @@ export default function ForexPage() {
     ctx.beginPath();
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
-    drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan);
+    drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan, { bodyRatio: 0.4 });
     ctx.restore();
+
+    // Дивергенция считается на сервере с более широким lookback, чем окно
+    // реально загруженных свечей (нужен запас для поиска свингов) — метки
+    // старше первой загруженной свечи фильтруем, иначе при зуме/панораме за
+    // пределы загруженных данных они «висят» без свечей под собой.
+    const firstCandleT = candles[0]?.t;
+    const lastCandleT = candles[candles.length - 1]?.t;
+    const visibleDivSignals = firstCandleT !== undefined && lastCandleT !== undefined
+      ? divSignals.filter(s => s.t >= firstCandleT && s.t <= lastCandleT)
+      : divSignals;
+    drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, visibleDivSignals);
 
     // Рисунки пользователя (трендовые линии, прямоугольники и т.п.)
     if (showDrawings && drawings.length) {
@@ -478,7 +489,7 @@ export default function ForexPage() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, range, timezone, t, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef]);
+  }, [data, candles, range, timezone, t, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
@@ -550,6 +561,22 @@ export default function ForexPage() {
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [redrawAll]);
+
+  // При смене пары/таймфрейма старый viewRef (масштаб цены/времени) остаётся
+  // от прежнего инструмента, пока не придут новые данные — если сбрасывать
+  // viewRef сразу в load() (до ответа fetch), возникает окно, когда график
+  // рисуется вообще без view (пусто) до следующего пересчёта. Сбрасываем и
+  // форсируем перерисовку здесь — в эффекте, который гарантированно видит
+  // уже применённые свежие `candles` (не нужен двойной клик, чтобы починить).
+  const lastResetKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!data) return;
+    const key = `${data.symbol}|${data.range}`;
+    if (key === lastResetKeyRef.current) return;
+    lastResetKeyRef.current = key;
+    viewRef.current = null;
+    redrawAllRef.current();
+  }, [data, viewRef, redrawAllRef]);
 
   // ─── Render ──────────────────────────────────────────────────────────
 
@@ -671,8 +698,9 @@ export default function ForexPage() {
             </div>
           );
         })()}
-        <div className="flex gap-2">
+        <div className="relative">
           <DrawingToolbar
+            overlay
             activeTool={activeTool}
             onSelectTool={setActiveTool}
             magnet={magnet}
@@ -680,25 +708,28 @@ export default function ForexPage() {
             showDrawings={showDrawings}
             onToggleShowDrawings={() => setShowDrawings(v => !v)}
           />
-          <div className="flex-1 min-w-0">
-            <canvas
-              ref={candleCanvasRef}
-              className="w-full cursor-crosshair"
-              style={{ height: "min(60vh, 500px)" }}
-              onMouseMove={onMove}
-              onMouseLeave={onLeave}
-              onMouseDown={onDown}
-              onMouseUp={onUp}
-              onDoubleClick={onDouble}
-            />
-          </div>
+          <canvas
+            ref={candleCanvasRef}
+            className="w-full cursor-crosshair"
+            style={{ height: "min(72vh, 720px)" }}
+            onMouseMove={onMove}
+            onMouseLeave={onLeave}
+            onMouseDown={onDown}
+            onMouseUp={onUp}
+            onDoubleClick={onDouble}
+          />
         </div>
       </div>
       <div className="mt-1 mb-4 text-[11px] text-faint">{t("of.zoomHint")}</div>
 
       {/* Delta / CVD */}
       <div className="card mb-4">
-        <div className="text-xs text-muted mb-1 px-2 pt-2">{t("fx.deltaCvd")}</div>
+        <div className="text-xs text-muted mb-1 px-2 pt-2 inline-flex items-center gap-1.5">
+          {t("fx.deltaCvd")}
+          <span title={t("fx.hintDeltaCvd")} className="inline-flex cursor-help">
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
+        </div>
         {data?.delta ? (
           <canvas ref={deltaCanvasRef} className="w-full h-[80px]" />
         ) : (
@@ -708,7 +739,12 @@ export default function ForexPage() {
 
       {/* B/A Spread */}
       <div className="card mb-4">
-        <div className="text-xs text-muted mb-1 px-2 pt-2">{t("fx.bidAsk")}</div>
+        <div className="text-xs text-muted mb-1 px-2 pt-2 inline-flex items-center gap-1.5">
+          {t("fx.bidAsk")}
+          <span title={t("fx.hintBidAsk")} className="inline-flex cursor-help">
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
+        </div>
         {data?.ba ? (
           <canvas ref={baCanvasRef} className="w-full h-[80px]" />
         ) : (

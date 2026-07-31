@@ -53,7 +53,7 @@ export async function GET(req: Request) {
         const candles = await prisma.fxCandle.findMany({
           where: {
             symbol,
-            exchange: "twelvedata",
+            exchange: "finnhub",
             interval: "5m",
             t: { gte: new Date(fromMs), lte: new Date(toMs) },
           },

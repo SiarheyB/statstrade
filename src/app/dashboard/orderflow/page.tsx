@@ -318,7 +318,6 @@ export default function OrderflowPage() {
         return;
       }
       offRef.current = null;
-      viewRef.current = null;
       setData(d);
     } catch (e) {
       setError("Network error");
@@ -779,7 +778,16 @@ export default function OrderflowPage() {
     }
 
     if (showDivergence && divergenceSignals.length) {
-      drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, divergenceSignals);
+      // Дивергенция считается на сервере с более широким lookback, чем окно
+      // реально загруженных свечей — метки старше первой загруженной свечи
+      // фильтруем, иначе при зуме/панораме за пределы загруженных данных они
+      // «висят» без свечей под собой.
+      const firstCandleT = candles[0]?.t;
+      const lastCandleT = candles[candles.length - 1]?.t;
+      const visibleDivergenceSignals = firstCandleT !== undefined && lastCandleT !== undefined
+        ? divergenceSignals.filter(s => s.t >= firstCandleT && s.t <= lastCandleT)
+        : divergenceSignals;
+      drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, visibleDivergenceSignals);
     }
 
     const last = candles.length ? candles[candles.length - 1].c : hm.price;
@@ -946,6 +954,22 @@ export default function OrderflowPage() {
   }, [draw, drawDelta, drawBA]);
   useEffect(() => { redrawAllRef.current = redrawAll; }, [redrawAll]);
 
+  // При смене пары/биржи/таймфрейма старый viewRef (масштаб цены/времени)
+  // остаётся от прежнего инструмента, пока не придут новые данные — если
+  // сбрасывать viewRef сразу в load() (до ответа fetch), возникает окно,
+  // когда график рисуется вообще без view (пусто) до следующего пересчёта.
+  // Сбрасываем и форсируем перерисовку здесь — в эффекте, который гарантированно
+  // видит уже применённые свежие `candles` (не нужен двойной клик, чтобы починить).
+  const lastResetKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (!data) return;
+    const key = `${data.symbol}|${data.exchange}|${data.range}`;
+    if (key === lastResetKeyRef.current) return;
+    lastResetKeyRef.current = key;
+    viewRef.current = null;
+    redrawAllRef.current();
+  }, [data, viewRef, redrawAllRef]);
+
   // Принудительный перерисовка при изменении рисунков (saveDrawing асинхронный,
   // и может не успеть к моменту вызова draw() из эффекта выше)
   useEffect(() => {
@@ -1007,7 +1031,7 @@ export default function OrderflowPage() {
             title={t("of.hintDivergence") || "Divergence Scanner — show/hide price vs delta divergence markers"}
           >
             <span className={`h-3 w-3 rounded-sm border ${showDivergence ? "bg-accent border-accent" : "border-border-strong"}`} />
-            Divergence
+            {t("of.divergence")}
             <span title={t("of.hintDivergence") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD"} className="inline-flex cursor-help">
               <HelpCircle size={12} className="text-faint shrink-0" />
             </span>
@@ -1018,7 +1042,7 @@ export default function OrderflowPage() {
             title={t("of.hintAbsorption") || "Absorption Pattern Detector — narrow range + high volume + near-zero delta"}
           >
             <span className={`h-3 w-3 rounded-sm border ${showAbsorption ? "bg-accent border-accent" : "border-border-strong"}`} />
-            Absorption
+            {t("of.absorption")}
             <span title={t("of.hintAbsorption") || "Absorption — detects accumulation/distribution patterns"} className="inline-flex cursor-help">
               <HelpCircle size={12} className="text-faint shrink-0" />
             </span>
@@ -1164,7 +1188,7 @@ export default function OrderflowPage() {
                 </div>
               );
             })()}
-            <div className="flex gap-2">
+            <div className="flex gap-2 items-start">
               <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} />
               <div className="flex-1 min-w-0">
                 <canvas
@@ -1203,7 +1227,12 @@ export default function OrderflowPage() {
           </div>
 
           <div className="card p-3 mt-3">
-            <div className="text-xs font-medium text-muted">{t("of.bigTrades")}</div>
+            <div className="text-xs font-medium text-muted inline-flex items-center gap-1.5">
+              {t("of.bigTrades")}
+              <span title={t("of.bigTradesHint")} className="inline-flex cursor-help">
+                <HelpCircle size={12} className="text-faint shrink-0" />
+              </span>
+            </div>
             <div className="text-[11px] text-faint mb-2">{t("of.bigTradesHint")}</div>
             {(data?.bigTrades?.length ?? 0) === 0 ? (
               <div className="text-xs text-faint">{t("of.noBig")}</div>
@@ -1212,12 +1241,36 @@ export default function OrderflowPage() {
                 <table className="w-full text-xs tabular-nums">
                   <thead>
                     <tr className="text-faint text-left border-b border-border/50">
-                      <th className="font-medium py-1 pr-3">{t("of.thTime")}</th>
-                      <th className="font-medium py-1 pr-3">{t("of.thExchange")}</th>
-                      <th className="font-medium py-1 pr-3">{t("of.thSide")}</th>
-                      <th className="font-medium py-1 pr-3 text-right">{t("of.thPrice")}</th>
-                      <th className="font-medium py-1 pr-3 text-right">{t("of.thSize")}, {baseAsset(symbol)}</th>
-                      <th className="font-medium py-1 text-right">{t("of.thValue")}, $</th>
+                      <th className="font-medium py-1 pr-3">
+                        <span className="inline-flex items-center gap-1" title={t("of.thTradeTimeHint") || undefined}>
+                          {t("of.thTime")} <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
+                      <th className="font-medium py-1 pr-3">
+                        <span className="inline-flex items-center gap-1" title={t("of.thExchangeHint") || undefined}>
+                          {t("of.thExchange")} <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
+                      <th className="font-medium py-1 pr-3">
+                        <span className="inline-flex items-center gap-1" title={t("of.thSideHint") || undefined}>
+                          {t("of.thSide")} <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
+                      <th className="font-medium py-1 pr-3 text-right">
+                        <span className="inline-flex items-center gap-1" title={t("of.thTradePriceHint") || undefined}>
+                          {t("of.thPrice")} <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
+                      <th className="font-medium py-1 pr-3 text-right">
+                        <span className="inline-flex items-center gap-1" title={t("of.thSizeHint") || undefined}>
+                          {t("of.thSize")}, {baseAsset(symbol)} <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
+                      <th className="font-medium py-1 text-right">
+                        <span className="inline-flex items-center gap-1" title={t("of.thValueHint") || undefined}>
+                          {t("of.thValue")}, $ <HelpCircle size={10} className="text-faint shrink-0" />
+                        </span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>

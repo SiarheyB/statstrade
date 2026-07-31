@@ -161,18 +161,19 @@ export function drawCandlesticks(
   plotX: number,
   plotW: number,
   xspan: number,
-  opts: { clusters?: boolean; colW?: number } = {},
+  opts: { clusters?: boolean; colW?: number; bodyRatio?: number } = {},
 ) {
   if (candles.length < 2) return;
   const stepMs = candles[1].t - candles[0].t;
   const clusters = !!opts.clusters;
   const colW = opts.colW ?? 0;
+  const bodyRatio = opts.bodyRatio ?? 0.7;
   const wickW = clusters
     ? Math.min(3, Math.max(1, (stepMs / xspan) * plotW * 0.05))
     : 1;
   const cw = clusters
     ? wickW * 3
-    : Math.max(1, (stepMs / xspan) * plotW * 0.7);
+    : Math.max(1, (stepMs / xspan) * plotW * bodyRatio);
   ctx.lineWidth = wickW;
   for (const k of candles) {
     const x = sx(k.t + stepMs / 2);

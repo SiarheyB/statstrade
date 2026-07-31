@@ -1,18 +1,24 @@
-// Forex collector — подключается к Twelve Data REST API и пишет свечи + котировки в Postgres.
+// Forex collector — Finnhub WebSocket (реальные тики) как основной источник +
+// Twelve Data REST как источник истории и fallback-догон.
 //
-// Замена Dukascopy bridge: он не доступен из РБ.
-// Twelve Data — бесплатный REST API (800 запросов/день, 8 запросов/мин).
-// Даёт OHLCV свечи + bid/ask котировки для всех мажоров и кроссов.
-// Нет данных стакана (depth) — индикаторы работают через свечи и котировки.
+// Почему так:
+//   Twelve Data free tier (800 запросов/день, 8/мин) не тянет обновление
+//   каждые 5 минут по всем мажорам × всем таймфреймам — уходит в лимит.
+//   Finnhub free tier даёт WebSocket с тиками (сделками) без ограничения на
+//   число сообщений (лимитируется только число подписанных символов, до 50) —
+//   поэтому коллектор сам агрегирует тики в свечи 5m/15m/1h/4h/1d/1w в
+//   памяти и льёт их в Postgres. REST /forex/candle у Finnhub — premium-only
+//   на free-плане, поэтому для истории и на случай обрыва WS используется
+//   Twelve Data (батчим до 8 символов в одном запросе).
 //
 // Архитектура:
-//   Twelve Data REST API → этот collector → Postgres (FxCandle + FxQuote)
+//   Finnhub WS (тики) → агрегатор свечей в памяти → Postgres (FxCandle, exchange="finnhub")
+//   Twelve Data REST  → бэкафилл истории при старте + периодический fallback-догон
+//                        (пишет в тот же exchange="finnhub", т.к. это тот же логический ряд)
 //
 // Ограничения free tier:
-//   - 8 запросов в минуту
-//   - 800 запросов в день
-//   - До 8 символов в одном запросе (через запятую)
-//   - Исторические данные: до 5000 свечей за запрос
+//   Twelve Data: 8 запросов/мин, 800/день, до 8 символов в одном запросе.
+//   Finnhub: WS без лимита на сообщения, до 50 подписанных символов.
 
 import http from "node:http";
 import pg from "pg";
@@ -23,19 +29,24 @@ const cfg = {
   symbols: (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY")
     .split(",").map(s => s.trim()).filter(Boolean),
 
-  exchange: "twelvedata",
+  // Единый тег источника для всех свечей форекса (и WS, и REST-бэкафилл
+  // пишут под одним exchange — это один логический ряд для приложения).
+  exchange: "finnhub",
 
-  // Twelve Data API key.
-  apiKey: process.env.TWELVEDATA_API_KEY ?? "",
+  twelveDataApiKey: process.env.TWELVEDATA_API_KEY ?? "",
+  twelveDataApiBase: process.env.TWELVEDATA_API_BASE ?? "https://api.twelvedata.com",
 
-  // URL для запросов к Twelve Data (без символа в конце).
-  apiBase: process.env.TWELVEDATA_API_BASE ?? "https://api.twelvedata.com",
+  finnhubApiKey: process.env.FINNHUB_API_KEY ?? "",
+  finnhubWsUrl: process.env.FINNHUB_WS_URL ?? "wss://ws.finnhub.io",
 
-  // Как часто обновлять свечи (с) — 600 секунд, чтобы цикл из 36 запросов
-  // (6 символов × 6 таймфреймов) успевал при rate limit 10 сек/запрос.
-  updateIntervalSec: Number(process.env.FX_UPDATE_INTERVAL_SEC ?? 600),
+  // Как часто Twelve Data досогласовывает историю (fallback-догон), сек.
+  // Не критично для реального времени — это только подстраховка на случай
+  // обрыва Finnhub WS или пропущенных тиков.
+  fallbackIntervalSec: Number(process.env.FX_FALLBACK_INTERVAL_SEC ?? 900),
 
-  // Сколько дней хранить свечи.
+  // Как часто сбрасывать в БД текущие (ещё открытые) свечи, собранные из тиков.
+  flushIntervalSec: Number(process.env.FX_FLUSH_INTERVAL_SEC ?? 15),
+
   candleRetentionDays: Number(process.env.FX_CANDLE_RETENTION_DAYS ?? 365),
 
   databaseUrl: process.env.DATABASE_URL,
@@ -47,8 +58,8 @@ if (!cfg.databaseUrl) {
   process.exit(1);
 }
 
-if (!cfg.apiKey) {
-  console.error("[fx] FATAL: TWELVEDATA_API_KEY не задан");
+if (!cfg.finnhubApiKey) {
+  console.error("[fx] FATAL: FINNHUB_API_KEY не задан");
   process.exit(1);
 }
 
@@ -58,8 +69,6 @@ const pool = new pg.Pool({ connectionString: cfg.databaseUrl, max: 4 });
 
 // ─── Таймфреймы ───────────────────────────────────────────────────────────
 
-// Маппинг нашего таймфрейма → интервал Twelve Data.
-// Twelve Data не поддерживает 12h — исключаем из коллектора.
 const TF_MAP = {
   "5m": "5min",
   "15m": "15min",
@@ -71,98 +80,131 @@ const TF_MAP = {
 
 const CANDLE_INTERVALS = Object.keys(TF_MAP);
 
-// ─── Rate limiter ──────────────────────────────────────────────────────────
-//
-// Twelve Data free tier: 8 запросов/мин, 800/день.
-// Простая очередь: не более 1 запроса в 8 секунд (≈7.5/мин).
+const INTERVAL_MS = {
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
 
+// Начало бакета для таймфрейма (UTC). Для 1w — начало ISO-недели (понедельник 00:00 UTC).
+function bucketStart(ms, interval) {
+  if (interval === "1w") {
+    const d = new Date(ms);
+    const day = d.getUTCDay(); // 0=Sun..6=Sat
+    const diffToMonday = (day + 6) % 7; // Пн=0
+    const monday = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() - diffToMonday);
+    return monday;
+  }
+  // 4h у Twelve Data выровнен не по UTC-полночи, а по границе торгового дня
+  // форекса (01:00/05:00/09:00/13:00/17:00/21:00 UTC) — сдвиг на 1 час от
+  // «наивной» сетки от эпохи. Без этого офсета WS-агрегированный бакет и
+  // TD-бар почти совпадают по времени и рисуются как две налезающие друг на
+  // друга свечи.
+  if (interval === "4h") {
+    const anchor = 60 * 60_000; // 1 час
+    return Math.floor((ms - anchor) / INTERVAL_MS["4h"]) * INTERVAL_MS["4h"] + anchor;
+  }
+
+  const span = INTERVAL_MS[interval];
+  return Math.floor(ms / span) * span;
+}
+
+// ─── Символы: наш формат "EUR/USD" ↔ Finnhub "OANDA:EUR_USD" ──────────────
+
+function toFinnhubSymbol(symbol) {
+  return `OANDA:${symbol.replace("/", "_")}`;
+}
+
+function fromFinnhubSymbol(fhSymbol) {
+  const raw = fhSymbol.startsWith("OANDA:") ? fhSymbol.slice(6) : fhSymbol;
+  return raw.replace("_", "/");
+}
+
+// ─── Rate limiter для Twelve Data ──────────────────────────────────────────
+
+// Twelve Data считает кредиты ПО СИМВОЛУ в батч-запросе, а не по HTTP-вызову —
+// запрос с 6 символами стоит 6 кредитов из тех же 8/мин. Поэтому лимитер
+// учитывает стоимость (cost) каждого вызова, а не просто минимальный интервал.
 class RateLimiter {
-  constructor(minIntervalMs = 8000) {
-    this._minInterval = minIntervalMs;
+  constructor(creditsPerMinute = 8) {
+    this._creditsPerMinute = creditsPerMinute;
     this._lastCall = 0;
   }
 
-  async wait() {
+  async wait(cost = 1) {
     const now = Date.now();
-    const wait = Math.max(0, this._lastCall + this._minInterval - now);
+    // Twelve Data использует скользящее окно (не жёстко по границе минуты) —
+    // берём запас с округлением вверх до целой минуты, а не пропорциональный
+    // интервал, иначе соседние окна пересекаются и ловим 429.
+    const intervalMs = 60_000 * Math.ceil(cost / this._creditsPerMinute) + 2000;
+    const wait = Math.max(0, this._lastCall + intervalMs - now);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     this._lastCall = Date.now();
   }
 }
 
-const rateLimiter = new RateLimiter(10000);
+const rateLimiter = new RateLimiter(8);
 
 // ─── Состояние коллектора ─────────────────────────────────────────────────
 
 const startedAt = Date.now();
 let writeErrors = 0;
 let lastWriteOkAt = 0;
-let totalApiCalls = 0;
+let totalTwelveDataCalls = 0;
 let backfillDone = false;
+let wsConnected = false;
+let wsReconnects = 0;
+let lastTradeAt = 0;
+let totalTrades = 0;
 
-// ─── Twelve Data API ──────────────────────────────────────────────────────
+// ─── Twelve Data: история и fallback-догон ────────────────────────────────
+//
+// Символы батчатся: до 8 штук в одном запросе на interval, а не по одному —
+// это снижает число запросов в разы против прежней версии коллектора.
 
-// Запрос к Twelve Data time_series.
-// Поддерживает несколько символов через запятую.
-async function fetchTimeSeries(symbols, interval, outputsize = 5000) {
-  await rateLimiter.wait();
+async function fetchTimeSeriesBatch(symbols, interval, outputsize) {
+  await rateLimiter.wait(symbols.length);
   const symStr = symbols.join(",");
-  const url = `${cfg.apiBase}/time_series?symbol=${encodeURIComponent(symStr)}&interval=${interval}&outputsize=${outputsize}&apikey=${cfg.apiKey}`;
-  totalApiCalls++;
+  // timezone=UTC обязателен: без него Twelve Data отдаёт datetime в своей
+  // "биржевой" таймзоне (для форекса — не UTC), и это выглядит как сдвиг
+  // свечей в будущее относительно реального времени.
+  const url = `${cfg.twelveDataApiBase}/time_series?symbol=${encodeURIComponent(symStr)}&interval=${interval}&outputsize=${outputsize}&timezone=UTC&apikey=${cfg.twelveDataApiKey}`;
+  totalTwelveDataCalls++;
 
   try {
     const res = await fetch(url);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
-      console.error(`[fx/api] HTTP ${res.status} для ${symStr} ${interval}: ${text.slice(0, 200)}`);
+      console.error(`[fx/td] HTTP ${res.status} для ${symStr} ${interval}: ${text.slice(0, 200)}`);
       return null;
     }
     const data = await res.json();
     if (data.status === "error") {
-      console.error(`[fx/api] Twelve Data error: ${data.message ?? JSON.stringify(data)}`);
+      console.error(`[fx/td] Twelve Data error: ${data.message ?? JSON.stringify(data)}`);
       return null;
     }
     return data;
   } catch (err) {
-    console.error(`[fx/api] fetch error ${symStr} ${interval}: ${err.message}`);
+    console.error(`[fx/td] fetch error ${symStr} ${interval}: ${err.message}`);
     return null;
   }
 }
 
-// ─── Парсинг свечей из ответа Twelve Data ──────────────────────────────────
-//
-// Ответ Twelve Data time_series:
-// {
-//   "status": "ok",
-//   "values": [{ "datetime": "2024-01-01 00:00:00", "open": "1.07000", "high": "1.07050", "low": "1.06950", "close": "1.07000", "volume": "1234" }]
-// }
-
-function parseTwelveDataResponse(data, symbol) {
-  if (!data || data.status !== "ok") return null;
-  // Если запрошен один символ — values прямо в ответе.
-  // Если несколько — ответ в виде { "EUR/USD": { "status": "ok", "values": [...] }, ... }
-  let values;
-  if (data.values) {
-    values = data.values;
-  } else if (data[symbol]) {
-    values = data[symbol].values;
-  } else {
-    // Ищем первый символ с данными
-    for (const key of Object.keys(data)) {
-      if (data[key]?.values) {
-        values = data[key].values;
-        break;
-      }
-    }
-  }
-  if (!Array.isArray(values) || values.length === 0) return null;
-  return values;
+// Ответ на батч из нескольких символов: { "EUR/USD": { status, values }, ... }
+// Ответ на один символ: { status, values } напрямую.
+function extractSymbolValues(data, symbol, requestedMultiple) {
+  if (!data) return null;
+  if (!requestedMultiple && data.values) return data.values;
+  const entry = data[symbol];
+  if (entry?.values) return entry.values;
+  return null;
 }
 
-// Конвертация свечи Twelve Data → наш формат.
 function toCandleRow(value, symbol, interval) {
   const dt = value.datetime;
-  // Формат даты: "2024-01-01 00:00:00" (intraday) или "2024-01-01" (daily)
   const t = dt.includes(" ") ? new Date(dt + " UTC") : new Date(dt + "T00:00:00Z");
   return {
     symbol,
@@ -177,9 +219,7 @@ function toCandleRow(value, symbol, interval) {
   };
 }
 
-// ─── Запись свечей в БД ──────────────────────────────────────────────────
-
-async function storeCandles(rows, symbol, interval) {
+async function storeCandleRows(rows) {
   if (rows.length === 0) return 0;
 
   const values = [];
@@ -204,87 +244,190 @@ async function storeCandles(rows, symbol, interval) {
     return rows.length;
   } catch (err) {
     writeErrors++;
-    console.error(`[fx/store] error ${symbol} ${interval}: ${err.message}`);
+    console.error(`[fx/store] error: ${err.message}`);
     return 0;
   }
 }
 
-// ─── Получение и сохранение свечей для пары ───────────────────────────────
-
-async function fetchAndStoreForSymbol(symbol, interval, outputsize = 1000) {
+// Бэкафилл/догон для одного таймфрейма по всем символам разом (батч).
+async function fetchAndStoreBatch(interval, outputsize) {
   const twelveInterval = TF_MAP[interval];
   if (!twelveInterval) return 0;
+  if (!cfg.twelveDataApiKey) return 0;
 
-  const data = await fetchTimeSeries([symbol], twelveInterval, outputsize);
+  const requestedMultiple = cfg.symbols.length > 1;
+  const data = await fetchTimeSeriesBatch(cfg.symbols, twelveInterval, outputsize);
   if (!data) return 0;
 
-  const values = parseTwelveDataResponse(data, symbol);
-  if (!values) return 0;
-
-  const rows = values.map(v => toCandleRow(v, symbol, interval));
-  const stored = await storeCandles(rows, symbol, interval);
-  if (stored > 0) {
-    console.log(`[fx] ${symbol} ${interval}: +${stored} свечей`);
+  let stored = 0;
+  for (const symbol of cfg.symbols) {
+    const values = extractSymbolValues(data, symbol, requestedMultiple);
+    if (!values || values.length === 0) continue;
+    const rows = values.map(v => toCandleRow(v, symbol, interval));
+    stored += await storeCandleRows(rows);
   }
+  if (stored > 0) console.log(`[fx/td] ${interval}: +${stored} свечей (${cfg.symbols.length} пар за 1 запрос)`);
   return stored;
 }
 
-// ─── Бэкафилл исторических данных ─────────────────────────────────────────
-//
-// На старте: загружаем историю для всех символов × всех таймфреймов.
-// Используем outputsize=5000 для максимальной истории.
-
+// На старте: полная история по всем таймфреймам (батчами по символам).
 async function backfillAll() {
-  console.log(`[fx] backfill: начинаем для ${cfg.symbols.length} символов, ${CANDLE_INTERVALS.length} таймфреймов`);
+  if (!cfg.twelveDataApiKey) {
+    console.log("[fx/td] TWELVEDATA_API_KEY не задан — бэкафилл истории пропущен, ждём накопления тиков из Finnhub");
+    backfillDone = true;
+    return;
+  }
+  console.log(`[fx/td] backfill: начинаем для ${cfg.symbols.length} символов, ${CANDLE_INTERVALS.length} таймфреймов (батч по символам)`);
 
-  for (const symbol of cfg.symbols) {
-    for (const interval of CANDLE_INTERVALS) {
-      // Проверяем, есть ли уже данные в БД
-      try {
-        const r = await pool.query(
-          `SELECT COUNT(*) as cnt FROM "FxCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
-          [symbol, cfg.exchange, interval],
-        );
-        if (parseInt(r.rows[0]?.cnt ?? "0") > 100) {
-          console.log(`[fx] backfill: ${symbol} ${interval} — уже есть данные, пропускаем`);
-          continue;
-        }
-      } catch (_) {
-        // Если таблица не существует — создастся при первой записи
+  for (const interval of CANDLE_INTERVALS) {
+    try {
+      const r = await pool.query(
+        `SELECT COUNT(*) as cnt FROM "FxCandle" WHERE "exchange"=$1 AND "interval"=$2`,
+        [cfg.exchange, interval],
+      );
+      if (parseInt(r.rows[0]?.cnt ?? "0") > 100 * cfg.symbols.length) {
+        console.log(`[fx/td] backfill: ${interval} — уже есть данные, пропускаем`);
+        continue;
       }
-
-      const outputsize = interval === "5m" || interval === "15m" ? 5000 : 2000;
-      await fetchAndStoreForSymbol(symbol, interval, outputsize);
+    } catch (_) {
+      // Таблица создастся при первой записи (миграцией) — просто продолжаем.
     }
+
+    const outputsize = interval === "5m" || interval === "15m" ? 5000 : 2000;
+    await fetchAndStoreBatch(interval, outputsize);
   }
 
   backfillDone = true;
-  console.log(`[fx] backfill: завершён (всего API вызовов: ${totalApiCalls})`);
+  console.log(`[fx/td] backfill: завершён (всего запросов к Twelve Data: ${totalTwelveDataCalls})`);
 }
 
-// ─── Периодическое обновление ─────────────────────────────────────────────
-//
-// Раз в updateIntervalSec: обновляем последние свечи для ВСЕХ символов × ВСЕХ
-// таймфреймов. Каждый таймфрейм получает достаточно свечей для отображения:
-//   - 5m/15m: 100 свечей (быстрые)
-//   - 1h/4h: 10 свечей
-//   - 1d/1w: 5 свечей
+// Периодический fallback-догон: подстраховка, если WS оборвался/пропустил тики.
+// Батч по символам, редкий (fallbackIntervalSec) — не расходует лимит впустую.
+async function fallbackCatchUp() {
+  if (!cfg.twelveDataApiKey) return;
+  for (const interval of CANDLE_INTERVALS) {
+    const outputsize = interval === "5m" || interval === "15m" ? 20 : 5;
+    await fetchAndStoreBatch(interval, outputsize);
+  }
+  console.log(`[fx/td] fallback-догон завершён (всего запросов: ${totalTwelveDataCalls})`);
+}
 
-async function updateLatest() {
-  for (const symbol of cfg.symbols) {
-    const intervals = [
-      { interval: "5m", outputsize: 100 },
-      { interval: "15m", outputsize: 100 },
-      { interval: "1h", outputsize: 10 },
-      { interval: "4h", outputsize: 10 },
-      { interval: "1d", outputsize: 5 },
-      { interval: "1w", outputsize: 5 },
-    ];
-    for (const { interval, outputsize } of intervals) {
-      await fetchAndStoreForSymbol(symbol, interval, outputsize);
+// ─── Finnhub WebSocket: тики → агрегация свечей в памяти ──────────────────
+
+// state[symbol][interval] = { t (bucket start ms), o, h, l, c, v, dirty }
+const liveCandles = new Map();
+
+function getSymbolState(symbol) {
+  let s = liveCandles.get(symbol);
+  if (!s) {
+    s = new Map();
+    liveCandles.set(symbol, s);
+  }
+  return s;
+}
+
+function applyTrade(symbol, price, volume, tradeMs) {
+  const symState = getSymbolState(symbol);
+  for (const interval of CANDLE_INTERVALS) {
+    const bStart = bucketStart(tradeMs, interval);
+    const cur = symState.get(interval);
+    if (!cur || cur.t !== bStart) {
+      // Новый бакет — предыдущий уже был сброшен по таймеру, просто начинаем новый.
+      symState.set(interval, { t: bStart, o: price, h: price, l: price, c: price, v: volume, dirty: true });
+    } else {
+      cur.h = Math.max(cur.h, price);
+      cur.l = Math.min(cur.l, price);
+      cur.c = price;
+      cur.v += volume;
+      cur.dirty = true;
     }
   }
-  console.log(`[fx] update: завершён (всего API вызовов: ${totalApiCalls})`);
+}
+
+// Сброс всех «грязных» (изменившихся с прошлого сброса) свечей в БД.
+async function flushLiveCandles() {
+  const rows = [];
+  for (const [symbol, symState] of liveCandles) {
+    for (const [interval, c] of symState) {
+      if (!c.dirty) continue;
+      rows.push({
+        symbol,
+        exchange: cfg.exchange,
+        interval,
+        t: new Date(c.t),
+        o: c.o, h: c.h, l: c.l, c: c.c, v: c.v,
+      });
+      c.dirty = false;
+    }
+  }
+  if (rows.length === 0) return;
+  const stored = await storeCandleRows(rows);
+  if (stored > 0) console.log(`[fx/ws] flush: ${stored} свечей обновлено из тиков`);
+}
+
+// ─── WebSocket-клиент с автопереподключением ───────────────────────────────
+
+let ws = null;
+let wsReconnectTimer = null;
+let wsReconnectDelayMs = 2000;
+
+function connectFinnhub() {
+  const url = `${cfg.finnhubWsUrl}?token=${cfg.finnhubApiKey}`;
+  console.log(`[fx/ws] подключение к Finnhub WS…`);
+
+  try {
+    ws = new WebSocket(url);
+  } catch (err) {
+    console.error(`[fx/ws] ошибка создания WebSocket: ${err.message}`);
+    scheduleReconnect();
+    return;
+  }
+
+  ws.onopen = () => {
+    wsConnected = true;
+    wsReconnectDelayMs = 2000;
+    console.log(`[fx/ws] подключено, подписываемся на ${cfg.symbols.length} пар`);
+    for (const symbol of cfg.symbols) {
+      ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) }));
+    }
+  };
+
+  ws.onmessage = (event) => {
+    let msg;
+    try {
+      msg = JSON.parse(event.data);
+    } catch {
+      return;
+    }
+    if (msg.type !== "trade" || !Array.isArray(msg.data)) return;
+    for (const trade of msg.data) {
+      const symbol = fromFinnhubSymbol(trade.s);
+      if (!cfg.symbols.includes(symbol)) continue;
+      applyTrade(symbol, trade.p, trade.v ?? 0, trade.t ?? Date.now());
+      totalTrades++;
+      lastTradeAt = Date.now();
+    }
+  };
+
+  ws.onerror = (event) => {
+    console.error(`[fx/ws] ошибка: ${event.message ?? "unknown"}`);
+  };
+
+  ws.onclose = () => {
+    wsConnected = false;
+    console.log(`[fx/ws] соединение закрыто, переподключение через ${wsReconnectDelayMs}мс`);
+    scheduleReconnect();
+  };
+}
+
+function scheduleReconnect() {
+  if (wsReconnectTimer) return;
+  wsReconnects++;
+  wsReconnectTimer = setTimeout(() => {
+    wsReconnectTimer = null;
+    connectFinnhub();
+  }, wsReconnectDelayMs);
+  wsReconnectDelayMs = Math.min(wsReconnectDelayMs * 2, 60_000);
 }
 
 // ─── Чистка старого ──────────────────────────────────────────────────────
@@ -308,15 +451,23 @@ const server = http.createServer(async (req, res) => {
   if (url === "/health" || url === "/") {
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({
-      healthy: cfg.apiKey.length > 0,
+      healthy: wsConnected || backfillDone,
       uptimeMs: Date.now() - startedAt,
       instruments: cfg.symbols.length,
       backfillDone,
-      totalApiCalls,
+      ws: {
+        connected: wsConnected,
+        reconnects: wsReconnects,
+        totalTrades,
+        lastTradeAt: lastTradeAt ? new Date(lastTradeAt).toISOString() : null,
+      },
+      twelveData: {
+        apiKeySet: cfg.twelveDataApiKey.length > 0,
+        totalCalls: totalTwelveDataCalls,
+        fallbackIntervalSec: cfg.fallbackIntervalSec,
+      },
       errors: writeErrors,
       lastWriteOkAt: lastWriteOkAt ? new Date(lastWriteOkAt).toISOString() : null,
-      apiKeySet: cfg.apiKey.length > 0,
-      updateIntervalSec: cfg.updateIntervalSec,
       exchange: cfg.exchange,
     }));
   } else {
@@ -331,30 +482,41 @@ server.listen(cfg.port, () => {
 
 // ─── Запуск ──────────────────────────────────────────────────────────────
 
-console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange} update=${cfg.updateIntervalSec}s`);
+console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange}`);
 
-// Бэкафилл при старте
+// 1. Бэкафилл истории через Twelve Data (если задан ключ).
 backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
 
-// Периодическое обновление свечей
-const updateTimer = setInterval(() => {
-  updateLatest().catch(err => console.error(`[fx/update] fatal: ${err.message}`));
-}, cfg.updateIntervalSec * 1000);
+// 2. Основной источник реального времени — Finnhub WS.
+connectFinnhub();
 
+// 3. Периодический сброс агрегированных из тиков свечей в БД.
+const flushTimer = setInterval(() => {
+  flushLiveCandles().catch(err => console.error(`[fx/flush] fatal: ${err.message}`));
+}, cfg.flushIntervalSec * 1000);
 
-// Чистка — раз в 6 часов
+// 4. Периодический fallback-догон через Twelve Data (подстраховка).
+const fallbackTimer = setInterval(() => {
+  fallbackCatchUp().catch(err => console.error(`[fx/fallback] fatal: ${err.message}`));
+}, cfg.fallbackIntervalSec * 1000);
+
+// 5. Чистка старого — раз в 6 часов.
 const pruneTimer = setInterval(pruneOld, 6 * 3600_000);
 setTimeout(pruneOld, 60_000);
 
-// Статус rate limit — выводим каждые 10 минут
+// Статус — раз в 10 минут.
 setInterval(() => {
-  console.log(`[fx/status] API calls: ${totalApiCalls}, backfill: ${backfillDone ? "✅" : "⏳"}`);
+  console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}`);
 }, 600_000);
 
 async function shutdown() {
   console.log("[fx] shutdown…");
-  clearInterval(updateTimer);
+  clearInterval(flushTimer);
+  clearInterval(fallbackTimer);
   clearInterval(pruneTimer);
+  if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
+  if (ws) ws.close();
+  await flushLiveCandles().catch(() => {});
   server.close();
   await pool.end().catch(() => {});
   process.exit(0);

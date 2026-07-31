@@ -40,7 +40,7 @@ export async function GET(req: Request) {
     let candles = await prisma.fxCandle.findMany({
       where: {
         symbol,
-        exchange: "twelvedata",
+        exchange: "finnhub",
         interval: sourceInterval,
       },
       orderBy: { t: "desc" },

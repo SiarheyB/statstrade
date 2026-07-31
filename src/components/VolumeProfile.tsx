@@ -107,7 +107,7 @@ export default function VolumeProfile({
       <div className="card p-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {(t("of.volumeProfile") as string) || "Volume Profile"}
-          <span title="Volume Profile — горизонтальный профиль объёмов: распределение торгового объёма по ценовым уровням за выбранный период." className="inline-flex cursor-help">
+          <span title={(t("of.volumeProfileHint") as string) || undefined} className="inline-flex cursor-help">
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
         </div>
@@ -124,7 +124,7 @@ export default function VolumeProfile({
       <div className="card p-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {(t("of.volumeProfile") as string) || "Volume Profile"}
-          <span title="Volume Profile — горизонтальный профиль объёмов." className="inline-flex cursor-help">
+          <span title={(t("of.volumeProfileHint") as string) || undefined} className="inline-flex cursor-help">
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
         </div>
@@ -141,7 +141,7 @@ export default function VolumeProfile({
       <div className="card p-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {(t("of.volumeProfile") as string) || "Volume Profile"}
-          <span title="Volume Profile — горизонтальный профиль объёмов." className="inline-flex cursor-help">
+          <span title={(t("of.volumeProfileHint") as string) || undefined} className="inline-flex cursor-help">
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
         </div>
@@ -187,23 +187,23 @@ function VolumeProfileChart({ data }: { data: VolumeProfile }) {
     <div className="card p-3">
       <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
         {(t("of.volumeProfile") as string) || "Volume Profile"}
-        <span title="Volume Profile — горизонтальный профиль объёмов: распределение торгового объёма по ценовым уровням за выбранный период. POC (Point of Control) — цена с максимальным объёмом, VAH/VAL — границы Value Area (70% объёма). HVN — зоны высокого объёма, LVN — зоны низкого объёма." className="inline-flex cursor-help">
+        <span title={(t("of.volumeProfileHint") as string) || undefined} className="inline-flex cursor-help">
           <HelpCircle size={12} className="text-faint shrink-0" />
         </span>
       </div>
 
       {/* Value Area labels */}
       <div className="flex items-center gap-3 mb-2 text-[11px] text-faint tabular-nums">
-        <span title="Point of Control — цена с максимальным объёмом за период">
+        <span title={(t("of.vpPocHint") as string) || undefined}>
           POC: <span className="text-accent font-medium">{fmtP(data.poc)}</span>
         </span>
-        <span title="Value Area High — верхняя граница зоны справедливой цены (70% объёма)">
+        <span title={(t("of.vpVahHint") as string) || undefined}>
           VAH: <span className="text-profit">{fmtP(data.vah)}</span>
         </span>
-        <span title="Value Area Low — нижняя граница зоны справедливой цены (70% объёма)">
+        <span title={(t("of.vpValHint") as string) || undefined}>
           VAL: <span className="text-loss">{fmtP(data.val)}</span>
         </span>
-        <span className="text-faint/60" title="Суммарный объём торгов за выбранный период">
+        <span className="text-faint/60" title={(t("of.vpVolHint") as string) || undefined}>
           Vol: {fmtVal(data.totalVolume)}
         </span>
       </div>

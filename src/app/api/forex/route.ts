@@ -18,17 +18,24 @@ const TF_MS: Record<string, number> = {
   "1w": 7 * 24 * 60 * 60_000,
 };
 
-// Сколько свечей таймфрейма показываем в окне
+// Сколько свечей таймфрейма показываем в окне.
+// Должно быть >= VISIBLE_CANDLES на фронте (src/app/dashboard/forex/page.tsx) —
+// иначе computeInitialView упирается в границу загруженных данных и не может
+// расширить дефолтный масштаб (свечи остаются «огромными» даже после
+// увеличения VISIBLE_CANDLES).
 const CANDLES_IN_WINDOW: Record<string, number> = {
-  "5m": 240,  // 20 часов
-  "15m": 160, // 40 часов
-  "1h": 120,  // 5 дней
-  "4h": 90,   // 15 дней
-  "12h": 60,  // 30 дней
-  "1d": 90,   // 3 месяца
-  "1w": 52,   // год
+  "5m": 500,  // ~42 часа
+  "15m": 460, // ~4.8 суток
+  "1h": 420,  // ~17.5 дней
+  "4h": 380,  // ~63 дня
+  "12h": 340, // ~170 дней
+  "1d": 320,  // ~10.5 месяцев
+  // "1w" ограничен FX_CANDLE_RETENTION_DAYS в коллекторе (365 дней по
+  // умолчанию, docker-compose.prod.yml) — больше 52 баров всё равно нет в БД,
+  // расширять окно сверх этого смысла не имеет.
+  "1w": 52,   // ~1 год
 };
-const DEFAULT_CANDLES = 100;
+const DEFAULT_CANDLES = 360;
 
 // Маппинг таймфрейма → источник для агрегации (если напрямую не поддерживается)
 const AGGREGATE_FROM: Record<string, string | undefined> = {
@@ -69,7 +76,7 @@ async function fetchCandles(symbol: string, range: string, fromMs: number, toMs:
   const rows = await prisma.fxCandle.findMany({
     where: {
       symbol,
-      exchange: "twelvedata",
+      exchange: "finnhub",
       interval,
       t: { gte: new Date(fromMs), lte: new Date(toMs) },
     },
@@ -94,7 +101,7 @@ async function computeBA(symbol: string, fromMs: number, toMs: number) {
   const rows = await prisma.fxCandle.findMany({
     where: {
       symbol,
-      exchange: "twelvedata",
+      exchange: "finnhub",
       t: { gte: new Date(fromMs), lte: new Date(toMs) },
     },
     orderBy: { t: "asc" },
@@ -127,7 +134,7 @@ async function computeDelta(symbol: string, fromMs: number, toMs: number, interv
   const rows = await prisma.fxCandle.findMany({
     where: {
       symbol,
-      exchange: "twelvedata",
+      exchange: "finnhub",
       interval,
       t: { gte: new Date(fromMs), lte: new Date(toMs) },
     },

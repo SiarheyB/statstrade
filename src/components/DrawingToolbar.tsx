@@ -18,6 +18,12 @@ type Props = {
   onToggleMagnet: () => void;
   showDrawings: boolean;
   onToggleShowDrawings: () => void;
+  // Раньше панель стояла отдельной колонкой рядом с графиком и постоянно
+  // занимала её ширину (даже когда сама колонка растягивалась на всю высоту
+  // графика по cross-axis flex и визуально выглядела как пустое место).
+  // overlay=true кладёт панель поверх canvas (левый верхний угол) —
+  // график получает всю ширину контейнера.
+  overlay?: boolean;
 };
 
 const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] = [
@@ -27,9 +33,15 @@ const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] =
   { type: "rectangle", label: "Прямоугольник", icon: <Square size={14} /> },
 ];
 
-export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings }: Props) {
+export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings, overlay = false }: Props) {
   return (
-    <div className="flex flex-col gap-0.5 py-1.5 px-0.5">
+    <div
+      className={
+        overlay
+          ? "absolute top-1 left-1 z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40"
+          : "flex flex-col gap-0.5 py-1.5 px-0.5"
+      }
+    >
       {TOOLS.map((tool) => (
         <button
           key={tool.type}
