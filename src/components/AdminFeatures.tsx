@@ -15,6 +15,13 @@ type FeatureRow = {
   value: { enabled: boolean } & Record<string, unknown>;
 };
 
+// forex/forexPublicAccess живут в этой же таблице FeatureConfig (данные и
+// сам переключатель работают через общий /api/admin/features), но на этой
+// общей странице их не показываем — у них теперь свой дублирующий UI на
+// /admin/forex (AdminForexConfig.tsx), рядом с остальными настройками
+// форекса, чтобы не искать их среди несвязанных фич.
+const HIDDEN_HERE = new Set(["forex", "forexPublicAccess"]);
+
 export default function AdminFeatures() {
   const [rows, setRows] = useState<FeatureRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -26,7 +33,9 @@ export default function AdminFeatures() {
     (async () => {
       const res = await fetch("/api/admin/features");
       if (res.ok && alive) {
-        const rows: FeatureRow[] = (await res.json()).features ?? [];
+        const rows: FeatureRow[] = ((await res.json()).features ?? []).filter(
+          (r: FeatureRow) => !HIDDEN_HERE.has(r.key),
+        );
         setRows(rows);
         setDrafts(
           Object.fromEntries(
