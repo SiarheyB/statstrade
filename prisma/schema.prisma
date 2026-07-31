@@ -558,6 +558,97 @@ model RiskProfile {
   @@index([userId])
 }
 
+// ─── Форекс (Dukascopy) ──────────────────────────────────────────────────
+//
+// Depth data from Dukascopy bridge: 10-level order book snapshots, minute
+// rollups, and historical candles.
+
+// Raw depth snapshot — price-bin level in the order book at a given instant.
+// Written by the forex collector every FX_SNAPSHOT_MS ms.
+model FxDepth {
+  id       BigInt   @id @default(autoincrement())
+  symbol   String // EUR/USD, GBP/USD, ...
+  exchange String @default("dukascopy")
+  t        DateTime @db.Timestamptz(3)
+  price    Float
+  bidVol   Float    @default(0)
+  askVol   Float    @default(0)
+
+  @@index([symbol, t])
+  @@index([symbol, exchange, t])
+}
+
+// OHLCV candles for forex pairs, fetched from Twelve Data time_series API.
+model FxCandle {
+  symbol   String // EUR/USD, GBP/USD, ...
+  exchange String @default("twelvedata")
+  interval String // 5m, 15m, 1h, 4h, 12h, 1d, 1w
+  t        DateTime @db.Timestamptz(3) // candle open time
+  o        Float
+  h        Float
+  l        Float
+  c        Float
+  v        Float    @default(0) // volume
+
+  @@id([symbol, exchange, interval, t])
+  @@index([symbol, exchange, interval, t])
+}
+
+// Bid/ask quotes from Twelve Data quote API.
+// Одна строка = один снапшот bid/ask для пары в момент времени.
+// Используется для B/A spread, delta, CVD, imbalance.
+model FxQuote {
+  symbol   String   // EUR/USD, GBP/USD, ...
+  exchange String   @default("twelvedata")
+  t        DateTime @db.Timestamptz(3) // quote timestamp
+  bid      Float    // bid price
+  ask      Float    // ask price
+  mid      Float    // (bid + ask) / 2
+  spread   Float    // ask - bid
+  volume   Float    @default(0) // total volume (from quote)
+
+  @@id([symbol, exchange, t])
+  @@index([symbol, t])
+  @@index([symbol, exchange, t])
+}
+
+// Список валютных пар, которые собирает forex-collector — управляется из
+// админки без передеплоя (в отличие от ENV FX_SYMBOLS, который остаётся
+// дефолтом/фоллбеком, если таблица пуста). Коллектор перечитывает эту
+// таблицу раз в ~60с (тот же паттерн, что CollectorConfig для крипты).
+model FxCollectorConfig {
+  symbol    String   @id // "EUR/USD", "GBP/JPY", …
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
+// Minute rollup aggregate of depth levels (parallel to ObSnapshotRollup).
+model FxDepthRollup {
+  symbol   String
+  exchange String   @default("dukascopy")
+  bucket   DateTime @db.Timestamptz(3) // minute bucket start
+  price    Float
+  volSum   Float    @default(0)
+  bidSum   Float    @default(0)
+  askSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+}
+
+// Metadata about a minute bucket: snapshot count and mid-price sum.
+model FxRollupBucket {
+  symbol   String
+  exchange String   @default("dukascopy")
+  bucket   DateTime @db.Timestamptz(3)
+  snapCount Int     @default(0)
+  midSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+}
+
 // Economic-calendar event ingested from the free ForexFactory/faireconomy JSON
 // feed. Global (not per-user); deduped by time+currency+title and refreshed
 // lazily by the /api/econcal endpoint.

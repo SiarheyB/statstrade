@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGri
 import { useI18n } from "@/lib/i18n/provider";
 import { HelpCircle } from "lucide-react";
 import type { Imbalance } from "@/lib/orderflow";
+import { zonedParts, type TimezoneId } from "@/lib/timezone";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
@@ -15,10 +16,14 @@ function fmtVal(v: number): string {
   return v.toFixed(0);
 }
 
-function fmtTime(ms: number): string {
-  const d = new Date(ms);
+// Всегда показываем дату + время (а не только HH:MM) и в выбранном
+// пользователем часовом поясе (zonedParts, как в остальных графиках проекта) —
+// иначе при окне в несколько дней подписи по HH:MM выглядят "перепутанными",
+// когда дата на самом деле просто перевалила за полночь.
+function fmtTime(ms: number, tz: TimezoneId): string {
+  const { d, mo, h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+  return `${p(d)}.${p(mo + 1)} ${p(h)}:${p(mi)}`;
 }
 
 // ─── Colors ────────────────────────────────────────────────────────────────
@@ -40,10 +45,12 @@ function barColor(r: number): string {
 
 function ImbalanceTooltip({
   t,
+  timezone,
   active,
   payload,
 }: {
   t: (k: string, p?: Record<string, string | number>) => string;
+  timezone: TimezoneId;
   active?: boolean;
   payload?: { payload: { time: number; ratio: number } }[];
 }) {
@@ -55,7 +62,7 @@ function ImbalanceTooltip({
   const actionKey = isBid ? "of.imbalanceBidAction" : isAsk ? "of.imbalanceAskAction" : "of.imbalanceNeutralAction";
   return (
     <div className="rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs shadow-lg max-w-[260px]">
-      <div className="text-faint">{fmtTime(d.time)}</div>
+      <div className="text-faint">{fmtTime(d.time, timezone)}</div>
       <div className={d.ratio < 0 ? "text-profit" : d.ratio > 0 ? "text-loss" : "text-muted"}>
         {t("of.imbalanceRatio", { ratio: d.ratio.toFixed(3) })}
       </div>
@@ -80,7 +87,15 @@ export default function ImbalanceHeatmap({
   loading: boolean;
   error: string | null;
 }) {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
+
+  // Хук должен вызываться на каждом рендере в одном и том же порядке —
+  // до любых early return (loading/error/empty), иначе React теряет
+  // синхронизацию хуков между рендерами ("Rendered more hooks...").
+  const chartData = useMemo(() =>
+    data ? data.times.map((t, i) => ({ time: t, ratio: data.ratio[i] ?? 0 })) : [],
+    [data],
+  );
 
   // Loading state.
   if (loading) {
@@ -127,11 +142,6 @@ export default function ImbalanceHeatmap({
     );
   }
 
-  const chartData = useMemo(() =>
-    data.times.map((t, i) => ({ time: t, ratio: data.ratio[i] ?? 0 })),
-    [data],
-  );
-
   return (
     <div className="card p-3 mt-3">
       <div className="text-xs font-medium text-muted mb-1 inline-flex items-center gap-1.5">
@@ -154,10 +164,10 @@ export default function ImbalanceHeatmap({
               dataKey="time"
               type="number"
               domain={[data.times[0], data.times[data.times.length - 1]]}
-              tickFormatter={fmtTime}
+              tickFormatter={(ms: number) => fmtTime(ms, timezone)}
               tick={{ fill: AXIS, fontSize: 9 }}
               stroke={GRID}
-              minTickGap={30}
+              minTickGap={40}
             />
             <YAxis
               type="number"
@@ -167,7 +177,7 @@ export default function ImbalanceHeatmap({
               stroke={GRID}
               width={30}
             />
-            <Tooltip content={<ImbalanceTooltip t={t} />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
+            <Tooltip content={<ImbalanceTooltip t={t} timezone={timezone} />} cursor={{ fill: "rgba(255,255,255,0.04)" }} />
             <ReferenceLine y={0} stroke={ZERO_LINE} strokeWidth={1} />
             <Bar dataKey="ratio" isAnimationActive={false} minPointSize={1}>
               {chartData.map((entry, idx) => (

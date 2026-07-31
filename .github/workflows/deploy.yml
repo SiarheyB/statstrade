@@ -13,6 +13,7 @@ env:
   # GHCR требует lowercase; репозиторий SiarheyB/statstrade → siarheyb/statstrade
   APP_IMAGE: ghcr.io/siarheyb/statstrade-app
   COLLECTOR_IMAGE: ghcr.io/siarheyb/statstrade-collector
+  FOREX_COLLECTOR_IMAGE: ghcr.io/siarheyb/statstrade-forex-collector
 
 jobs:
   test:
@@ -104,5 +105,18 @@ jobs:
           tags: |
             ${{ env.COLLECTOR_IMAGE }}:latest
             ${{ env.COLLECTOR_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # --- Forex collector ---
+      - name: Build & push forex-collector
+        uses: docker/build-push-action@v6
+        with:
+          context: ./collector/forex
+          file: ./Dockerfile.forex-collector
+          push: true
+          tags: |
+            ${{ env.FOREX_COLLECTOR_IMAGE }}:latest
+            ${{ env.FOREX_COLLECTOR_IMAGE }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

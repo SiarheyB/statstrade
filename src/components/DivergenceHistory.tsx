@@ -122,7 +122,9 @@ export default function DivergenceHistory({
       <div className="card p-3 mt-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {t("of.divergenceTitle") || "Divergence Scanner"}
-          <HelpCircle size={12} className="text-faint shrink-0" />
+          <span title={t("of.divergenceHint") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD."} className="inline-flex cursor-help">
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
         </div>
         <div className="flex items-center justify-center h-16 text-sm text-faint">
           {t("common.loading")}
@@ -137,7 +139,9 @@ export default function DivergenceHistory({
       <div className="card p-3 mt-3">
         <div className="text-xs font-medium text-muted mb-2 inline-flex items-center gap-1.5">
           {t("of.divergenceTitle") || "Divergence Scanner"}
-          <HelpCircle size={12} className="text-faint shrink-0" />
+          <span title={t("of.divergenceHint") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD."} className="inline-flex cursor-help">
+            <HelpCircle size={12} className="text-faint shrink-0" />
+          </span>
         </div>
         <div className="text-sm text-loss">
           {error}
@@ -176,33 +180,40 @@ export default function DivergenceHistory({
           <table className="w-full text-xs tabular-nums">
             <thead>
               <tr className="text-faint text-left border-b border-border/50">
-                <th className={thClass} onClick={() => toggleSort("t")}
-                    title={t("of.thTimeHint") || "Candle timestamp when the divergence was detected"}>
-                  {t("of.thTime")} <SortIcon k="t" />
+                <th className={thClass} onClick={() => toggleSort("t")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thTimeHint") || "Candle timestamp when the divergence was detected"}>
+                    {t("of.thTime")} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span> <SortIcon k="t" />
                 </th>
-                <th className={thClass} onClick={() => toggleSort("type")}
-                    title={t("of.thTypeHint") || "Divergence type: Regular Bearish, Regular Bullish, Hidden Bearish, Hidden Bullish"}>
-                  {t("of.thType") || "Type"} <SortIcon k="type" />
+                <th className={thClass} onClick={() => toggleSort("type")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thTypeHint") || "Divergence type: Regular Bearish, Regular Bullish, Hidden Bearish, Hidden Bullish"}>
+                    {t("of.thType") || "Type"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span> <SortIcon k="type" />
                 </th>
-                <th className={thRight} onClick={() => toggleSort("strength")}
-                    title={t("of.thStrengthHint") || "Divergence strength: 1 (weak) to 5 (very strong). Based on the deviation between price and delta."}>
-                  {t("of.thStrength") || "Str"} <SortIcon k="strength" />
+                <th className={thRight} onClick={() => toggleSort("strength")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thStrengthHint") || "Divergence strength: 1 (weak) to 5 (very strong). Based on the deviation between price and delta."}>
+                    {t("of.thStrength") || "Str"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span> <SortIcon k="strength" />
                 </th>
-                <th className={thRight}
-                    title={t("of.thPriceHint") || "Price range: the peak price and trough price that define the divergence structure"}>
-                  {t("of.thPrice")}
+                <th className={thRight}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thPriceHint") || "Price range: the peak price and trough price that define the divergence structure"}>
+                    {t("of.thPrice")} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
-                <th className={thRight}
-                    title={t("of.thDeltaHint") || "Delta values at the peak and trough points. Delta = buy volume - sell volume. A divergence occurs when price and delta move in opposite directions."}>
-                  {t("of.thDelta") || "Δ"}
+                <th className={thRight}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thDeltaHint") || "Delta values at the peak and trough points. Delta = buy volume - sell volume. A divergence occurs when price and delta move in opposite directions."}>
+                    {t("of.thDelta") || "Δ"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
-                <th className={thRight} onClick={() => toggleSort("bars")}
-                    title={t("of.thBarsHint") || "How many candles the divergence pattern spans from start to confirmation"}>
-                  {t("of.thBars") || "Bars"} <SortIcon k="bars" />
+                <th className={thRight} onClick={() => toggleSort("bars")}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thBarsHint") || "How many candles the divergence pattern spans from start to confirmation"}>
+                    {t("of.thBars") || "Bars"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span> <SortIcon k="bars" />
                 </th>
-                <th className={thClass}
-                    title={t("of.thStatusHint") || "Confirmed = the divergence has resolved (price moved in the expected direction). Pending = divergence detected but not yet confirmed."}>
-                  {t("of.thStatus") || "Status"}
+                <th className={thClass}>
+                  <span className="inline-flex items-center gap-1" title={t("of.thStatusHint") || "Confirmed = the divergence has resolved (price moved in the expected direction). Pending = divergence detected but not yet confirmed."}>
+                    {t("of.thStatus") || "Status"} <HelpCircle size={10} className="text-faint shrink-0" />
+                  </span>
                 </th>
               </tr>
             </thead>

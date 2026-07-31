@@ -55,13 +55,20 @@ export function drawDrawings(
       y: sy(p.price),
     }));
 
-    // Пропускаем, если все точки за пределами экрана
-    // Для горизонтальных инструментов проверяем только Y — линия идёт на всю ширину графика
+    // Пропускаем, если рисунок целиком за пределами экрана.
+    // Для горизонтальных инструментов проверяем только Y — линия идёт на всю ширину графика.
+    // Для линии/прямоугольника сравниваем bounding box точек с областью графика —
+    // если проверять "офскрин" каждую точку по отдельности, линия с концами
+    // за разными краями экрана (но проходящая через видимую середину) ложно скрывается.
     let allOffscreen: boolean;
     if (d.toolType === "horizontal_line" || d.toolType === "horizontal_ray") {
       allOffscreen = screenPts[0].y < 0 || screenPts[0].y > plotH;
     } else {
-      allOffscreen = screenPts.every((p) => p.x < plotX || p.x > plotX + plotW || p.y < 0 || p.y > plotH);
+      const minX = Math.min(...screenPts.map((p) => p.x));
+      const maxX = Math.max(...screenPts.map((p) => p.x));
+      const minY = Math.min(...screenPts.map((p) => p.y));
+      const maxY = Math.max(...screenPts.map((p) => p.y));
+      allOffscreen = maxX < plotX || minX > plotX + plotW || maxY < 0 || minY > plotH;
     }
     if (allOffscreen) continue;
 

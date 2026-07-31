@@ -68,5 +68,33 @@ services:
     networks:
       - tradestats
 
+# Forex collector — подключается к Twelve Data REST API и пишет свечи в Postgres.
+  forex-collector:
+    build:
+      context: ./collector/forex
+      dockerfile: ../../Dockerfile.forex-collector
+    container_name: tradestats-forex-collector
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://tradestats:tradestats@db:5432/tradestats
+      FX_SYMBOLS: ${FX_SYMBOLS:-EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY}
+      TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY}
+      FX_UPDATE_INTERVAL_SEC: ${FX_UPDATE_INTERVAL_SEC:-300}
+      FX_CANDLE_RETENTION_DAYS: ${FX_CANDLE_RETENTION_DAYS:-365}
+      PORT: 8081
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8081/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - tradestats
+
 volumes:
   tradestats_pg:
