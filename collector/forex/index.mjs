@@ -389,6 +389,15 @@ async function flushLiveCandles() {
 let ws = null;
 let wsReconnectTimer = null;
 let wsReconnectDelayMs = 2000;
+let wsOpenedAt = 0;
+// Сеть до Finnhub нестабильна на некоторых хостах (code=1006, обрыв без
+// close-фрейма — похоже на NAT/файрвол, обрывающий соединение, а не отказ
+// самого Finnhub). Раньше задержка реконнекта сбрасывалась на минимум при
+// КАЖДОМ открытии соединения — если оно обрывалось почти сразу, получался
+// частый цикл переподключений, который ещё сильнее нагружал нестабильный
+// путь. Теперь сбрасываем задержку только если соединение продержалось
+// стабильно — иначе продолжаем расти по экспоненте.
+const WS_STABLE_MS = 30_000;
 
 function connectFinnhub() {
   const url = `${cfg.finnhubWsUrl}?token=${cfg.finnhubApiKey}`;
@@ -404,7 +413,7 @@ function connectFinnhub() {
 
   ws.onopen = () => {
     wsConnected = true;
-    wsReconnectDelayMs = 2000;
+    wsOpenedAt = Date.now();
     console.log(`[fx/ws] подключено, подписываемся на ${cfg.symbols.length} пар`);
     for (const symbol of cfg.symbols) {
       ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) }));
@@ -438,10 +447,16 @@ function connectFinnhub() {
 
   ws.onclose = (event) => {
     wsConnected = false;
+    // Сбрасываем задержку реконнекта на минимум, только если соединение
+    // продержалось достаточно долго (WS_STABLE_MS) — иначе при частых
+    // мгновенных обрывах (нестабильная сеть) продолжаем расти по экспоненте,
+    // а не долбим заново каждые 2с.
+    const heldMs = wsOpenedAt ? Date.now() - wsOpenedAt : 0;
+    if (heldMs >= WS_STABLE_MS) wsReconnectDelayMs = 2000;
     // code/reason из close-фрейма — часто это единственный способ понять
     // причину (неверный токен, лимит, сетевой обрыв и т.п.), т.к. onerror
     // сам по себе редко несёт полезную информацию.
-    console.log(`[fx/ws] соединение закрыто (code=${event?.code ?? "?"} reason="${event?.reason ?? ""}"), переподключение через ${wsReconnectDelayMs}мс`);
+    console.log(`[fx/ws] соединение закрыто (code=${event?.code ?? "?"} reason="${event?.reason ?? ""}", держалось ${Math.round(heldMs / 1000)}с), переподключение через ${wsReconnectDelayMs}мс`);
     scheduleReconnect();
   };
 }
