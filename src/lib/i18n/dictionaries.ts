@@ -817,6 +817,7 @@ const en: Dict = {
   "admin.backToApp": "Back to app",
   "admin.nav.overview": "Overview",
   "admin.nav.collector": "Order map",
+  "admin.nav.forex": "Forex",
   "admin.nav.users": "Users",
   "admin.nav.accounts": "Exchange accounts",
   "admin.nav.exchanges": "Exchanges",
@@ -900,6 +901,9 @@ const en: Dict = {
 
   "admin.collector.title": "Order map",
   "admin.collector.subtitle": "Limit-order heatmap filling: collector service status and writes into Postgres.",
+
+  "admin.forex.title": "Forex",
+  "admin.forex.subtitle": "forex-collector status (Finnhub WS + Twelve Data), pairs, and FxCandle write stats.",
   "admin.collector.staleBanner": "{n} of {total} feed(s) not filling for over {sec}s",
   "admin.collector.status": "Collector:",
   "admin.collector.online": "online",
@@ -1885,6 +1889,7 @@ const ru: Dict = {
   "admin.backToApp": "К приложению",
   "admin.nav.overview": "Обзор",
   "admin.nav.collector": "Карта ордеров",
+  "admin.nav.forex": "Форекс",
   "admin.nav.users": "Пользователи",
   "admin.nav.accounts": "Аккаунты бирж",
   "admin.nav.exchanges": "Биржи",
@@ -1975,6 +1980,9 @@ const ru: Dict = {
 
   "admin.collector.title": "Карта ордеров",
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",
+
+  "admin.forex.title": "Форекс",
+  "admin.forex.subtitle": "Статус forex-collector (Finnhub WS + Twelve Data), пары и факт записи в FxCandle.",
   "admin.collector.staleBanner": "{n} из {total} фид(ов) не наполняются дольше {sec} с",
   "admin.collector.status": "Collector:",
   "admin.collector.online": "онлайн",

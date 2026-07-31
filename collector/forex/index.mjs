@@ -312,6 +312,25 @@ async function fallbackCatchUp() {
   console.log(`[fx/td] fallback-догон завершён (всего запросов: ${totalTwelveDataCalls})`);
 }
 
+// Бэкафилл истории для ОДНОГО символа (добавлен из админки после старта) —
+// не батчим с остальными, чтобы не пересчитывать общий cfg.symbols на лету.
+async function backfillOneSymbol(symbol) {
+  if (!cfg.twelveDataApiKey) return;
+  console.log(`[fx/td] backfill нового символа ${symbol}…`);
+  for (const interval of CANDLE_INTERVALS) {
+    const twelveInterval = TF_MAP[interval];
+    if (!twelveInterval) continue;
+    const outputsize = interval === "5m" || interval === "15m" ? 5000 : 2000;
+    const data = await fetchTimeSeriesBatch([symbol], twelveInterval, outputsize);
+    if (!data) continue;
+    const values = extractSymbolValues(data, symbol, false);
+    if (!values || values.length === 0) continue;
+    const rows = values.map(v => toCandleRow(v, symbol, interval));
+    const stored = await storeCandleRows(rows);
+    if (stored > 0) console.log(`[fx/td] ${symbol} ${interval}: +${stored} свечей`);
+  }
+}
+
 // ─── Finnhub WebSocket: тики → агрегация свечей в памяти ──────────────────
 
 // state[symbol][interval] = { t (bucket start ms), o, h, l, c, v, dirty }
@@ -444,6 +463,58 @@ async function pruneOld() {
   }
 }
 
+// ─── Список пар из админки (FxCollectorConfig) ────────────────────────────
+//
+// Источник истины — таблица FxCollectorConfig (управляется из админки без
+// передеплоя). Если она пуста (свежий деплой, ничего ещё не настроено) —
+// используем ENV FX_SYMBOLS как фоллбек-дефолт.
+
+const envDefaultSymbols = [...cfg.symbols];
+
+async function loadEnabledSymbolsFromDb() {
+  try {
+    const r = await pool.query(`SELECT symbol FROM "FxCollectorConfig" WHERE enabled = true ORDER BY symbol`);
+    return r.rows.map(row => row.symbol);
+  } catch (err) {
+    console.error(`[fx/config] ошибка чтения FxCollectorConfig: ${err.message}`);
+    return null; // не трогаем текущий список при ошибке БД
+  }
+}
+
+// Сверяет активный список символов с БД, донастраивает WS-подписки и
+// запускает бэкафилл для вновь добавленных пар. Ничего не делает, если
+// список не изменился.
+async function syncSymbolsFromConfig() {
+  const dbSymbols = await loadEnabledSymbolsFromDb();
+  if (dbSymbols === null) return; // ошибка БД — оставляем как есть
+  const target = dbSymbols.length > 0 ? dbSymbols : envDefaultSymbols;
+
+  const current = new Set(cfg.symbols);
+  const next = new Set(target);
+  const added = target.filter(s => !current.has(s));
+  const removed = cfg.symbols.filter(s => !next.has(s));
+  if (added.length === 0 && removed.length === 0) return;
+
+  console.log(`[fx/config] изменение списка пар: +[${added.join(",")}] -[${removed.join(",")}]`);
+
+  for (const symbol of removed) {
+    if (wsConnected && ws) {
+      try { ws.send(JSON.stringify({ type: "unsubscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
+    }
+    liveCandles.delete(symbol);
+  }
+
+  cfg.symbols.length = 0;
+  cfg.symbols.push(...target);
+
+  for (const symbol of added) {
+    if (wsConnected && ws) {
+      try { ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
+    }
+    backfillOneSymbol(symbol).catch(err => console.error(`[fx/config] backfill ${symbol}: ${err.message}`));
+  }
+}
+
 // ─── HTTP healthcheck ────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -454,6 +525,7 @@ const server = http.createServer(async (req, res) => {
       healthy: wsConnected || backfillDone,
       uptimeMs: Date.now() - startedAt,
       instruments: cfg.symbols.length,
+      symbols: cfg.symbols,
       backfillDone,
       ws: {
         connected: wsConnected,
@@ -482,13 +554,20 @@ server.listen(cfg.port, () => {
 
 // ─── Запуск ──────────────────────────────────────────────────────────────
 
-console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange}`);
+async function start() {
+  // 0. Список пар из админки (FxCollectorConfig), если настроен — иначе
+  //    остаётся дефолт из ENV FX_SYMBOLS (envDefaultSymbols).
+  await syncSymbolsFromConfig();
 
-// 1. Бэкафилл истории через Twelve Data (если задан ключ).
-backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
+  console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange}`);
 
-// 2. Основной источник реального времени — Finnhub WS.
-connectFinnhub();
+  // 1. Бэкафилл истории через Twelve Data (если задан ключ).
+  backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
+
+  // 2. Основной источник реального времени — Finnhub WS.
+  connectFinnhub();
+}
+start().catch(err => console.error(`[fx/start] fatal: ${err.message}`));
 
 // 3. Периодический сброс агрегированных из тиков свечей в БД.
 const flushTimer = setInterval(() => {
@@ -504,6 +583,12 @@ const fallbackTimer = setInterval(() => {
 const pruneTimer = setInterval(pruneOld, 6 * 3600_000);
 setTimeout(pruneOld, 60_000);
 
+// 6. Синхронизация списка пар с админкой — раз в 60с (добавление/удаление
+//    пары применяется без перезапуска коллектора).
+const configSyncTimer = setInterval(() => {
+  syncSymbolsFromConfig().catch(err => console.error(`[fx/config] fatal: ${err.message}`));
+}, 60_000);
+
 // Статус — раз в 10 минут.
 setInterval(() => {
   console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}`);
@@ -514,6 +599,7 @@ async function shutdown() {
   clearInterval(flushTimer);
   clearInterval(fallbackTimer);
   clearInterval(pruneTimer);
+  clearInterval(configSyncTimer);
   if (wsReconnectTimer) clearTimeout(wsReconnectTimer);
   if (ws) ws.close();
   await flushLiveCandles().catch(() => {});

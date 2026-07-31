@@ -612,6 +612,16 @@ model FxQuote {
   @@index([symbol, exchange, t])
 }
 
+// Список валютных пар, которые собирает forex-collector — управляется из
+// админки без передеплоя (в отличие от ENV FX_SYMBOLS, который остаётся
+// дефолтом/фоллбеком, если таблица пуста). Коллектор перечитывает эту
+// таблицу раз в ~60с (тот же паттерн, что CollectorConfig для крипты).
+model FxCollectorConfig {
+  symbol    String   @id // "EUR/USD", "GBP/JPY", …
+  enabled   Boolean  @default(true)
+  updatedAt DateTime @updatedAt
+}
+
 // Minute rollup aggregate of depth levels (parallel to ObSnapshotRollup).
 model FxDepthRollup {
   symbol   String

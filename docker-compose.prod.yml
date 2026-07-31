@@ -99,6 +99,8 @@ services:
       # Внутри compose-сети collector доступен по имени сервиса. Переопределить
       # можно в .env. COLLECTOR_METRICS_TOKEN/ADMIN_EMAILS задаются в .env.
       COLLECTOR_URL: ${COLLECTOR_URL:-http://collector:8080}
+      # То же самое для forex-collector (раздел «Форекс» в админке).
+      FX_COLLECTOR_URL: ${FX_COLLECTOR_URL:-http://forex-collector:8081}
       # Логи импорта в БД (ImportLog). Без «true» LogService.record() молча
       # возвращается — логи не пишутся, диагностика импорта слепая.
       ENABLE_IMPORT_LOGS: ${ENABLE_IMPORT_LOGS:-true}

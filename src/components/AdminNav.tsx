@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
@@ -14,6 +14,7 @@ import NotificationBell from "@/components/NotificationBell";
 const LINKS = [
   { href: "/admin", key: "admin.nav.overview", icon: LayoutDashboard, exact: true },
   { href: "/admin/collector", key: "admin.nav.collector", icon: Layers },
+  { href: "/admin/forex", key: "admin.nav.forex", icon: TrendingUp },
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
