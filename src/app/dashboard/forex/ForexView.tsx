@@ -25,6 +25,7 @@ import {
   drawTooltipBox,
   drawDeltaCvdChart,
   drawTwoLineSeries,
+  drawHistoryStartBoundary,
   fmtPriceLabel,
   fmtDateDM,
   fmtTimeHM,
@@ -53,6 +54,9 @@ type FxResp = {
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"];
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
 const DEFAULT_VISIBLE = 360;
+// Верхняя граница памяти для догруженной истории (historyRef) — см.
+// LAZY_HISTORY_PLAN.md и аналогичную константу на /dashboard/orderflow.
+const MAX_HISTORY_CANDLES = 4000;
 
 function parseTime(iso: string): number {
   return new Date(iso).getTime();
@@ -93,10 +97,61 @@ export default function ForexView() {
   const deltaCanvasRef = useRef<HTMLCanvasElement>(null);
   const baCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  const candles: Candle[] = useMemo(
+  const tailCandles: Candle[] = useMemo(
     () => (data?.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c })),
     [data],
   );
+
+  // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md, тот же
+  // паттерн, что и на /dashboard/orderflow). historyRef — старые свечи,
+  // догруженные через /api/forex/history, всегда старше tailCandles[0].t.
+  const historyRef = useRef<Candle[]>([]);
+  const hasMoreHistoryRef = useRef(true);
+  const loadingHistoryRef = useRef(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  const candles: Candle[] = useMemo(
+    () => (historyRef.current.length ? [...historyRef.current, ...tailCandles] : tailCandles),
+    // historyVersion — не читается напрямую, нужен как повод пересчитать
+    // при догрузке истории (historyRef мутируется в ref, без ре-рендера).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tailCandles, historyVersion],
+  );
+
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingHistoryRef.current || !hasMoreHistoryRef.current || !data) return;
+    const before = historyRef.current.length ? historyRef.current[0].t : data.from;
+    loadingHistoryRef.current = true;
+    setLoadingHistory(true);
+    try {
+      const p = new URLSearchParams({ symbol, range, before: String(before), limit: "500" });
+      const res = await fetch(`/api/forex/history?${p}`);
+      if (!res.ok) { hasMoreHistoryRef.current = false; return; }
+      const d = await res.json() as {
+        candles: { t: string; o: number; h: number; l: number; c: number }[];
+        hasMore: boolean;
+      };
+      const newCandles = (d.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c }));
+      if (newCandles.length === 0) { hasMoreHistoryRef.current = false; return; }
+      let merged = [...newCandles, ...historyRef.current];
+      if (merged.length > MAX_HISTORY_CANDLES) {
+        merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
+        // Обрезали самый старый конец — если пользователь ещё раньше
+        // доскроллит, историю ниже нужно будет запросить заново.
+        hasMoreHistoryRef.current = true;
+      } else {
+        hasMoreHistoryRef.current = d.hasMore;
+      }
+      historyRef.current = merged;
+      setHistoryVersion((v) => v + 1);
+    } catch {
+      // тихая ошибка — следующий триггер (pan/zoom) попробует снова
+    } finally {
+      loadingHistoryRef.current = false;
+      setLoadingHistory(false);
+    }
+  }, [data, symbol, range]);
 
   // ─── Load pairs ───────────────────────────────────────────────────────
 
@@ -184,6 +239,8 @@ export default function ForexView() {
     saveDrawing,
     updateDrawing: updateDrawingApi,
     redraw: () => redrawAllRef.current(),
+    getHasMoreHistory: () => hasMoreHistoryRef.current,
+    onNeedHistory: () => { void loadMoreHistory(); },
   });
 
   const load = useCallback(async () => {
@@ -352,7 +409,9 @@ export default function ForexView() {
     const { plotX, plotW, plotH } = layout;
     layoutRef.current = { plotX, plotW, plotH };
 
-    const fullT0 = data.from;
+    // fullT0 расширяется влево по мере догрузки истории (historyRef) — иначе
+    // pan/zoom клэмпились бы по исходному окну data.from (см. LAZY_HISTORY_PLAN.md).
+    const fullT0 = candles.length ? Math.min(data.from, candles[0].t) : data.from;
     const fullT1 = data.to;
     let fYMin = candles[0].l;
     let fYMax = candles[0].h;
@@ -381,6 +440,9 @@ export default function ForexView() {
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
     drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan, { bodyRatio: 0.4 });
+    if (!hasMoreHistoryRef.current && candles.length) {
+      drawHistoryStartBoundary(ctx, sx(candles[0].t), layout, t("fx.historyStart"));
+    }
     ctx.restore();
 
     // Дивергенция считается на сервере с более широким lookback, чем окно
@@ -575,6 +637,9 @@ export default function ForexView() {
     if (key === lastResetKeyRef.current) return;
     lastResetKeyRef.current = key;
     viewRef.current = null;
+    historyRef.current = [];
+    hasMoreHistoryRef.current = true;
+    setHistoryVersion((v) => v + 1);
     redrawAllRef.current();
   }, [data, viewRef, redrawAllRef]);
 
@@ -718,6 +783,12 @@ export default function ForexView() {
             onMouseUp={onUp}
             onDoubleClick={onDouble}
           />
+          {loadingHistory && (
+            <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+              <RefreshCw className="h-3 w-3 animate-spin" />
+              {t("fx.loadingHistory")}
+            </div>
+          )}
         </div>
       </div>
       <div className="mt-1 mb-4 text-[11px] text-faint">{t("of.zoomHint")}</div>

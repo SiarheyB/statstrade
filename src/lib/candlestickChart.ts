@@ -193,6 +193,39 @@ export function drawCandlesticks(
   ctx.lineWidth = 1;
 }
 
+/**
+ * Вертикальная граница "начало истории данных" — рисуется вместо тихой
+ * пустоты слева, когда догрузка истории (lazy-loading, см. LAZY_HISTORY_PLAN.md)
+ * упёрлась в реальный край данных в БД. `x` — экранная координата самой
+ * старой загруженной свечи; рисуется, только если она попадает в plot area.
+ */
+export function drawHistoryStartBoundary(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  layout: PlotLayout,
+  label: string,
+) {
+  const { plotX, plotW, plotH } = layout;
+  if (x < plotX - 1 || x > plotX + plotW + 1) return;
+  ctx.save();
+  ctx.strokeStyle = CHART_COLORS.gridWeak;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, plotH);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.font = "11px ui-sans-serif, system-ui";
+  ctx.fillStyle = CHART_COLORS.axisTextWeak;
+  ctx.textAlign = "left";
+  ctx.save();
+  ctx.translate(x + 4, plotH - 6);
+  ctx.rotate(-Math.PI / 2);
+  ctx.fillText(label, 0, 0);
+  ctx.restore();
+  ctx.restore();
+}
+
 /** Dashed crosshair lines at (cx, cy) within the plot area. */
 export function drawCrosshair(ctx: CanvasRenderingContext2D, cx: number, cy: number, layout: PlotLayout) {
   const { plotX, plotW, plotH } = layout;

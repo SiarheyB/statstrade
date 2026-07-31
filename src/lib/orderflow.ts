@@ -222,6 +222,42 @@ export async function fetchOrderflowCandles(
   return [];
 }
 
+// Догрузка истории свечей "влево" (пагинация по курсору `before`), для
+// динамической подгрузки при скролле/зуме графика. В отличие от
+// fetchOrderflowCandles — читает строго из БД (ObCandle), без похода в
+// Binance: история не может появиться на бирже "задним числом", а поход в
+// Binance на каждый шаг скролла был бы слишком дорогим. Возвращает свечи
+// строго раньше `beforeMs`, отсортированные по возрастанию времени, плюс
+// признак того, что дальше в БД данных больше нет (реальный край истории,
+// ограниченный CANDLE_RETENTION_DAYS коллектора).
+export async function fetchOrderflowCandlesBefore(
+  symbol: string,
+  exchange: string,
+  range: string,
+  beforeMs: number,
+  limit: number,
+): Promise<{ candles: OfCandle[]; hasMore: boolean }> {
+  const interval = CANDLE_INTERVAL[range] ?? "1m";
+  interface ObCandleRow { t: Date; o: number; h: number; l: number; c: number; }
+  let rows: ObCandleRow[] = [];
+  try {
+    rows = await prisma.obCandle.findMany({
+      where: { symbol, exchange, interval, t: { lt: new Date(beforeMs) } },
+      orderBy: { t: "desc" },
+      take: limit,
+      select: { t: true, o: true, h: true, l: true, c: true },
+    });
+  } catch {
+    return { candles: [], hasMore: false };
+  }
+  const candles = rows
+    .map((r) => ({ t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c }))
+    .sort((a, b) => a.t - b.t);
+  // hasMore=true означает "получили полную страницу, дальше в БД скорее
+  // всего ещё есть данные"; false — упёрлись в реальный край истории.
+  return { candles, hasMore: rows.length === limit };
+}
+
 export type DeltaSeries = {
   times: number[]; // центры корзин
   buy: number[];

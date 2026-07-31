@@ -77,7 +77,22 @@ export interface ChartInteractionsOptions {
   saveDrawing: (toolType: DrawingToolType, points: DrawingPoint[]) => void;
   updateDrawing: (id: string, points: DrawingPoint[]) => void;
   redraw: () => void;
+  /** true, если в БД может быть ещё более старая история (не упёрлись в реальный край). */
+  getHasMoreHistory?: () => boolean;
+  /** Запросить дозагрузку более старых свечей — вызывается при приближении
+   * pan/zoom к левому краю уже загруженных данных. Дедуп "уже грузим" и
+   * реальную загрузку делает вызывающая сторона (страница); хук только
+   * троттлит частоту вызовов. */
+  onNeedHistory?: () => void;
 }
+
+// Доля видимого окна от левого края загруженных данных, при приближении к
+// которой запрашивается более старая история — не ждём упора в самый край
+// (известная грабля из прошлого lazy-loading фикса форекса: порог "впритык"
+// даёт заметный рывок/пустоту, пока грузится ответ).
+const HISTORY_TRIGGER_FRACTION = 0.3;
+// Не долбим бэкенд на каждый mousemove/wheel-тик при быстром скролле.
+const HISTORY_TRIGGER_THROTTLE_MS = 400;
 
 export function useChartInteractions(opts: ChartInteractionsOptions) {
   const optsRef = useRef(opts);
@@ -91,6 +106,20 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
   const dragRef = useRef<DragState | null>(null);
   const drawingDragRef = useRef<DrawingDragState | null>(null);
   const drawingResizeRef = useRef<DrawingResizeState | null>(null);
+  const lastHistoryTriggerRef = useRef(0);
+
+  const maybeTriggerHistory = useCallback((view: ChartView) => {
+    const o = optsRef.current;
+    if (!o.onNeedHistory || !o.getHasMoreHistory?.()) return;
+    const b = boundsRef.current;
+    if (!b) return;
+    const span = view.t1 - view.t0 || 1;
+    if (view.t0 - b.t0 > span * HISTORY_TRIGGER_FRACTION) return;
+    const now = Date.now();
+    if (now - lastHistoryTriggerRef.current < HISTORY_TRIGGER_THROTTLE_MS) return;
+    lastHistoryTriggerRef.current = now;
+    o.onNeedHistory();
+  }, []);
 
   const onMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const o = optsRef.current;
@@ -208,6 +237,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         const maxT = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
         const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
         viewRef.current = { ...drag.view, t0: cx - span / 2, t1: cx + span / 2 };
+        maybeTriggerHistory(viewRef.current);
       } else {
         const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
         const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
@@ -217,6 +247,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
           y0: drag.view.y0 + dp,
           y1: drag.view.y1 + dp,
         };
+        maybeTriggerHistory(viewRef.current);
       }
       o.redraw();
     } else {
@@ -404,6 +435,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
       }
       viewRef.current = next;
+      maybeTriggerHistory(next);
       optsRef.current.redraw();
     };
     cv.addEventListener("wheel", onWheel, { passive: false });

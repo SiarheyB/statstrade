@@ -120,8 +120,10 @@ const en: Dict = {
   "of.showLiq": "Limit-order history",
   "of.hintShowLiq": "Show/hide the order-book liquidity “walls” (limit-order history) overlaid on the chart — large resting buy/sell limit orders at specific price levels.\n\nWhat a trader can do:\n• Price approaching a large wall → often slows down or reverses there (the wall acts as support/resistance).\n• A wall suddenly disappearing right as price reaches it → likely absorbed or pulled — watch for a fast move through that level (breakout, not bounce).\n• Walls stacked closely together → a stronger zone than a single isolated wall.\n\n⚠ Walls can be pulled/replaced in seconds (spoofing) — treat them as a hint about intent, not a guarantee.",
   "of.noDelta": "No delta data yet (collector gathering trades)",
+  "of.noDeltaHistory": "Delta/CVD are only computed for the currently loaded window — not available for older history",
   "of.clusters": "Clusters",
   "of.noBa": "No B/A data yet",
+  "of.noBaHistory": "B/A is only computed for the currently loaded window — not available for older history",
   "of.bigTrades": "Large market orders",
   "of.bigTradesHint": "Recent large executed market (taker) trades — not the resting limit-order walls on the heatmap. These are orders that actually executed and moved the tape, often a sign of institutional/whale activity.\n\nWhat a trader can do:\n• A cluster of large Buy trades at a low → possible accumulation, watch for a bounce.\n• A cluster of large Sell trades at a high → possible distribution, watch for a drop.\n• A large trade with little price follow-through afterward → it was likely absorbed by resting liquidity, less significant than one that moves price immediately.",
   "of.noBig": "No large orders yet (collector gathering trades)",
@@ -149,6 +151,8 @@ const en: Dict = {
   "of.hintMinSize": "Hides liquidity walls smaller than this share of the largest wall — filters out noise so only big walls remain.",
   "of.hintBrightness": "Display brightness of the heatmap — does not change the data, only how vivid the walls look.",
   "of.hintRefresh": "Reload data now.",
+  "of.loadingHistory": "Loading history…",
+  "of.historyStart": "Start of available history",
 
   // forex
   "fx.title": "Forex",
@@ -165,6 +169,8 @@ const en: Dict = {
   "fx.vpFailed": "Failed to load volume profile",
   "fx.imbFailed": "Failed to load imbalance",
   "fx.divFailed": "Failed to load divergence",
+  "fx.loadingHistory": "Loading history…",
+  "fx.historyStart": "Start of available history",
 
   // volume profile
   "of.volumeProfile": "Volume Profile",
@@ -1204,8 +1210,10 @@ const ru: Dict = {
   "of.showLiq": "История лимитных ордеров",
   "of.hintShowLiq": "Показывать/скрывать «стены» ликвидности из стакана (историю лимитных ордеров) поверх графика — крупные лимитные ордера на покупку/продажу на конкретных ценовых уровнях.\n\nЧто делать трейдеру:\n• Цена подходит к крупной стене → часто замедляется или разворачивается там (стена работает как поддержка/сопротивление).\n• Стена внезапно исчезает прямо когда цена до неё доходит → её, скорее всего, поглотили или сняли — ждите быстрого прохода через этот уровень (пробой, а не отскок).\n• Стены стоят плотной группой → зона сильнее, чем одна изолированная стена.\n\n⚠ Стены могут сниматься/переставляться за секунды (спуфинг) — воспринимайте их как подсказку о намерениях, а не гарантию.",
   "of.noDelta": "Данных по дельте пока нет (collector собирает сделки)",
+  "of.noDeltaHistory": "Дельта/CVD рассчитываются только для текущего загруженного окна — недоступны для более старой истории",
   "of.clusters": "Кластеры",
   "of.noBa": "Данных B/A пока нет",
+  "of.noBaHistory": "B/A рассчитывается только для текущего загруженного окна — недоступен для более старой истории",
   "of.bigTrades": "Крупные рыночные ордера",
   "of.bigTradesHint": "Недавние крупные исполненные маркет-ордера (тейкеры) — это не лимитные «стены» на карте. Это ордера, которые реально исполнились и подвинули ленту, часто признак активности институционалов/китов.\n\nЧто делать трейдеру:\n• Скопление крупных Buy-сделок на минимуме → возможное накопление, следите за отскоком.\n• Скопление крупных Sell-сделок на максимуме → возможное распределение, следите за падением.\n• Крупная сделка, после которой цена почти не сдвинулась → её, скорее всего, поглотила лимитная ликвидность, значимость меньше, чем у сделки, сразу двигающей цену.",
   "of.noBig": "Крупных ордеров пока нет (collector собирает сделки)",
@@ -1233,6 +1241,8 @@ const ru: Dict = {
   "of.hintMinSize": "Скрывает стены ликвидности мельче этой доли от самой крупной стены — отсекает шум, остаются только крупные стены.",
   "of.hintBrightness": "Яркость отображения карты — не меняет данные, только насыщенность свечения стен.",
   "of.hintRefresh": "Перезагрузить данные сейчас.",
+  "of.loadingHistory": "Загрузка истории…",
+  "of.historyStart": "Начало доступной истории",
 
   // forex
   "fx.title": "Форекс",
@@ -1249,6 +1259,8 @@ const ru: Dict = {
   "fx.vpFailed": "Не удалось загрузить профиль объёма",
   "fx.imbFailed": "Не удалось загрузить дисбаланс",
   "fx.divFailed": "Не удалось загрузить дивергенцию",
+  "fx.loadingHistory": "Загрузка истории…",
+  "fx.historyStart": "Начало доступной истории",
 
   // volume profile
   "of.volumeProfile": "Профиль объёма",

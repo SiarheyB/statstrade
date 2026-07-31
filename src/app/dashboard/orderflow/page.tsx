@@ -56,6 +56,7 @@ import {
   drawTooltipBox,
   drawDeltaCvdChart,
   drawTwoLineSeries,
+  drawHistoryStartBoundary,
   fmtPriceLabel as fmtP,
   fmtValLabel as fmtVal,
   fmtTimeHM as fmtTime,
@@ -102,6 +103,10 @@ type Resp = {
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
+// Верхняя граница памяти для догруженной истории (historyRef). При
+// превышении обрезаем самый старый конец — если пользователь доскроллит
+// туда снова, история перезапросится тем же механизмом, что и в первый раз.
+const MAX_HISTORY_CANDLES = 4000;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
@@ -212,6 +217,16 @@ export default function OrderflowPage() {
   const baRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
 
+  // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md). historyRef —
+  // старые свечи, догруженные через /api/orderflow/history, всегда старше
+  // data.candles[0].t. hasMoreHistoryRef=false — реально упёрлись в край
+  // данных в БД (CANDLE_RETENTION_DAYS коллектора).
+  const historyRef = useRef<Candle[]>([]);
+  const hasMoreHistoryRef = useRef(true);
+  const loadingHistoryRef = useRef(false);
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
   const minT = useMemo(() => minPct / 100, [minPct]);
 
@@ -276,13 +291,51 @@ export default function OrderflowPage() {
     }
   }, []);
 
+  const getMergedCandles = useCallback((): Candle[] => {
+    const tail = data?.candles ?? [];
+    return historyRef.current.length ? [...historyRef.current, ...tail] : tail;
+    // historyVersion — не читается напрямую, но нужен как повод пересчитать
+    // при догрузке истории (historyRef мутируется в ref, без ре-рендера).
+  }, [data, historyVersion]);
+
+  const loadMoreHistory = useCallback(async () => {
+    if (loadingHistoryRef.current || !hasMoreHistoryRef.current || !data) return;
+    const before = historyRef.current.length ? historyRef.current[0].t : data.from;
+    loadingHistoryRef.current = true;
+    setLoadingHistory(true);
+    try {
+      const res = await fetch(
+        `/api/orderflow/history?symbol=${symbol}&exchange=${exchange}&range=${range}&before=${before}&limit=500`,
+      );
+      if (!res.ok) { hasMoreHistoryRef.current = false; return; }
+      const d = await res.json() as { candles: Candle[]; hasMore: boolean };
+      if (!d.candles?.length) { hasMoreHistoryRef.current = false; return; }
+      let merged = [...d.candles, ...historyRef.current];
+      if (merged.length > MAX_HISTORY_CANDLES) {
+        merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
+        // Обрезали самый старый конец — если пользователь ещё раньше
+        // доскроллит, историю ниже нужно будет запросить заново.
+        hasMoreHistoryRef.current = true;
+      } else {
+        hasMoreHistoryRef.current = d.hasMore;
+      }
+      historyRef.current = merged;
+      setHistoryVersion((v) => v + 1);
+    } catch {
+      // тихая ошибка — следующий триггер (pan/zoom) попробует снова
+    } finally {
+      loadingHistoryRef.current = false;
+      setLoadingHistory(false);
+    }
+  }, [data, symbol, exchange, range]);
+
   const redrawAllRef = useRef<() => void>(() => {});
   const {
     viewRef, layoutRef, boundsRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef,
     onMove, onLeave, onDown, onUp, onDouble,
   } = useChartInteractions({
     canvasRef,
-    getCandles: () => data?.candles ?? [],
+    getCandles: getMergedCandles,
     getDrawings: () => drawings,
     showDrawings,
     magnet,
@@ -296,6 +349,8 @@ export default function OrderflowPage() {
     saveDrawing,
     updateDrawing,
     redraw: () => redrawAllRef.current(),
+    getHasMoreHistory: () => hasMoreHistoryRef.current,
+    onNeedHistory: () => { void loadMoreHistory(); },
   });
   const load = useCallback(async () => {
     setLoading(true);
@@ -531,7 +586,7 @@ export default function OrderflowPage() {
     const cv = canvasRef.current;
     if (!cv || !data?.heatmap) return;
     const hm = data.heatmap;
-    const candles = data.candles ?? [];
+    const candles = getMergedCandles();
     const dpr = window.devicePixelRatio || 1;
     const W = cv.clientWidth;
     const H = cv.clientHeight;
@@ -548,7 +603,10 @@ export default function OrderflowPage() {
     const { plotX, plotW, plotH } = layout;
     layoutRef.current = { plotX, plotW, plotH };
 
-    const fullT0 = data.from;
+    // fullT0 расширяется влево по мере догрузки истории (historyRef) — иначе
+    // pan/zoom клэмпились бы по исходному окну data.from и не давали уйти
+    // в уже подгруженную историю (см. LAZY_HISTORY_PLAN.md).
+    const fullT0 = candles.length ? Math.min(data.from, candles[0].t) : data.from;
     const fullT1 = data.to;
     let fYMin = hm.priceMin;
     let fYMax = hm.priceMax;
@@ -706,6 +764,9 @@ export default function OrderflowPage() {
     }
 
     drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan, { clusters, colW });
+    if (!hasMoreHistoryRef.current && candles.length) {
+      drawHistoryStartBoundary(ctx, sx(candles[0].t), layout, t("of.historyStart"));
+    }
     ctx.restore();
 
     if (showDrawings && drawings.length) {
@@ -848,7 +909,7 @@ export default function OrderflowPage() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet, getMergedCandles]);
 
   const drawDelta = useCallback(() => {
     const cv = deltaRef.current;
@@ -860,17 +921,23 @@ export default function OrderflowPage() {
     cv.height = Math.round(H * dpr);
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    const d = data.delta;
     const t0 = viewRef.current?.t0 ?? data.from;
     const t1 = viewRef.current?.t1 ?? data.to;
+    // Дельта/CVD считаются только для загруженного сервером окна
+    // [data.from, data.to] — в этой итерации не пагинируются (см.
+    // LAZY_HISTORY_PLAN.md, п.5.7). Если пользователь доскроллил в
+    // догруженную историю (t0 < data.from), честно показываем заглушку
+    // вместо тихой пустой/плоской линии.
+    const viewingUnpaginatedHistory = t0 < data.from;
+    const d = viewingUnpaginatedHistory ? null : data.delta;
     drawDeltaCvdChart(ctx, {
       W, H, t0, t1,
       times: d?.times ?? [],
       delta: d?.delta ?? [],
       cvd: d?.cvd ?? null,
-      emptyText: t("of.noDelta"),
+      emptyText: viewingUnpaginatedHistory ? t("of.noDeltaHistory") : t("of.noDelta"),
     });
-  }, [data, t]);
+  }, [data, t, viewRef]);
 
   const drawBA = useCallback(() => {
     const cv = baRef.current;
@@ -886,17 +953,21 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const ba = data.ba;
+    const t0 = viewRef.current?.t0 ?? data.from;
+    const t1 = viewRef.current?.t1 ?? data.to;
+    // B/A считается только для загруженного сервером окна [data.from, data.to]
+    // (см. LAZY_HISTORY_PLAN.md, п.5.7) — при скролле в догруженную историю
+    // показываем заглушку вместо тихой пустоты.
+    const viewingUnpaginatedHistory = t0 < data.from;
+    const ba = viewingUnpaginatedHistory ? null : data.ba;
     const plotX = 8 + 76;
     const plotW = W - plotX - 64;
     if (!ba || ba.full.length === 0) {
       ctx.fillStyle = "#6b7384";
       ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.fillText(t("of.noBa"), plotX, H / 2);
+      ctx.fillText(viewingUnpaginatedHistory ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
       return;
     }
-    const t0 = viewRef.current?.t0 ?? data.from;
-    const t1 = viewRef.current?.t1 ?? data.to;
     const xspan = t1 - t0 || 1;
     const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
     const sy = (v: number) => H - 4 - v * (H - 8);
@@ -936,7 +1007,7 @@ export default function OrderflowPage() {
     ctx.fillText("full", plotX + plotW + 5, 12);
     ctx.fillStyle = "#e6b800";
     ctx.fillText("±1%", plotX + plotW + 5, 24);
-  }, [data, t]);
+  }, [data, t, viewRef]);
 
   useEffect(() => {
     draw();
@@ -967,6 +1038,9 @@ export default function OrderflowPage() {
     if (key === lastResetKeyRef.current) return;
     lastResetKeyRef.current = key;
     viewRef.current = null;
+    historyRef.current = [];
+    hasMoreHistoryRef.current = true;
+    setHistoryVersion((v) => v + 1);
     redrawAllRef.current();
   }, [data, viewRef, redrawAllRef]);
 
@@ -1070,14 +1144,14 @@ export default function OrderflowPage() {
       {/* Слайдеры фильтрации */}
       <div className="flex flex-wrap items-center gap-6 mb-3 text-xs text-muted">
         <label className="flex items-center gap-2" title={t("of.hintMinSize")}>
-          <span className="w-28 inline-flex items-center gap-1">
+          <span className="min-w-28 inline-flex items-center gap-1 whitespace-nowrap">
             {t("of.filterThreshold")}: {minPct}%
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
           <input type="range" min={0} max={100} value={minPct} onChange={(e) => setMinPct(Number(e.target.value))} className="accent-accent w-40" />
         </label>
         <label className="flex items-center gap-2" title={t("of.hintBrightness")}>
-          <span className="w-28 inline-flex items-center gap-1">
+          <span className="min-w-28 inline-flex items-center gap-1 whitespace-nowrap">
             {t("of.filterBrightness")}: {brightness}%
             <HelpCircle size={12} className="text-faint shrink-0" />
           </span>
@@ -1190,7 +1264,7 @@ export default function OrderflowPage() {
             })()}
             <div className="flex gap-2 items-start">
               <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} />
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 relative">
                 <canvas
                   ref={canvasRef}
                   className="w-full"
@@ -1201,6 +1275,12 @@ export default function OrderflowPage() {
                   onMouseUp={onUp}
                   onDoubleClick={onDouble}
                 />
+                {loadingHistory && (
+                  <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    {t("of.loadingHistory")}
+                  </div>
+                )}
               </div>
             </div>
             <div className="mt-1 border-t border-border/40 pt-1">
