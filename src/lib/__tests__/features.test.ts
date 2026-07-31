@@ -22,9 +22,17 @@ describe('features - FEATURE_DEFAULTS', () => {
       'mentorMode',
       'volumeProfile',
       'divergenceScanner',
+      'forex',
+      'forexPublicAccess',
       'imbalanceIndicator',
     ]);
   });
+
+  // forex/forexPublicAccess (админ-переключатели раздела «Форекс», см.
+  // /admin/forex) — единственные фичи без тюнинговых полей: только
+  // enabled/disabled, никаких числовых параметров. Поэтому "at least one
+  // numeric field" проверяем не для всех фич подряд, а с явным исключением.
+  const PURE_TOGGLE_KEYS = new Set<FeatureKey>(['forex', 'forexPublicAccess']);
 
   it('each feature has required fields: enabled, numeric params, meta', () => {
     for (const key of Object.keys(FEATURE_DEFAULTS) as FeatureKey[]) {
@@ -33,16 +41,27 @@ describe('features - FEATURE_DEFAULTS', () => {
       expect(def).toHaveProperty('label');
       expect(def).toHaveProperty('description');
       expect(def).toHaveProperty('fieldHelp');
-      // at least one numeric config field besides meta
+      // at least one numeric config field besides meta — except pure on/off toggles
       const numericKeys = Object.keys(def).filter(
         (k) => !FEATURE_META_KEYS.includes(k as (typeof FEATURE_META_KEYS)[number])
       );
+      if (PURE_TOGGLE_KEYS.has(key)) {
+        expect(numericKeys.length).toBe(0);
+        continue;
+      }
       expect(numericKeys.length).toBeGreaterThan(0);
       // all numeric fields should be numbers
       for (const nk of numericKeys) {
         expect(typeof def[nk as keyof typeof def]).toBe('number');
       }
     }
+  });
+
+  it('forex and forexPublicAccess are pure on/off toggles with no tunable params', () => {
+    expect(FEATURE_DEFAULTS.forex.label).toBeTruthy();
+    expect(FEATURE_DEFAULTS.forex.description).toBeTruthy();
+    expect(FEATURE_DEFAULTS.forexPublicAccess.label).toBeTruthy();
+    expect(FEATURE_DEFAULTS.forexPublicAccess.description).toBeTruthy();
   });
 
   it('exitEfficiency has correct defaults', () => {
