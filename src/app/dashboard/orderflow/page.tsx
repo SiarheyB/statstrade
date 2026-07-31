@@ -43,6 +43,28 @@ import type {
   DrawingToolType,
   DrawingPoint,
 } from "@/lib/drawings";
+import {
+  computePlotLayout,
+  computeInitialView,
+  drawPriceGrid,
+  drawTimeGrid,
+  drawCandlesticks,
+  drawCrosshair,
+  drawLastPriceTag,
+  drawPriceCrosshairTag,
+  drawTimeCrosshairTag,
+  drawTooltipBox,
+  drawDeltaCvdChart,
+  drawTwoLineSeries,
+  fmtPriceLabel as fmtP,
+  fmtValLabel as fmtVal,
+  fmtTimeHM as fmtTime,
+  PADL,
+  PADR,
+  PADB,
+  PRICE_AXIS_W,
+} from "@/lib/candlestickChart";
+import { useChartInteractions } from "@/lib/useChartInteractions";
 
 type ObHeatmap = {
   priceMin: number;
@@ -83,31 +105,12 @@ const DEFAULT_VISIBLE = 100;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
-const ZOOM_IN_LIMIT = 1;
-const ZOOM_OUT_LIMIT = 2;
-
 const BIG_LIMIT_COINS: Record<string, number> = { BTCUSDT: 500, ETHUSDT: 5000 };
 const DEFAULT_BIG_LIMIT_COINS = 500;
 function bigLimitFor(symbol: string): number {
   return BIG_LIMIT_COINS[symbol.toUpperCase()] ?? DEFAULT_BIG_LIMIT_COINS;
 }
 
-function fmtP(p: number): string {
-  if (p >= 1000) return Math.round(p).toLocaleString("en-US");
-  if (p >= 1) return p.toFixed(2);
-  return p.toPrecision(4);
-}
-function fmtVal(v: number): string {
-  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return String(Math.round(v));
-}
-function fmtTime(ms: number, tz: TimezoneId): string {
-  const { h, mi } = zonedParts(ms, tz);
-  const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(h)}:${p(mi)}`;
-}
 function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
   const { ms: shifted } = shiftedMs(ms, tz);
   const d = new Date(shifted);
@@ -123,15 +126,6 @@ function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
   });
   return f.format(d);
 }
-function fmtDate(ms: number, tz: TimezoneId): string {
-  const { d, mo } = zonedParts(ms, tz);
-  const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d)}.${p(mo + 1)}`;
-}
-function dayKey(ms: number, tz: TimezoneId): number {
-  const { y, mo, d } = zonedParts(ms, tz);
-  return y * 10000 + mo * 100 + d;
-}
 function fmtDateTime(ms: number, tz: TimezoneId): string {
   const { d, mo, h, mi } = zonedParts(ms, tz);
   const p = (z: number) => String(z).padStart(2, "0");
@@ -139,26 +133,6 @@ function fmtDateTime(ms: number, tz: TimezoneId): string {
 }
 function baseAsset(symbol: string): string {
   return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
-}
-
-function niceStep(raw: number): number {
-  if (!Number.isFinite(raw) || raw <= 0) return 1;
-  const exp = Math.floor(Math.log10(raw));
-  const base = Math.pow(10, exp);
-  const frac = raw / base;
-  const niceFrac = frac < 1.5 ? 1 : frac < 3 ? 2 : frac < 7 ? 5 : 10;
-  return niceFrac * base;
-}
-
-const TIME_STEPS_MS = [
-  1000, 5000, 15000, 30000,
-  60000, 5 * 60000, 15 * 60000, 30 * 60000,
-  3600000, 2 * 3600000, 4 * 3600000, 6 * 3600000, 12 * 3600000,
-  86400000, 2 * 86400000, 7 * 86400000, 30 * 86400000,
-];
-function niceTimeStep(xspan: number, maxLines = 8): number {
-  for (const s of TIME_STEPS_MS) if (xspan / s <= maxLines) return s;
-  return TIME_STEPS_MS[TIME_STEPS_MS.length - 1];
 }
 
 const WALL_LEVELS = 8;
@@ -237,34 +211,92 @@ export default function OrderflowPage() {
   const deltaRef = useRef<HTMLCanvasElement>(null);
   const baRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
-  const hoverRef = useRef<{ mx: number; my: number } | null>(null);
-  const viewRef = useRef<{ t0: number; t1: number; y0: number; y1: number } | null>(null);
-  const dragRef = useRef<({
-    mx: number;
-    my: number;
-    mode: "pan" | "zoomX" | "zoomY";
-    view: { t0: number; t1: number; y0: number; y1: number };
-    drawingId?: string;
-    originalPoints?: Array<{ t: number; price: number }>;
-  }) | null>(null);
-  const layoutRef = useRef<{ plotX: number; plotW: number; plotH: number } | null>(null);
-  const boundsRef = useRef<{ t0: number; t1: number; y0: number; y1: number; step: number } | null>(null);
-  const drawingDragRef = useRef<{ drawingId: string; dx: number; dy: number; originalPoints: DrawingPoint[] } | null>(null);
-  const drawingResizeRef = useRef<{
-    drawingId: string;
-    cornerIdx: number; // 0=TL,1=TR,2=BL,3=BR
-    // Исходные границы прямоугольника
-    origMinT: number;
-    origMaxT: number;
-    origMinPrice: number;
-    origMaxPrice: number;
-    originalPoints: DrawingPoint[];
-  } | null>(null);
-  const snappedRef = useRef<{ t: number; price: number } | null>(null);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
   const minT = useMemo(() => minPct / 100, [minPct]);
 
+  const loadDrawings = useCallback(async () => {
+    setDrawingsLoading(true);
+    setDrawingsError(null);
+    try {
+      const res = await fetch(`/api/orderflow/drawings?symbol=${symbol}&exchange=${exchange}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Error" }));
+        setDrawingsError(err.error ?? "Error");
+        setDrawings([]);
+        return;
+      }
+      const d = await res.json();
+      setDrawings(d.drawings ?? []);
+    } catch {
+      setDrawingsError("Network error");
+      setDrawings([]);
+    } finally {
+      setDrawingsLoading(false);
+    }
+  }, [symbol, exchange]);
+
+  const saveDrawing = useCallback(async (toolType: DrawingToolType, pts: DrawingPoint[]) => {
+    try {
+      const res = await fetch("/api/orderflow/drawings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol, exchange, toolType, points: pts }),
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => "unknown error");
+        console.error("[drawings] save failed:", res.status, errText);
+        return;
+      }
+      const d = await res.json();
+      if (d.drawing) {
+        setDrawings(prev => [...prev, d.drawing]);
+      }
+    } catch (err) {
+      console.error("[drawings] save error:", err);
+    }
+  }, [symbol, exchange]);
+
+  const updateDrawing = useCallback(async (id: string, pts: DrawingPoint[]) => {
+    try {
+      const res = await fetch(`/api/orderflow/drawings?id=${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ points: pts }),
+      });
+      if (!res.ok) return;
+      const d = await res.json();
+      if (d.drawing) {
+        setDrawings(prev => prev.map(drawing =>
+          drawing.id === id ? { ...drawing, points: d.drawing.points } : drawing
+        ));
+      }
+    } catch (err) {
+      console.error("Failed to update drawing:", err);
+    }
+  }, []);
+
+  const redrawAllRef = useRef<() => void>(() => {});
+  const {
+    viewRef, layoutRef, boundsRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef,
+    onMove, onLeave, onDown, onUp, onDouble,
+  } = useChartInteractions({
+    canvasRef,
+    getCandles: () => data?.candles ?? [],
+    getDrawings: () => drawings,
+    showDrawings,
+    magnet,
+    activeTool,
+    setActiveTool,
+    drawingPoints,
+    setDrawingPoints,
+    selectedDrawingId,
+    setSelectedDrawingId,
+    setShowDrawingEditor,
+    saveDrawing,
+    updateDrawing,
+    redraw: () => redrawAllRef.current(),
+  });
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -455,87 +487,6 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
-  const loadDrawings = useCallback(async () => {
-    setDrawingsLoading(true);
-    setDrawingsError(null);
-    try {
-      const res = await fetch(`/api/orderflow/drawings?symbol=${symbol}&exchange=${exchange}`);
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: "Error" }));
-        setDrawingsError(err.error ?? "Error");
-        setDrawings([]);
-        return;
-      }
-      const d = await res.json();
-      setDrawings(d.drawings ?? []);
-    } catch {
-      setDrawingsError("Network error");
-      setDrawings([]);
-    } finally {
-      setDrawingsLoading(false);
-    }
-  }, [symbol, exchange]);
-
-  const saveDrawing = useCallback(async (toolType: DrawingToolType, pts: DrawingPoint[]) => {
-    try {
-      const res = await fetch("/api/orderflow/drawings", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbol, exchange, toolType, points: pts }),
-      });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => "unknown error");
-        console.error("[drawings] save failed:", res.status, errText);
-        return;
-      }
-      const d = await res.json();
-      if (d.drawing) {
-        setDrawings(prev => [...prev, d.drawing]);
-      }
-    } catch (err) {
-      console.error("[drawings] save error:", err);
-    }
-  }, [symbol, exchange]);
-
-  const updateDrawing = useCallback(async (id: string, pts: DrawingPoint[]) => {
-    try {
-      const res = await fetch(`/api/orderflow/drawings?id=${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ points: pts }),
-      });
-      if (!res.ok) return;
-      const d = await res.json();
-      if (d.drawing) {
-        setDrawings(prev => prev.map(drawing =>
-          drawing.id === id ? { ...drawing, points: d.drawing.points } : drawing
-        ));
-      }
-    } catch (err) {
-      console.error("Failed to update drawing:", err);
-    }
-  }, []);
-
-  /** Привязка точки к haй/лою ближайшей свечи, если включён магнит. */
-  function snapToCandle(t: number, price: number, candles: Candle[]): { t: number; price: number } {
-    if (!magnet || !candles.length) return { t, price };
-    // Ищем ближайшую свечу по времени
-    let nearest = candles[0];
-    let minDist = Math.abs(t - candles[0].t);
-    for (const c of candles) {
-      const d = Math.abs(t - c.t);
-      if (d < minDist) { minDist = d; nearest = c; }
-    }
-    const step = candles.length > 1 ? candles[1].t - candles[0].t : 60000;
-    const snapTimeThreshold = step * 0.5;
-    if (minDist >= snapTimeThreshold) return { t, price };
-    const range = nearest.h - nearest.l || 1;
-    const snapPriceThreshold = range * 0.3;
-    const distHigh = Math.abs(price - nearest.h);
-    const distLow = Math.abs(price - nearest.l);
-    const snappedPrice = distHigh < snapPriceThreshold ? nearest.h : distLow < snapPriceThreshold ? nearest.l : price;
-    return { t: nearest.t, price: snappedPrice };
-  }
 
   useEffect(() => {
     loadVolumeProfile();
@@ -577,10 +528,6 @@ export default function OrderflowPage() {
     };
   }, [live, range, symbol, exchange, timezone]);
 
-  const PADL = 8;
-  const PADR = 64;
-  const PADB = 20;
-
   const draw = useCallback(() => {
     const cv = canvasRef.current;
     if (!cv || !data?.heatmap) return;
@@ -597,10 +544,9 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const PP = 76;
-    const plotX = PADL + PP;
-    const plotW = W - plotX - PADR;
-    const plotH = H - PADB;
+    const PP = PRICE_AXIS_W;
+    const layout = computePlotLayout(W, H, PADB);
+    const { plotX, plotW, plotH } = layout;
     layoutRef.current = { plotX, plotW, plotH };
 
     const fullT0 = data.from;
@@ -615,20 +561,7 @@ export default function OrderflowPage() {
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
     if (!viewRef.current) {
       const visible = VISIBLE_CANDLES[range] ?? DEFAULT_VISIBLE;
-      const t0 = Math.max(fullT0, fullT1 - visible * candleStep);
-      let vy0 = Infinity;
-      let vy1 = -Infinity;
-      for (const k of candles) {
-        if (k.t < t0) continue;
-        if (k.l < vy0) vy0 = k.l;
-        if (k.h > vy1) vy1 = k.h;
-      }
-      if (!Number.isFinite(vy0) || !Number.isFinite(vy1)) {
-        vy0 = fYMin;
-        vy1 = fYMax;
-      }
-      const pad = (vy1 - vy0) * 0.04 || vy1 * 0.01;
-      viewRef.current = { t0, t1: fullT1, y0: vy0 - pad, y1: vy1 + pad };
+      viewRef.current = computeInitialView(candles, fullT0, fullT1, visible);
     }
     const v = viewRef.current;
     const t0 = v.t0;
@@ -716,43 +649,8 @@ export default function OrderflowPage() {
       ctx.stroke();
     }
 
-    ctx.font = "10px ui-sans-serif, system-ui";
-    ctx.textAlign = "left";
-    const priceStep = niceStep(yspan / 6);
-    const priceStart = Math.ceil(yMin / priceStep) * priceStep;
-    for (let price = priceStart; price <= yMax; price += priceStep) {
-      const y = sy(price);
-      if (y < 0 || y > plotH) continue;
-      ctx.strokeStyle = "rgba(255,255,255,0.08)";
-      ctx.beginPath();
-      ctx.moveTo(plotX, y);
-      ctx.lineTo(plotX + plotW, y);
-      ctx.stroke();
-      ctx.fillStyle = "#8a93a6";
-      ctx.fillText(fmtP(price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, y + 3)));
-    }
-
-    const timeStep = niceTimeStep(xspan);
-    const timeStart = Math.ceil(t0 / timeStep) * timeStep;
-    ctx.textAlign = "center";
-    let lastDay: number | null = null;
-    for (let ms = timeStart; ms <= t1; ms += timeStep) {
-      const x = sx(ms);
-      if (x < plotX || x > plotX + plotW) continue;
-      ctx.strokeStyle = "rgba(255,255,255,0.06)";
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, plotH);
-      ctx.stroke();
-      const day = dayKey(ms, timezone);
-      const isDayStep = timeStep >= 86400000;
-      const isNewDay = day !== lastDay;
-      lastDay = day;
-      const label = isDayStep ? fmtDate(ms, timezone) : isNewDay ? `${fmtDate(ms, timezone)} ${fmtTime(ms, timezone)}` : fmtTime(ms, timezone);
-      ctx.fillStyle = isDayStep || isNewDay ? "#9aa2b3" : "#6b7384";
-      ctx.fillText(label, x, H - 6);
-    }
-    ctx.textAlign = "left";
+    drawPriceGrid(ctx, layout, yMin, yMax, sy);
+    drawTimeGrid(ctx, layout, t0, t1, timezone, sx);
 
     ctx.save();
     ctx.beginPath();
@@ -808,32 +706,7 @@ export default function OrderflowPage() {
       ctx.textBaseline = "alphabetic";
     }
 
-    if (candles.length > 1) {
-      const stepMs = candles[1].t - candles[0].t;
-      const wickW = clusters
-        ? Math.min(3, Math.max(1, (stepMs / xspan) * plotW * 0.05))
-        : 1;
-      const cw = clusters
-        ? wickW * 3
-        : Math.max(1, (stepMs / xspan) * plotW * 0.7);
-      ctx.lineWidth = wickW;
-      for (const k of candles) {
-        const x = sx(k.t + stepMs / 2);
-        if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
-        const up = k.c >= k.o;
-        ctx.strokeStyle = up ? "#13af74" : "#ce323b";
-        ctx.fillStyle = up ? "#13af74" : "#ce323b";
-        ctx.beginPath();
-        ctx.moveTo(x, sy(k.h));
-        ctx.lineTo(x, sy(k.l));
-        ctx.stroke();
-        const yo = sy(k.o);
-        const yc = sy(k.c);
-        const bodyX = clusters ? x - cw - 1 : x - cw / 2;
-        ctx.fillRect(bodyX, Math.min(yo, yc), cw, Math.max(1, Math.abs(yc - yo)));
-      }
-      ctx.lineWidth = 1;
-    }
+    drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan, { clusters, colW });
     ctx.restore();
 
     if (showDrawings && drawings.length) {
@@ -911,19 +784,7 @@ export default function OrderflowPage() {
 
     const last = candles.length ? candles[candles.length - 1].c : hm.price;
     const yp = sy(last);
-    if (yp >= 0 && yp <= plotH) {
-      ctx.strokeStyle = "#e6b800";
-      ctx.setLineDash([4, 3]);
-      ctx.beginPath();
-      ctx.moveTo(plotX, yp);
-      ctx.lineTo(plotX + plotW, yp);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#e6b800";
-      ctx.fillRect(plotX + plotW, yp - 7, PADR, 14);
-      ctx.fillStyle = "#08080d";
-      ctx.fillText(fmtP(last), plotX + plotW + 5, yp + 3);
-    }
+    drawLastPriceTag(ctx, last, yp, layout);
 
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
@@ -934,15 +795,7 @@ export default function OrderflowPage() {
         cx = sx(snappedRef.current.t);
         cy = sy(snappedRef.current.price);
       }
-      ctx.strokeStyle = "rgba(255,255,255,0.35)";
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.moveTo(cx, 0);
-      ctx.lineTo(cx, plotH);
-      ctx.moveTo(plotX, cy);
-      ctx.lineTo(plotX + plotW, cy);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      drawCrosshair(ctx, cx, cy, layout);
       // Если магнит активен — рисуем маркер притягивания
       if (activeTool && magnet && snappedRef.current) {
         ctx.fillStyle = "#e6b800";
@@ -970,23 +823,12 @@ export default function OrderflowPage() {
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
       const vol = insideHeatmap ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
 
-      ctx.fillStyle = "#e6b800";
-      ctx.fillRect(plotX + plotW, cy - 7, PADR, 14);
-      ctx.fillStyle = "#08080d";
-      ctx.fillText(fmtP(priceH), plotX + plotW + 5, cy + 3);
+      drawPriceCrosshairTag(ctx, priceH, cy, layout);
 
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
       const timeLabel = fmtCrosshairLabel(cndl ? cndl.t : ms, timezone, locale);
-      ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.textAlign = "center";
-      const timeBoxW = Math.ceil(ctx.measureText(timeLabel).width) + 12;
-      const timeBoxX = Math.min(plotX + plotW - timeBoxW / 2, Math.max(plotX + timeBoxW / 2, cx));
-      ctx.fillStyle = "#e6b800";
-      ctx.fillRect(timeBoxX - timeBoxW / 2, plotH, timeBoxW, PADB - 1);
-      ctx.fillStyle = "#08080d";
-      ctx.fillText(timeLabel, timeBoxX, H - 6);
-      ctx.textAlign = "left";
+      drawTimeCrosshairTag(ctx, timeLabel, cx, layout);
 
       const base = baseAsset(data.symbol);
       const hasWall = showLiq && insideHeatmap && hm.maxVal > 0 && vol / hm.maxVal >= minT;
@@ -995,27 +837,7 @@ export default function OrderflowPage() {
           t("of.tipLimitOrder"),
           `${fmtP(priceH)} · ${fmtVal(vol)} ${base}`,
         ];
-        const tipPx = 14;
-        const lineH = 20;
-        const padX = 12;
-        const padY = 10;
-        ctx.font = `${tipPx}px ui-sans-serif, system-ui`;
-        let textW = 0;
-        for (const ln of lines) textW = Math.max(textW, ctx.measureText(ln).width);
-        const boxW = Math.ceil(textW) + padX * 2;
-        const boxH = padY * 2 + lines.length * lineH;
-        let bx = cx + 16;
-        let by = cy + 16;
-        if (bx + boxW > plotX + plotW) bx = cx - boxW - 16;
-        if (by + boxH > plotH) by = cy - boxH - 16;
-        ctx.fillStyle = "rgba(16,18,26,0.96)";
-        ctx.strokeStyle = "rgba(255,255,255,0.18)";
-        ctx.fillRect(bx, by, boxW, boxH);
-        ctx.strokeRect(bx, by, boxW, boxH);
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = "#e6eaf2";
-        lines.forEach((ln, i) => ctx.fillText(ln, bx + padX, by + padY + lineH / 2 + i * lineH));
-        ctx.textBaseline = "alphabetic";
+        drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
   }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet]);
@@ -1030,64 +852,16 @@ export default function OrderflowPage() {
     cv.height = Math.round(H * dpr);
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0a0b10";
-    ctx.fillRect(0, 0, W, H);
-
     const d = data.delta;
-    const plotX = 8 + 76;
-    const plotW = W - plotX - 64;
-    if (!d || d.delta.length === 0) {
-      ctx.fillStyle = "#6b7384";
-      ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.fillText(t("of.noDelta"), plotX, H / 2);
-      return;
-    }
     const t0 = viewRef.current?.t0 ?? data.from;
     const t1 = viewRef.current?.t1 ?? data.to;
-    const xspan = t1 - t0 || 1;
-    const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
-
-    const n = d.delta.length;
-    const maxAbs = Math.max(1, ...d.delta.map((v) => Math.abs(v)));
-    const mid = H / 2;
-    const bw = Math.max(1, (plotW / n) * 0.8);
-    for (let i = 0; i < n; i++) {
-      const v = d.delta[i];
-      if (v === 0) continue;
-      const x = sx(d.times[i]);
-      const h = (Math.abs(v) / maxAbs) * (H / 2 - 4);
-      ctx.fillStyle = v >= 0 ? "rgba(22,199,132,0.8)" : "rgba(234,57,67,0.8)";
-      if (v >= 0) ctx.fillRect(x - bw / 2, mid - h, bw, h);
-      else ctx.fillRect(x - bw / 2, mid, bw, h);
-    }
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.beginPath();
-    ctx.moveTo(plotX, mid);
-    ctx.lineTo(plotX + plotW, mid);
-    ctx.stroke();
-
-    const cvdMin = Math.min(...d.cvd);
-    const cvdMax = Math.max(...d.cvd);
-    const cspan = cvdMax - cvdMin || 1;
-    const cy = (v: number) => H - 4 - ((v - cvdMin) / cspan) * (H - 8);
-    ctx.strokeStyle = "#e6b800";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    for (let i = 0; i < n; i++) {
-      const x = sx(d.times[i]);
-      const y = cy(d.cvd[i]);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.lineWidth = 1;
-
-    ctx.fillStyle = "#8a93a6";
-    ctx.font = "10px ui-sans-serif, system-ui";
-    ctx.fillText("Δ / CVD", plotX + 2, 12);
-    ctx.fillStyle = "#e6b800";
-    ctx.fillText(`CVD ${d.cvd[n - 1] >= 0 ? "+" : "-"}${fmtVal(Math.abs(d.cvd[n - 1]))}`, plotX + plotW + 5, 12);
+    drawDeltaCvdChart(ctx, {
+      W, H, t0, t1,
+      times: d?.times ?? [],
+      delta: d?.delta ?? [],
+      cvd: d?.cvd ?? null,
+      emptyText: t("of.noDelta"),
+    });
   }, [data, t]);
 
   const drawBA = useCallback(() => {
@@ -1170,6 +944,7 @@ export default function OrderflowPage() {
     drawDelta();
     drawBA();
   }, [draw, drawDelta, drawBA]);
+  useEffect(() => { redrawAllRef.current = redrawAll; }, [redrawAll]);
 
   // Принудительный перерисовка при изменении рисунков (saveDrawing асинхронный,
   // и может не успеть к моменту вызова draw() из эффекта выше)
@@ -1177,350 +952,6 @@ export default function OrderflowPage() {
     redrawAll();
   }, [drawings, redrawAll]);
 
-  function onMove(e: React.MouseEvent<HTMLCanvasElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    hoverRef.current = { mx, my };
-    const drag = dragRef.current;
-    const lay = layoutRef.current;
-    if (activeTool && lay && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
-      const cv = canvasRef.current;
-      if (cv) cv.style.cursor = "crosshair";
-      // Обновляем snappedRef для preview-линии
-      if (data?.candles) {
-        const v = viewRef.current;
-        if (v) {
-          const xspan = v.t1 - v.t0 || 1;
-          const yspan = v.y1 - v.y0 || 1;
-          const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
-          const price = v.y1 - (my / lay.plotH) * yspan;
-          snappedRef.current = snapToCandle(t, price, data.candles);
-        }
-      } else {
-        snappedRef.current = null;
-      }
-      draw();
-      return;
-    }
-    if (drag && lay) {
-      // Check if we're dragging a selected drawing
-      if (dragRef.current?.drawingId) {
-        const v = viewRef.current;
-        if (v) {
-          const xspan = v.t1 - v.t0 || 1;
-          const yspan = v.y1 - v.y0 || 1;
-          const cv = canvasRef.current;
-          // === RESIZE прямоугольника ===
-          if (drawingResizeRef.current) {
-            // Вычисляем позицию мыши в координатах графика
-            let tChart = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
-            let priceChart = v.y1 - (my / lay.plotH) * yspan;
-            if (magnet && data?.candles?.length) {
-              const snapped = snapToCandle(tChart, priceChart, data.candles);
-              snappedRef.current = snapped;
-              tChart = snapped.t;
-              priceChart = snapped.price;
-            }
-            const rs = drawingResizeRef.current;
-            // Вычисляем новые границы прямоугольника
-            let newT1: number, newT2: number, newP1: number, newP2: number;
-            switch (rs.cornerIdx) {
-              case 0: // TL — фиксирован BR
-                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
-                newP1 = priceChart; newP2 = rs.origMinPrice;
-                break;
-              case 1: // TR — фиксирован BL
-                newT1 = rs.origMinT; newT2 = Math.round(tChart);
-                newP1 = priceChart; newP2 = rs.origMinPrice;
-                break;
-              case 2: // BL — фиксирован TR
-                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
-                newP1 = rs.origMaxPrice; newP2 = priceChart;
-                break;
-              default: // 3 BR — фиксирован TL
-                newT1 = rs.origMinT; newT2 = Math.round(tChart);
-                newP1 = rs.origMaxPrice; newP2 = priceChart;
-                break;
-            }
-            drawingDragRef.current = {
-              drawingId: drawingResizeRef.current.drawingId,
-              dx: 0, dy: 0,
-              originalPoints: [{ t: newT1, price: newP1 }, { t: newT2, price: newP2 }],
-            };
-            if (cv) cv.style.cursor = "nwse-resize";
-            draw();
-            return;
-          }
-          // Смещение в координатах графика от начальной точки
-          const dx = (mx - drag.mx) / lay.plotW * xspan;
-          const dy = (my - drag.my) / lay.plotH * yspan;
-          // Если магнит включён — притягиваем опорную точку рисунка к свече
-          if (magnet && data?.candles?.length) {
-            const orig = dragRef.current.originalPoints ?? [];
-            if (orig.length > 0) {
-              const anchor = orig[0];
-              const endT = anchor.t + dx;
-              const endPrice = anchor.price - dy;
-              const snapped = snapToCandle(endT, endPrice, data.candles);
-              // Пересчитываем offset так, чтобы опорная точка оказалась на snapped позиции
-              const snappedDx = snapped.t - anchor.t;
-              const snappedDy = anchor.price - snapped.price;
-              // Ещё раз обновляем snappedRef (для отрисовки маркера)
-              snappedRef.current = snapped;
-              drawingDragRef.current = {
-                drawingId: dragRef.current.drawingId,
-                dx: snappedDx,
-                dy: snappedDy,
-                originalPoints: dragRef.current.originalPoints ?? [],
-              };
-              draw();
-              return;
-            }
-          }
-          drawingDragRef.current = {
-            drawingId: dragRef.current.drawingId,
-            dx,
-            dy,
-            originalPoints: dragRef.current.originalPoints ?? [],
-          };
-          draw();
-          return;
-        }
-      } else if (drag.mode === "zoomY") {
-        const f = Math.exp((my - drag.my) * 0.006);
-        const cy = (drag.view.y0 + drag.view.y1) / 2;
-        const b = boundsRef.current;
-        const minP = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
-        const maxP = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
-        const span = Math.min(maxP, Math.max(minP, (drag.view.y1 - drag.view.y0) * f));
-        viewRef.current = { ...drag.view, y0: cy - span / 2, y1: cy + span / 2 };
-      } else if (drag.mode === "zoomX") {
-        const f = Math.exp(-(mx - drag.mx) * 0.006);
-        const cx = (drag.view.t0 + drag.view.t1) / 2;
-        const b = boundsRef.current;
-        const minT = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
-        const maxT = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
-        const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
-        viewRef.current = { ...drag.view, t0: cx - span / 2, t1: cx + span / 2 };
-      } else {
-        const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
-        const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
-        viewRef.current = {
-          t0: drag.view.t0 - dt,
-          t1: drag.view.t1 - dt,
-          y0: drag.view.y0 + dp,
-          y1: drag.view.y1 + dp,
-        };
-      }
-      redrawAll();
-    } else {
-      const lay2 = layoutRef.current;
-      const cv = canvasRef.current;
-      if (lay2 && cv) {
-        if (!activeTool && showDrawings && drawings.length > 0) {
-          const v = viewRef.current;
-          if (v) {
-            const xspan = v.t1 - v.t0 || 1;
-            const yspan = v.y1 - v.y0 || 1;
-            const sxLocal = (ms: number) => lay2.plotX + ((ms - v.t0) / xspan) * lay2.plotW;
-            const syLocal = (p: number) => lay2.plotH - ((p - v.y0) / yspan) * lay2.plotH;
-            const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay2.plotX, lay2.plotW, lay2.plotH);
-            if (hit) {
-              // Если это угол прямоугольника — курсор resize
-              if (hit.pointIdx >= 0 && hit.pointIdx <= 3) {
-                cv.style.cursor = "nwse-resize";
-              } else {
-                cv.style.cursor = "pointer";
-              }
-            } else {
-              // Даже если есть рисунки, на краях графика показываем resize-курсоры
-              cv.style.cursor =
-                mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
-            }
-          }
-        } else {
-          cv.style.cursor =
-            mx >= lay2.plotX + lay2.plotW ? "ns-resize" : my >= lay2.plotH - 8 ? "ew-resize" : "default";
-        }
-      }
-      draw();
-    }
-  }
-  function onLeave() {
-    hoverRef.current = null;
-    dragRef.current = null;
-    drawingResizeRef.current = null;
-    draw();
-  }
-  function onDown(e: React.MouseEvent<HTMLCanvasElement>) {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const mx = e.clientX - rect.left;
-    const my = e.clientY - rect.top;
-    const lay = layoutRef.current;
-    if (!lay) {
-      if (viewRef.current) {
-        dragRef.current = { mx, my, mode: "pan", view: { ...viewRef.current } };
-      }
-      return;
-    }
-
-    if (activeTool && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
-      const v = viewRef.current;
-      if (!v) return;
-      const xspan = v.t1 - v.t0 || 1;
-      const yspan = v.y1 - v.y0 || 1;
-      const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
-      const price = v.y1 - (my / lay.plotH) * yspan;
-      const candles = data?.candles ?? [];
-      const snapped = snapToCandle(t, price, candles);
-
-      if (activeTool === "horizontal_line" || activeTool === "horizontal_ray") {
-        saveDrawing(activeTool, [{ t: Math.round(snapped.t), price: snapped.price }]);
-        setActiveTool(null);
-        return;
-      }
-
-      if (drawingPoints.length === 0) {
-        setDrawingPoints([{ t: Math.round(snapped.t), price: snapped.price }]);
-      } else {
-        saveDrawing(activeTool, [...drawingPoints, { t: Math.round(snapped.t), price: snapped.price }]);
-        setDrawingPoints([]);
-        setActiveTool(null);
-      }
-      return;
-    }
-
-    if (!activeTool && showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
-      const v = viewRef.current;
-      if (v) {
-        const xspan = v.t1 - v.t0 || 1;
-        const yspan = v.y1 - v.y0 || 1;
-        const sxLocal = (ms: number) => lay.plotX + ((ms - v.t0) / xspan) * lay.plotW;
-        const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
-        const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
-        if (hit) {
-          setSelectedDrawingId(hit.id);
-          setShowDrawingEditor(true);
-          const hitDrawing = drawings.find(d => d.id === hit.id);
-          let originalPoints: DrawingPoint[] = [];
-          if (hitDrawing?.points) {
-            try { originalPoints = JSON.parse(hitDrawing.points); } catch { /* ignore */ }
-          }
-          drawingDragRef.current = null;
-          drawingResizeRef.current = null;
-          // Если это прямоугольник и клик по углу — запускаем resize
-          if (hitDrawing?.toolType === "rectangle" && hit.pointIdx >= 0 && hit.pointIdx <= 3 && originalPoints.length >= 2) {
-            const minT = Math.min(originalPoints[0].t, originalPoints[1].t);
-            const maxT = Math.max(originalPoints[0].t, originalPoints[1].t);
-            const minPrice = Math.min(originalPoints[0].price, originalPoints[1].price);
-            const maxPrice = Math.max(originalPoints[0].price, originalPoints[1].price);
-            drawingResizeRef.current = {
-              drawingId: hit.id,
-              cornerIdx: hit.pointIdx,
-              origMinT: minT,
-              origMaxT: maxT,
-              origMinPrice: minPrice,
-              origMaxPrice: maxPrice,
-              originalPoints,
-            };
-            if (!dragRef.current) {
-              dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
-            }
-            return;
-          }
-          // Иначе — обычный drag всего рисунка
-          if (!dragRef.current) {
-            dragRef.current = { mx, my, mode: "pan", view: { ...v }, drawingId: hit.id, originalPoints };
-          }
-          return;
-        }
-      }
-    }
-    if (selectedDrawingId && !activeTool) {
-      setSelectedDrawingId(null);
-      setShowDrawingEditor(false);
-      drawingResizeRef.current = null;
-    }
-
-    if (viewRef.current) {
-      const v2 = viewRef.current;
-      const mode2: "pan" | "zoomX" | "zoomY" =
-        lay && mx >= lay.plotX + lay.plotW ? "zoomY" : lay && my >= lay.plotH - 8 ? "zoomX" : "pan";
-      dragRef.current = { mx, my, mode: mode2, view: { ...v2 } };
-    }
-  }
-  function onUp() {
-    const dd = drawingDragRef.current;
-    const rs = drawingResizeRef.current;
-    if (dd && dd.originalPoints.length > 0) {
-      if (rs) {
-        // RESIZE: точки уже содержат новые координаты (не offset)
-        updateDrawing(dd.drawingId, dd.originalPoints);
-        setDrawings(prev => prev.map(d =>
-          d.id === dd.drawingId
-            ? { ...d, points: JSON.stringify(dd.originalPoints) }
-            : d
-        ));
-      } else {
-        // DRAG: применяем offset к исходным точкам
-        const newPoints = dd.originalPoints.map(p => ({
-          t: Math.round(p.t + dd.dx),
-          price: p.price - dd.dy,
-        }));
-        updateDrawing(dd.drawingId, newPoints);
-        setDrawings(prev => prev.map(d =>
-          d.id === dd.drawingId
-            ? { ...d, points: JSON.stringify(newPoints) }
-            : d
-        ));
-      }
-    }
-    drawingDragRef.current = null;
-    drawingResizeRef.current = null;
-    dragRef.current = null;
-  }
-  function onDouble() {
-    viewRef.current = null;
-    redrawAll();
-  }
-
-  useEffect(() => {
-    const cv = canvasRef.current;
-    if (!cv) return;
-    const onWheel = (e: WheelEvent) => {
-      if (!viewRef.current || !layoutRef.current) return;
-      e.preventDefault();
-      const rect = cv.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      const { plotX, plotW, plotH } = layoutRef.current;
-      const v = viewRef.current;
-      const delta = Math.abs(e.deltaY) >= Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-      const factor = delta > 0 ? 1.1 : 0.9;
-      const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
-      const fy = Math.min(1, Math.max(0, my / plotH));
-      const b = boundsRef.current;
-      const maxTSpan = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
-      const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
-      const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
-      const minPSpan = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
-      const clamp = (val: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, val));
-
-      const tcur = v.t0 + fx * (v.t1 - v.t0);
-      const tspan = clamp((v.t1 - v.t0) * factor, minTSpan, maxTSpan);
-      let next = { ...v, t0: tcur - fx * tspan, t1: tcur + (1 - fx) * tspan };
-      if (!e.shiftKey) {
-        const pcur = v.y1 - fy * (v.y1 - v.y0);
-        const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);
-        next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
-      }
-      viewRef.current = next;
-      redrawAll();
-    };
-    cv.addEventListener("wheel", onWheel, { passive: false });
-    return () => cv.removeEventListener("wheel", onWheel);
-  }, [redrawAll]);
 
   const hm = data?.heatmap ?? null;
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";

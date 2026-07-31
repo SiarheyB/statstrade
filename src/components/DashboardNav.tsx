@@ -15,6 +15,7 @@ import {
   CalendarClock,
   Flame,
   Layers,
+  TrendingUp,
   Wrench,
   SlidersHorizontal,
   Tags,
@@ -58,6 +59,7 @@ function isNewsRoute(pathname: string): boolean {
 
 const SERVICE_CHILDREN = [
   { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
+  { href: "/dashboard/forex", key: "nav.forex", icon: TrendingUp },
   { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
   { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
 ];
@@ -65,6 +67,7 @@ const SERVICE_CHILDREN = [
 function isServiceRoute(pathname: string): boolean {
   return (
     pathname.startsWith("/dashboard/liqmap") ||
+    pathname.startsWith("/dashboard/forex") ||
     pathname.startsWith("/dashboard/orderflow") ||
     pathname.startsWith("/dashboard/settings/risk")
   );

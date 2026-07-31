@@ -1,0 +1,20 @@
+# Forex collector service — fetches OHLCV candles from Twelve Data API and writes to Postgres.
+FROM node:24-alpine
+
+WORKDIR /app
+
+# Сначала зависимости (кэш слоёв).
+COPY package.json ./
+RUN npm install --omit=dev
+
+# Исходники collector.
+COPY index.mjs ./
+
+ENV NODE_ENV=production
+ENV PORT=8081
+EXPOSE 8081
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8081/health >/dev/null 2>&1 || exit 1
+
+CMD ["node", "index.mjs"]
