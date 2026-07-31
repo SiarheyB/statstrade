@@ -429,12 +429,19 @@ function connectFinnhub() {
   };
 
   ws.onerror = (event) => {
-    console.error(`[fx/ws] ошибка: ${event.message ?? "unknown"}`);
+    // Node-шный нативный WebSocket (undici) не всегда кладёт причину в
+    // event.message — пробуем все поля, где она может быть, чтобы не
+    // печатать пустую строку вместо диагностики.
+    const reason = event?.message || event?.error?.message || event?.error || String(event);
+    console.error(`[fx/ws] ошибка: ${reason}`);
   };
 
-  ws.onclose = () => {
+  ws.onclose = (event) => {
     wsConnected = false;
-    console.log(`[fx/ws] соединение закрыто, переподключение через ${wsReconnectDelayMs}мс`);
+    // code/reason из close-фрейма — часто это единственный способ понять
+    // причину (неверный токен, лимит, сетевой обрыв и т.п.), т.к. onerror
+    // сам по себе редко несёт полезную информацию.
+    console.log(`[fx/ws] соединение закрыто (code=${event?.code ?? "?"} reason="${event?.reason ?? ""}"), переподключение через ${wsReconnectDelayMs}мс`);
     scheduleReconnect();
   };
 }
