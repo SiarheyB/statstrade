@@ -215,7 +215,7 @@ services:
     networks:
       - tradestats
 
-  # Авто-деплой: следит за GHCR и подменяет образы app/collector на новые.
+  # Авто-деплой: следит за GHCR и подменяет образы app/collector на новые
   watchtower:
     image: containrrr/watchtower
     container_name: tradestats-watchtower
