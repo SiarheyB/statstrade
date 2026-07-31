@@ -1,10 +1,12 @@
 "use client";
 
+import { Suspense } from "react";
 import LocaleMenu from "@/components/LocaleMenu";
 import TimezoneMenu from "@/components/TimezoneMenu";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
 import GoogleLinkSettings from "@/components/GoogleLinkSettings";
+import CloudStorageSettings from "@/components/CloudStorageSettings";
 import DeleteAccount from "@/components/DeleteAccount";
 import MentorShareSettings from "@/components/MentorShareSettings";
 import { useI18n } from "@/lib/i18n/provider";
@@ -39,6 +41,9 @@ export default function GeneralSettingsPage() {
 
       <ChangePassword />
       <GoogleLinkSettings />
+      <Suspense fallback={null}>
+        <CloudStorageSettings />
+      </Suspense>
       <TwoFactorSettings />
       <DeleteAccount />
     </div>

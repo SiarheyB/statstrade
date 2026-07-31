@@ -157,6 +157,11 @@ ENABLE_SCHEDULER=false
 GOOGLE_CLIENT_ID=
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=
 
+# Google Drive — опционально, загрузка скриншотов сделок (см. 5.1 ниже).
+GOOGLE_DRIVE_CLIENT_ID=
+GOOGLE_DRIVE_CLIENT_SECRET=
+GOOGLE_DRIVE_REDIRECT_URI=
+
 # Параметры сбора стаканов (можно не менять)
 OB_SYMBOLS=BTCUSDT,ETHUSDT
 OB_EXCHANGES=binance-futures,binance-spot
@@ -166,6 +171,41 @@ chmod 600 .env
 ```
 > `DATABASE_URL` в `.env` указывает на `db` (имя сервиса внутри Docker-сети) — это правильно
 > для контейнеров. Для app оно ещё и переопределяется в `docker-compose.prod.yml`.
+
+### 5.1 Google Drive — загрузка скриншотов сделок (опционально)
+
+Пользователи могут прикреплять к сделке скриншот, который загружается на ИХ
+собственный Google Drive (не на наш сервер) — мы храним только ссылку.
+Требует отдельного OAuth-клиента (НЕ тот же `GOOGLE_CLIENT_ID`, что для входа
+через Google — там Identity Services без client secret, здесь нужен полный
+Authorization Code flow):
+
+1. https://console.cloud.google.com/apis/credentials → создать/выбрать
+   проект → включить **Google Drive API**.
+2. **OAuth consent screen**: тип External, заполнить название приложения.
+   Пока приложение не прошло верификацию Google — добавьте себя и
+   пользователей в **Test users** (без верификации доступно до 100
+   пользователей; используемый scope `drive.file` даёт доступ только к
+   файлам, созданным самим приложением — обычно не требует полной
+   верификации Google даже сверх лимита в 100).
+3. **Credentials → Create Credentials → OAuth client ID → Web application**.
+   Authorized redirect URIs: `https://<ваш-домен>/api/integrations/google-drive/callback`.
+4. Скопировать **Client ID** и **Client Secret** в `.env`:
+   ```
+   GOOGLE_DRIVE_CLIENT_ID=...
+   GOOGLE_DRIVE_CLIENT_SECRET=...
+   GOOGLE_DRIVE_REDIRECT_URI=https://<ваш-домен>/api/integrations/google-drive/callback
+   ```
+
+Если переменные не заданы — кнопка «Подключить Google Drive» в настройках
+скрыта, остальное приложение работает как обычно. Как и с
+`docker-compose.prod.yml`, изменения `.env` не подхватываются watchtower —
+нужен ручной `git pull && docker compose -f docker-compose.prod.yml up -d`
+(либо просто `docker compose --env-file .env up -d app` после правки `.env`).
+
+Токены доступа хранятся в БД зашифрованными (`ENCRYPTION_KEY`, тот же ключ,
+что и для секретов бирж) — сам сервер никогда не видит и не хранит файлы
+пользователя, только временный `access_token`/`refresh_token` для API-вызовов.
 
 ---
 

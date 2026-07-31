@@ -6,6 +6,8 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
+import TradeImageCell from "@/components/TradeImageCell";
+import ImagePreviewModal from "@/components/ImagePreviewModal";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtNumSmart, fmtSymbol, canonSymbol } from "@/lib/format";
 import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
@@ -39,6 +41,9 @@ export default function TradesPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
+  const [images, setImages] = useState<Record<string, string | null>>({});
+  const [gdriveConnected, setGdriveConnected] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
   const [symbolFilter, setSymbolFilter] = useState("all");
@@ -92,6 +97,7 @@ export default function TradesPage() {
       const d: StatsResponse = await res.json();
       setData(d);
       const map: Record<string, Ann> = {};
+      const imgMap: Record<string, string | null> = {};
       for (const tr of d.trades) {
         map[tr.id] = {
           entryPoint: tr.entryPoint,
@@ -101,8 +107,10 @@ export default function TradesPage() {
           stopLoss: tr.stopLoss,
           note: tr.note,
         };
+        imgMap[tr.id] = tr.imageUrl;
       }
       setAnn(map);
+      setImages(imgMap);
     }
     setLoading(false);
   }, []);
@@ -110,6 +118,19 @@ export default function TradesPage() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Статус подключения Google Drive — определяет, показывать ли кнопку
+  // «Загрузить» или ссылку в настройки в колонке изображений.
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/integrations/google-drive");
+      if (res.ok) setGdriveConnected((await res.json()).connected === true);
+    })();
+  }, []);
+
+  function imageOf(tr: SerializedTrade): string | null {
+    return tr.id in images ? images[tr.id] : tr.imageUrl;
+  }
 
   // Reload trades once a background sync finishes (new fills may have landed).
   useEffect(() => {
@@ -390,6 +411,7 @@ export default function TradesPage() {
                   <Th right sortable onClick={() => toggleSort("netPnl")} active={sortKey === "netPnl"}><Term desc={t("trades.colDesc.netPnl")}>{t("trades.col.netPnl")}</Term></Th>
                   <Th right sortable onClick={() => toggleSort("fees")} active={sortKey === "fees"}><Term name="Fees">{t("trades.col.fees")}</Term></Th>
                   <Th right><Term name="RR">{t("trades.col.rr")}</Term></Th>
+                  <Th><Term desc={t("trades.colDesc.image")}>{t("trades.col.image")}</Term></Th>
                 </tr>
               </thead>
               <tbody>
@@ -448,10 +470,20 @@ export default function TradesPage() {
                       <td className={`px-3 py-2 text-right tabular-nums font-medium ${tr.netPnl >= 0 ? "text-profit" : "text-loss"}`}>{fmtUsd(tr.netPnl, { sign: true })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtUsd(tr.fees)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : rr >= 0 ? "text-profit" : "text-loss"}`}>{fmtRR(rr)}</td>
+                      <td className="px-3 py-2">
+                        <TradeImageCell
+                          tradeKey={tr.id}
+                          imageUrl={imageOf(tr)}
+                          connected={gdriveConnected}
+                          onUploaded={(url) => setImages((prev) => ({ ...prev, [tr.id]: url }))}
+                          onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: null }))}
+                          onPreview={(url) => setPreviewUrl(url)}
+                        />
+                      </td>
                     </tr>
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
-                        <td colSpan={13} className="px-4 py-4">
+                        <td colSpan={14} className="px-4 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             {tr.lots != null && (
                               <>
@@ -536,6 +568,8 @@ export default function TradesPage() {
           </div>
         </div>
       )}
+
+      {previewUrl && <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
     </div>
   );
 }

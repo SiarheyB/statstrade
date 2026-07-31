@@ -40,6 +40,7 @@ model User {
   playbooks    Playbook[]
   shareLinks   ShareLink[]
   drawings     UserDrawing[]
+  cloudStorageAccounts CloudStorageAccount[]
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -74,9 +75,36 @@ model TradeAnnotation {
   pattern    String? // паттерн
   stopLoss   Float? // цена стоп-лосса (для маркера на графике)
   note       String?
+  // Скриншот сделки, загруженный пользователем в СВОЁ облако (Google Drive).
+  // Мы храним только публичную ссылку — не сам файл. imageProvider/imageFileId
+  // нужны для UI (иконка сервиса) и потенциальной переустановки прав доступа.
+  imageUrl      String?
+  imageProvider String? // "google_drive"
+  imageFileId   String? // id файла в облаке провайдера
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, tradeKey])
+  @@index([userId])
+}
+
+// OAuth-подключение облачного хранилища пользователя (Google Drive), через
+// которое загружаются скриншоты сделок. Токены шифруются AES-256-GCM тем же
+// ENCRYPTION_KEY, что и секреты ExchangeAccount (см. lib/crypto.ts) — мы НЕ
+// храним и не видим файлы пользователя, только используем узкий OAuth-scope
+// drive.file (доступ лишь к файлам, созданным этим приложением).
+model CloudStorageAccount {
+  id            String   @id @default(cuid())
+  userId        String
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      String   // "google_drive"
+  accessToken   String   // encrypted (AES-256-GCM)
+  refreshToken  String   // encrypted (AES-256-GCM)
+  expiresAt     DateTime
+  accountEmail  String?  // для отображения "подключено как you@gmail.com"
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([userId, provider])
   @@index([userId])
 }
 

@@ -180,6 +180,8 @@ async function buildBase(
     // Keep the imported S/L (from the MT report) unless the user overrode it.
     t.stopLoss = a?.stopLoss ?? t.stopLoss ?? null;
     t.note = a?.note ?? null;
+    t.imageUrl = a?.imageUrl ?? null;
+    t.imageProvider = a?.imageProvider ?? null;
   }
 
   const allSymbols = Array.from(
@@ -285,6 +287,8 @@ export async function GET(req: Request) {
       mistake: t.mistake ?? null,
       stopLoss: t.stopLoss ?? null,
       note: t.note ?? null,
+      imageUrl: t.imageUrl ?? null,
+      imageProvider: t.imageProvider ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),
     }));
