@@ -411,7 +411,6 @@ export default function TradesPage() {
                   <Th right sortable onClick={() => toggleSort("netPnl")} active={sortKey === "netPnl"}><Term desc={t("trades.colDesc.netPnl")}>{t("trades.col.netPnl")}</Term></Th>
                   <Th right sortable onClick={() => toggleSort("fees")} active={sortKey === "fees"}><Term name="Fees">{t("trades.col.fees")}</Term></Th>
                   <Th right><Term name="RR">{t("trades.col.rr")}</Term></Th>
-                  <Th><Term desc={t("trades.colDesc.image")}>{t("trades.col.image")}</Term></Th>
                 </tr>
               </thead>
               <tbody>
@@ -470,20 +469,10 @@ export default function TradesPage() {
                       <td className={`px-3 py-2 text-right tabular-nums font-medium ${tr.netPnl >= 0 ? "text-profit" : "text-loss"}`}>{fmtUsd(tr.netPnl, { sign: true })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtUsd(tr.fees)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : rr >= 0 ? "text-profit" : "text-loss"}`}>{fmtRR(rr)}</td>
-                      <td className="px-3 py-2">
-                        <TradeImageCell
-                          tradeKey={tr.id}
-                          imageUrl={imageOf(tr)}
-                          connected={gdriveConnected}
-                          onUploaded={(url) => setImages((prev) => ({ ...prev, [tr.id]: url }))}
-                          onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: null }))}
-                          onPreview={(url) => setPreviewUrl(url)}
-                        />
-                      </td>
                     </tr>
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
-                        <td colSpan={14} className="px-4 py-4">
+                        <td colSpan={13} className="px-4 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             {tr.lots != null && (
                               <>
@@ -511,6 +500,16 @@ export default function TradesPage() {
                             </DetailField>
                             <DetailField label={t("trades.col.mistake")}>
                               <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
+                            </DetailField>
+                            <DetailField label={t("trades.col.image")}>
+                              <TradeImageCell
+                                tradeKey={tr.id}
+                                imageUrl={imageOf(tr)}
+                                connected={gdriveConnected}
+                                onUploaded={(url) => setImages((prev) => ({ ...prev, [tr.id]: url }))}
+                                onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: null }))}
+                                onPreview={(url) => setPreviewUrl(url)}
+                              />
                             </DetailField>
                           </div>
                           <div className="mt-4">
