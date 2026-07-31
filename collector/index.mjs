@@ -19,9 +19,13 @@ const cfg = {
   binSize: Number(process.env.BIN_SIZE ?? 25),
   snapshotMs: Number(process.env.SNAPSHOT_MS ?? 2000),
   depthPct: Number(process.env.DEPTH_PCT ?? 0.02),
+  // retentionDays (RETENTION_DAYS / OB_RETENTION_DAYS в docker-compose) —
+  // реальный и единственный порог очистки ObSnapshot. Раньше в pruneOld()
+  // использовалась отдельная rawRetention (RAW_RETENTION_DAYS), которой нет
+  // ни в docker-compose.prod.yml, ни в .env на проде — она всегда падала на
+  // хардкод 30 дней и полностью игнорировала настроенные здесь дни. Убрано.
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),         // сырые снапшоты ObSnapshot
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
-  rawRetention: Number(process.env.RAW_RETENTION_DAYS ?? 30),     // сырые данные хранить 30 дней
   rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
   candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
   databaseUrl: process.env.DATABASE_URL,
@@ -608,7 +612,7 @@ async function pruneOld() {
     {
       const r = await pool.query(
         `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObSnapshot", String(cfg.rawRetention)],
+        ["ObSnapshot", String(cfg.retentionDays)],
       );
       snapDropped = r.rows[0]?.n ?? 0;
     }
@@ -669,7 +673,7 @@ async function pruneOld() {
     if (candlesDeleted) await updateEpoch("candle", cfg.candleRetentionDays);
     if (total || rollupDeleted || candlesDeleted) {
       console.log(
-        `[prune] сброшено ${total} партиций (снапшоты: ${cfg.rawRetention}д, сделки: ${cfg.tradeRetentionDays}д); ` +
+        `[prune] сброшено ${total} партиций (снапшоты: ${cfg.retentionDays}д, сделки: ${cfg.tradeRetentionDays}д); ` +
         `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д); ` +
         `удалено ${candlesDeleted} свечей (retention: ${cfg.candleRetentionDays}д)`,
       );

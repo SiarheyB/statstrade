@@ -30,8 +30,10 @@
   сделок, footprint и крупные сделки в Postgres.
 - **Производительность:** heatmap и B/A читают предагрегированные **rollup-таблицы**
   (`ObSnapshotRollup` / `ObRollupBucket`, минутные бакеты), которые наполняет
-  коллектор, — а не миллионы сырых `ObSnapshot`. Сырые таблицы держатся коротко
-  (`RAW_RETENTION_DAYS`), rollup — дольше (`ROLLUP_RETENTION_DAYS`).
+  коллектор, — а не миллионы сырых `ObSnapshot`. Сырые снапшоты держатся коротко
+  (`OB_RETENTION_DAYS` → `cfg.retentionDays`, по умолчанию 7 дней), сделки/футпринт/
+  крупные сделки — отдельно (`OB_TRADE_RETENTION_DAYS`), rollup — дольше
+  (`ROLLUP_RETENTION_DAYS`, не задан в `docker-compose.prod.yml` → дефолт 365 дней).
 
 ## i18n / часовой пояс — сквозной паттерн
 
