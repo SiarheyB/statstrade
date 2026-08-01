@@ -921,21 +921,28 @@ export default function OrderflowPage() {
     cv.height = Math.round(H * dpr);
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    const t0 = viewRef.current?.t0 ?? data.from;
-    const t1 = viewRef.current?.t1 ?? data.to;
+    const viewT0 = viewRef.current?.t0 ?? data.from;
+    const viewT1 = viewRef.current?.t1 ?? data.to;
     // Дельта/CVD считаются только для загруженного сервером окна
     // [data.from, data.to] — в этой итерации не пагинируются (см.
-    // LAZY_HISTORY_PLAN.md, п.5.7). Если пользователь доскроллил в
-    // догруженную историю (t0 < data.from), честно показываем заглушку
-    // вместо тихой пустой/плоской линии.
-    const viewingUnpaginatedHistory = t0 < data.from;
-    const d = viewingUnpaginatedHistory ? null : data.delta;
+    // LAZY_HISTORY_PLAN.md, п.5.7). Текущий вид (viewRef) может быть ШИРЕ
+    // этого окна — например, после zoom-out до предела или после дозагрузки
+    // истории свечей, которая на дельту/CVD не распространяется. Раньше это
+    // рисовало данные "сжатыми" в узкую полосу где-то в середине canvas.
+    // Клэмпим шкалу к пересечению вида и реального окна данных, чтобы то,
+    // что реально загружено, всегда растягивалось на всю ширину панели —
+    // ровно так же, как уже маскирует ту же проблему фон B/A-панели
+    // (см. drawBA ниже), только явно, а не за счёт фонового прямоугольника.
+    const t0 = Math.max(viewT0, data.from);
+    const t1 = Math.min(viewT1, data.to);
+    const noOverlap = t1 <= t0;
+    const d = noOverlap ? null : data.delta;
     drawDeltaCvdChart(ctx, {
       W, H, t0, t1,
       times: d?.times ?? [],
       delta: d?.delta ?? [],
       cvd: d?.cvd ?? null,
-      emptyText: viewingUnpaginatedHistory ? t("of.noDeltaHistory") : t("of.noDelta"),
+      emptyText: noOverlap ? t("of.noDeltaHistory") : t("of.noDelta"),
     });
   }, [data, t, viewRef]);
 
@@ -953,19 +960,23 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const t0 = viewRef.current?.t0 ?? data.from;
-    const t1 = viewRef.current?.t1 ?? data.to;
+    const viewT0 = viewRef.current?.t0 ?? data.from;
+    const viewT1 = viewRef.current?.t1 ?? data.to;
     // B/A считается только для загруженного сервером окна [data.from, data.to]
-    // (см. LAZY_HISTORY_PLAN.md, п.5.7) — при скролле в догруженную историю
-    // показываем заглушку вместо тихой пустоты.
-    const viewingUnpaginatedHistory = t0 < data.from;
-    const ba = viewingUnpaginatedHistory ? null : data.ba;
+    // (см. LAZY_HISTORY_PLAN.md, п.5.7). Клэмпим к пересечению с текущим
+    // видом — иначе при виде шире загруженного окна (zoom-out до предела,
+    // смена таймфрейма и т.п.) линия рисуется сжатой в узкую полосу, а не на
+    // всю ширину (тот же фикс, что и в drawDelta выше — см. комментарий там).
+    const t0 = Math.max(viewT0, data.from);
+    const t1 = Math.min(viewT1, data.to);
+    const noOverlap = t1 <= t0;
+    const ba = noOverlap ? null : data.ba;
     const plotX = 8 + 76;
     const plotW = W - plotX - 64;
     if (!ba || ba.full.length === 0) {
       ctx.fillStyle = "#6b7384";
       ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.fillText(viewingUnpaginatedHistory ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
+      ctx.fillText(noOverlap ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
       return;
     }
     const xspan = t1 - t0 || 1;
