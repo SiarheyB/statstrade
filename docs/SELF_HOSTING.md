@@ -181,16 +181,22 @@ chmod 600 .env
 Authorization Code flow):
 
 1. https://console.cloud.google.com/apis/credentials → создать/выбрать
-   проект → включить **Google Drive API**.
-2. **OAuth consent screen**: тип External, заполнить название приложения.
+   проект.
+2. **⚠️ Отдельным шагом, легко пропустить**: включить сам API —
+   https://console.cloud.google.com/apis/library/drive.googleapis.com
+   → **Enable** (для того же проекта из шага 1). Создание OAuth-клиента
+   (шаг 4) само по себе API не включает — если пропустить этот шаг,
+   загрузка скриншота будет падать с «Не удалось загрузить файл в Google
+   Drive» (в Admin → Errors будет видно `403` от Google).
+3. **OAuth consent screen**: тип External, заполнить название приложения.
    Пока приложение не прошло верификацию Google — добавьте себя и
    пользователей в **Test users** (без верификации доступно до 100
    пользователей; используемый scope `drive.file` даёт доступ только к
    файлам, созданным самим приложением — обычно не требует полной
    верификации Google даже сверх лимита в 100).
-3. **Credentials → Create Credentials → OAuth client ID → Web application**.
+4. **Credentials → Create Credentials → OAuth client ID → Web application**.
    Authorized redirect URIs: `https://<ваш-домен>/api/integrations/google-drive/callback`.
-4. Скопировать **Client ID** и **Client Secret** в `.env`:
+5. Скопировать **Client ID** и **Client Secret** в `.env`:
    ```
    GOOGLE_DRIVE_CLIENT_ID=...
    GOOGLE_DRIVE_CLIENT_SECRET=...
