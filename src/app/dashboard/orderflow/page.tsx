@@ -1289,9 +1289,21 @@ export default function OrderflowPage() {
               </div>
             </div>
             <div className="mt-1 border-t border-border/40 pt-1">
+              <div className="text-xs font-medium text-muted px-1 inline-flex items-center gap-1.5">
+                {t("of.deltaCvdTitle")}
+                <span title={t("of.hintDeltaCvd")} className="inline-flex cursor-help">
+                  <HelpCircle size={12} className="text-faint shrink-0" />
+                </span>
+              </div>
               <canvas ref={deltaRef} className="w-full" style={{ height: 110 }} />
             </div>
             <div className="mt-1 border-t border-border/40 pt-1">
+              <div className="text-xs font-medium text-muted px-1 inline-flex items-center gap-1.5">
+                {t("of.imbalanceTitle")}
+                <span title={t("of.imbalanceHint")} className="inline-flex cursor-help">
+                  <HelpCircle size={12} className="text-faint shrink-0" />
+                </span>
+              </div>
               <canvas ref={baRef} className="w-full" style={{ height: 80 }} />
             </div>
           </div>
