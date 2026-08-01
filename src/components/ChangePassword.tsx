@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { KeyRound, Check } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import PasswordStrengthMeter from "@/components/PasswordStrengthMeter";
+import PasswordInput from "@/components/PasswordInput";
 import { isValidPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 export default function ChangePassword() {
@@ -100,11 +101,9 @@ export default function ChangePassword() {
           {hasPassword && (
             <div>
               <label className="block text-xs text-muted mb-1">{t("settings.password.current")}</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 maxLength={200}
-                className="input-base w-full"
                 value={current}
                 onChange={(e) => setCurrent(e.target.value)}
               />
@@ -112,12 +111,10 @@ export default function ChangePassword() {
           )}
           <div>
             <label className="block text-xs text-muted mb-1">{t("settings.password.new")}</label>
-            <input
-              type="password"
+            <PasswordInput
               autoComplete="new-password"
               minLength={MIN_PASSWORD_LENGTH}
               maxLength={200}
-              className="input-base w-full"
               value={next}
               onChange={(e) => setNext(e.target.value)}
               placeholder={t("auth.passwordHintReg")}
@@ -126,11 +123,9 @@ export default function ChangePassword() {
           </div>
           <div>
             <label className="block text-xs text-muted mb-1">{t("settings.password.confirm")}</label>
-            <input
-              type="password"
+            <PasswordInput
               autoComplete="new-password"
               maxLength={200}
-              className="input-base w-full"
               value={confirm}
               onChange={(e) => setConfirm(e.target.value)}
             />

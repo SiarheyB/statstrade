@@ -7,6 +7,7 @@ import { BarChart3 } from "lucide-react";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 import TurnstileWidget from "@/components/TurnstileWidget";
 import PasswordStrengthMeter from "@/components/PasswordStrengthMeter";
+import PasswordInput from "@/components/PasswordInput";
 import { useI18n } from "@/lib/i18n/provider";
 import { MIN_PASSWORD_LENGTH, isValidPassword } from "@/lib/password";
 
@@ -217,12 +218,10 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
             </div>
             <div>
               <label className="block text-xs text-muted mb-1">{t("auth.password")}</label>
-              <input
-                type="password"
+              <PasswordInput
                 required
                 minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
                 maxLength={200}
-                className="input-base w-full"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={isRegister ? t("auth.passwordHintReg") : "••••••••"}

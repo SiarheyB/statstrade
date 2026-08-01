@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import PasswordInput from "@/components/PasswordInput";
 
 export default function DeleteAccount() {
   const { t } = useI18n();
@@ -79,11 +80,9 @@ export default function DeleteAccount() {
           {hasPassword && (
             <div>
               <label className="block text-xs text-muted mb-1">{t("settings.deleteAccount.password")}</label>
-              <input
-                type="password"
+              <PasswordInput
                 autoComplete="current-password"
                 maxLength={200}
-                className="input-base w-full"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
               />
