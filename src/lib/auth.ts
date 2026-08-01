@@ -8,7 +8,15 @@ import { prisma } from "./db";
 
 const COOKIE_NAME = "ts_session";
 const PENDING_COOKIE = "ts_2fa_pending";
-const MAX_AGE_SECONDS = 60 * 60 * 24 * 7; // 7 days
+// Таймаут по неактивности, а не жёсткий лимит с момента входа: срок жизни
+// самого JWT — 5 часов, но middleware.ts перевыпускает cookie с новым exp на
+// каждом аутентифицированном запросе ("скользящее окно") — активный
+// пользователь не разлогинивается, а бездействующий 5+ часов — да.
+// ВАЖНО: то же значение задано в middleware.ts (SESSION_MAX_AGE_SECONDS) —
+// middleware не может импортировать этот модуль (тянет bcrypt, нативный
+// аддон, несовместим с edge-рантаймом), значения приходится держать в синхроне
+// вручную при изменении.
+const MAX_AGE_SECONDS = 60 * 60 * 5; // 5 hours
 const PENDING_MAX_AGE = 60 * 10; // 10 minutes to enter the 2FA code
 
 export type SessionPayload = {
