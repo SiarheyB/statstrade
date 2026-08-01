@@ -165,13 +165,20 @@ let totalTrades = 0;
 // Символы батчатся: до 8 штук в одном запросе на interval, а не по одному —
 // это снижает число запросов в разы против прежней версии коллектора.
 
-async function fetchTimeSeriesBatch(symbols, interval, outputsize) {
+async function fetchTimeSeriesBatch(symbols, interval, outputsize, startDate) {
   await rateLimiter.wait(symbols.length);
   const symStr = symbols.join(",");
   // timezone=UTC обязателен: без него Twelve Data отдаёт datetime в своей
   // "биржевой" таймзоне (для форекса — не UTC), и это выглядит как сдвиг
   // свечей в будущее относительно реального времени.
-  const url = `${cfg.twelveDataApiBase}/time_series?symbol=${encodeURIComponent(symStr)}&interval=${interval}&outputsize=${outputsize}&timezone=UTC&apikey=${cfg.twelveDataApiKey}`;
+  //
+  // start_date — явная нижняя граница глубины истории (см. BACKFILL_DEPTH_DAYS
+  // ниже). Без неё Twelve Data просто отдаёт "последние outputsize баров", и
+  // непонятно, ограничивает ли реально глубину сам тариф или мы просто плохо
+  // просим — с явной датой это видно по ответу (пустая история/ошибка плана
+  // логируется явно, см. ниже).
+  let url = `${cfg.twelveDataApiBase}/time_series?symbol=${encodeURIComponent(symStr)}&interval=${interval}&outputsize=${outputsize}&timezone=UTC&apikey=${cfg.twelveDataApiKey}`;
+  if (startDate) url += `&start_date=${encodeURIComponent(startDate)}`;
   totalTwelveDataCalls++;
 
   try {
@@ -250,24 +257,48 @@ async function storeCandleRows(rows) {
 }
 
 // Бэкафилл/догон для одного таймфрейма по всем символам разом (батч).
-async function fetchAndStoreBatch(interval, outputsize) {
+async function fetchAndStoreBatch(interval, outputsize, startDate) {
   const twelveInterval = TF_MAP[interval];
   if (!twelveInterval) return 0;
   if (!cfg.twelveDataApiKey) return 0;
 
   const requestedMultiple = cfg.symbols.length > 1;
-  const data = await fetchTimeSeriesBatch(cfg.symbols, twelveInterval, outputsize);
+  const data = await fetchTimeSeriesBatch(cfg.symbols, twelveInterval, outputsize, startDate);
   if (!data) return 0;
 
   let stored = 0;
   for (const symbol of cfg.symbols) {
     const values = extractSymbolValues(data, symbol, requestedMultiple);
-    if (!values || values.length === 0) continue;
+    if (!values || values.length === 0) {
+      // Явный лог отсутствия данных на символ — если тариф молча режет
+      // глубину истории, это будет видно здесь, а не выглядеть как "просто
+      // сработал бэкафилл, но почему-то мало свечей".
+      if (startDate) console.log(`[fx/td] ${symbol} ${interval}: 0 баров от Twelve Data (запрошено с ${startDate})`);
+      continue;
+    }
     const rows = values.map(v => toCandleRow(v, symbol, interval));
     stored += await storeCandleRows(rows);
+    if (startDate) {
+      const oldest = values[values.length - 1]?.datetime;
+      const newest = values[0]?.datetime;
+      console.log(`[fx/td] ${symbol} ${interval}: получено ${values.length} баров (${oldest} … ${newest}), запрошено с ${startDate}`);
+    }
   }
   if (stored > 0) console.log(`[fx/td] ${interval}: +${stored} свечей (${cfg.symbols.length} пар за 1 запрос)`);
   return stored;
+}
+
+// Насколько глубокая история нужна на каждом таймфрейме (дней назад от
+// сегодня). Для 1h/4h/1d/1w просим её ЯВНО через start_date — иначе Twelve
+// Data по умолчанию отдаёт "последние outputsize баров", и без явной даты
+// невозможно отличить "тариф режет глубину" от "просто мало баров попросили".
+// 5m/15m не получают start_date — outputsize=5000 уже даёт ~17–52 дня, для
+// внутридневных таймфреймов больше и не нужно (да и Twelve Data столько
+// интрадей-истории на free tier обычно и не хранит).
+const BACKFILL_DEPTH_DAYS = { "1h": 90, "4h": 180, "1d": 400, "1w": 400 };
+
+function daysAgoIso(days) {
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 }
 
 // На старте: полная история по всем таймфреймам (батчами по символам).
@@ -281,21 +312,36 @@ async function backfillAll() {
   console.log(`[fx/td] backfill: начинаем для ${cfg.symbols.length} символов, ${CANDLE_INTERVALS.length} таймфреймов (батч по символам)`);
 
   for (const interval of CANDLE_INTERVALS) {
+    const depthDays = BACKFILL_DEPTH_DAYS[interval];
     try {
+      // Проверяем ГЛУБИНУ (возраст самой старой свечи), а не count(*) — свечей
+      // может быть много (8 символов × сотни баров), но все за последний
+      // месяц, если Twelve Data (или сам бэкафилл раньше) ограничил глубину.
+      // Старый вариант с count(*) > 100*symbols.length в этом случае навсегда
+      // пропускал бы повторный бэкафилл, даже не пытаясь копнуть глубже.
       const r = await pool.query(
-        `SELECT COUNT(*) as cnt FROM "FxCandle" WHERE "exchange"=$1 AND "interval"=$2`,
+        `SELECT MIN("t") as min_t FROM "FxCandle" WHERE "exchange"=$1 AND "interval"=$2`,
         [cfg.exchange, interval],
       );
-      if (parseInt(r.rows[0]?.cnt ?? "0") > 100 * cfg.symbols.length) {
-        console.log(`[fx/td] backfill: ${interval} — уже есть данные, пропускаем`);
+      const minT = r.rows[0]?.min_t;
+      const ageDays = minT ? (Date.now() - new Date(minT).getTime()) / 86_400_000 : 0;
+      if (depthDays && ageDays >= depthDays * 0.9) {
+        console.log(`[fx/td] backfill: ${interval} — уже есть история глубиной ~${Math.round(ageDays)}д (нужно ${depthDays}д), пропускаем`);
+        continue;
+      }
+      if (!depthDays && minT) {
+        console.log(`[fx/td] backfill: ${interval} — данные уже есть, пропускаем`);
         continue;
       }
     } catch (_) {
       // Таблица создастся при первой записи (миграцией) — просто продолжаем.
     }
 
-    const outputsize = interval === "5m" || interval === "15m" ? 5000 : 2000;
-    await fetchAndStoreBatch(interval, outputsize);
+    // outputsize=5000 — верхняя граница на все таймфреймы: с start_date она
+    // просто гарантирует, что весь запрошенный диапазон поместится в ответ
+    // (для 1d/400д это 400 баров, для 1h/90д — 2160, оба далеко под 5000).
+    const startDate = depthDays ? daysAgoIso(depthDays) : undefined;
+    await fetchAndStoreBatch(interval, 5000, startDate);
   }
 
   backfillDone = true;
@@ -321,8 +367,8 @@ async function backfillOneSymbol(symbol) {
   for (const interval of CANDLE_INTERVALS) {
     const twelveInterval = TF_MAP[interval];
     if (!twelveInterval) continue;
-    const outputsize = interval === "5m" || interval === "15m" ? 5000 : 2000;
-    const data = await fetchTimeSeriesBatch([symbol], twelveInterval, outputsize);
+    const startDate = BACKFILL_DEPTH_DAYS[interval] ? daysAgoIso(BACKFILL_DEPTH_DAYS[interval]) : undefined;
+    const data = await fetchTimeSeriesBatch([symbol], twelveInterval, 5000, startDate);
     if (!data) continue;
     const values = extractSymbolValues(data, symbol, false);
     if (!values || values.length === 0) continue;
