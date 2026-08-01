@@ -5,9 +5,15 @@ import { bumpStatsVersion } from "@/lib/statsCache";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { detectImageType, isAllowedImageType, extForMime, MAX_IMAGE_BYTES } from "@/lib/imageValidation";
 import { getValidCloudToken, firstConnectedProvider } from "@/lib/integrations/cloudStorage";
-import { uploadImage, makeFilePublic, directImageUrl, GoogleDriveError } from "@/lib/integrations/googleDrive";
+import { uploadImage, makeFilePublic, directImageUrl, getOrCreateAppFolder, GoogleDriveError } from "@/lib/integrations/googleDrive";
 import { uploadFile, publishResource, YandexDiskError } from "@/lib/integrations/yandexDisk";
 import { logError } from "@/lib/errorLog";
+
+// Скриншоты кладём в отдельную папку, а не в корень "Мой диск"/"Приложения"
+// пользователя — так их легко найти и они не мешаются среди остальных файлов.
+// Для Яндекс.Диска подпапка того же имени зашита в lib/integrations/yandexDisk.ts
+// (DEAL_FOLDER) — там своя структура путей, но имя то же самое сознательно.
+const DEAL_FOLDER_NAME = "tradingstat_deal";
 
 // Загружает скриншот сделки в облако пользователя (Google Drive или
 // Яндекс.Диск — НЕ на наш сервер) и сохраняет только ссылку в
@@ -69,7 +75,8 @@ export async function POST(req: Request) {
     let imageFileId: string;
 
     if (provider === "google_drive") {
-      const { id: fileId } = await uploadImage(accessToken, filename, detected, buf);
+      const folderId = await getOrCreateAppFolder(accessToken, DEAL_FOLDER_NAME);
+      const { id: fileId } = await uploadImage(accessToken, filename, detected, buf, folderId);
       await makeFilePublic(accessToken, fileId);
       imageUrl = directImageUrl(fileId);
       imageFileId = fileId;

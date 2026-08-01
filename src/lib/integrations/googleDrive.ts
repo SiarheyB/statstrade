@@ -118,6 +118,33 @@ export async function getUserEmail(accessToken: string): Promise<string | null> 
   return typeof d.email === "string" ? d.email : null;
 }
 
+// Находит папку с этим именем среди файлов, СОЗДАННЫХ этим приложением
+// (drive.file-scope и так видит только их — фильтр по mimeType/trashed
+// достаточен, без q=owners=... — нам чужие папки не видны в принципе), а
+// если её ещё нет — создаёт. Кладём сюда скриншоты сделок, а не в корень
+// "Мой диск" пользователя, чтобы не засорять его обычный вид диска.
+export async function getOrCreateAppFolder(accessToken: string, name: string): Promise<string> {
+  const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const searchRes = await fetch(`${DRIVE_API_URL}?${new URLSearchParams({ q, fields: "files(id)", pageSize: "1" })}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!searchRes.ok) throw new GoogleDriveError(`folder search failed: ${searchRes.status}`);
+  const found = await searchRes.json();
+  if (found.files?.[0]?.id) return found.files[0].id;
+
+  const createRes = await fetch(DRIVE_API_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder" }),
+  });
+  if (!createRes.ok) throw new GoogleDriveError(`folder create failed: ${createRes.status}`);
+  const created = await createRes.json();
+  return created.id;
+}
+
 // Multipart upload (metadata + raw bytes) в один запрос — стандартный способ
 // Drive API для файлов среднего размера (< ~5MB держим себя, см. MAX_IMAGE_BYTES).
 export async function uploadImage(
@@ -125,9 +152,10 @@ export async function uploadImage(
   filename: string,
   mimeType: string,
   data: Buffer,
+  folderId?: string,
 ): Promise<{ id: string }> {
   const boundary = `tsboundary_${crypto.randomUUID()}`;
-  const metadata = JSON.stringify({ name: filename, mimeType });
+  const metadata = JSON.stringify({ name: filename, mimeType, ...(folderId ? { parents: [folderId] } : {}) });
   const body = Buffer.concat([
     Buffer.from(
       `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n` +

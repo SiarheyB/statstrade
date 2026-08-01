@@ -116,19 +116,37 @@ export async function getUserLogin(accessToken: string): Promise<string | null> 
   return d?.user?.display_name ?? d?.user?.login ?? null;
 }
 
+// Подпапка внутри изолированной папки приложения ("Приложения/TradeStats/
+// tradingstat_deal"), а не прямо в её корне — на случай, если позже туда
+// добавится что-то ещё, и просто для аккуратности.
+const DEAL_FOLDER = "tradingstat_deal";
+
 function appPath(filename: string): string {
-  return `app:/${filename}`;
+  return `app:/${DEAL_FOLDER}/${filename}`;
+}
+
+// Создаёт подпапку, если её ещё нет (идемпотентно — 409 "уже существует"
+// не считаем ошибкой).
+async function ensureDealFolder(accessToken: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/resources?${new URLSearchParams({ path: `app:/${DEAL_FOLDER}` })}`, {
+    method: "PUT",
+    headers: { Authorization: `OAuth ${accessToken}` },
+  });
+  if (!res.ok && res.status !== 409) {
+    throw new YandexDiskError(`create folder failed: ${res.status} ${await res.text().catch(() => "")}`);
+  }
 }
 
 // Загружает файл в изолированную папку приложения на диске пользователя
-// ("Приложения/TradeStats"). Двухшаговый API Яндекса: сначала получаем
-// upload-URL, затем PUT байтов туда напрямую.
+// ("Приложения/TradeStats/tradingstat_deal"). Двухшаговый API Яндекса:
+// сначала получаем upload-URL, затем PUT байтов туда напрямую.
 export async function uploadFile(
   accessToken: string,
   filename: string,
   mimeType: string,
   data: Buffer,
 ): Promise<{ path: string }> {
+  await ensureDealFolder(accessToken);
   const path = appPath(filename);
   const uploadUrlRes = await fetch(
     `${API_BASE}/resources/upload?${new URLSearchParams({ path, overwrite: "true" })}`,
