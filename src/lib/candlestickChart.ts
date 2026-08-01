@@ -384,8 +384,8 @@ export function drawDeltaCvdChart(
   ctx.stroke();
 
   ctx.fillStyle = CHART_COLORS.axisText;
-  ctx.font = "10px ui-sans-serif, system-ui";
-  ctx.fillText("Δ / CVD", plotX + 2, 12);
+  ctx.font = "12px ui-sans-serif, system-ui";
+  ctx.fillText("Δ / CVD", plotX + 2, 13);
 
   if (cvd && cvd.length === n) {
     const cvdMin = Math.min(...cvd);
@@ -405,7 +405,7 @@ export function drawDeltaCvdChart(
     ctx.lineWidth = 1;
 
     ctx.fillStyle = CHART_COLORS.accent;
-    ctx.fillText(`CVD ${cvd[n - 1] >= 0 ? "+" : "-"}${fmtValLabel(Math.abs(cvd[n - 1]))}`, plotX + plotW + 5, 12);
+    ctx.fillText(`CVD ${cvd[n - 1] >= 0 ? "+" : "-"}${fmtValLabel(Math.abs(cvd[n - 1]))}`, plotX + plotW + 5, 13);
   }
 }
 

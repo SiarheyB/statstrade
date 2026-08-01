@@ -921,28 +921,26 @@ export default function OrderflowPage() {
     cv.height = Math.round(H * dpr);
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    const viewT0 = viewRef.current?.t0 ?? data.from;
-    const viewT1 = viewRef.current?.t1 ?? data.to;
-    // Дельта/CVD считаются только для загруженного сервером окна
-    // [data.from, data.to] — в этой итерации не пагинируются (см.
-    // LAZY_HISTORY_PLAN.md, п.5.7). Текущий вид (viewRef) может быть ШИРЕ
-    // этого окна — например, после zoom-out до предела или после дозагрузки
-    // истории свечей, которая на дельту/CVD не распространяется. Раньше это
-    // рисовало данные "сжатыми" в узкую полосу где-то в середине canvas.
-    // Клэмпим шкалу к пересечению вида и реального окна данных, чтобы то,
-    // что реально загружено, всегда растягивалось на всю ширину панели —
-    // ровно так же, как уже маскирует ту же проблему фон B/A-панели
-    // (см. drawBA ниже), только явно, а не за счёт фонового прямоугольника.
-    const t0 = Math.max(viewT0, data.from);
-    const t1 = Math.min(viewT1, data.to);
-    const noOverlap = t1 <= t0;
-    const d = noOverlap ? null : data.delta;
+    // Та же временная шкала (t0/t1), что у самих свечей (viewRef), БЕЗ
+    // клэмпа к [data.from, data.to] — так подписи Δ/CVD всегда стоят под
+    // теми же свечами по X, что и на графике выше (как на форекс-графике,
+    // ForexView.tsx, где точно так же напрямую берётся viewRef). Раньше тут
+    // был клэмп, растягивавший загруженный кусок дельты на всю ширину —
+    // при виде шире окна [data.from,data.to] (zoom-out до предела, дозагрузка
+    // истории свечей) это чинило "сжатую в полоску" дельту, но ценой сдвига
+    // её относительно свечей ("начинается с середины"). Так честнее: если
+    // дельты для части видимого диапазона нет — там просто пусто, а не
+    // подрисованный кусок не в том месте.
+    const t0 = viewRef.current?.t0 ?? data.from;
+    const t1 = viewRef.current?.t1 ?? data.to;
+    const viewingUnpaginatedHistory = t0 < data.from;
+    const d = viewingUnpaginatedHistory ? null : data.delta;
     drawDeltaCvdChart(ctx, {
       W, H, t0, t1,
       times: d?.times ?? [],
       delta: d?.delta ?? [],
       cvd: d?.cvd ?? null,
-      emptyText: noOverlap ? t("of.noDeltaHistory") : t("of.noDelta"),
+      emptyText: viewingUnpaginatedHistory ? t("of.noDeltaHistory") : t("of.noDelta"),
     });
   }, [data, t, viewRef]);
 
@@ -960,23 +958,19 @@ export default function OrderflowPage() {
     ctx.fillStyle = "#0a0b10";
     ctx.fillRect(0, 0, W, H);
 
-    const viewT0 = viewRef.current?.t0 ?? data.from;
-    const viewT1 = viewRef.current?.t1 ?? data.to;
-    // B/A считается только для загруженного сервером окна [data.from, data.to]
-    // (см. LAZY_HISTORY_PLAN.md, п.5.7). Клэмпим к пересечению с текущим
-    // видом — иначе при виде шире загруженного окна (zoom-out до предела,
-    // смена таймфрейма и т.п.) линия рисуется сжатой в узкую полосу, а не на
-    // всю ширину (тот же фикс, что и в drawDelta выше — см. комментарий там).
-    const t0 = Math.max(viewT0, data.from);
-    const t1 = Math.min(viewT1, data.to);
-    const noOverlap = t1 <= t0;
-    const ba = noOverlap ? null : data.ba;
+    // Та же шкала, что у свечей — без клэмпа к [data.from, data.to], см.
+    // комментарий в drawDelta выше (то же самое решение и по той же причине:
+    // клэмп чинил "сжатую полоску", но сдвигал B/A относительно свечей).
+    const t0 = viewRef.current?.t0 ?? data.from;
+    const t1 = viewRef.current?.t1 ?? data.to;
+    const viewingUnpaginatedHistory = t0 < data.from;
+    const ba = viewingUnpaginatedHistory ? null : data.ba;
     const plotX = 8 + 76;
     const plotW = W - plotX - 64;
     if (!ba || ba.full.length === 0) {
       ctx.fillStyle = "#6b7384";
       ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.fillText(noOverlap ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
+      ctx.fillText(viewingUnpaginatedHistory ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
       return;
     }
     const xspan = t1 - t0 || 1;
@@ -1011,13 +1005,13 @@ export default function OrderflowPage() {
     line(ba.full, "#5b8def");
     line(ba.near, "#e6b800");
 
-    ctx.font = "10px ui-sans-serif, system-ui";
+    ctx.font = "12px ui-sans-serif, system-ui";
     ctx.fillStyle = "#8a93a6";
-    ctx.fillText("B/A", plotX + 2, 12);
+    ctx.fillText("B/A", plotX + 2, 13);
     ctx.fillStyle = "#5b8def";
-    ctx.fillText("full", plotX + plotW + 5, 12);
+    ctx.fillText("full", plotX + plotW + 5, 13);
     ctx.fillStyle = "#e6b800";
-    ctx.fillText("±1%", plotX + plotW + 5, 24);
+    ctx.fillText("±1%", plotX + plotW + 5, 26);
   }, [data, t, viewRef]);
 
   useEffect(() => {
