@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { invalidateTokenVersionCache } from "@/lib/auth";
 
 // Полное удаление пользователя и всей связанной истории.
 //
@@ -13,4 +14,7 @@ export async function deleteUserCascade(userId: string): Promise<void> {
     prisma.riskProfile.deleteMany({ where: { userId } }),
     prisma.user.delete({ where: { id: userId } }),
   ]);
+  // Сбрасываем кэш версии токена сразу — иначе в этом же процессе сессия
+  // удалённого юзера могла бы остаться валидной ещё до минуты (см. auth.ts).
+  invalidateTokenVersionCache(userId);
 }

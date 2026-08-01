@@ -98,10 +98,11 @@ describe('auth', () => {
 
   describe('signSession / verifySession (round-trip)', () => {
     it('подписанный токен проверяется обратно', async () => {
-      const token = await signSession({ userId: 'u1', email: 'a@b.com' });
+      findUnique.mockResolvedValue({ tokenVersion: 0 });
+      const token = await signSession({ userId: 'rt-1', email: 'a@b.com' });
       expect(token.split('.')).toHaveLength(3);
       const payload = await verifySession(token);
-      expect(payload).toEqual({ userId: 'u1', email: 'a@b.com' });
+      expect(payload).toEqual({ userId: 'rt-1', email: 'a@b.com' });
     });
     it('verifySession возвращает null для битого токена', async () => {
       expect(await verifySession('not.a.jwt')).toBeNull();
@@ -110,6 +111,7 @@ describe('auth', () => {
 
   describe('generateToken / verifyToken (proxies)', () => {
     it('round-trip возвращает userId', async () => {
+      findUnique.mockResolvedValue({ tokenVersion: 0 });
       const token = await generateToken('tester');
       expect(await verifyToken(token)).toBe('tester');
     });
@@ -156,6 +158,7 @@ describe('auth', () => {
     });
 
     it('round-trip: куку ставим → getSession её читает', async () => {
+      findUnique.mockResolvedValue({ tokenVersion: 0 });
       await createSessionCookie({ userId: 'u1', email: 'a@b.com' });
       expect(cookieStore.has(COOKIE_NAME)).toBe(true);
       const session = await getSession();
@@ -184,6 +187,16 @@ describe('auth', () => {
       findUnique.mockResolvedValue({ tokenVersion: 3 });
       const token = await signSession({ userId: 'tv-b', email: 'a@b.com' }, 3);
       expect(await verifySession(token)).toEqual({ userId: 'tv-b', email: 'a@b.com' });
+    });
+
+    it('verifySession возвращает null для удалённого пользователя, даже если v токена = 0 (регрессия)', async () => {
+      // Пользователь удалён из БД → findUnique возвращает null. v=0 в токене —
+      // самый частый случай (дефолт tokenVersion). Раньше `row?.tokenVersion
+      // ?? 0` совпадал с этим v=0, и сессия удалённого юзера оставалась
+      // рабочей до истечения JWT (до 7 дней).
+      findUnique.mockResolvedValue(null);
+      const token = await signSession({ userId: 'tv-deleted', email: 'ghost@x.com' }, 0);
+      expect(await verifySession(token)).toBeNull();
     });
 
     it('invalidateTokenVersionCache очищает кэш (дальше ходит в БД)', async () => {

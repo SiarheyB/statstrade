@@ -42,6 +42,15 @@ export async function verifyPassword(
 const VERSION_CACHE_MS = 60_000;
 const versionCache = new Map<string, { v: number; at: number }>();
 
+// -1 — служебное значение "пользователь не найден" (удалён из БД). Реальный
+// tokenVersion всегда >= 0, так что -1 никогда не совпадёт ни с одним валидным
+// claim `v` из JWT — сессия удалённого юзера гарантированно не пройдёт
+// verifySession(), а не тихо провалидируется через ?? 0 (был баг: у только
+// что удалённого юзера, чей токен ещё нёс дефолтный v=0, `row?.tokenVersion
+// ?? 0` совпадал с этим v=0, и сессия оставалась рабочей до истечения JWT —
+// то есть до 7 дней после удаления аккаунта из БД).
+const DELETED_USER_VERSION = -1;
+
 async function currentTokenVersion(userId: string): Promise<number> {
   const hit = versionCache.get(userId);
   const now = Date.now();
@@ -50,7 +59,7 @@ async function currentTokenVersion(userId: string): Promise<number> {
     where: { id: userId },
     select: { tokenVersion: true },
   });
-  const v = row?.tokenVersion ?? 0;
+  const v = row ? row.tokenVersion : DELETED_USER_VERSION;
   versionCache.set(userId, { v, at: now });
   return v;
 }
