@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getExchangeGuides } from "@/lib/exchange-guides";
+import { logError } from "@/lib/errorLog";
 
 /**
  * GET /api/exchange-guides
@@ -11,7 +12,7 @@ export async function GET() {
     const guides = await getExchangeGuides();
     return NextResponse.json({ guides });
   } catch (error) {
-    console.error("Error loading exchange guides:", error);
+    logError(`Error loading exchange guides: ${(error as Error).message}`, { path: "/api/exchange-guides" });
     return NextResponse.json({ error: "Failed to load guides" }, { status: 500 });
   }
 }

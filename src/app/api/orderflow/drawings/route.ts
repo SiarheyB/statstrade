@@ -32,8 +32,7 @@ export async function GET(req: Request) {
     const drawings = await getDrawings({ userId: user.userId, symbol, exchange });
     return NextResponse.json({ drawings });
   } catch (error) {
-    console.error("[drawings GET]", error);
-    return serverError("Internal server error");
+    return serverError(`[drawings GET] ${(error as Error).message}`);
   }
 }
 
@@ -66,8 +65,7 @@ export async function POST(req: Request) {
     if (error instanceof Error && error.message.startsWith("invalid")) {
       return badRequest(error.message);
     }
-    console.error("[drawings POST]", error);
-    return serverError("Internal server error");
+    return serverError(`[drawings POST] ${(error as Error).message}`);
   }
 }
 
@@ -97,8 +95,7 @@ export async function PUT(req: Request) {
     if (error instanceof Error && error.message.startsWith("invalid")) {
       return badRequest(error.message);
     }
-    console.error("[drawings PUT]", error);
-    return serverError("Internal server error");
+    return serverError(`[drawings PUT] ${(error as Error).message}`);
   }
 }
 
@@ -117,7 +114,6 @@ export async function DELETE(req: Request) {
 
     return NextResponse.json({ deleted: true });
   } catch (error) {
-    console.error("[drawings DELETE]", error);
-    return serverError("Internal server error");
+    return serverError(`[drawings DELETE] ${(error as Error).message}`);
   }
 }

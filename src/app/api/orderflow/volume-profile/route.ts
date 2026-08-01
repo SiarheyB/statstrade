@@ -92,7 +92,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(payload);
   } catch (e) {
-    console.error("[volume-profile] error:", e);
-    return serverError("Ошибка вычисления Volume Profile");
+    return serverError(`[volume-profile] ${(e as Error).message}`);
   }
 }

@@ -123,7 +123,7 @@ describe('GET /api/orderflow/absorption', () => {
     const res = await GET(makeReq(`http://localhost/api/orderflow/absorption?symbol=${uniqueSym}`));
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.error).toBe('Internal server error');
+    expect(body.error).toContain('DB error');
   });
 
   it('passes custom params to computeAbsorption', async () => {

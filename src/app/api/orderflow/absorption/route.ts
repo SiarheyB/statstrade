@@ -91,7 +91,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(data);
   } catch (error) {
-    console.error('[absorption]', error);
-    return serverError('Internal server error');
+    return serverError(`[absorption] ${(error as Error).message}`);
   }
 }

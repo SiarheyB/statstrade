@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ShieldCheck, Trash2, KeyRound } from "lucide-react";
+import { ShieldCheck, Trash2, KeyRound, HardDrive } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { Pagination } from "@/components/Pagination";
@@ -22,6 +22,12 @@ type Row = {
   accounts: number;
   annotations: number;
   isAdmin: boolean;
+  cloudStorage: { provider: string; email: string | null }[];
+};
+
+const CLOUD_PROVIDER_LABELS: Record<string, string> = {
+  google_drive: "Google Drive",
+  yandex_disk: "Яндекс.Диск",
 };
 
 export default function UsersTable({ rows }: { rows: Row[] }) {
@@ -87,6 +93,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.status")}</th>
                 <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.accounts")}</th>
                 <th className="px-3 py-2 font-medium text-right">{t("admin.users.th.annotations")}</th>
+                <th className="px-3 py-2 font-medium">{t("admin.users.th.cloudStorage")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.2fa")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.registered")}</th>
                 <th className="px-3 py-2 font-medium">{t("admin.users.th.lastActive")}</th>
@@ -120,6 +127,23 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
                   </td>
                   <td className="px-3 py-2.5 text-right tabular-nums">{r.accounts}</td>
                   <td className="px-3 py-2.5 text-right tabular-nums text-muted">{r.annotations}</td>
+                  <td className="px-3 py-2.5">
+                    {r.cloudStorage.length > 0 ? (
+                      <div className="flex flex-wrap gap-1">
+                        {r.cloudStorage.map((c) => (
+                          <span
+                            key={c.provider}
+                            title={c.email ?? undefined}
+                            className="inline-flex items-center gap-1 text-[10px] text-profit bg-profit/10 border border-profit/30 rounded px-1.5 py-0.5 whitespace-nowrap"
+                          >
+                            <HardDrive size={10} /> {CLOUD_PROVIDER_LABELS[c.provider] ?? c.provider}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-faint text-xs">{t("admin.dash")}</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2.5">
                     {r.twoFactorEnabled ? (
                       <span className="inline-flex items-center gap-1 text-profit text-xs"><KeyRound size={12} /> {t("admin.users.2faOn")}</span>
@@ -162,7 +186,7 @@ export default function UsersTable({ rows }: { rows: Row[] }) {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="px-5 py-8 text-center text-muted">{t("admin.users.none")}</td>
+                  <td colSpan={9} className="px-5 py-8 text-center text-muted">{t("admin.users.none")}</td>
                 </tr>
               )}
             </tbody>

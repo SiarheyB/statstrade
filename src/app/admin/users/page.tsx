@@ -18,6 +18,7 @@ export default async function AdminUsersPage() {
       twoFactorEnabled: true,
       googleId: true,
       _count: { select: { accounts: true, annotations: true } },
+      cloudStorageAccounts: { select: { provider: true, accountEmail: true } },
     },
   });
 
@@ -33,6 +34,9 @@ export default async function AdminUsersPage() {
     accounts: u._count.accounts,
     annotations: u._count.annotations,
     isAdmin: isAdminEmail(u.email),
+    // Какое облако для скриншотов сделок подключено (см. TRADE_IMAGE_LINK_PLAN.md) —
+    // отдельно от googleId выше (тот — вход через Google, не то же самое).
+    cloudStorage: u.cloudStorageAccounts.map((a) => ({ provider: a.provider, email: a.accountEmail })),
   }));
 
   return (

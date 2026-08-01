@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { getExchangeGuides, saveExchangeGuide } from "@/lib/exchange-guides";
+import { logError } from "@/lib/errorLog";
 
 /**
  * GET /api/admin/exchange-guides
@@ -15,7 +16,7 @@ export async function GET() {
     const guides = await getExchangeGuides();
     return NextResponse.json({ guides });
   } catch (error) {
-    console.error("Error loading exchange guides:", error);
+    logError(`Error loading exchange guides: ${(error as Error).message}`, { path: "/api/admin/exchange-guides" });
     return NextResponse.json({ error: "Failed to load guides" }, { status: 500 });
   }
 }
@@ -43,7 +44,7 @@ export async function PUT(req: Request) {
     await saveExchangeGuide(exchangeId, guide);
     return NextResponse.json({ success: true, exchangeId });
   } catch (error) {
-    console.error("Error saving exchange guide:", error);
+    logError(`Error saving exchange guide: ${(error as Error).message}`, { path: "/api/admin/exchange-guides" });
     return NextResponse.json({ error: "Failed to save guide" }, { status: 500 });
   }
 }

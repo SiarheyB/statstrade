@@ -69,7 +69,6 @@ export async function GET(req: Request) {
     cache.set(cacheKey, { at: Date.now(), data: payload });
     return NextResponse.json(payload);
   } catch (e) {
-    console.error("[imbalance] error:", e);
-    return serverError("Ошибка вычисления Imbalance/Speed of Tape");
+    return serverError(`[imbalance] ${(e as Error).message}`);
   }
 }

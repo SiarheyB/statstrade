@@ -94,7 +94,6 @@ export async function GET(req: Request) {
 
     return NextResponse.json(payload);
   } catch (e) {
-    console.error("[divergence] error:", e);
-    return serverError("Ошибка вычисления Divergence Scanner");
+    return serverError(`[divergence] ${(e as Error).message}`);
   }
 }

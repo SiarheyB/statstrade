@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
 import { LogService } from "@/lib/log.service";
+import { logError } from "@/lib/errorLog";
 
 // Simple in-memory rate limiter for DELETE endpoint
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -78,7 +79,7 @@ export async function GET(req: Request) {
     const result = await LogService.fetchPage(page, limit, filters);
     return NextResponse.json(result);
   } catch (error) {
-    console.error("Error fetching logs:", error);
+    logError(`Error fetching logs: ${(error as Error).message}`, { path: "/api/admin/logs" });
     return NextResponse.json({ error: "Failed to fetch logs" }, { status: 500 });
   }
 }
@@ -115,7 +116,7 @@ export async function DELETE(req: Request) {
       const result = await LogService.deleteAll();
       return NextResponse.json({ success: true, deletedCount: result.count });
     } catch (error) {
-      console.error("Error deleting all logs:", error);
+      logError(`Error deleting all logs: ${(error as Error).message}`, { path: "/api/admin/logs" });
       return NextResponse.json({ error: "Failed to delete all logs" }, { status: 500 });
     }
   }
@@ -139,7 +140,7 @@ export async function DELETE(req: Request) {
     await LogService.deleteMany(ids);
     return NextResponse.json({ success: true, deletedIds: ids });
   } catch (error) {
-    console.error("Error deleting logs:", error);
+    logError(`Error deleting logs: ${(error as Error).message}`, { path: "/api/admin/logs" });
     return NextResponse.json({ error: "Failed to delete logs" }, { status: 500 });
   }
 }
