@@ -8,14 +8,20 @@ import { useI18n } from "@/lib/i18n/provider";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = "image/png,image/jpeg,image/webp,image/gif";
 
+const PROVIDER_LABELS: Record<string, string> = {
+  google_drive: "Google Drive",
+  yandex_disk: "Яндекс.Диск",
+};
+
 // Ячейка колонки «Изображение» в таблице сделок. Три состояния:
-//  1. Google Drive не подключён → ссылка в настройки.
+//  1. Ни один облачный провайдер не подключён → ссылка в настройки.
 //  2. Подключён, ссылки нет → кнопка «Загрузить» (выбор файла → аплоад).
-//  3. Ссылка есть → короткая ссылка (открывает модалку) + корзина (удаляет
-//     только ссылку у нас, файл в Drive пользователя не трогаем).
+//  3. Ссылка есть → короткая метка (открывает модалку) + корзина (удаляет
+//     только ссылку у нас, файл в облаке пользователя не трогаем).
 export default function TradeImageCell({
   tradeKey,
   imageUrl,
+  imageProvider,
   connected,
   onUploaded,
   onDeleted,
@@ -23,8 +29,9 @@ export default function TradeImageCell({
 }: {
   tradeKey: string;
   imageUrl: string | null;
+  imageProvider?: string | null;
   connected: boolean;
-  onUploaded: (url: string) => void;
+  onUploaded: (url: string, provider: string) => void;
   onDeleted: () => void;
   onPreview: (url: string) => void;
 }) {
@@ -50,7 +57,7 @@ export default function TradeImageCell({
         setError(d.error ?? t("trades.image.uploadError"));
         return;
       }
-      onUploaded(d.imageUrl);
+      onUploaded(d.imageUrl, d.imageProvider);
     } catch {
       setError(t("trades.image.uploadError"));
     } finally {
@@ -84,11 +91,16 @@ export default function TradeImageCell({
   }
 
   if (imageUrl) {
-    let host = "";
-    try {
-      host = new URL(imageUrl).hostname.replace(/^www\./, "");
-    } catch {
-      host = imageUrl;
+    // Для Яндекс.Диска imageUrl — наш собственный относительный прокси-путь
+    // (см. /api/trade-images/view), у него нет хоста для парсинга — там
+    // показываем название провайдера вместо домена.
+    let label = imageProvider ? PROVIDER_LABELS[imageProvider] : undefined;
+    if (!label) {
+      try {
+        label = new URL(imageUrl).hostname.replace(/^www\./, "");
+      } catch {
+        label = imageUrl;
+      }
     }
     return (
       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
@@ -99,7 +111,7 @@ export default function TradeImageCell({
           title={imageUrl}
         >
           <ImageIcon size={13} className="shrink-0" />
-          <span className="truncate">{host}</span>
+          <span className="truncate">{label}</span>
         </button>
         <button
           type="button"

@@ -41,8 +41,8 @@ export default function TradesPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
-  const [images, setImages] = useState<Record<string, string | null>>({});
-  const [gdriveConnected, setGdriveConnected] = useState(false);
+  const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null }>>({});
+  const [cloudConnected, setCloudConnected] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
@@ -97,7 +97,6 @@ export default function TradesPage() {
       const d: StatsResponse = await res.json();
       setData(d);
       const map: Record<string, Ann> = {};
-      const imgMap: Record<string, string | null> = {};
       for (const tr of d.trades) {
         map[tr.id] = {
           entryPoint: tr.entryPoint,
@@ -107,10 +106,12 @@ export default function TradesPage() {
           stopLoss: tr.stopLoss,
           note: tr.note,
         };
-        imgMap[tr.id] = tr.imageUrl;
       }
       setAnn(map);
-      setImages(imgMap);
+      // images (imageUrl/imageProvider overrides) НЕ переинициализируем на
+      // каждый load() — imageOf() и так падает обратно на tr.imageUrl/tr.
+      // imageProvider из свежих данных, когда явного оверрайда нет.
+      setImages({});
     }
     setLoading(false);
   }, []);
@@ -119,17 +120,22 @@ export default function TradesPage() {
     load();
   }, [load]);
 
-  // Статус подключения Google Drive — определяет, показывать ли кнопку
-  // «Загрузить» или ссылку в настройки в колонке изображений.
+  // Статус подключения облака (Google Drive и/или Яндекс.Диск) — определяет,
+  // показывать ли кнопку «Загрузить» или ссылку в настройки в детальной
+  // панели сделки. Хватает хотя бы одного подключённого провайдера —
+  // /api/trade-images сам выберет, куда грузить (см. PROVIDER_PRIORITY).
   useEffect(() => {
     (async () => {
-      const res = await fetch("/api/integrations/google-drive");
-      if (res.ok) setGdriveConnected((await res.json()).connected === true);
+      const [gdrive, ydisk] = await Promise.all([
+        fetch("/api/integrations/google-drive").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch("/api/integrations/yandex-disk").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      setCloudConnected(gdrive?.connected === true || ydisk?.connected === true);
     })();
   }, []);
 
-  function imageOf(tr: SerializedTrade): string | null {
-    return tr.id in images ? images[tr.id] : tr.imageUrl;
+  function imageOf(tr: SerializedTrade): { url: string | null; provider: string | null } {
+    return tr.id in images ? images[tr.id] : { url: tr.imageUrl, provider: tr.imageProvider };
   }
 
   // Reload trades once a background sync finishes (new fills may have landed).
@@ -504,10 +510,11 @@ export default function TradesPage() {
                             <DetailField label={t("trades.col.image")}>
                               <TradeImageCell
                                 tradeKey={tr.id}
-                                imageUrl={imageOf(tr)}
-                                connected={gdriveConnected}
-                                onUploaded={(url) => setImages((prev) => ({ ...prev, [tr.id]: url }))}
-                                onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: null }))}
+                                imageUrl={imageOf(tr).url}
+                                imageProvider={imageOf(tr).provider}
+                                connected={cloudConnected}
+                                onUploaded={(url, provider) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider } }))}
+                                onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null } }))}
                                 onPreview={(url) => setPreviewUrl(url)}
                               />
                             </DetailField>

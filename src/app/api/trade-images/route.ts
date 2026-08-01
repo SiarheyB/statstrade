@@ -4,19 +4,21 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { detectImageType, isAllowedImageType, extForMime, MAX_IMAGE_BYTES } from "@/lib/imageValidation";
-import { getValidGoogleDriveToken } from "@/lib/integrations/cloudStorage";
+import { getValidCloudToken, firstConnectedProvider } from "@/lib/integrations/cloudStorage";
 import { uploadImage, makeFilePublic, directImageUrl, GoogleDriveError } from "@/lib/integrations/googleDrive";
+import { uploadFile, publishResource, YandexDiskError } from "@/lib/integrations/yandexDisk";
 import { logError } from "@/lib/errorLog";
 
-// Загружает скриншот сделки в Google Drive пользователя (НЕ на наш сервер) и
-// сохраняет только публичную ссылку в TradeAnnotation. Файл никогда не
-// проходит через постоянное хранилище приложения — читаем его целиком в
-// память (лимит 10 МБ), проверяем и сразу пересылаем в Drive API.
+// Загружает скриншот сделки в облако пользователя (Google Drive или
+// Яндекс.Диск — НЕ на наш сервер) и сохраняет только ссылку в
+// TradeAnnotation. Файл никогда не проходит через постоянное хранилище
+// приложения — читаем его целиком в память (лимит 10 МБ), проверяем и сразу
+// пересылаем в API провайдера.
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
 
-  // Лимит защищает Drive API-квоту пользователя и наш сервер от заливки спама.
+  // Лимит защищает квоту API провайдера и наш сервер от заливки спама.
   const limit = rateLimit(`trade-image-upload:${clientIp(req)}:${user.userId}`, 20, 10 * 60_000);
   if (!limit.ok) {
     return NextResponse.json({ error: "Слишком много загрузок, попробуйте позже" }, { status: 429 });
@@ -41,9 +43,13 @@ export async function POST(req: Request) {
     return badRequest(`Файл слишком большой (максимум ${MAX_IMAGE_BYTES / (1024 * 1024)} МБ)`);
   }
 
-  const accessToken = await getValidGoogleDriveToken(user.userId);
+  const provider = await firstConnectedProvider(user.userId);
+  if (!provider) {
+    return badRequest("Облачное хранилище не подключено — подключите его в настройках");
+  }
+  const accessToken = await getValidCloudToken(user.userId, provider);
   if (!accessToken) {
-    return badRequest("Google Drive не подключён — подключите его в настройках");
+    return badRequest("Облачное хранилище не подключено — подключите его в настройках");
   }
 
   const buf = Buffer.from(await file.arrayBuffer());
@@ -56,33 +62,50 @@ export async function POST(req: Request) {
     return badRequest("Файл не распознан как изображение (поддерживаются PNG, JPEG, WEBP, GIF)");
   }
 
+  const filename = `tradestats_${tradeKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extForMime(detected)}`;
+
   try {
-    const filename = `tradestats_${tradeKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extForMime(detected)}`;
-    const { id: fileId } = await uploadImage(accessToken, filename, detected, buf);
-    await makeFilePublic(accessToken, fileId);
-    const imageUrl = directImageUrl(fileId);
+    let imageUrl: string;
+    let imageFileId: string;
+
+    if (provider === "google_drive") {
+      const { id: fileId } = await uploadImage(accessToken, filename, detected, buf);
+      await makeFilePublic(accessToken, fileId);
+      imageUrl = directImageUrl(fileId);
+      imageFileId = fileId;
+    } else {
+      // Яндекс.Диск не даёт постоянной прямой ссылки на байты файла — только
+      // короткоживущий подписанный download-URL. Поэтому imageUrl указывает
+      // на наш собственный прокси-роут, который перевыпускает свежую ссылку
+      // на каждый просмотр (см. /api/trade-images/view).
+      const { path } = await uploadFile(accessToken, filename, detected, buf);
+      await publishResource(accessToken, path);
+      imageUrl = `/api/trade-images/view?tradeKey=${encodeURIComponent(tradeKey)}`;
+      imageFileId = path;
+    }
 
     await prisma.tradeAnnotation.upsert({
       where: { userId_tradeKey: { userId: user.userId, tradeKey } },
-      create: { userId: user.userId, tradeKey, imageUrl, imageProvider: "google_drive", imageFileId: fileId },
-      update: { imageUrl, imageProvider: "google_drive", imageFileId: fileId },
+      create: { userId: user.userId, tradeKey, imageUrl, imageProvider: provider, imageFileId },
+      update: { imageUrl, imageProvider: provider, imageFileId },
     });
     bumpStatsVersion(user.userId);
 
-    return NextResponse.json({ imageUrl, imageProvider: "google_drive" });
+    return NextResponse.json({ imageUrl, imageProvider: provider });
   } catch (err) {
-    if (err instanceof GoogleDriveError) {
-      // Реальную причину (ответ Google API — не enabled API, quota, invalid
-      // scope и т.п.) видно только в логе, клиенту — общее сообщение.
-      logError(`GoogleDrive upload failed: ${err.message}`, { path: "/api/trade-images" });
-      return badRequest("Не удалось загрузить файл в Google Drive");
+    if (err instanceof GoogleDriveError || err instanceof YandexDiskError) {
+      // Реальную причину (ответ API провайдера — не enabled API, quota,
+      // invalid scope и т.п.) видно только в логе, клиенту — общее сообщение.
+      logError(`${provider} upload failed: ${err.message}`, { path: "/api/trade-images" });
+      return badRequest("Не удалось загрузить файл в облако");
     }
     return serverError((err as Error).message);
   }
 }
 
-// Удаляет только ссылку у нас — файл в Google Drive пользователя остаётся
-// нетронутым (сознательное решение, см. TRADE_IMAGE_LINK_PLAN.md).
+// Удаляет только ссылку у нас — файл в облаке пользователя остаётся
+// нетронутым независимо от провайдера (сознательное решение, см.
+// TRADE_IMAGE_LINK_PLAN.md).
 export async function DELETE(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
