@@ -575,7 +575,11 @@ export default function TradesPage() {
         </div>
       )}
 
-      {previewUrl && <ImagePreviewModal url={previewUrl} onClose={() => setPreviewUrl(null)} />}
+      {previewUrl && (
+        // key=url — remounts on a new image so zoom/pan resets, instead of
+        // an effect syncing it (see ImagePreviewModal for why).
+        <ImagePreviewModal key={previewUrl} url={previewUrl} onClose={() => setPreviewUrl(null)} />
+      )}
     </div>
   );
 }
