@@ -15,6 +15,34 @@ import { logError } from "@/lib/errorLog";
 // (DEAL_FOLDER) — там своя структура путей, но имя то же самое сознательно.
 const DEAL_FOLDER_NAME = "tradingstat_deal";
 
+const RESULT_LABELS: Record<string, string> = { win: "win", loss: "loss", breakeven: "breakeven" };
+
+// Человекочитаемое имя файла на диске пользователя:
+// СИМВОЛ_ГГГГ-ММ-ДД_ЧЧ-ММ_результат.png (время входа, UTC).
+// symbol/entryTime/result — необязательные (пришли от клиента вместе с
+// формой); если чего-то нет или формат не распознан, откатываемся на старое
+// имя по tradeKey, чтобы загрузка не ломалась из-за косметики.
+function buildFilename(
+  symbol: string | null,
+  entryTimeIso: string | null,
+  result: string | null,
+  tradeKey: string,
+  ext: string,
+): string {
+  const cleanSymbol = symbol?.trim().replace(/[^a-zA-Z0-9]/g, "").slice(0, 30);
+  const entryMs = entryTimeIso ? Date.parse(entryTimeIso) : NaN;
+  const resultLabel = result ? RESULT_LABELS[result] : undefined;
+
+  if (!cleanSymbol || !Number.isFinite(entryMs) || !resultLabel) {
+    return `tradestats_${tradeKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.${ext}`;
+  }
+
+  const d = new Date(entryMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const stamp = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}_${pad(d.getUTCHours())}-${pad(d.getUTCMinutes())}`;
+  return `${cleanSymbol}_${stamp}_${resultLabel}.${ext}`;
+}
+
 // Загружает скриншот сделки в облако пользователя (Google Drive или
 // Яндекс.Диск — НЕ на наш сервер) и сохраняет только ссылку в
 // TradeAnnotation. Файл никогда не проходит через постоянное хранилище
@@ -39,6 +67,13 @@ export async function POST(req: Request) {
 
   const tradeKey = form.get("tradeKey");
   const file = form.get("file");
+  // Необязательные, только для человекочитаемого имени файла на диске
+  // пользователя — сама привязка идёт по tradeKey, эти поля ни на что
+  // больше не влияют, поэтому при их отсутствии просто откатываемся на
+  // старое имя вместо ошибки.
+  const symbolRaw = form.get("symbol");
+  const entryTimeRaw = form.get("entryTime");
+  const resultRaw = form.get("result");
   if (typeof tradeKey !== "string" || !tradeKey.trim() || tradeKey.length > 200) {
     return badRequest("Некорректный tradeKey");
   }
@@ -68,7 +103,13 @@ export async function POST(req: Request) {
     return badRequest("Файл не распознан как изображение (поддерживаются PNG, JPEG, WEBP, GIF)");
   }
 
-  const filename = `tradestats_${tradeKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.${extForMime(detected)}`;
+  const filename = buildFilename(
+    typeof symbolRaw === "string" ? symbolRaw : null,
+    typeof entryTimeRaw === "string" ? entryTimeRaw : null,
+    typeof resultRaw === "string" ? resultRaw : null,
+    tradeKey,
+    extForMime(detected),
+  );
 
   try {
     let imageUrl: string;

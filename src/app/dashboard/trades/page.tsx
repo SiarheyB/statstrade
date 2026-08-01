@@ -108,10 +108,11 @@ export default function TradesPage() {
         };
       }
       setAnn(map);
-      // images (imageUrl/imageProvider overrides) НЕ переинициализируем на
-      // каждый load() — imageOf() и так падает обратно на tr.imageUrl/tr.
-      // imageProvider из свежих данных, когда явного оверрайда нет.
-      setImages({});
+      // images (imageUrl/imageProvider overrides) НЕ трогаем на каждый load() —
+      // imageOf() и так падает обратно на tr.imageUrl/tr.imageProvider из
+      // свежих данных, когда явного оверрайда нет. Сбрасывать его здесь
+      // затирало бы только что загруженную ссылку, если load() перезапустится
+      // (например, из-за фонового автосинка) сразу после аплоада.
     }
     setLoading(false);
   }, []);
@@ -510,6 +511,9 @@ export default function TradesPage() {
                             <DetailField label={t("trades.col.image")}>
                               <TradeImageCell
                                 tradeKey={tr.id}
+                                symbol={tr.symbol}
+                                entryTime={tr.entryTime}
+                                result={tr.result}
                                 imageUrl={imageOf(tr).url}
                                 imageProvider={imageOf(tr).provider}
                                 connected={cloudConnected}

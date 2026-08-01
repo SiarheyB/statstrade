@@ -20,6 +20,9 @@ const PROVIDER_LABELS: Record<string, string> = {
 //     только ссылку у нас, файл в облаке пользователя не трогаем).
 export default function TradeImageCell({
   tradeKey,
+  symbol,
+  entryTime,
+  result,
   imageUrl,
   imageProvider,
   connected,
@@ -28,6 +31,11 @@ export default function TradeImageCell({
   onPreview,
 }: {
   tradeKey: string;
+  // Только для человекочитаемого имени файла на диске (символ_дата_результат) —
+  // сама привязка идёт по tradeKey, см. /api/trade-images.
+  symbol: string;
+  entryTime: string;
+  result: string;
   imageUrl: string | null;
   imageProvider?: string | null;
   connected: boolean;
@@ -50,6 +58,9 @@ export default function TradeImageCell({
     try {
       const form = new FormData();
       form.append("tradeKey", tradeKey);
+      form.append("symbol", symbol);
+      form.append("entryTime", entryTime);
+      form.append("result", result);
       form.append("file", file);
       const res = await fetch("/api/trade-images", { method: "POST", body: form });
       const d = await res.json();
