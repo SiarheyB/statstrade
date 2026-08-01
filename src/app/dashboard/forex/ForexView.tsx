@@ -288,96 +288,133 @@ export default function ForexView() {
 
   // ─── Load volume profile ─────────────────────────────────────────────
 
-  useEffect(() => {
-    let alive = true;
+  const loadVolumeProfile = useCallback(async (alive: () => boolean) => {
     setVpLoading(true);
     setVpError(null);
-    fetch(`/api/forex/volume-profile?symbol=${symbol}&period=${range}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!alive) return;
-        if (!d) { setVpError(t("fx.vpFailed")); return; }
-        setVpData({
-          poc: d.poc?.price ?? 0,
-          vah: d.valueArea?.high ?? 0,
-          val: d.valueArea?.low ?? 0,
-          levels: (d.levels ?? []).map((l: { price: number; volume: number }) => ({
-            price: l.price,
-            volume: l.volume,
-            isPoc: d.poc?.price === l.price,
-            isVa: l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0),
-            pct: d.poc?.volume ? (l.volume / d.poc.volume) * 100 : 0,
-          })),
-          totalVolume: (d.levels ?? []).reduce((s: number, l: { volume: number }) => s + l.volume, 0),
-          pocVolume: d.poc?.volume ?? 0,
-          valueAreaVolume: (d.levels ?? [])
-            .filter((l: { price: number }) => l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0))
-            .reduce((s: number, l: { volume: number }) => s + l.volume, 0),
-          valueAreaPct: 70,
-          binSize: 0.0001,
-        });
-        setVpError(null);
-      })
-      .catch(() => { if (alive) setVpError(t("auth.networkError")); })
-      .finally(() => { if (alive) setVpLoading(false); });
+    try {
+      const r = await fetch(`/api/forex/volume-profile?symbol=${symbol}&period=${range}`);
+      const d = r.ok ? await r.json() : null;
+      if (!alive()) return;
+      if (!d) { setVpError(t("fx.vpFailed")); return; }
+      setVpData({
+        poc: d.poc?.price ?? 0,
+        vah: d.valueArea?.high ?? 0,
+        val: d.valueArea?.low ?? 0,
+        levels: (d.levels ?? []).map((l: { price: number; volume: number }) => ({
+          price: l.price,
+          volume: l.volume,
+          isPoc: d.poc?.price === l.price,
+          isVa: l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0),
+          pct: d.poc?.volume ? (l.volume / d.poc.volume) * 100 : 0,
+        })),
+        totalVolume: (d.levels ?? []).reduce((s: number, l: { volume: number }) => s + l.volume, 0),
+        pocVolume: d.poc?.volume ?? 0,
+        valueAreaVolume: (d.levels ?? [])
+          .filter((l: { price: number }) => l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0))
+          .reduce((s: number, l: { volume: number }) => s + l.volume, 0),
+        valueAreaPct: 70,
+        binSize: 0.0001,
+      });
+      setVpError(null);
+    } catch {
+      if (alive()) setVpError(t("auth.networkError"));
+    } finally {
+      if (alive()) setVpLoading(false);
+    }
+  }, [symbol, range, t]);
+
+  useEffect(() => {
+    let alive = true;
+    loadVolumeProfile(() => alive);
     return () => { alive = false; };
-  }, [symbol, range]);
+  }, [loadVolumeProfile]);
 
   // ─── Load imbalance ──────────────────────────────────────────────────
 
-  useEffect(() => {
-    let alive = true;
+  const loadImbalance = useCallback(async (alive: () => boolean) => {
     setImbLoading(true);
     setImbError(null);
-    fetch(`/api/forex/imbalance?symbol=${symbol}&period=${range}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!alive) return;
-        if (!d) { setImbError(t("fx.imbFailed")); return; }
-        const series = d.series ?? [];
-        setImbData({
-          times: series.map((s: { t: number }) => s.t),
-          ratio: series.map((s: { ratio: number }) => s.ratio),
-          fullBid: series.map((s: { bidVol: number }) => s.bidVol),
-          fullAsk: series.map((s: { askVol: number }) => s.askVol),
-          nearBid: series.map((s: { bidVol: number }) => s.bidVol),
-          nearAsk: series.map((s: { askVol: number }) => s.askVol),
-          alerts: d.current && Math.abs(d.current.ratio) > 0.3
-            ? [{
-                t: series[series.length - 1]?.t ?? Date.now(),
-                type: d.current.ratio > 0 ? "high_imbalance" as const : "low_imbalance" as const,
-                value: d.current.ratio,
-                message: d.current.ratio > 0 ? "Ask dominance" : "Bid dominance",
-              }]
-            : [],
-        });
-        setImbError(null);
-      })
-      .catch(() => { if (alive) setImbError(t("auth.networkError")); })
-      .finally(() => { if (alive) setImbLoading(false); });
+    try {
+      const r = await fetch(`/api/forex/imbalance?symbol=${symbol}&period=${range}`);
+      const d = r.ok ? await r.json() : null;
+      if (!alive()) return;
+      if (!d) { setImbError(t("fx.imbFailed")); return; }
+      const series = d.series ?? [];
+      setImbData({
+        times: series.map((s: { t: number }) => s.t),
+        ratio: series.map((s: { ratio: number }) => s.ratio),
+        fullBid: series.map((s: { bidVol: number }) => s.bidVol),
+        fullAsk: series.map((s: { askVol: number }) => s.askVol),
+        nearBid: series.map((s: { bidVol: number }) => s.bidVol),
+        nearAsk: series.map((s: { askVol: number }) => s.askVol),
+        alerts: d.current && Math.abs(d.current.ratio) > 0.3
+          ? [{
+              t: series[series.length - 1]?.t ?? Date.now(),
+              type: d.current.ratio > 0 ? "high_imbalance" as const : "low_imbalance" as const,
+              value: d.current.ratio,
+              message: d.current.ratio > 0 ? "Ask dominance" : "Bid dominance",
+            }]
+          : [],
+      });
+      setImbError(null);
+    } catch {
+      if (alive()) setImbError(t("auth.networkError"));
+    } finally {
+      if (alive()) setImbLoading(false);
+    }
+  }, [symbol, range, t]);
+
+  useEffect(() => {
+    let alive = true;
+    loadImbalance(() => alive);
     return () => { alive = false; };
-  }, [symbol, range]);
+  }, [loadImbalance]);
 
   // ─── Load divergence ─────────────────────────────────────────────────
 
-  useEffect(() => {
-    let alive = true;
+  const loadDivergence = useCallback(async (alive: () => boolean) => {
     setDivLoading(true);
     setDivError(null);
-    fetch(`/api/forex/divergence?symbol=${symbol}&period=${range}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!alive) return;
-        if (!d) { setDivError(t("fx.divFailed")); return; }
-        // API уже отдаёт форму, совпадающую с DivergenceSignal — тем же типом
-        // пользуется общий компонент DivergenceHistory на orderflow и forex.
-        setDivSignals(d.signals ?? []);
-        setDivError(null);
-      })
-      .catch(() => { if (alive) setDivError(t("auth.networkError")); })
-      .finally(() => { if (alive) setDivLoading(false); });
+    try {
+      const r = await fetch(`/api/forex/divergence?symbol=${symbol}&period=${range}`);
+      const d = r.ok ? await r.json() : null;
+      if (!alive()) return;
+      if (!d) { setDivError(t("fx.divFailed")); return; }
+      // API уже отдаёт форму, совпадающую с DivergenceSignal — тем же типом
+      // пользуется общий компонент DivergenceHistory на orderflow и forex.
+      setDivSignals(d.signals ?? []);
+      setDivError(null);
+    } catch {
+      if (alive()) setDivError(t("auth.networkError"));
+    } finally {
+      if (alive()) setDivLoading(false);
+    }
+  }, [symbol, range, t]);
+
+  useEffect(() => {
+    let alive = true;
+    loadDivergence(() => alive);
     return () => { alive = false; };
-  }, [symbol, range]);
+  }, [loadDivergence]);
+
+  // Тихое обновление Volume Profile / Imbalance / Divergence раз в 15с —
+  // раньше грузились один раз при смене symbol/range и не обновлялись,
+  // хотя сами свечи на этой странице живые всегда (см. интервал выше).
+  // Реже, чем свечи (3с): это более тяжёлые агрегации, нет тумблера LIVE на
+  // форекс-странице — в отличие от /dashboard/orderflow, тут опрос идёт
+  // всегда, без возможности выключить.
+  useEffect(() => {
+    let alive = true;
+    const iv = setInterval(() => {
+      loadVolumeProfile(() => alive);
+      loadImbalance(() => alive);
+      loadDivergence(() => alive);
+    }, 15000);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [loadVolumeProfile, loadImbalance, loadDivergence]);
 
 
   // ─── Draw candle chart — same primitives as /dashboard/orderflow ─────

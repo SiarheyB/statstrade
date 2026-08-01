@@ -582,6 +582,23 @@ export default function OrderflowPage() {
     };
   }, [live, range, symbol, exchange, timezone]);
 
+  // Второстепенные индикаторы (Volume Profile, Divergence, Imbalance,
+  // Absorption) раньше грузились только один раз при смене symbol/exchange/
+  // range и не обновлялись, даже когда включён LIVE — только основной
+  // график свечей/карты ордеров жил в реальном времени. Реже основного (15с
+  // вместо 3с): это более тяжёлые SQL-агрегации (детекция паттернов), нет
+  // смысла гонять их так же часто, как обновление цены.
+  useEffect(() => {
+    if (!live) return;
+    const iv = setInterval(() => {
+      loadVolumeProfile();
+      loadDivergence();
+      loadImbalance();
+      loadAbsorption();
+    }, 15000);
+    return () => clearInterval(iv);
+  }, [live, loadVolumeProfile, loadDivergence, loadImbalance, loadAbsorption]);
+
   const draw = useCallback(() => {
     const cv = canvasRef.current;
     if (!cv || !data?.heatmap) return;
