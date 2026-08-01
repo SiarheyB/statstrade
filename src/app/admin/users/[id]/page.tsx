@@ -8,6 +8,11 @@ import UserDetailActions from "@/components/admin/UserDetailActions";
 
 export const dynamic = "force-dynamic";
 
+const CLOUD_PROVIDER_LABELS: Record<string, string> = {
+  google_drive: "Google Drive",
+  yandex_disk: "Яндекс.Диск",
+};
+
 const STATUS_STYLE: Record<string, string> = {
   idle: "text-muted",
   syncing: "text-accent",
@@ -30,6 +35,7 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
       googleId: true,
       password: true,
       _count: { select: { accounts: true, annotations: true } },
+      cloudStorageAccounts: { select: { provider: true, accountEmail: true } },
       accounts: {
         orderBy: { createdAt: "desc" },
         select: {
@@ -104,6 +110,23 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         </Row>
         <Row label={t("admin.userDetail.id")}>
           <span className="font-mono text-xs text-muted">{user.id}</span>
+        </Row>
+        <Row label={t("admin.userDetail.cloudStorage")}>
+          {user.cloudStorageAccounts.length > 0 ? (
+            <span className="inline-flex flex-wrap justify-end gap-1.5">
+              {user.cloudStorageAccounts.map((c) => (
+                <span
+                  key={c.provider}
+                  title={c.accountEmail ?? undefined}
+                  className="inline-flex items-center gap-1 text-xs text-profit bg-profit/10 border border-profit/30 rounded px-1.5 py-0.5"
+                >
+                  {CLOUD_PROVIDER_LABELS[c.provider] ?? c.provider}
+                </span>
+              ))}
+            </span>
+          ) : (
+            <span className="text-faint">{t("admin.dash")}</span>
+          )}
         </Row>
       </div>
 
