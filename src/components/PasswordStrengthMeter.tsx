@@ -15,9 +15,10 @@ export default function PasswordStrengthMeter({ password }: { password: string }
   const { score, label } = passwordStrength(password);
   const issues = new Set(passwordIssues(password));
 
-  const requirements: { key: "length" | "letter" | "digit" | "special"; text: string }[] = [
+  const requirements: { key: "length" | "uppercase" | "lowercase" | "digit" | "special"; text: string }[] = [
     { key: "length", text: t("auth.password.req.length", { n: MIN_PASSWORD_LENGTH }) },
-    { key: "letter", text: t("auth.password.req.letter") },
+    { key: "uppercase", text: t("auth.password.req.uppercase") },
+    { key: "lowercase", text: t("auth.password.req.lowercase") },
     { key: "digit", text: t("auth.password.req.digit") },
     { key: "special", text: t("auth.password.req.special") },
   ];

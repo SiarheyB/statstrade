@@ -10,7 +10,7 @@ const schema = z.object({
   newPassword: z.string()
     .min(MIN_PASSWORD_LENGTH, `Пароль минимум ${MIN_PASSWORD_LENGTH} символов`)
     .max(200)
-    .refine(isValidPassword, "Пароль должен содержать буквы, цифры и хотя бы один спецсимвол"),
+    .refine(isValidPassword, "Пароль должен содержать заглавную и строчную буквы, цифру и спецсимвол"),
 });
 
 // Status: does this account have a password? (Google-only accounts don't, so the

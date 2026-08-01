@@ -5,19 +5,21 @@
 
 export const MIN_PASSWORD_LENGTH = 6;
 
-const LETTER_RE = /[a-zA-Zа-яА-ЯёЁ]/;
+const UPPERCASE_RE = /[A-ZА-ЯЁ]/;
+const LOWERCASE_RE = /[a-zа-яё]/;
 const DIGIT_RE = /\d/;
 // Спецсимвол — всё, что не буква/цифра/пробел (пробел не считаем спецсимволом,
 // чтобы не поощрять "пароль с пробелом в конце" как обход требования).
 const SPECIAL_RE = /[^a-zA-Zа-яА-ЯёЁ0-9\s]/;
 
-export type PasswordIssue = "length" | "letter" | "digit" | "special";
+export type PasswordIssue = "length" | "uppercase" | "lowercase" | "digit" | "special";
 
 // Список непройденных требований — пустой массив = пароль валиден.
 export function passwordIssues(pw: string): PasswordIssue[] {
   const issues: PasswordIssue[] = [];
   if (pw.length < MIN_PASSWORD_LENGTH) issues.push("length");
-  if (!LETTER_RE.test(pw)) issues.push("letter");
+  if (!UPPERCASE_RE.test(pw)) issues.push("uppercase");
+  if (!LOWERCASE_RE.test(pw)) issues.push("lowercase");
   if (!DIGIT_RE.test(pw)) issues.push("digit");
   if (!SPECIAL_RE.test(pw)) issues.push("special");
   return issues;
@@ -41,7 +43,7 @@ export function passwordStrength(pw: string): PasswordStrength {
   let score = 0;
   if (pw.length >= MIN_PASSWORD_LENGTH) score++;
   if (pw.length >= 10) score++;
-  if (LETTER_RE.test(pw) && DIGIT_RE.test(pw)) score++;
+  if (UPPERCASE_RE.test(pw) && LOWERCASE_RE.test(pw) && DIGIT_RE.test(pw)) score++;
   if (SPECIAL_RE.test(pw)) score++;
   const clamped = Math.min(4, score) as PasswordStrength["score"];
   const labels: PasswordStrength["label"][] = ["veryWeak", "weak", "fair", "good", "strong"];

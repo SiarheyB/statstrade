@@ -12,7 +12,7 @@ const schema = z.object({
   password: z.string()
     .min(MIN_PASSWORD_LENGTH, `Пароль минимум ${MIN_PASSWORD_LENGTH} символов`)
     .max(200)
-    .refine(isValidPassword, "Пароль должен содержать буквы, цифры и хотя бы один спецсимвол"),
+    .refine(isValidPassword, "Пароль должен содержать заглавную и строчную буквы, цифру и спецсимвол"),
   name: z.string().max(80).optional(),
   turnstileToken: z.string().max(4000).optional(),
   // Honeypot: скрытое поле, которое заполняют только боты. Люди его не видят.
