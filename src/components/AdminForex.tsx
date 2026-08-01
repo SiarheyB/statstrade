@@ -1,8 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleCheck, CircleX, AlertTriangle, Wifi, WifiOff } from "lucide-react";
+import { CircleCheck, CircleX, AlertTriangle, Wifi, WifiOff, HelpCircle } from "lucide-react";
 import clsx from "clsx";
+
+function Hint({ text }: { text: string }) {
+  return (
+    <span title={text} className="inline-flex cursor-help">
+      <HelpCircle size={12} className="text-faint shrink-0" />
+    </span>
+  );
+}
 
 // Раздел «Форекс» админ-панели. Опрашивает /api/admin/forex раз в несколько
 // секунд: статус forex-collector (Finnhub WS + Twelve Data) и факт записи
@@ -123,8 +131,9 @@ export default function AdminForex() {
         <div className="card p-4 border-loss/40 flex items-start gap-3 text-sm">
           <AlertTriangle size={18} className="text-loss shrink-0 mt-0.5" />
           <div>
-            <div className="font-medium text-loss">
+            <div className="font-medium text-loss flex items-center gap-1.5">
               {staleSymbols.length} из {data?.symbols.length ?? 0} пар(ы) не обновляются на 5m {">"}15 мин
+              <Hint text="У этих пар нет свежей 5-минутной свечи дольше 15 минут (3× длины свечи — запас на паузы рынка/сети). Обычно значит: коллектор недавно перезапущен и ещё не наверстал данные, либо реально пропали тики от источника (WS отключён / тиков 0)." />
             </div>
             <div className="mt-1 text-muted">{staleSymbols.join(", ")}</div>
           </div>
@@ -137,25 +146,46 @@ export default function AdminForex() {
           {online ? <CircleCheck size={18} className="text-profit" /> : <CircleX size={18} className="text-loss" />}
           forex-collector:{" "}
           {online ? "online" : h?.ok ? "не готов" : "недоступен"}
+          <Hint text="Статус самого процесса forex-collector (отдельный сервис): online — процесс жив и здоров; не готов — процесс запущен, но ещё не прошёл проверку здоровья (например, идёт бэкафилл); недоступен — не отвечает на /health вовсе." />
         </span>
         {h?.ok && h.data && (
           <>
-            <span className="text-muted">uptime: {fmtUptime(h.data.uptimeMs)}</span>
-            <span className="text-muted">пар: {h.data.instruments}</span>
+            <span className="text-muted flex items-center gap-1">
+              uptime: {fmtUptime(h.data.uptimeMs)}
+              <Hint text="Сколько времени процесс forex-collector работает без перезапуска." />
+            </span>
+            <span className="text-muted flex items-center gap-1">
+              пар: {h.data.instruments}
+              <Hint text="Сколько валютных пар коллектор сейчас отслеживает (подписан на них)." />
+            </span>
             <span className="flex items-center gap-1.5 text-muted">
               {wsOk ? <Wifi size={14} className="text-profit" /> : <WifiOff size={14} className="text-loss" />}
               Finnhub WS: {wsOk ? "подключён" : "отключён"}
               {h.data.ws.reconnects > 0 && ` (реконнектов: ${h.data.ws.reconnects})`}
+              <Hint text="Finnhub WebSocket — основной источник тиков (сделок) в реальном времени. «Отключён» или частые реконнекты — тики не приходят живьём, свежие свечи не наполняются, но история дозагружается через Twelve Data." />
             </span>
-            <span className="text-muted">тиков: {h.data.ws.totalTrades.toLocaleString("ru-RU")}</span>
-            <span className="text-muted">
+            <span className="text-muted flex items-center gap-1">
+              тиков: {h.data.ws.totalTrades.toLocaleString("ru-RU")}
+              <Hint text="Сколько сделок (тиков) коллектор получил от Finnhub WS с момента запуска. Если WS подключён, но тиков 0 — с сервера реально ничего не приходит (нет активности по подписанным символам или проблема с подпиской)." />
+            </span>
+            <span className="text-muted flex items-center gap-1">
               последний тик: {agoLabel(h.data.ws.lastTradeAt, now).text}
+              <Hint text="Сколько времени прошло с последней полученной сделки от Finnhub WS." />
             </span>
-            <span className="text-muted">
+            <span className="text-muted flex items-center gap-1">
               Twelve Data: {h.data.twelveData.apiKeySet ? `${h.data.twelveData.totalCalls} запросов` : "ключ не задан"}
+              <Hint text="Twelve Data — резервный REST-источник: докачивает историю (бэкафилл) и подстраховывает, если WS не даёт свежих тиков. Число — сколько запросов к его API сделано с запуска." />
             </span>
-            <span className="text-muted">бэкафилл: {h.data.backfillDone ? "завершён" : "идёт…"}</span>
-            {h.data.errors > 0 && <span className="text-loss">ошибок записи: {h.data.errors}</span>}
+            <span className="text-muted flex items-center gap-1">
+              бэкафилл: {h.data.backfillDone ? "завершён" : "идёт…"}
+              <Hint text="Первоначальная догрузка исторических свечей через Twelve Data при старте коллектора. Пока «идёт…» — таблица свечей ниже может быть неполной." />
+            </span>
+            {h.data.errors > 0 && (
+              <span className="text-loss flex items-center gap-1">
+                ошибок записи: {h.data.errors}
+                <Hint text="Сколько раз коллектор не смог записать данные в БД с момента запуска." />
+              </span>
+            )}
           </>
         )}
         {h && !h.ok && <span className="text-loss text-xs">{h.error}</span>}
@@ -164,7 +194,10 @@ export default function AdminForex() {
       {/* Матрица пара × таймфрейм */}
       {data && (
         <div className="card p-4 overflow-x-auto">
-          <h3 className="text-sm font-medium mb-3">Свечи по парам (FxCandle)</h3>
+          <h3 className="text-sm font-medium mb-3 flex items-center gap-1.5">
+            Свечи по парам (FxCandle)
+            <Hint text="Для каждой пары и таймфрейма: слева — сколько всего свечей сохранено в БД, справа после «·» — сколько времени прошло с последней (самой свежей) свечи. Красным помечены ячейки, где последняя свеча отстаёт больше чем на 3× длины своей свечи (например, для 1h — больше 3 часов)." />
+          </h3>
           <table className="w-full text-xs tabular-nums">
             <thead>
               <tr className="text-faint text-left border-b border-border/50">
