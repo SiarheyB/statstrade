@@ -15,6 +15,8 @@ describe('drawAbsorptionMarkers', () => {
     moveTo: vi.fn(),
     lineTo: vi.fn(),
     stroke: vi.fn(),
+    fillRect: vi.fn(),
+    strokeRect: vi.fn(),
     fillText: vi.fn(),
     measureText: vi.fn().mockReturnValue({ width: 20 }),
     setLineDash: vi.fn(),
@@ -77,11 +79,14 @@ describe('drawAbsorptionMarkers', () => {
     drawAbsorptionMarkers(mockCtx, sx, sy, plotX, plotW, plotH, signals, candles);
     expect(mockCtx.save).toHaveBeenCalled();
     expect(mockCtx.clip).toHaveBeenCalled();
-    // Strong signal should draw bracket
+    // Price-level band + line
+    expect(mockCtx.fillRect).toHaveBeenCalled();
     expect(mockCtx.moveTo).toHaveBeenCalled();
     expect(mockCtx.stroke).toHaveBeenCalled();
-    // Should draw vertical dashed line
-    expect(mockCtx.setLineDash).toHaveBeenCalledWith([2, 4]);
+    // Label background pill + text, always drawn now (used to be skipped
+    // when the pattern was narrower than its own label).
+    expect(mockCtx.strokeRect).toHaveBeenCalled();
+    expect(mockCtx.fillText).toHaveBeenCalled();
     expect(mockCtx.restore).toHaveBeenCalled();
   });
 
