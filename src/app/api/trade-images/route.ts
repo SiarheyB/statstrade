@@ -6,6 +6,7 @@ import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { detectImageType, isAllowedImageType, extForMime, MAX_IMAGE_BYTES } from "@/lib/imageValidation";
 import { getValidGoogleDriveToken } from "@/lib/integrations/cloudStorage";
 import { uploadImage, makeFilePublic, directImageUrl, GoogleDriveError } from "@/lib/integrations/googleDrive";
+import { logError } from "@/lib/errorLog";
 
 // Загружает скриншот сделки в Google Drive пользователя (НЕ на наш сервер) и
 // сохраняет только публичную ссылку в TradeAnnotation. Файл никогда не
@@ -70,7 +71,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ imageUrl, imageProvider: "google_drive" });
   } catch (err) {
-    if (err instanceof GoogleDriveError) return badRequest("Не удалось загрузить файл в Google Drive");
+    if (err instanceof GoogleDriveError) {
+      // Реальную причину (ответ Google API — не enabled API, quota, invalid
+      // scope и т.п.) видно только в логе, клиенту — общее сообщение.
+      logError(`GoogleDrive upload failed: ${err.message}`, { path: "/api/trade-images" });
+      return badRequest("Не удалось загрузить файл в Google Drive");
+    }
     return serverError((err as Error).message);
   }
 }
