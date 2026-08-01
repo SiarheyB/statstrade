@@ -175,6 +175,12 @@ export async function deleteFile(accessToken: string, fileId: string): Promise<v
 
 // Прямая ссылка на просмотр картинки (рендерится в <img src>), а не
 // wrapper-страница вьюера Drive (webViewLink).
+//
+// НЕ используем `drive.google.com/uc?export=view&id=...` — этот endpoint
+// у Google нестабилен для хотлинка в <img>: часто отдаёт HTML-страницу
+// (интерстишл/предупреждение о вирус-скане) вместо самих байт картинки,
+// из-за чего <img> падает с ошибкой загрузки. `thumbnail` — официальный
+// путь встраивания превью файла, отдаёт непосредственно image/*.
 export function directImageUrl(fileId: string): string {
-  return `https://drive.google.com/uc?export=view&id=${encodeURIComponent(fileId)}`;
+  return `https://drive.google.com/thumbnail?id=${encodeURIComponent(fileId)}&sz=w2000`;
 }
