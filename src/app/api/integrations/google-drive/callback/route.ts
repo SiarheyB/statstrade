@@ -3,14 +3,19 @@ import { cookies } from "next/headers";
 import { prisma } from "@/lib/db";
 import { getAuthUser } from "@/lib/api";
 import { encrypt } from "@/lib/crypto";
-import { exchangeCodeForTokens, getUserEmail, isGoogleDriveConfigured } from "@/lib/integrations/googleDrive";
+import { exchangeCodeForTokens, getUserEmail, isGoogleDriveConfigured, getPublicOrigin } from "@/lib/integrations/googleDrive";
 import { logError } from "@/lib/errorLog";
 
 const STATE_COOKIE = "ts_gdrive_state";
 const SETTINGS_URL = "/dashboard/settings";
 
-function redirectWithStatus(req: Request, status: "connected" | "error"): NextResponse {
-  const url = new URL(SETTINGS_URL, req.url);
+// НЕ строим URL от req.url — за реверс-прокси (Tailscale Funnel/nginx) это
+// внутренний адрес контейнера (http://localhost:3000), а не публичный домен,
+// и пользователя после подключения Google Drive уводило на нерабочий
+// localhost. Origin берём из GOOGLE_DRIVE_REDIRECT_URI — он обязан быть
+// публичным, иначе сам OAuth-обмен кода тоже не прошёл бы.
+function redirectWithStatus(status: "connected" | "error"): NextResponse {
+  const url = new URL(SETTINGS_URL, getPublicOrigin());
   url.searchParams.set("gdrive", status);
   return NextResponse.redirect(url);
 }
@@ -21,7 +26,7 @@ export async function GET(req: Request) {
   const expectedState = store.get(STATE_COOKIE)?.value;
   store.delete(STATE_COOKIE);
 
-  if (!user || !isGoogleDriveConfigured()) return redirectWithStatus(req, "error");
+  if (!user || !isGoogleDriveConfigured()) return redirectWithStatus("error");
 
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
@@ -29,7 +34,7 @@ export async function GET(req: Request) {
 
   // Сверка state — обязательна, защита от CSRF/подмены редиректа.
   if (!code || !state || !expectedState || state !== expectedState) {
-    return redirectWithStatus(req, "error");
+    return redirectWithStatus("error");
   }
 
   try {
@@ -38,7 +43,7 @@ export async function GET(req: Request) {
       // Google не выдал refresh_token — обычно значит, что пользователь уже
       // давал согласие раньше без prompt=consent. Мы всегда шлём prompt=consent,
       // так что это должно быть редким случаем; просим переподключить.
-      return redirectWithStatus(req, "error");
+      return redirectWithStatus("error");
     }
 
     const email = await getUserEmail(tokens.access_token);
@@ -62,9 +67,9 @@ export async function GET(req: Request) {
       },
     });
 
-    return redirectWithStatus(req, "connected");
+    return redirectWithStatus("connected");
   } catch (err) {
     logError((err as Error).message);
-    return redirectWithStatus(req, "error");
+    return redirectWithStatus("error");
   }
 }

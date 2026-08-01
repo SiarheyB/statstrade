@@ -31,6 +31,16 @@ function redirectUri(): string {
   return requireEnv("GOOGLE_DRIVE_REDIRECT_URI");
 }
 
+// Публичный origin приложения, выведенный из GOOGLE_DRIVE_REDIRECT_URI (он
+// обязан указывать на реальный публичный домен, иначе Google откажет в
+// callback). Используем его вместо req.url при построении редиректа из
+// callback-роута — за реверс-прокси (Tailscale Funnel/nginx) req.url
+// отражает внутренний адрес контейнера (http://localhost:3000), а не
+// публичный домен, и редирект уводит пользователя на нерабочий localhost.
+export function getPublicOrigin(): string {
+  return new URL(redirectUri()).origin;
+}
+
 // Google Drive OAuth не настроен — фича должна быть скрыта в UI, а не падать.
 export function isGoogleDriveConfigured(): boolean {
   return !!(
