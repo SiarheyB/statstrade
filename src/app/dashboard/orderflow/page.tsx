@@ -55,7 +55,6 @@ import {
   drawTimeCrosshairTag,
   drawTooltipBox,
   drawDeltaCvdChart,
-  drawTwoLineSeries,
   drawHistoryStartBoundary,
   fmtPriceLabel as fmtP,
   fmtValLabel as fmtVal,
@@ -84,7 +83,6 @@ type Candle = { t: number; o: number; h: number; l: number; c: number };
 type DeltaSeries = { times: number[]; buy: number[]; sell: number[]; delta: number[]; cvd: number[] };
 type FootprintLevel = { price: number; buy: number; sell: number };
 type Footprint = { interval: number; maxVol: number; candles: { t: number; levels: FootprintLevel[] }[] };
-type BaSeries = { times: number[]; full: number[]; near: number[] };
 type BigTrade = { t: number; price: number; qty: number; side: string; exchange: string };
 type Resp = {
   symbol: string;
@@ -96,7 +94,6 @@ type Resp = {
   candles: Candle[];
   delta: DeltaSeries | null;
   footprint: Footprint | null;
-  ba: BaSeries | null;
   bigTrades: BigTrade[];
 };
 
@@ -214,7 +211,6 @@ export default function OrderflowPage() {
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
-  const baRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
 
   // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md). historyRef —
@@ -453,8 +449,12 @@ export default function OrderflowPage() {
     "1w": "7d",
   };
 
-  const loadVolumeProfile = useCallback(async () => {
-    setVpLoading(true);
+  // background=true — фоновый live-опрос (см. интервал ниже): не дёргаем
+  // индикатор loading/skeleton, иначе карточка "мигает"/"прыгает" каждые
+  // 15с даже когда данные почти не изменились. loading выставляем только
+  // на самую первую загрузку (или явный ручной вызов).
+  const loadVolumeProfile = useCallback(async (background = false) => {
+    if (!background) setVpLoading(true);
     setVpError(null);
     try {
       const vpPeriod = rangeToVpPeriod[range] ?? "24h";
@@ -475,8 +475,8 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
-  const loadDivergence = useCallback(async () => {
-    setDivLoading(true);
+  const loadDivergence = useCallback(async (background = false) => {
+    if (!background) setDivLoading(true);
     setDivError(null);
     try {
       const res = await fetch(`/api/orderflow/divergence?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
@@ -496,8 +496,8 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
-  const loadImbalance = useCallback(async () => {
-    setImbalanceLoading(true);
+  const loadImbalance = useCallback(async (background = false) => {
+    if (!background) setImbalanceLoading(true);
     setImbalanceError(null);
     try {
       const res = await fetch(`/api/orderflow/imbalance?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
@@ -520,8 +520,8 @@ export default function OrderflowPage() {
     }
   }, [symbol, exchange, range]);
 
-  const loadAbsorption = useCallback(async () => {
-    setAbsorptionLoading(true);
+  const loadAbsorption = useCallback(async (background = false) => {
+    if (!background) setAbsorptionLoading(true);
     setAbsorptionError(null);
     try {
       const res = await fetch(`/api/orderflow/absorption?symbol=${symbol}&exchange=${exchange}&period=${rangeToIndicatorPeriod[range] ?? range}`);
@@ -591,10 +591,10 @@ export default function OrderflowPage() {
   useEffect(() => {
     if (!live) return;
     const iv = setInterval(() => {
-      loadVolumeProfile();
-      loadDivergence();
-      loadImbalance();
-      loadAbsorption();
+      loadVolumeProfile(true);
+      loadDivergence(true);
+      loadImbalance(true);
+      loadAbsorption(true);
     }, 15000);
     return () => clearInterval(iv);
   }, [live, loadVolumeProfile, loadDivergence, loadImbalance, loadAbsorption]);
@@ -944,8 +944,8 @@ export default function OrderflowPage() {
     // то есть буквально помещается только в левую половину буфера при dpr=2,
     // а правая половина остаётся непрокрашенной (сквозь неё виден фон
     // страницы). Именно поэтому Δ/CVD визуально "обрывался" на середине
-    // ширины панели независимо от диапазона дат — drawBA ниже и основной
-    // draw() эту трансформацию уже применяют, здесь её просто не было.
+    // ширины панели независимо от диапазона дат — основной draw() эту
+    // трансформацию уже применяет, здесь её просто не было.
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     // Та же временная шкала (t0/t1), что у самих свечей (viewRef), БЕЗ
     // клэмпа к [data.from, data.to] — так подписи Δ/CVD всегда стоят под
@@ -970,90 +970,18 @@ export default function OrderflowPage() {
     });
   }, [data, t, viewRef]);
 
-  const drawBA = useCallback(() => {
-    const cv = baRef.current;
-    if (!cv || !data) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = cv.clientWidth;
-    const H = cv.clientHeight;
-    cv.width = Math.round(W * dpr);
-    cv.height = Math.round(H * dpr);
-    const ctx = cv.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0a0b10";
-    ctx.fillRect(0, 0, W, H);
-
-    // Та же шкала, что у свечей — без клэмпа к [data.from, data.to], см.
-    // комментарий в drawDelta выше (то же самое решение и по той же причине:
-    // клэмп чинил "сжатую полоску", но сдвигал B/A относительно свечей).
-    const t0 = viewRef.current?.t0 ?? data.from;
-    const t1 = viewRef.current?.t1 ?? data.to;
-    const viewingUnpaginatedHistory = t0 < data.from;
-    const ba = viewingUnpaginatedHistory ? null : data.ba;
-    const plotX = 8 + 76;
-    const plotW = W - plotX - 64;
-    if (!ba || ba.full.length === 0) {
-      ctx.fillStyle = "#6b7384";
-      ctx.font = "11px ui-sans-serif, system-ui";
-      ctx.fillText(viewingUnpaginatedHistory ? t("of.noBaHistory") : t("of.noBa"), plotX, H / 2);
-      return;
-    }
-    const xspan = t1 - t0 || 1;
-    const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
-    const sy = (v: number) => H - 4 - v * (H - 8);
-
-    ctx.fillStyle = "rgba(22,199,132,0.06)";
-    ctx.fillRect(plotX, sy(1), plotW, sy(0.5) - sy(1));
-    ctx.fillStyle = "rgba(234,57,67,0.06)";
-    ctx.fillRect(plotX, sy(0.5), plotW, sy(0) - sy(0.5));
-    ctx.strokeStyle = "rgba(255,255,255,0.12)";
-    ctx.beginPath();
-    ctx.moveTo(plotX, sy(0.5));
-    ctx.lineTo(plotX + plotW, sy(0.5));
-    ctx.stroke();
-
-    const line = (vals: number[], color: string) => {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < vals.length; i++) {
-        if (data.ba!.full[i] === 0.5 && data.ba!.near[i] === 0.5) continue;
-        const x = sx(ba.times[i]);
-        const y = sy(vals[i]);
-        if (!started) { ctx.moveTo(x, y); started = true; }
-        else ctx.lineTo(x, y);
-      }
-      ctx.stroke();
-      ctx.lineWidth = 1;
-    };
-    line(ba.full, "#5b8def");
-    line(ba.near, "#e6b800");
-
-    ctx.font = "12px ui-sans-serif, system-ui";
-    ctx.fillStyle = "#8a93a6";
-    ctx.fillText("B/A", plotX + 2, 13);
-    ctx.fillStyle = "#5b8def";
-    ctx.fillText("full", plotX + plotW + 5, 13);
-    ctx.fillStyle = "#e6b800";
-    ctx.fillText("±1%", plotX + plotW + 5, 26);
-  }, [data, t, viewRef]);
-
   useEffect(() => {
     draw();
     drawDelta();
-    drawBA();
-    const onResize = () => { draw(); drawDelta(); drawBA(); };
+    const onResize = () => { draw(); drawDelta(); };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [draw, drawDelta, drawBA]);
+  }, [draw, drawDelta]);
 
   const redrawAll = useCallback(() => {
     draw();
     drawDelta();
-    drawBA();
-  }, [draw, drawDelta, drawBA]);
+  }, [draw, drawDelta]);
   useEffect(() => { redrawAllRef.current = redrawAll; }, [redrawAll]);
 
   // При смене пары/биржи/таймфрейма старый viewRef (масштаб цены/времени)
@@ -1322,15 +1250,6 @@ export default function OrderflowPage() {
                 </span>
               </div>
               <canvas ref={deltaRef} className="w-full" style={{ height: 110 }} />
-            </div>
-            <div className="mt-1 border-t border-border/40 pt-1">
-              <div className="text-xs font-medium text-muted px-1 inline-flex items-center gap-1.5">
-                {t("of.imbalanceTitle")}
-                <span title={t("of.imbalanceHint")} className="inline-flex cursor-help">
-                  <HelpCircle size={12} className="text-faint shrink-0" />
-                </span>
-              </div>
-              <canvas ref={baRef} className="w-full" style={{ height: 80 }} />
             </div>
           </div>
           <div className="mt-1 text-[11px] text-faint">{t("of.zoomHint")}</div>

@@ -288,8 +288,11 @@ export default function ForexView() {
 
   // ─── Load volume profile ─────────────────────────────────────────────
 
-  const loadVolumeProfile = useCallback(async (alive: () => boolean) => {
-    setVpLoading(true);
+  // background=true — фоновый live-опрос (см. интервал ниже): не дёргаем
+  // индикатор loading/skeleton, иначе карточка "мигает"/"прыгает" каждые
+  // 15с даже когда данные почти не изменились.
+  const loadVolumeProfile = useCallback(async (alive: () => boolean, background = false) => {
+    if (!background) setVpLoading(true);
     setVpError(null);
     try {
       const r = await fetch(`/api/forex/volume-profile?symbol=${symbol}&period=${range}`);
@@ -331,8 +334,8 @@ export default function ForexView() {
 
   // ─── Load imbalance ──────────────────────────────────────────────────
 
-  const loadImbalance = useCallback(async (alive: () => boolean) => {
-    setImbLoading(true);
+  const loadImbalance = useCallback(async (alive: () => boolean, background = false) => {
+    if (!background) setImbLoading(true);
     setImbError(null);
     try {
       const r = await fetch(`/api/forex/imbalance?symbol=${symbol}&period=${range}`);
@@ -372,8 +375,8 @@ export default function ForexView() {
 
   // ─── Load divergence ─────────────────────────────────────────────────
 
-  const loadDivergence = useCallback(async (alive: () => boolean) => {
-    setDivLoading(true);
+  const loadDivergence = useCallback(async (alive: () => boolean, background = false) => {
+    if (!background) setDivLoading(true);
     setDivError(null);
     try {
       const r = await fetch(`/api/forex/divergence?symbol=${symbol}&period=${range}`);
@@ -406,9 +409,9 @@ export default function ForexView() {
   useEffect(() => {
     let alive = true;
     const iv = setInterval(() => {
-      loadVolumeProfile(() => alive);
-      loadImbalance(() => alive);
-      loadDivergence(() => alive);
+      loadVolumeProfile(() => alive, true);
+      loadImbalance(() => alive, true);
+      loadDivergence(() => alive, true);
     }, 15000);
     return () => {
       alive = false;

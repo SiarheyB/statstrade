@@ -4,7 +4,6 @@ import {
   computeOrderflow,
   computeDelta,
   computeFootprint,
-  computeBA,
   computeBigTrades,
   fetchOrderflowCandles,
   CANDLES_IN_WINDOW,
@@ -43,7 +42,6 @@ type Payload = {
   candles: Awaited<ReturnType<typeof fetchOrderflowCandles>>;
   delta: Awaited<ReturnType<typeof computeDelta>>;
   footprint: Awaited<ReturnType<typeof computeFootprint>>;
-  ba: Awaited<ReturnType<typeof computeBA>>;
   bigTrades: Awaited<ReturnType<typeof computeBigTrades>>;
 };
 
@@ -59,15 +57,14 @@ const inflight = new Map<string, Promise<Payload>>();
 async function buildPayload(symbol: string, exchange: string, range: string, tf: number): Promise<Payload> {
   const toMs = Date.now();
   const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
-  const [heatmap, candles, delta, footprint, ba, bigTrades] = await Promise.all([
+  const [heatmap, candles, delta, footprint, bigTrades] = await Promise.all([
     computeOrderflow(symbol, exchange, fromMs, toMs),
     fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),
     computeDelta(symbol, exchange, fromMs, toMs),
     computeFootprint(symbol, exchange, range, fromMs, toMs),
-    computeBA(symbol, exchange, fromMs, toMs),
     computeBigTrades(symbol, exchange, fromMs, toMs),
   ]);
-  return { symbol, exchange, range, from: fromMs, to: toMs, heatmap, candles, delta, footprint, ba, bigTrades };
+  return { symbol, exchange, range, from: fromMs, to: toMs, heatmap, candles, delta, footprint, bigTrades };
 }
 
 export async function GET(req: Request) {
