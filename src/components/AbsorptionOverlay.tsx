@@ -3,13 +3,18 @@
  * Не React-компонент, а функция, вызываемая внутри draw() в orderflow/page.tsx.
  *
  * Absorption: узкий диапазон + аномальный объём + дельта ~0.
- * Рисует горизонтальную скобку "[" под графиком над паттерном.
+ * Рисует горизонтальную зону на уровне цены паттерна (sig.price) — раньше
+ * скобка рисовалась в фиксированной точке у самого низа графика вне
+ * зависимости от цены, и на широком ценовом диапазоне превращалась в еле
+ * заметную точку без подписи (лейбл рисовался, только если паттерн шире
+ * своего текста, иначе пропускался целиком).
  */
 import type { AbsorptionSignal } from "@/lib/orderflow";
 
 // Цвет: фиолетовый/сиреневый — аккумуляция (не бычий/медвежий, а нейтральный).
-const COLOR = "rgba(147, 112, 219, 0.7)"; // medium purple
-const STRONG_COLOR = "rgba(180, 140, 255, 0.85)"; // яркий для strong
+const COLOR = "rgba(147, 112, 219, 0.9)"; // medium purple
+const STRONG_COLOR = "rgba(196, 160, 255, 1)"; // яркий для strong
+const MIN_MARKER_W = 14; // минимальная ширина зоны на экране (px) — иначе не видно совсем
 
 /**
  * Рисует маркеры absorption на canvas графика.
@@ -42,50 +47,57 @@ export function drawAbsorptionMarkers(
     const endT = candles[endIdx].t;
     const startT = candles[startIdx].t;
 
-    const x0 = sx(startT);
-    const x1 = sx(endT);
+    let x0 = sx(startT);
+    let x1 = sx(endT);
     // Пропускаем, если весь паттерн за пределами экрана.
     if (x1 < plotX || x0 > plotX + plotW) continue;
+    // Слишком узкий (короткий паттерн, сильный зум) — расширяем визуально,
+    // иначе это одна нечитаемая точка. Реальные start/end не меняются, это
+    // только отрисовка.
+    if (x1 - x0 < MIN_MARKER_W) {
+      const cx = (x0 + x1) / 2;
+      x0 = cx - MIN_MARKER_W / 2;
+      x1 = cx + MIN_MARKER_W / 2;
+    }
 
     const isStrong = sig.strength >= 4;
     const color = isStrong ? STRONG_COLOR : COLOR;
+    const y = sy(sig.price);
 
-    // Рисуем скобку "[" под графиком: вертикальная + горизонтальная линии.
-    const bracketY = plotH - 2;
-    const bracketH = 8;
+    // Горизонтальная зона на уровне цены паттерна — толще и ярче для strong.
+    const bandH = isStrong ? 5 : 3;
+    ctx.fillStyle = color;
+    ctx.globalAlpha = isStrong ? 0.35 : 0.22;
+    ctx.fillRect(x0, y - bandH / 2, x1 - x0, bandH);
+    ctx.globalAlpha = 1;
+
     ctx.strokeStyle = color;
     ctx.lineWidth = isStrong ? 2 : 1.5;
-
-    // Левая скобка: вертикальная + нижняя горизонтальная.
     ctx.beginPath();
-    ctx.moveTo(x0, bracketY);
-    ctx.lineTo(x0, bracketY + bracketH);
-    ctx.lineTo(Math.min(x1, plotX + plotW), bracketY + bracketH);
+    ctx.moveTo(x0, y);
+    ctx.lineTo(x1, y);
     ctx.stroke();
 
-    // Если помещается — подпись "Abs" или "S-Abs".
+    // Подпись "Abs"/"S-Abs" на фоновой плашке для читаемости — всегда
+    // рисуется (раньше пропускалась, если паттерн уже своего текста).
+    // Якорим у правого края зоны и клэмпим, чтобы не улетала за canvas.
     const label = isStrong ? "S-Abs" : "Abs";
-    ctx.font = "bold 8px ui-sans-serif, system-ui";
+    ctx.font = "bold 10px ui-sans-serif, system-ui";
     ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillStyle = color;
+    ctx.textBaseline = "middle";
     const labelW = ctx.measureText(label).width;
-    if (x1 - x0 >= labelW + 6) {
-      ctx.fillText(label, x0 + 2, bracketY + bracketH + 2);
-    }
+    const padX = 3;
+    let labelX = x1 + 4;
+    if (labelX + labelW + padX * 2 > plotX + plotW) labelX = x0 - labelW - padX * 2 - 4;
+    labelX = Math.max(plotX, labelX);
 
-    // Вертикальный пунктир на всю высоту, если паттерн не слишком широкий.
-    if (x1 - x0 < plotW * 0.5) {
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.15;
-      ctx.setLineDash([2, 4]);
-      ctx.beginPath();
-      ctx.moveTo((x0 + x1) / 2, 0);
-      ctx.lineTo((x0 + x1) / 2, bracketY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.globalAlpha = 1;
-    }
+    ctx.fillStyle = "rgba(10,11,16,0.85)";
+    ctx.fillRect(labelX - padX, y - 8, labelW + padX * 2, 16);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1;
+    ctx.strokeRect(labelX - padX, y - 8, labelW + padX * 2, 16);
+    ctx.fillStyle = color;
+    ctx.fillText(label, labelX, y);
   }
 
   ctx.restore();
