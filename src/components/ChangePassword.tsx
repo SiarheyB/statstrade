@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { KeyRound, Check } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import PasswordStrengthMeter from "@/components/PasswordStrengthMeter";
+import { isValidPassword, MIN_PASSWORD_LENGTH } from "@/lib/password";
 
 export default function ChangePassword() {
   const { t } = useI18n();
@@ -33,7 +35,7 @@ export default function ChangePassword() {
 
   async function save() {
     setError(null);
-    if (next.length < 8) {
+    if (!isValidPassword(next)) {
       setError(t("settings.password.tooShort"));
       return;
     }
@@ -113,13 +115,14 @@ export default function ChangePassword() {
             <input
               type="password"
               autoComplete="new-password"
-              minLength={8}
+              minLength={MIN_PASSWORD_LENGTH}
               maxLength={200}
               className="input-base w-full"
               value={next}
               onChange={(e) => setNext(e.target.value)}
               placeholder={t("auth.passwordHintReg")}
             />
+            <PasswordStrengthMeter password={next} />
           </div>
           <div>
             <label className="block text-xs text-muted mb-1">{t("settings.password.confirm")}</label>

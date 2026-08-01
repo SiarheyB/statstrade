@@ -3,10 +3,14 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { hashPassword, verifyPassword, createSessionCookie, invalidateTokenVersionCache } from "@/lib/auth";
+import { MIN_PASSWORD_LENGTH, isValidPassword } from "@/lib/password";
 
 const schema = z.object({
   currentPassword: z.string().max(200).optional(),
-  newPassword: z.string().min(8, "Пароль минимум 8 символов").max(200),
+  newPassword: z.string()
+    .min(MIN_PASSWORD_LENGTH, `Пароль минимум ${MIN_PASSWORD_LENGTH} символов`)
+    .max(200)
+    .refine(isValidPassword, "Пароль должен содержать буквы, цифры и хотя бы один спецсимвол"),
 });
 
 // Status: does this account have a password? (Google-only accounts don't, so the

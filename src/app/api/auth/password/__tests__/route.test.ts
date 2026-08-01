@@ -59,7 +59,7 @@ describe("PUT /api/auth/password", () => {
 
   it("returns 401 when not authenticated", async () => {
     asGuest();
-    const res = await PUT(new Request(base, { method: "PUT", body: JSON.stringify({ newPassword: "longenough123" }) }));
+    const res = await PUT(new Request(base, { method: "PUT", body: JSON.stringify({ newPassword: "longenough123!" }) }));
     expect(res.status).toBe(401);
   });
 
@@ -72,14 +72,14 @@ describe("PUT /api/auth/password", () => {
     const auth = await import("@/lib/auth");
     (auth.verifyPassword as ReturnType<typeof vi.fn>).mockResolvedValueOnce(false);
     const res = await PUT(
-      new Request(base, { method: "PUT", body: JSON.stringify({ currentPassword: "wrong", newPassword: "longenough123" }) }),
+      new Request(base, { method: "PUT", body: JSON.stringify({ currentPassword: "wrong", newPassword: "longenough123!" }) }),
     );
     expect(res.status).toBe(400);
   });
 
   it("changes the password on the happy path", async () => {
     const res = await PUT(
-      new Request(base, { method: "PUT", body: JSON.stringify({ currentPassword: "currentlong123", newPassword: "longenough123" }) }),
+      new Request(base, { method: "PUT", body: JSON.stringify({ currentPassword: "currentlong123", newPassword: "longenough123!" }) }),
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -90,7 +90,7 @@ describe("PUT /api/auth/password", () => {
   it("allows setting a first password without currentPassword", async () => {
     mockPrisma.user.findUnique.mockResolvedValue({ password: null });
     const res = await PUT(
-      new Request(base, { method: "PUT", body: JSON.stringify({ newPassword: "longenough123" }) }),
+      new Request(base, { method: "PUT", body: JSON.stringify({ newPassword: "longenough123!" }) }),
     );
     expect(res.status).toBe(200);
     expect(mockPrisma.user.update).toHaveBeenCalledOnce();

@@ -16,8 +16,11 @@ const schema = z.object({
 const DUMMY_HASH = "$2b$10$C6UzMDM.H6dfI/f/IKcEeO7ZLpFvbrAhIcNRLougKUX1nOTNW/PC2";
 
 export async function POST(req: Request) {
-  // Rate-limit против брутфорса: 10 попыток входа с одного IP за 10 минут.
-  const rl = rateLimit(`login:${clientIp(req)}`, 10, 10 * 60_000);
+  // Rate-limit против брутфорса: 5 попыток входа с одного IP за 15 минут
+  // (тот же лимит, что у /register — единый порог по всем auth-роутам).
+  // Раньше было 10/10мин — этого достаточно, чтобы за разумное время
+  // перебрать частые слабые пароли по одному IP.
+  const rl = rateLimit(`login:${clientIp(req)}`, 5, 15 * 60_000);
   if (!rl.ok) return tooManyRequests(rl.retryAfterSec);
 
   let body: unknown;
@@ -34,8 +37,9 @@ export async function POST(req: Request) {
   const { email, password } = parsed.data;
 
   // Второй ключ лимита — по email: распределённый брутфорс одного аккаунта с
-  // многих IP всё равно упирается в 20 попыток в час.
-  const rlEmail = rateLimit(`login:email:${email.toLowerCase()}`, 20, 60 * 60_000);
+  // многих IP всё равно упирается в 10 попыток в час (было 20 — слишком
+  // много для одного конкретного аккаунта).
+  const rlEmail = rateLimit(`login:email:${email.toLowerCase()}`, 10, 60 * 60_000);
   if (!rlEmail.ok) return tooManyRequests(rlEmail.retryAfterSec);
 
   try {

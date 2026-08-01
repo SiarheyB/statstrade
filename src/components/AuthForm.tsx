@@ -6,7 +6,9 @@ import Link from "next/link";
 import { BarChart3 } from "lucide-react";
 import GoogleSignInButton from "@/components/GoogleSignInButton";
 import TurnstileWidget from "@/components/TurnstileWidget";
+import PasswordStrengthMeter from "@/components/PasswordStrengthMeter";
 import { useI18n } from "@/lib/i18n/provider";
+import { MIN_PASSWORD_LENGTH, isValidPassword } from "@/lib/password";
 
 export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   const router = useRouter();
@@ -218,13 +220,14 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               <input
                 type="password"
                 required
-                minLength={isRegister ? 8 : undefined}
+                minLength={isRegister ? MIN_PASSWORD_LENGTH : undefined}
                 maxLength={200}
                 className="input-base w-full"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder={isRegister ? t("auth.passwordHintReg") : "••••••••"}
               />
+              {isRegister && <PasswordStrengthMeter password={password} />}
             </div>
 
             {isRegister && <TurnstileWidget onToken={setTurnstileToken} />}
@@ -237,7 +240,11 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
 
             <button
               type="submit"
-              disabled={loading || (isRegister && turnstileOn && !turnstileToken)}
+              disabled={
+                loading ||
+                (isRegister && turnstileOn && !turnstileToken) ||
+                (isRegister && !isValidPassword(password))
+              }
               className="w-full py-2.5 rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition disabled:opacity-50"
             >
               {loading

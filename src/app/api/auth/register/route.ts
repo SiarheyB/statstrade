@@ -5,10 +5,14 @@ import { hashPassword, createSessionCookie } from "@/lib/auth";
 import { badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { verifyTurnstile } from "@/lib/turnstile";
+import { MIN_PASSWORD_LENGTH, isValidPassword } from "@/lib/password";
 
 const schema = z.object({
   email: z.string().email("Некорректный email").max(254),
-  password: z.string().min(8, "Пароль минимум 8 символов").max(200),
+  password: z.string()
+    .min(MIN_PASSWORD_LENGTH, `Пароль минимум ${MIN_PASSWORD_LENGTH} символов`)
+    .max(200)
+    .refine(isValidPassword, "Пароль должен содержать буквы, цифры и хотя бы один спецсимвол"),
   name: z.string().max(80).optional(),
   turnstileToken: z.string().max(4000).optional(),
   // Honeypot: скрытое поле, которое заполняют только боты. Люди его не видят.

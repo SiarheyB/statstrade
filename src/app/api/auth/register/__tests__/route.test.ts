@@ -66,7 +66,7 @@ describe("POST /api/auth/register", () => {
         method: "POST",
         body: JSON.stringify({
           email: "new@example.com",
-          password: "longenough123",
+          password: "longenough123!",
           website: "spam",
         }),
       }),
@@ -79,7 +79,7 @@ describe("POST /api/auth/register", () => {
     const res = await POST(
       new Request(base, {
         method: "POST",
-        body: JSON.stringify({ email: "taken@example.com", password: "longenough123" }),
+        body: JSON.stringify({ email: "taken@example.com", password: "longenough123!" }),
       }),
     );
     expect(res.status).toBe(400);
@@ -89,7 +89,7 @@ describe("POST /api/auth/register", () => {
     const res = await POST(
       new Request(base, {
         method: "POST",
-        body: JSON.stringify({ email: "new@example.com", password: "longenough123", name: "Neo" }),
+        body: JSON.stringify({ email: "new@example.com", password: "longenough123!", name: "Neo" }),
       }),
     );
     expect(res.status).toBe(200);
@@ -105,7 +105,7 @@ describe("POST /api/auth/register", () => {
     const res = await POST(
       new Request(base, {
         method: "POST",
-        body: JSON.stringify({ email: "new@example.com", password: "longenough123" }),
+        body: JSON.stringify({ email: "new@example.com", password: "longenough123!" }),
       }),
     );
     expect(res.status).toBe(429);
