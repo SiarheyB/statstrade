@@ -880,17 +880,21 @@ export async function computeDivergence(
   const candleHigh = new Array(candleCount).fill(0);
   const candleLow = new Array(candleCount).fill(Infinity);
 
+  // Оба массива (candles, deltaSeries.times) хронологически отсортированы и
+  // окна свечей не перекрываются — вместо полного прохода по deltaSeries на
+  // каждую свечу (O(candleCount × deltaSeries.length)) двигаем один указатель
+  // только вперёд (two-pointer, O(candleCount + deltaSeries.length)).
+  let deltaPtr = 0;
   for (let i = 0; i < candleCount; i++) {
     const ci = startIdx + i;
     const c = candles[ci];
     const cStart = c.t;
     const cEnd = c.t + stepMs;
 
-    // Суммируем дельту по всем корзинам, попадающим в свечу.
-    for (let j = 0; j < deltaSeries.times.length; j++) {
-      if (deltaSeries.times[j] >= cStart && deltaSeries.times[j] < cEnd) {
-        candleDelta[i] += deltaSeries.delta[j];
-      }
+    while (deltaPtr < deltaSeries.times.length && deltaSeries.times[deltaPtr] < cStart) deltaPtr++;
+    while (deltaPtr < deltaSeries.times.length && deltaSeries.times[deltaPtr] < cEnd) {
+      candleDelta[i] += deltaSeries.delta[deltaPtr];
+      deltaPtr++;
     }
 
     candleHigh[i] = c.h;
