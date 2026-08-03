@@ -223,10 +223,20 @@ export function findDrawingAt(
         }
         break;
       }
-      case "horizontal_line":
-      case "horizontal_ray": {
+      case "horizontal_line": {
         const y = screenPts[0].y;
         if (Math.abs(my - y) < HIT_RADIUS && mx >= plotX && mx <= plotX + plotW) {
+          return { id: d.id, pointIdx: 0 };
+        }
+        break;
+      }
+      case "horizontal_ray": {
+        // Луч рисуется только от точки вправо (см. drawDrawings выше) — хит-тест
+        // должен начинаться от screenPts[0].x, а не от plotX, иначе клик левее
+        // точки (где линии физически нет на экране) всё равно выделяет рисунок.
+        const y = screenPts[0].y;
+        const rx = screenPts[0].x;
+        if (Math.abs(my - y) < HIT_RADIUS && mx >= rx && mx <= plotX + plotW) {
           return { id: d.id, pointIdx: 0 };
         }
         break;

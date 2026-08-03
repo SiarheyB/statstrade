@@ -30,6 +30,17 @@ vi.mock("@/lib/db", () => ({
 
 import { computeDivergence } from "@/lib/orderflow";
 
+// fetchOrderflowCandles (вызывается из computeDivergence) даже при
+// достаточной глубине БД дополнительно бьёт в реальный Binance API за
+// последними 2 свечами, чтобы обновить формирующуюся свечу "вживую" (см.
+// orderflow.ts). Без мока этот сетевой запрос в изолированной среде сборки
+// висит до таймаута теста — стабильно мокаем fetch пустым/неуспешным
+// ответом, чтобы тест не зависел от реальной сети.
+vi.stubGlobal(
+  "fetch",
+  vi.fn().mockResolvedValue({ ok: false, json: async () => [] }),
+);
+
 // CANDLES_IN_WINDOW для "1w" = 200 — минимальное количество, которое
 // fetchOrderflowCandles требует, чтобы не падать на Binance fallback.
 // Используем TOTAL_CANDLES = 240, чтобы каждый candleStepMs совпадал
