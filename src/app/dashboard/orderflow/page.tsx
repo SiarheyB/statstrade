@@ -218,6 +218,14 @@ export default function OrderflowPage() {
     candles: Candle[]; priceMin: number; priceMax: number;
     fYMin: number; fYMax: number; candleStep: number;
   } | null>(null);
+  // Кэш агрегации footprint по рядам (buy/sell на бакет цены) — раньше
+  // пересчитывался Map'ом на каждый draw(), включая чистый hover без смены
+  // вида/данных. Инвалидируется при смене fp, масштаба строк или видимого
+  // диапазона цены/высоты.
+  const footprintRowsCacheRef = useRef<{
+    fp: unknown; rowPx: number; yMin: number; yMax: number; plotH: number;
+    byCandle: Map<number, { rows: Map<number, { buy: number; sell: number }>; cMax: number }>;
+  } | null>(null);
 
   // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md). historyRef —
   // старые свечи, догруженные через /api/orderflow/history, всегда старше
@@ -782,22 +790,35 @@ export default function OrderflowPage() {
         ctx.textAlign = "left";
         ctx.textBaseline = "middle";
       }
+      const fpCache = footprintRowsCacheRef.current;
+      let byCandle: Map<number, { rows: Map<number, { buy: number; sell: number }>; cMax: number }>;
+      if (fpCache && fpCache.fp === fp && fpCache.rowPx === rowPx && fpCache.yMin === yMin && fpCache.yMax === yMax && fpCache.plotH === plotH) {
+        byCandle = fpCache.byCandle;
+      } else {
+        byCandle = new Map();
+        for (const fc2 of fp.candles) {
+          const rows = new Map<number, { buy: number; sell: number }>();
+          for (const lvl of fc2.levels) {
+            if (lvl.buy + lvl.sell <= 0) continue;
+            const y = sy(lvl.price);
+            if (y < -rowPx || y > plotH + rowPx) continue;
+            const ri = Math.floor(y / rowPx);
+            const r = rows.get(ri) ?? { buy: 0, sell: 0 };
+            r.buy += lvl.buy; r.sell += lvl.sell;
+            rows.set(ri, r);
+          }
+          let cMax = 0;
+          for (const r of rows.values()) { const v = r.buy + r.sell; if (v > cMax) cMax = v; }
+          byCandle.set(fc2.t, { rows, cMax });
+        }
+        footprintRowsCacheRef.current = { fp, rowPx, yMin, yMax, plotH, byCandle };
+      }
       for (const fc of fp.candles) {
         const x0 = sx(fc.t + fp.interval / 2);
         if (x0 < plotX - colW || x0 > plotX + plotW + colW) continue;
-        const rows = new Map<number, { buy: number; sell: number }>();
-        for (const lvl of fc.levels) {
-          if (lvl.buy + lvl.sell <= 0) continue;
-          const y = sy(lvl.price);
-          if (y < -rowPx || y > plotH + rowPx) continue;
-          const ri = Math.floor(y / rowPx);
-          const r = rows.get(ri) ?? { buy: 0, sell: 0 };
-          r.buy += lvl.buy; r.sell += lvl.sell;
-          rows.set(ri, r);
-        }
-        let cMax = 0;
-        for (const r of rows.values()) { const v = r.buy + r.sell; if (v > cMax) cMax = v; }
-        if (cMax <= 0) continue;
+        const agg = byCandle.get(fc.t);
+        if (!agg || agg.cMax <= 0) continue;
+        const { rows, cMax } = agg;
         for (const [ri, r] of rows) {
           const vol = r.buy + r.sell;
           const len = Math.max(1, (vol / cMax) * maxBarW);
