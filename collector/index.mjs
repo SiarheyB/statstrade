@@ -124,11 +124,21 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
   if (lastTs > 0 && now - lastTs < 30_000 && startMs === lastTs) return;
 
   // Binance limit = 1500 свечей. Если окно шире — тянем последовательно.
+  //
+  // endTime всегда = now (а не fromMs + intervalMs*1500!) — иначе при глубоком
+  // CANDLE_RETENTION_DAYS и узком таймфрейме (5m/15m/...) первый запрос
+  // попадает в окно, целиком лежащее РАНЬШЕ даты листинга символа на бирже
+  // (например, retentionStart ~2012 год для BTCUSDT, который торгуется с
+  // 2017/2019) — Binance корректно отвечает пустым массивом just для этого
+  // узкого отрезка, а не "истории вообще нет". limit=1500 и так ограничивает
+  // объём ответа, поэтому сужать endTime не нужно: с endTime=now пустой ответ
+  // означает "данных дальше действительно нет", а не "не туда заглянули".
+  // Для широких интервалов (1w — окно ~28 лет) это ничего не меняло, там
+  // toMs и так почти всегда совпадал с now.
   let fromMs = startMs;
   let total = 0;
   while (fromMs < now) {
-    const toMs = Math.min(fromMs + intervalMs * 1500, now);
-    const url = `${urlBase}?symbol=${symbol}&interval=${interval}&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
+    const url = `${urlBase}?symbol=${symbol}&interval=${interval}&startTime=${fromMs}&endTime=${now}&limit=1500`;
     let res;
     try {
       res = await fetch(url);
