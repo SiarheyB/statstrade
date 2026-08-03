@@ -465,13 +465,26 @@ async function flushRollup(now) {
   }
 }
 
-// Асинхронный «beat» для flush rollup — не блокирует запись снапшотов
+// Асинхронный «beat» для flush rollup — не блокирует запись снапшотов.
+// flushRollup сбрасывает бакет, только когда его минута уже завершилась —
+// при интервале 1000мс это означало 60 холостых вызовов в минуту (лишняя,
+// хоть и дешёвая, постоянная нагрузка на слабом сервере). Вместо этого
+// планируем один вызов сразу после границы минуты + небольшой запас, чтобы
+// последние снапшоты той минуты успели попасть в accumulateRollup.
 function startRollupFlushBeat() {
-  // Каждые 1000 мс сбрасываем завершённые минутные бакеты
-  // На 4 ядрах один beat-поток достаточен; избегаем лишних воркеров
-  return setInterval(() => {
+  const FLUSH_INTERVAL_MS = 60_000;
+  const FLUSH_OFFSET_MS = 1_000;
+  const run = () => {
     flushRollup(new Date()).catch(err => console.error(`[rollup-beat] ошибка: ${err.message}`));
-  }, 1000);
+  };
+  const state = { timer: null };
+  const now = Date.now();
+  const firstRunAt = Math.ceil((now + 1) / FLUSH_INTERVAL_MS) * FLUSH_INTERVAL_MS + FLUSH_OFFSET_MS;
+  state.timer = setTimeout(() => {
+    run();
+    state.timer = setInterval(run, FLUSH_INTERVAL_MS);
+  }, firstRunAt - now);
+  return state;
 }
 
 async function writeSnapshot() {
@@ -863,7 +876,7 @@ setTimeout(backfillCandles, 30_000);
 
 async function shutdown() {
   clearInterval(writeTimer);
-  clearInterval(flushTimer);
+  clearInterval(flushTimer.timer);
   clearInterval(pruneTimer);
   clearInterval(configTimer);
   clearInterval(candleTimer);
