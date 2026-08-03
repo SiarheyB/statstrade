@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { memo, useCallback, useMemo } from "react";
 import { HelpCircle } from "lucide-react";
 import {
   BarChart,
@@ -90,7 +90,7 @@ function VPTooltip({ active, payload, label }: { active?: boolean; payload?: { p
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-export default function VolumeProfile({
+function VolumeProfileComponent({
   data,
   loading,
   error,
@@ -154,6 +154,8 @@ export default function VolumeProfile({
 
   return <VolumeProfileChart data={data} />;
 }
+
+export default memo(VolumeProfileComponent);
 
 // ─── Chart (separate component to keep re-renders contained) ──────────────
 

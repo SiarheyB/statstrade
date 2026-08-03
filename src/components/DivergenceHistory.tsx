@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { memo, useState, useMemo } from "react";
 import { HelpCircle, ArrowUp, ArrowDown } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts } from "@/lib/timezone";
@@ -60,7 +60,7 @@ const TYPE_LABEL_KEY: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-export default function DivergenceHistory({
+function DivergenceHistory({
   signals,
   loading,
   error,
@@ -256,3 +256,5 @@ export default function DivergenceHistory({
     </div>
   );
 }
+
+export default memo(DivergenceHistory);

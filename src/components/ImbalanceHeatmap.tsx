@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, CartesianGrid, Cell, ReferenceLine } from "recharts";
 import { useI18n } from "@/lib/i18n/provider";
 import { HelpCircle } from "lucide-react";
@@ -78,7 +78,7 @@ function ImbalanceTooltip({
 
 // ─── Component ────────────────────────────────────────────────────────────
 
-export default function ImbalanceHeatmap({
+function ImbalanceHeatmap({
   data,
   loading,
   error,
@@ -190,3 +190,5 @@ export default function ImbalanceHeatmap({
     </div>
   );
 }
+
+export default memo(ImbalanceHeatmap);

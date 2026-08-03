@@ -7,7 +7,7 @@
  */
 "use client";
 
-import { useMemo, useState } from "react";
+import { memo, useMemo, useState } from "react";
 import { HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts } from "@/lib/timezone";
@@ -28,7 +28,7 @@ function fmtTime(ms: number, tz: string): string {
   return `${p(h)}:${p(mi)}`;
 }
 
-export default function AbsorptionPanel({ signals, loading, error }: Props) {
+function AbsorptionPanel({ signals, loading, error }: Props) {
   const { t, timezone } = useI18n();
   const [sortKey, setSortKey] = useState<SortKey>("strength");
   const [sortAsc, setSortAsc] = useState(false);
@@ -173,3 +173,5 @@ export default function AbsorptionPanel({ signals, loading, error }: Props) {
     </div>
   );
 }
+
+export default memo(AbsorptionPanel);
