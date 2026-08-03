@@ -75,7 +75,16 @@ async function buildBase(
   const includeImported = market === "all" || market === "forex";
 
   const tradeRows = includeCrypto
-    ? await prisma.trade.findMany({ where, orderBy: { exitTime: "asc" } })
+    ? await prisma.trade.findMany({
+        where,
+        orderBy: { exitTime: "asc" },
+        select: {
+          id: true, symbol: true, base: true, quote: true, market: true, exchange: true,
+          accountId: true, side: true, entryTime: true, exitTime: true, qty: true,
+          entryPrice: true, exitPrice: true, grossPnl: true, fees: true, netPnl: true,
+          returnPct: true, fillCount: true, result: true,
+        },
+      })
     : [];
   const cryptoTrades: RoundTripTrade[] = tradeRows.map((r) => ({
     id: r.id,
@@ -119,7 +128,17 @@ async function buildBase(
     importedWhere.exitTime = exitTime;
   }
   const importedRows = includeImported
-    ? await prisma.importedTrade.findMany({ where: importedWhere, orderBy: { exitTime: "asc" } })
+    ? await prisma.importedTrade.findMany({
+        where: importedWhere,
+        orderBy: { exitTime: "asc" },
+        select: {
+          accountId: true, externalId: true, symbol: true, base: true, quote: true,
+          market: true, source: true, side: true, entryTime: true, exitTime: true,
+          qty: true, entryPrice: true, exitPrice: true, grossProfit: true, swap: true,
+          netPnl: true, commission: true, lots: true, pips: true, currency: true,
+          stopLoss: true,
+        },
+      })
     : [];
   const importedTrades: RoundTripTrade[] = importedRows.map((it) => ({
     id: `${it.accountId}:${it.externalId}`,
