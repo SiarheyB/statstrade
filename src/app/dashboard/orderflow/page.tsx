@@ -220,6 +220,13 @@ export default function OrderflowPage() {
   const historyRef = useRef<Candle[]>([]);
   const hasMoreHistoryRef = useRef(true);
   const loadingHistoryRef = useRef(false);
+  // Курсор "до какой точки уже точно всё запрошено" — отдельно от historyRef,
+  // потому что historyRef обрезается по MAX_HISTORY_CANDLES (память клиента),
+  // а курсор для следующего "before" должен идти строго по тому, что реально
+  // уже приходило с сервера, иначе после обрезки следующий запрос повторно
+  // просит только что обрезанный диапазон — и подгрузка зацикливается,
+  // никогда не продвигаясь дальше вглубь истории.
+  const earliestFetchedRef = useRef<number | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
@@ -296,29 +303,36 @@ export default function OrderflowPage() {
 
   const loadMoreHistory = useCallback(async () => {
     if (loadingHistoryRef.current || !hasMoreHistoryRef.current || !data) return;
-    const before = historyRef.current.length ? historyRef.current[0].t : data.from;
+    const before = earliestFetchedRef.current ?? (historyRef.current.length ? historyRef.current[0].t : data.from);
     loadingHistoryRef.current = true;
     setLoadingHistory(true);
     try {
       const res = await fetch(
         `/api/orderflow/history?symbol=${symbol}&exchange=${exchange}&range=${range}&before=${before}&limit=500`,
       );
-      if (!res.ok) { hasMoreHistoryRef.current = false; return; }
+      if (!res.ok) {
+        hasMoreHistoryRef.current = false;
+        setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
+        return;
+      }
       const d = await res.json() as { candles: Candle[]; hasMore: boolean };
-      if (!d.candles?.length) { hasMoreHistoryRef.current = false; return; }
+      if (!d.candles?.length) {
+        hasMoreHistoryRef.current = false;
+        setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
+        return;
+      }
+      // Курсор — по факту ответа сервера, не зависит от обрезки буфера ниже.
+      earliestFetchedRef.current = d.candles[0].t;
+      hasMoreHistoryRef.current = d.hasMore;
       let merged = [...d.candles, ...historyRef.current];
       if (merged.length > MAX_HISTORY_CANDLES) {
         merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
-        // Обрезали самый старый конец — если пользователь ещё раньше
-        // доскроллит, историю ниже нужно будет запросить заново.
-        hasMoreHistoryRef.current = true;
-      } else {
-        hasMoreHistoryRef.current = d.hasMore;
       }
       historyRef.current = merged;
       setHistoryVersion((v) => v + 1);
     } catch {
-      // тихая ошибка — следующий триггер (pan/zoom) попробует снова
+      // тихая сетевая ошибка — следующий триггер (pan/zoom) попробует снова,
+      // hasMoreHistoryRef не трогаем (не факт, что история кончилась)
     } finally {
       loadingHistoryRef.current = false;
       setLoadingHistory(false);
@@ -999,6 +1013,7 @@ export default function OrderflowPage() {
     viewRef.current = null;
     historyRef.current = [];
     hasMoreHistoryRef.current = true;
+    earliestFetchedRef.current = null;
     setHistoryVersion((v) => v + 1);
     redrawAllRef.current();
   }, [data, viewRef, redrawAllRef]);

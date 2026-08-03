@@ -121,6 +121,18 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     o.onNeedHistory();
   }, []);
 
+  // Не даёт панорамировать/зумить левее реально загруженных данных
+  // (boundsRef.t0) — иначе пользователь утаскивает окно в пустоту раньше
+  // того, что вообще есть в БД/подгружено на клиенте, и видит чёрный холст
+  // с "Загрузка истории", хотя грузить уже нечего (или ещё не подгрузилось).
+  // Сдвигает t0/t1 на одну и ту же дельту, чтобы не менять масштаб (span).
+  const clampToBounds = useCallback((view: ChartView): ChartView => {
+    const b = boundsRef.current;
+    if (!b || view.t0 >= b.t0) return view;
+    const shift = b.t0 - view.t0;
+    return { ...view, t0: view.t0 + shift, t1: view.t1 + shift };
+  }, []);
+
   const onMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const o = optsRef.current;
     const rect = e.currentTarget.getBoundingClientRect();
@@ -236,17 +248,17 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         const minT = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
         const maxT = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
         const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
-        viewRef.current = { ...drag.view, t0: cx - span / 2, t1: cx + span / 2 };
+        viewRef.current = clampToBounds({ ...drag.view, t0: cx - span / 2, t1: cx + span / 2 });
         maybeTriggerHistory(viewRef.current);
       } else {
         const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
         const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
-        viewRef.current = {
+        viewRef.current = clampToBounds({
           t0: drag.view.t0 - dt,
           t1: drag.view.t1 - dt,
           y0: drag.view.y0 + dp,
           y1: drag.view.y1 + dp,
-        };
+        });
         maybeTriggerHistory(viewRef.current);
       }
       o.redraw();
@@ -434,6 +446,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);
         next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
       }
+      next = clampToBounds(next);
       viewRef.current = next;
       maybeTriggerHistory(next);
       optsRef.current.redraw();
