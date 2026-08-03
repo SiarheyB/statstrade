@@ -655,27 +655,23 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
-    // Свечи (ObCandle) — не партиционированы, чистим DELETE-ом по CANDLE_RETENTION_DAYS
-    let candlesDeleted = 0;
-    {
-      const r = await pool.query(
-        `DELETE FROM "ObCandle" WHERE "t" < NOW() - ($1 || ' days')::interval`,
-        [String(cfg.candleRetentionDays)],
-      );
-      candlesDeleted = r.rowCount ?? 0;
-    }
+    // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
+    // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
+    // ленивой подгрузки графика). Раньше здесь был DELETE по
+    // CANDLE_RETENTION_DAYS, что противоречило описанию ручной очистки в
+    // /api/admin/collector/purge-candles ("чистятся только вручную из
+    // админки") и рвало историю графика без ведома пользователя. Удаление —
+    // только через админку "Очистка свечей (OHLCV)".
     // Обновляем epoch только если что-то реально удалили — иначе отсчёт
     // сбрасывался бы каждый час, и пользователь всегда видел бы полный retention.
     if (snapDropped) await updateEpoch("snapshot", cfg.retentionDays);
     if (tradeDropped || rollupDeleted) {
       await updateEpoch("trade", cfg.tradeRetentionDays);
     }
-    if (candlesDeleted) await updateEpoch("candle", cfg.candleRetentionDays);
-    if (total || rollupDeleted || candlesDeleted) {
+    if (total || rollupDeleted) {
       console.log(
         `[prune] сброшено ${total} партиций (снапшоты: ${cfg.retentionDays}д, сделки: ${cfg.tradeRetentionDays}д); ` +
-        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д); ` +
-        `удалено ${candlesDeleted} свечей (retention: ${cfg.candleRetentionDays}д)`,
+        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д)`,
       );
     }
   } catch (err) {

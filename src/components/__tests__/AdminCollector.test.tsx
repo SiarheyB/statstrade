@@ -7,7 +7,6 @@ vi.mock('@/lib/i18n/provider', () => ({
     t: (key: string, vars?: Record<string, string | number>) => {
       if (key === 'admin.collector.retention') return `snapshots ${vars?.days} d`;
       if (key === 'admin.collector.tradeRetention') return `trades ${vars?.days} d`;
-      if (key === 'admin.collector.candleRetention') return `candles ${vars?.days} d`;
       if (key === 'admin.collector.cleanupLabel') return `cleanup in ${vars?.time}`;
       if (key === 'admin.collector.cleanupNone') return 'no data';
       if (key === 'admin.collector.cleanupSoon') return 'cleanup due';
@@ -36,7 +35,6 @@ function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
         depthPct: 0.02,
         retentionDays: 7,
         tradeRetentionDays: 30,
-        candleRetentionDays: 365,
         feeds: [],
         ...overrides,
       },
@@ -44,7 +42,6 @@ function makePayload(overrides: Partial<Record<string, unknown>> = {}) {
     retentionAges: {
       snapshot: { oldestT: '2026-07-12T12:00:00Z', cleanupInMs: 86_400_000 },   // 1d left
       trade: { oldestT: '2026-06-19T12:00:00Z', cleanupInMs: 864_000_000 },     // 10d left
-      candle: { oldestT: '2025-07-24T12:00:00Z', cleanupInMs: 8_640_000_000 },  // 100d left
     },
   };
 }
@@ -96,7 +93,7 @@ describe('AdminCollector', () => {
         tableStats: [],
         preview: null,
         collector: { ok: false, error: 'collector offline' },
-        retentionAges: { snapshot: null, trade: null, candle: null },
+        retentionAges: { snapshot: null, trade: null },
       }),
     });
 

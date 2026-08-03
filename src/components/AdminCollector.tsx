@@ -33,7 +33,6 @@ type RetentionAge = { oldestT: string; cleanupInMs: number } | null;
 type RetentionAges = {
   snapshot: RetentionAge;
   trade: RetentionAge;
-  candle: RetentionAge;
 };
 type CollectorFeed = {
   feed: string;
@@ -224,11 +223,6 @@ export default function AdminCollector() {
             <RetentionSpan
               label={t("admin.collector.tradeRetention", { days: col.data.tradeRetentionDays })}
               age={data?.retentionAges?.trade ?? null}
-              t={t}
-            />
-            <RetentionSpan
-              label={t("admin.collector.candleRetention", { days: col.data.candleRetentionDays ?? 365 })}
-              age={data?.retentionAges?.candle ?? null}
               t={t}
             />
           </>

@@ -35,7 +35,6 @@ type PreviewRow = { price: number; bidVol: number; askVol: number };
 type RetentionAges = {
   snapshot: { oldestT: string | null; cleanupInMs: number | null } | null;
   trade: { oldestT: string | null; cleanupInMs: number | null } | null;
-  candle: { oldestT: string | null; cleanupInMs: number | null } | null;
 };
 
 async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; error?: string }> {
@@ -242,29 +241,28 @@ async function getHeavyStats(): Promise<HeavyStats> {
 
     // Отсчёт до очистки — через RetentionEpoch (эпохи, которые ведёт коллектор
     // в таблице RetentionEpoch). Если коллектор ещё не обновлён и не отдаёт
-    // epochs — fallback на uptime коллектора (стартовое время). Это точнее
-    // MIN(t) из ObCandle, т.к. бэкфилл свечей заполняет до границы ретеншна.
+    // epochs — fallback на uptime коллектора (стартовое время). Свечи (ObCandle)
+    // сюда не входят — они больше не чистятся автоматически, только вручную
+    // из /api/admin/collector/purge-candles.
     const colData = (collector.ok ? collector.data : undefined) as
-      | { retentionDays: number; tradeRetentionDays: number; candleRetentionDays: number; uptimeMs?: number; epochs?: Record<string, { epochStart: string; retentionDays: number }> }
+      | { retentionDays: number; tradeRetentionDays: number; uptimeMs?: number; epochs?: Record<string, { epochStart: string; retentionDays: number }> }
       | undefined;
-    let retentionAges: RetentionAges = { snapshot: null, trade: null, candle: null };
+    let retentionAges: RetentionAges = { snapshot: null, trade: null };
     if (colData) {
       const epochs = colData.epochs ?? {};
       const now = new Date();
-      const hasEpochs = epochs.snapshot || epochs.trade || epochs.candle;
+      const hasEpochs = epochs.snapshot || epochs.trade;
       if (hasEpochs) {
         retentionAges = {
           snapshot: computeCleanup(epochs.snapshot?.epochStart ?? null, now, colData.retentionDays),
           trade: computeCleanup(epochs.trade?.epochStart ?? null, now, colData.tradeRetentionDays),
-          candle: computeCleanup(epochs.candle?.epochStart ?? null, now, colData.candleRetentionDays),
         };
       } else if (colData.uptimeMs != null) {
-        // Fallback: стартовое время коллектора как эпоха для всех трёх категорий
+        // Fallback: стартовое время коллектора как эпоха
         const collectorStart = new Date(now.getTime() - colData.uptimeMs).toISOString();
         retentionAges = {
           snapshot: computeCleanup(collectorStart, now, colData.retentionDays),
           trade: computeCleanup(collectorStart, now, colData.tradeRetentionDays),
-          candle: computeCleanup(collectorStart, now, colData.candleRetentionDays),
         };
       }
     }
