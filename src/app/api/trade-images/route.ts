@@ -13,7 +13,7 @@ import {
   getOrCreateNestedFolders,
   GoogleDriveError,
 } from "@/lib/integrations/googleDrive";
-import { uploadFile, publishResource, YandexDiskError } from "@/lib/integrations/yandexDisk";
+import { uploadFile, publishResource, getPublicUrl, YandexDiskError } from "@/lib/integrations/yandexDisk";
 import { logError } from "@/lib/errorLog";
 
 // Скриншоты кладём в отдельную папку, а не в корень "Мой диск"/"Приложения"
@@ -150,6 +150,7 @@ export async function POST(req: Request) {
   try {
     let imageUrl: string;
     let imageFileId: string;
+    let imagePublicUrl: string | null;
 
     if (provider === "google_drive") {
       const dealFolderId = await getOrCreateAppFolder(accessToken, DEAL_FOLDER_NAME);
@@ -158,6 +159,8 @@ export async function POST(req: Request) {
       await makeFilePublic(accessToken, fileId);
       imageUrl = directImageUrl(fileId);
       imageFileId = fileId;
+      // У Google Drive imageUrl и так уже публичная прямая ссылка.
+      imagePublicUrl = imageUrl;
     } else {
       // Яндекс.Диск не даёт постоянной прямой ссылки на байты файла — только
       // короткоживущий подписанный download-URL. Поэтому imageUrl указывает
@@ -167,16 +170,20 @@ export async function POST(req: Request) {
       await publishResource(accessToken, path);
       imageUrl = `/api/trade-images/view?tradeKey=${encodeURIComponent(tradeKey)}`;
       imageFileId = path;
+      // Отдельная публичная ссылка (страница просмотра Яндекса) — работает
+      // без входа в приложение, в отличие от imageUrl выше. Best-effort: если
+      // не получилось — не валим весь аплоад, просто не будет публичной ссылки.
+      imagePublicUrl = await getPublicUrl(accessToken, path).catch(() => null);
     }
 
     await prisma.tradeAnnotation.upsert({
       where: { userId_tradeKey: { userId: user.userId, tradeKey } },
-      create: { userId: user.userId, tradeKey, imageUrl, imageProvider: provider, imageFileId },
-      update: { imageUrl, imageProvider: provider, imageFileId },
+      create: { userId: user.userId, tradeKey, imageUrl, imageProvider: provider, imageFileId, imagePublicUrl },
+      update: { imageUrl, imageProvider: provider, imageFileId, imagePublicUrl },
     });
     bumpStatsVersion(user.userId);
 
-    return NextResponse.json({ imageUrl, imageProvider: provider });
+    return NextResponse.json({ imageUrl, imageProvider: provider, imagePublicUrl });
   } catch (err) {
     if (err instanceof GoogleDriveError || err instanceof YandexDiskError) {
       // Реальную причину (ответ API провайдера — не enabled API, quota,
@@ -202,7 +209,7 @@ export async function DELETE(req: Request) {
   try {
     await prisma.tradeAnnotation.updateMany({
       where: { userId: user.userId, tradeKey },
-      data: { imageUrl: null, imageProvider: null, imageFileId: null },
+      data: { imageUrl: null, imageProvider: null, imageFileId: null, imagePublicUrl: null },
     });
     bumpStatsVersion(user.userId);
     return NextResponse.json({ ok: true });

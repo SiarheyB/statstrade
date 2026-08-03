@@ -42,7 +42,7 @@ export default function TradeImageCell({
   imageUrl: string | null;
   imageProvider?: string | null;
   connected: boolean;
-  onUploaded: (url: string, provider: string) => void;
+  onUploaded: (url: string, provider: string, publicUrl: string | null) => void;
   onDeleted: () => void;
   onPreview: (url: string) => void;
 }) {
@@ -72,7 +72,7 @@ export default function TradeImageCell({
         setError(d.error ?? t("trades.image.uploadError"));
         return;
       }
-      onUploaded(d.imageUrl, d.imageProvider);
+      onUploaded(d.imageUrl, d.imageProvider, d.imagePublicUrl ?? null);
     } catch {
       setError(t("trades.image.uploadError"));
     } finally {

@@ -182,6 +182,7 @@ async function buildBase(
     t.note = a?.note ?? null;
     t.imageUrl = a?.imageUrl ?? null;
     t.imageProvider = a?.imageProvider ?? null;
+    t.imagePublicUrl = a?.imagePublicUrl ?? null;
   }
 
   const allSymbols = Array.from(
@@ -289,6 +290,7 @@ export async function GET(req: Request) {
       note: t.note ?? null,
       imageUrl: t.imageUrl ?? null,
       imageProvider: t.imageProvider ?? null,
+      imagePublicUrl: t.imagePublicUrl ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),
     }));

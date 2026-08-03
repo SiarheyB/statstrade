@@ -41,7 +41,7 @@ export default function TradesPage() {
   const [data, setData] = useState<StatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [ann, setAnn] = useState<Record<string, Ann>>({});
-  const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null }>>({});
+  const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null; publicUrl: string | null }>>({});
   const [cloudConnected, setCloudConnected] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
@@ -135,8 +135,10 @@ export default function TradesPage() {
     })();
   }, []);
 
-  function imageOf(tr: SerializedTrade): { url: string | null; provider: string | null } {
-    return tr.id in images ? images[tr.id] : { url: tr.imageUrl, provider: tr.imageProvider };
+  function imageOf(tr: SerializedTrade): { url: string | null; provider: string | null; publicUrl: string | null } {
+    return tr.id in images
+      ? images[tr.id]
+      : { url: tr.imageUrl, provider: tr.imageProvider, publicUrl: tr.imagePublicUrl };
   }
 
   // Reload trades once a background sync finishes (new fills may have landed).
@@ -282,11 +284,21 @@ export default function TradesPage() {
       t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
       t("trades.export.result"), t("trades.col.pips"), t("trades.col.swap"),
       t("trades.col.pattern"), t("trades.col.entryPoint"),
-      t("trades.col.entryType"), t("trades.col.mistake"),
+      t("trades.col.entryType"), t("trades.col.mistake"), t("trades.col.image"),
     ];
     const rows = filtered.map((tr) => {
       const a = annOf(tr);
       const rr = rrFor(tr, a.stopLoss);
+      const image = imageOf(tr);
+      // publicUrl работает без входа в приложение (см. TradeImageCell/
+      // /api/trade-images). Фолбэк на imageUrl — на случай старых записей
+      // без publicUrl (загружены до появления этого поля) или для
+      // google_drive, где оба поля совпадают; для yandex_disk imageUrl там —
+      // наш защищённый сессией прокси-путь, поэтому достраиваем origin,
+      // чтобы ссылка хотя бы открывалась (хоть и потребует входа).
+      const imageLink =
+        image.publicUrl ??
+        (image.url ? (image.url.startsWith("/") ? `${window.location.origin}${image.url}` : image.url) : "");
       return [
         fmtSymbol(tr.symbol),
         tr.side === "long" ? "Long" : "Short",
@@ -309,6 +321,7 @@ export default function TradesPage() {
         a.entryPoint ?? "",
         a.entryType ?? "",
         a.mistake ?? "",
+        imageLink,
       ];
     });
     downloadCsv(`trades-${dateStamp()}.csv`, headers, rows);
@@ -518,8 +531,8 @@ export default function TradesPage() {
                                 imageUrl={imageOf(tr).url}
                                 imageProvider={imageOf(tr).provider}
                                 connected={cloudConnected}
-                                onUploaded={(url, provider) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider } }))}
-                                onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null } }))}
+                                onUploaded={(url, provider, publicUrl) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider, publicUrl } }))}
+                                onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null, publicUrl: null } }))}
                                 onPreview={(url) => setPreviewUrl(url)}
                               />
                             </DetailField>

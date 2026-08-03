@@ -189,6 +189,22 @@ export async function publishResource(accessToken: string, path: string): Promis
   if (!res.ok) throw new YandexDiskError(`publish failed: ${res.status}`);
 }
 
+// Публичная страница просмотра файла (public_url) — доступна кому угодно по
+// ссылке, без входа в наше приложение и без OAuth-токена. В отличие от
+// getFreshDownloadHref (короткоживущая подписанная ссылка на сами байты,
+// нужна для <img src> внутри UI), это постоянная ссылка на HTML-страницу
+// вьюера Яндекса — годится для CSV-экспорта и т.п., но не для хотлинка
+// картинки. Доступна только ПОСЛЕ publishResource (иначе поле пустое).
+export async function getPublicUrl(accessToken: string, path: string): Promise<string | null> {
+  const res = await fetch(
+    `${API_BASE}/resources?${new URLSearchParams({ path, fields: "public_url" })}`,
+    { headers: { Authorization: `OAuth ${accessToken}` } },
+  );
+  if (!res.ok) return null;
+  const d = await res.json();
+  return typeof d.public_url === "string" ? d.public_url : null;
+}
+
 export async function unpublishResource(accessToken: string, path: string): Promise<void> {
   await fetch(`${API_BASE}/resources/unpublish?${new URLSearchParams({ path })}`, {
     method: "PUT",

@@ -81,6 +81,13 @@ model TradeAnnotation {
   imageUrl      String?
   imageProvider String? // "google_drive"
   imageFileId   String? // id файла в облаке провайдера
+  // Публичная ссылка на страницу просмотра файла — работает БЕЗ входа в
+  // приложение (в отличие от imageUrl, который для yandex_disk указывает на
+  // наш защищённый сессией прокси /api/trade-images/view, нужный для показа
+  // картинки внутри UI через <img src>). Для google_drive imageUrl уже сам
+  // по себе публичный, так что тут дублируется то же значение. Используется
+  // в CSV-экспорте сделок.
+  imagePublicUrl String?
   updatedAt  DateTime @updatedAt
 
   @@unique([userId, tradeKey])
