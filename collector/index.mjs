@@ -61,6 +61,17 @@ function klinesUrl(exchange) {
   return null;
 }
 
+// Комбинации symbol×exchange×interval, для которых уже подтверждено, что
+// история упирается в реальное начало торгов на бирже (Binance вернул данные
+// позже запрошенного startTime) — глубже физически ничего нет, сколько бы
+// CANDLE_RETENTION_DAYS ни было задано. Без этой отметки проверка глубины
+// ниже (oldestTs vs retentionStart) никогда не проходит для старых пар с
+// коротким реальным листингом (BTCUSDT торгуется с 2017/2019, а не с
+// начала retentionStart) — коллектор бы каждые 60с перезапускал бэкафилл
+// заново вместо перехода в режим "только новые свечи". Сбрасывается при
+// рестарте контейнера — тогда одна проверка повторится, это нормально.
+const candleDepthReached = new Set();
+
 // Запрашивает и сохраняет свечи одной пары (symbol × exchange × interval).
 // Узнаёт последнюю сохранённую свечу и тянет от неё (или с начала ретеншна).
 async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
@@ -77,24 +88,31 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
     [symbol, exchange, interval],
   );
   const lastTs = last.rows[0]?.ts ? new Date(last.rows[0].ts).getTime() : 0;
+  const depthKey = `${exchange}|${symbol}|${interval}`;
 
   // Если таблица не пуста — проверяем, достаточно ли глубоко уходит история.
   // Если самая старая свеча новее, чем retentionStart + 1 час — значит,
   // исторических данных не хватает, и нужно начать заполнение с границы
   // ретеншна, а не от последней свечи. ON CONFLICT DO UPDATE ниже
   // обновит h/l/c/v существующих свечей, так что формирующаяся свеча
-  // получит актуальные данные.
+  // получит актуальные данные. Исключение — candleDepthReached: если уже
+  // подтверждено, что глубже реальных данных на бирже нет, не гоняем
+  // полный бэкафилл заново на каждом цикле.
   let startMs;
   if (lastTs > 0) {
-    const oldest = await pool.query(
-      `SELECT MIN("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
-      [symbol, exchange, interval],
-    );
-    const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
-    if (oldestTs > retentionStart + 3600_000) {
-      startMs = retentionStart; // не хватает истории — начинаем с границы ретеншна
-    } else {
+    if (candleDepthReached.has(depthKey)) {
       startMs = lastTs; // нормальный режим: только новые свечи
+    } else {
+      const oldest = await pool.query(
+        `SELECT MIN("t") as ts FROM "ObCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+        [symbol, exchange, interval],
+      );
+      const oldestTs = oldest.rows[0]?.ts ? new Date(oldest.rows[0].ts).getTime() : 0;
+      if (oldestTs > retentionStart + 3600_000) {
+        startMs = retentionStart; // не хватает истории — начинаем с границы ретеншна
+      } else {
+        startMs = lastTs; // нормальный режим: только новые свечи
+      }
     }
   } else {
     startMs = retentionStart; // таблица пуста — заполняем с границы ретеншна
@@ -124,6 +142,17 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
     }
     const raw = await res.json();
     if (!Array.isArray(raw) || raw.length === 0) break;
+
+    // Первый чанк этого прохода начинался с startMs=retentionStart (глубокий
+    // бэкафилл) — если биржа вернула данные ощутимо позже запрошенного, значит
+    // раньше этой даты у неё физически ничего нет (символ ещё не торговался).
+    // Запоминаем — не будем каждый цикл заново ломиться в ту же стену.
+    if (fromMs === startMs && startMs !== lastTs) {
+      const firstT = Number(raw[0][0]);
+      if (firstT > startMs + intervalMs) {
+        candleDepthReached.add(depthKey);
+      }
+    }
 
     // Batched upsert
     const values = [];
