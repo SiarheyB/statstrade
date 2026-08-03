@@ -603,6 +603,8 @@ export default function OrderflowPage() {
     if (!live) return;
     let cancelled = false;
     const iv = setInterval(async () => {
+      // Не долбим бэкенд, пока вкладка свёрнута/не активна — незачем.
+      if (document.hidden) return;
       try {
         const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${timezone}`);
         if (!res.ok || cancelled) return;
@@ -628,6 +630,7 @@ export default function OrderflowPage() {
   useEffect(() => {
     if (!live) return;
     const iv = setInterval(() => {
+      if (document.hidden) return;
       loadVolumeProfile(true);
       loadDivergence(true);
       loadImbalance(true);

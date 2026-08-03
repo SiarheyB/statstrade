@@ -273,6 +273,8 @@ export default function ForexView() {
   useEffect(() => {
     let cancelled = false;
     const iv = setInterval(async () => {
+      // Не долбим бэкенд, пока вкладка свёрнута/не активна — незачем.
+      if (document.hidden) return;
       try {
         const p = new URLSearchParams({ symbol, range, tz: timezone });
         const res = await fetch(`/api/forex?${p}`);
@@ -413,6 +415,7 @@ export default function ForexView() {
   useEffect(() => {
     let alive = true;
     const iv = setInterval(() => {
+      if (document.hidden) return;
       loadVolumeProfile(() => alive, true);
       loadImbalance(() => alive, true);
       loadDivergence(() => alive, true);
