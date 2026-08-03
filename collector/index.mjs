@@ -163,17 +163,29 @@ async function fetchAndStoreCandlesFor(symbol, exchange, interval) {
 // чтобы при переключении между биржами в UI свечи не пропадали.
 const CANDLE_EXCHANGES = ["binance-futures", "binance-spot"];
 
+// При глубоком CANDLE_RETENTION_DAYS (годы истории) один проход по всем
+// symbol×exchange×interval может занимать дольше 60с (интервал candleTimer
+// ниже) — без этого флага setInterval запускал бы новый проход поверх ещё
+// идущего, и оба одновременно долбили бы Binance по тем же символам.
+let candlesRunning = false;
+
 async function fetchAndStoreCandles() {
-  const seen = new Set();
-  for (const exchange of CANDLE_EXCHANGES) {
-    for (const symbol of cfg.symbols) {
-      for (const interval of CANDLE_INTERVALS) {
-        const key = `${exchange}|${symbol}|${interval}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        await fetchAndStoreCandlesFor(symbol, exchange, interval);
+  if (candlesRunning) return;
+  candlesRunning = true;
+  try {
+    const seen = new Set();
+    for (const exchange of CANDLE_EXCHANGES) {
+      for (const symbol of cfg.symbols) {
+        for (const interval of CANDLE_INTERVALS) {
+          const key = `${exchange}|${symbol}|${interval}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          await fetchAndStoreCandlesFor(symbol, exchange, interval);
+        }
       }
     }
+  } finally {
+    candlesRunning = false;
   }
 }
 

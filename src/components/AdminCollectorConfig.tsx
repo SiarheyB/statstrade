@@ -202,7 +202,12 @@ function PurgeCandles() {
       const res = await fetch("/api/admin/collector/purge-candles/truncate", { method: "POST" });
       const d = await res.json();
       if (res.ok) {
-        setResult("Таблица ObCandle полностью очищена. Коллектор заполнит свечи в течение ~1 минуты.");
+        setResult(
+          "Таблица ObCandle полностью очищена. При открытии графика видимое окно подгрузится сразу " +
+          "(бэкенд сам подтянет его с Binance). Полная глубина истории (CANDLE_RETENTION_DAYS) добэкафиллится " +
+          "коллектором в фоне — для мелких таймфреймов (5m/15m) это может занять от десятков минут до пары часов, " +
+          "не ~1 минуту: Binance отдаёт максимум 1500 свечей за запрос.",
+        );
         await load();
       } else {
         setResult(`Ошибка: ${d.error ?? res.status}`);
@@ -243,7 +248,9 @@ function PurgeCandles() {
       <h2 className="text-lg font-medium">Очистка свечей (OHLCV)</h2>
       <p className="mt-1 text-sm text-muted">
         Свечи хранятся в таблице ObCandle — сюда пишет коллектор из Binance klines API.
-        Автоочистки нет; удалённые свечи коллектор заново заполнит при следующем запуске.
+        Автоочистки нет; удалённые свечи коллектор заново заполнит фоном (глубина — параметр
+        CANDLE_RETENTION_DAYS). Для мелких таймфреймов (5m/15m) полное заполнение может занять
+        от десятков минут до пары часов — Binance отдаёт максимум 1500 свечей за один запрос.
       </p>
       <div className="mt-2 text-xs text-faint">
         Свечи в БД: с <b className="text-fg">{fmt(range.oldest)}</b> по <b className="text-fg">{fmt(range.newest)}</b>
@@ -285,9 +292,11 @@ function PurgeCandles() {
         </div>
         <hr className="border-border" />
         <div className="flex items-center justify-between pt-1">
-          <div className="text-xs text-muted">
-            Полная очистка удалит <b>все</b> свечи. Коллектор заново заполнит историю
-            в течение ~1 минуты.
+          <div className="text-xs text-muted max-w-md">
+            Полная очистка удалит <b>все</b> свечи. Видимое окно графика подгрузится сразу
+            при следующем открытии, но полная глубина истории добэкафиллится коллектором
+            в фоне — для мелких таймфреймов (5m/15m) это может занять от десятков минут
+            до пары часов, не ~1 минуту.
           </div>
           <button
             disabled={busy || truncating}
