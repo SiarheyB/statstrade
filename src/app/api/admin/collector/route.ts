@@ -57,20 +57,36 @@ async function fetchCollectorMetrics(): Promise<{ ok: boolean; data?: unknown; e
   }
 }
 
-/** Посчитать, сколько мс осталось до очистки данных по retention.
- *  Использует epochStart из RetentionEpoch (когда начался отсчёт) вместо
- *  MIN(t) данных — так отсчёт не зависит от бэкфилла и показывает реальное
- *  время до следующей очистки. */
-function computeCleanup(
-  epochStart: string | null,
-  now: Date,
+// Раньше «время до очистки» считалось через RetentionEpoch.epoch_start,
+// который коллектор сбрасывает на NOW() при каждом реальном дропе партиции
+// ([collector/index.mjs] updateEpoch). При дневных партициях и недельном
+// ретеншне дроп происходит примерно раз в сутки — то есть epoch_start
+// сбрасывался почти каждый день, и счётчик в UI вечно показывал что-то
+// около полного retentionDays вместо честного обратного отсчёта (баг,
+// репортнутый пользователем: "вчера было 5-6 дней, сегодня снова 7").
+//
+// Партиции — это метаданные каталога Postgres (pg_class/pg_inherits), а не
+// данные таблицы, поэтому их можно читать напрямую и дёшево (без скана
+// строк) — в отличие от MIN(t) на десятках млн строк. Следующая реальная
+// очистка произойдёт, когда verhняя граница САМОЙ СТАРОЙ существующей
+// партиции станет старше cutoff = NOW() - retentionDays, т.е. в момент
+// hi + retentionDays. Это и есть честное «время до следующей очистки».
+async function nextPartitionCleanup(
+  tbl: string,
   retentionDays: number,
-): { oldestT: string; cleanupInMs: number } | null {
-  if (!epochStart) return null;
-  const epoch = new Date(epochStart);
-  const cutoff = new Date(epoch.getTime() + retentionDays * 86_400_000);
-  const cleanupInMs = cutoff.getTime() - now.getTime();
-  return { oldestT: epochStart, cleanupInMs: Math.max(0, cleanupInMs) };
+): Promise<{ oldestT: string; cleanupInMs: number } | null> {
+  const rows = await prisma.$queryRawUnsafe<{ hi: Date | null }[]>(
+    `SELECT min(hi) AS hi FROM (
+       SELECT (regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \\(''([^'']+)''\\)'))[1]::timestamptz AS hi
+       FROM pg_inherits i JOIN pg_class c ON c.oid = i.inhrelid
+       WHERE i.inhparent = '"${tbl}"'::regclass
+         AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
+     ) sub`,
+  );
+  const hi = rows[0]?.hi;
+  if (!hi) return null;
+  const cleanupAt = new Date(hi).getTime() + retentionDays * 86_400_000;
+  return { oldestT: new Date(hi).toISOString(), cleanupInMs: Math.max(0, cleanupAt - Date.now()) };
 }
 
 // Список фидов — из маленькой ObRollupBucket (не сканируем сырые таблицы).
@@ -239,32 +255,28 @@ async function getHeavyStats(): Promise<HeavyStats> {
 
     const collector = await fetchCollectorMetrics();
 
-    // Отсчёт до очистки — через RetentionEpoch (эпохи, которые ведёт коллектор
-    // в таблице RetentionEpoch). Если коллектор ещё не обновлён и не отдаёт
-    // epochs — fallback на uptime коллектора (стартовое время). Свечи (ObCandle)
-    // сюда не входят — они больше не чистятся автоматически, только вручную
-    // из /api/admin/collector/purge-candles.
+    // Свечи (ObCandle) сюда не входят — они больше не чистятся автоматически,
+    // только вручную из /api/admin/collector/purge-candles.
     const colData = (collector.ok ? collector.data : undefined) as
-      | { retentionDays: number; tradeRetentionDays: number; uptimeMs?: number; epochs?: Record<string, { epochStart: string; retentionDays: number }> }
+      | { retentionDays: number; tradeRetentionDays: number }
       | undefined;
     let retentionAges: RetentionAges = { snapshot: null, trade: null };
     if (colData) {
-      const epochs = colData.epochs ?? {};
-      const now = new Date();
-      const hasEpochs = epochs.snapshot || epochs.trade;
-      if (hasEpochs) {
-        retentionAges = {
-          snapshot: computeCleanup(epochs.snapshot?.epochStart ?? null, now, colData.retentionDays),
-          trade: computeCleanup(epochs.trade?.epochStart ?? null, now, colData.tradeRetentionDays),
-        };
-      } else if (colData.uptimeMs != null) {
-        // Fallback: стартовое время коллектора как эпоха
-        const collectorStart = new Date(now.getTime() - colData.uptimeMs).toISOString();
-        retentionAges = {
-          snapshot: computeCleanup(collectorStart, now, colData.retentionDays),
-          trade: computeCleanup(collectorStart, now, colData.tradeRetentionDays),
-        };
-      }
+      const [snapshotCleanup, tradeCleanup, footprintCleanup, bigTradeCleanup] = await Promise.all([
+        nextPartitionCleanup("ObSnapshot", colData.retentionDays),
+        nextPartitionCleanup("ObTrade", colData.tradeRetentionDays),
+        nextPartitionCleanup("ObFootprint", colData.tradeRetentionDays),
+        nextPartitionCleanup("ObBigTrade", colData.tradeRetentionDays),
+      ]);
+      // "trade"-категория дропается из трёх таблиц одновременно (общий
+      // tradeRetentionDays) — показываем ту, что дропнется раньше всех.
+      const tradeCandidates = [tradeCleanup, footprintCleanup, bigTradeCleanup].filter(
+        (c): c is { oldestT: string; cleanupInMs: number } => c !== null,
+      );
+      const trade = tradeCandidates.length
+        ? tradeCandidates.reduce((a, b) => (a.cleanupInMs < b.cleanupInMs ? a : b))
+        : null;
+      retentionAges = { snapshot: snapshotCleanup, trade };
     }
 
     const data: HeavyStats = { feeds, series, tableStats, collector, retentionAges };
