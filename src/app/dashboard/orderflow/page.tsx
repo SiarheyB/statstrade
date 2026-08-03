@@ -212,6 +212,12 @@ export default function OrderflowPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
+  // Кэш fYMin/fYMax/candleStep — иначе draw() проходил бы весь массив свечей
+  // (до MAX_HISTORY_CANDLES) на каждый вызов, включая чисто hover-редрои.
+  const rangeCacheRef = useRef<{
+    candles: Candle[]; priceMin: number; priceMax: number;
+    fYMin: number; fYMax: number; candleStep: number;
+  } | null>(null);
 
   // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md). historyRef —
   // старые свечи, догруженные через /api/orderflow/history, всегда старше
@@ -294,11 +300,20 @@ export default function OrderflowPage() {
     }
   }, []);
 
+  // Кэш смёрженного массива свечей — без него getMergedCandles() пересоздавал
+  // бы новый массив (spread до MAX_HISTORY_CANDLES элементов) на каждый вызов,
+  // включая вызовы из onMove на каждый mousemove (чистый hover, без смены
+  // данных). Инвалидируется только при реальном изменении data/historyVersion.
+  const mergedCandlesCacheRef = useRef<{ data: Resp | null; historyVersion: number; candles: Candle[] } | null>(null);
   const getMergedCandles = useCallback((): Candle[] => {
+    const cache = mergedCandlesCacheRef.current;
+    if (cache && cache.data === data && cache.historyVersion === historyVersion) {
+      return cache.candles;
+    }
     const tail = data?.candles ?? [];
-    return historyRef.current.length ? [...historyRef.current, ...tail] : tail;
-    // historyVersion — не читается напрямую, но нужен как повод пересчитать
-    // при догрузке истории (historyRef мутируется в ref, без ре-рендера).
+    const merged = historyRef.current.length ? [...historyRef.current, ...tail] : tail;
+    mergedCandlesCacheRef.current = { data, historyVersion, candles: merged };
+    return merged;
   }, [data, historyVersion]);
 
   const loadMoreHistory = useCallback(async () => {
@@ -639,13 +654,22 @@ export default function OrderflowPage() {
     // в уже подгруженную историю (см. LAZY_HISTORY_PLAN.md).
     const fullT0 = candles.length ? Math.min(data.from, candles[0].t) : data.from;
     const fullT1 = data.to;
-    let fYMin = hm.priceMin;
-    let fYMax = hm.priceMax;
-    for (const k of candles) {
-      if (k.l < fYMin) fYMin = k.l;
-      if (k.h > fYMax) fYMax = k.h;
+    let fYMin: number, fYMax: number, candleStep: number;
+    const rc = rangeCacheRef.current;
+    if (rc && rc.candles === candles && rc.priceMin === hm.priceMin && rc.priceMax === hm.priceMax) {
+      fYMin = rc.fYMin;
+      fYMax = rc.fYMax;
+      candleStep = rc.candleStep;
+    } else {
+      fYMin = hm.priceMin;
+      fYMax = hm.priceMax;
+      for (const k of candles) {
+        if (k.l < fYMin) fYMin = k.l;
+        if (k.h > fYMax) fYMax = k.h;
+      }
+      candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
+      rangeCacheRef.current = { candles, priceMin: hm.priceMin, priceMax: hm.priceMax, fYMin, fYMax, candleStep };
     }
-    const candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
     if (!viewRef.current) {
       const visible = VISIBLE_CANDLES[range] ?? DEFAULT_VISIBLE;
