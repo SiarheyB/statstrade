@@ -54,7 +54,7 @@ export function snapToCandle(
   const snapTimeThreshold = step * 0.5;
   if (minDist >= snapTimeThreshold) return { t, price };
   const range = nearest.h - nearest.l || 1;
-  const snapPriceThreshold = range * 0.3;
+  const snapPriceThreshold = range * 0.6;
   const distHigh = Math.abs(price - nearest.h);
   const distLow = Math.abs(price - nearest.l);
   const snappedPrice = distHigh < snapPriceThreshold ? nearest.h : distLow < snapPriceThreshold ? nearest.l : price;
@@ -107,6 +107,18 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
   const drawingDragRef = useRef<DrawingDragState | null>(null);
   const drawingResizeRef = useRef<DrawingResizeState | null>(null);
   const lastHistoryTriggerRef = useRef(0);
+  const rafPendingRef = useRef(false);
+
+  // Коалесирует несколько redraw() за один кадр в один вызов — mousemove/wheel
+  // могут стрелять чаще, чем браузер успевает рисовать (60-120+ раз/сек).
+  const scheduleRedraw = useCallback(() => {
+    if (rafPendingRef.current) return;
+    rafPendingRef.current = true;
+    requestAnimationFrame(() => {
+      rafPendingRef.current = false;
+      optsRef.current.redraw();
+    });
+  }, []);
 
   const maybeTriggerHistory = useCallback((view: ChartView) => {
     const o = optsRef.current;
@@ -157,7 +169,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       } else {
         snappedRef.current = null;
       }
-      o.redraw();
+      scheduleRedraw();
       return;
     }
 
@@ -203,7 +215,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
               originalPoints: [{ t: newT1, price: newP1 }, { t: newT2, price: newP2 }],
             };
             if (cv) cv.style.cursor = "nwse-resize";
-            o.redraw();
+            scheduleRedraw();
             return;
           }
           const dx = ((mx - drag.mx) / lay.plotW) * xspan;
@@ -222,7 +234,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
               dy: snappedDy,
               originalPoints: drag.originalPoints ?? [],
             };
-            o.redraw();
+            scheduleRedraw();
             return;
           }
           drawingDragRef.current = {
@@ -230,7 +242,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
             dx, dy,
             originalPoints: drag.originalPoints ?? [],
           };
-          o.redraw();
+          scheduleRedraw();
           return;
         }
       } else if (drag.mode === "zoomY") {
@@ -261,7 +273,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         });
         maybeTriggerHistory(viewRef.current);
       }
-      o.redraw();
+      scheduleRedraw();
     } else {
       const cv = o.canvasRef.current;
       if (lay && cv) {
@@ -284,7 +296,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
           cv.style.cursor = mx >= lay.plotX + lay.plotW ? "ns-resize" : my >= lay.plotH - 8 ? "ew-resize" : "default";
         }
       }
-      o.redraw();
+      scheduleRedraw();
     }
   }, []);
 
@@ -292,7 +304,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     hoverRef.current = null;
     dragRef.current = null;
     drawingResizeRef.current = null;
-    optsRef.current.redraw();
+    scheduleRedraw();
   }, []);
 
   const onDown = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -449,7 +461,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       next = clampToBounds(next);
       viewRef.current = next;
       maybeTriggerHistory(next);
-      optsRef.current.redraw();
+      scheduleRedraw();
     };
     cv.addEventListener("wheel", onWheel, { passive: false });
     return () => cv.removeEventListener("wheel", onWheel);
