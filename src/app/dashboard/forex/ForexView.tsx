@@ -220,6 +220,10 @@ export default function ForexView() {
   // ─── Pan / zoom / drawing-tools interaction layer (shared with orderflow) ─
 
   const redrawAllRef = useRef<() => void>(() => {});
+  // drawDelta/drawBA не рисуют курсор/кроссхэйр — их результат зависит
+  // только от data и видимого диапазона (t0/t1), поэтому чистый hover
+  // (mousemove без пана/зума) не должен их перерисовывать заново.
+  const deltaBaDrawnRef = useRef<{ data: unknown; t0: number; t1: number } | null>(null);
   const {
     viewRef, layoutRef, boundsRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef,
     onMove, onLeave, onDown, onUp, onDouble,
@@ -652,14 +656,25 @@ export default function ForexView() {
 
   const redrawAll = useCallback(() => {
     draw();
-    drawDelta();
-    drawBA();
-  }, [draw, drawDelta, drawBA]);
+    const t0 = viewRef.current?.t0 ?? data?.from ?? 0;
+    const t1 = viewRef.current?.t1 ?? data?.to ?? 0;
+    const prev = deltaBaDrawnRef.current;
+    if (!prev || prev.data !== data || prev.t0 !== t0 || prev.t1 !== t1) {
+      drawDelta();
+      drawBA();
+      deltaBaDrawnRef.current = { data, t0, t1 };
+    }
+  }, [draw, drawDelta, drawBA, data, viewRef]);
   useEffect(() => { redrawAllRef.current = redrawAll; }, [redrawAll]);
 
   useEffect(() => {
     redrawAll();
-    const onResize = () => redrawAll();
+    const onResize = () => {
+      // Ширина/высота канваса могли смениться без изменения t0/t1 —
+      // кэш delta/BA не заметит этого сам, форсируем перерисовку.
+      deltaBaDrawnRef.current = null;
+      redrawAll();
+    };
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [redrawAll]);
