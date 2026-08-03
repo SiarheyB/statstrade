@@ -123,8 +123,9 @@ export async function getUserEmail(accessToken: string): Promise<string | null> 
 // достаточен, без q=owners=... — нам чужие папки не видны в принципе), а
 // если её ещё нет — создаёт. Кладём сюда скриншоты сделок, а не в корень
 // "Мой диск" пользователя, чтобы не засорять его обычный вид диска.
-export async function getOrCreateAppFolder(accessToken: string, name: string): Promise<string> {
-  const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+export async function getOrCreateAppFolder(accessToken: string, name: string, parentId?: string): Promise<string> {
+  const parentClause = parentId ? ` and '${parentId.replace(/'/g, "\\'")}' in parents` : "";
+  const q = `name='${name.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${parentClause}`;
   const searchRes = await fetch(`${DRIVE_API_URL}?${new URLSearchParams({ q, fields: "files(id)", pageSize: "1" })}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
@@ -138,11 +139,30 @@ export async function getOrCreateAppFolder(accessToken: string, name: string): P
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ name, mimeType: "application/vnd.google-apps.folder" }),
+    body: JSON.stringify({
+      name,
+      mimeType: "application/vnd.google-apps.folder",
+      ...(parentId ? { parents: [parentId] } : {}),
+    }),
   });
   if (!createRes.ok) throw new GoogleDriveError(`folder create failed: ${createRes.status}`);
   const created = await createRes.json();
   return created.id;
+}
+
+// Последовательно создаёт (или находит) цепочку вложенных папок начиная от
+// parentId — используется для структуры "год-месяц/паттерн" внутри
+// DEAL_FOLDER_NAME.
+export async function getOrCreateNestedFolders(
+  accessToken: string,
+  parentId: string,
+  segments: string[],
+): Promise<string> {
+  let currentId = parentId;
+  for (const segment of segments) {
+    currentId = await getOrCreateAppFolder(accessToken, segment, currentId);
+  }
+  return currentId;
 }
 
 // Multipart upload (metadata + raw bytes) в один запрос — стандартный способ

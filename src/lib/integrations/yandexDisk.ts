@@ -121,14 +121,16 @@ export async function getUserLogin(accessToken: string): Promise<string | null> 
 // добавится что-то ещё, и просто для аккуратности.
 const DEAL_FOLDER = "tradingstat_deal";
 
-function appPath(filename: string): string {
-  return `app:/${DEAL_FOLDER}/${filename}`;
+function appPath(filename: string, subDirs: string[] = []): string {
+  return `app:/${[DEAL_FOLDER, ...subDirs, filename].join("/")}`;
 }
 
-// Создаёт подпапку, если её ещё нет (идемпотентно — 409 "уже существует"
-// не считаем ошибкой).
-async function ensureDealFolder(accessToken: string): Promise<void> {
-  const res = await fetch(`${API_BASE}/resources?${new URLSearchParams({ path: `app:/${DEAL_FOLDER}` })}`, {
+// Создаёт папку (путь целиком, включая все промежуточные сегменты), если её
+// ещё нет (идемпотентно — 409 "уже существует" не считаем ошибкой). Яндекс
+// не создаёт родителей автоматически, поэтому для вложенных путей вида
+// "tradingstat_deal/2026-08/breakout" создаём каждый уровень по очереди.
+async function ensureFolder(accessToken: string, path: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/resources?${new URLSearchParams({ path })}`, {
     method: "PUT",
     headers: { Authorization: `OAuth ${accessToken}` },
   });
@@ -137,17 +139,27 @@ async function ensureDealFolder(accessToken: string): Promise<void> {
   }
 }
 
+async function ensureDealFolder(accessToken: string, subDirs: string[] = []): Promise<void> {
+  let path = `app:/${DEAL_FOLDER}`;
+  await ensureFolder(accessToken, path);
+  for (const dir of subDirs) {
+    path = `${path}/${dir}`;
+    await ensureFolder(accessToken, path);
+  }
+}
+
 // Загружает файл в изолированную папку приложения на диске пользователя
-// ("Приложения/TradeStats/tradingstat_deal"). Двухшаговый API Яндекса:
-// сначала получаем upload-URL, затем PUT байтов туда напрямую.
+// ("Приложения/TradeStats/tradingstat_deal[/год-месяц/паттерн]"). Двухшаговый
+// API Яндекса: сначала получаем upload-URL, затем PUT байтов туда напрямую.
 export async function uploadFile(
   accessToken: string,
   filename: string,
   mimeType: string,
   data: Buffer,
+  subDirs: string[] = [],
 ): Promise<{ path: string }> {
-  await ensureDealFolder(accessToken);
-  const path = appPath(filename);
+  await ensureDealFolder(accessToken, subDirs);
+  const path = appPath(filename, subDirs);
   const uploadUrlRes = await fetch(
     `${API_BASE}/resources/upload?${new URLSearchParams({ path, overwrite: "true" })}`,
     { headers: { Authorization: `OAuth ${accessToken}` } },

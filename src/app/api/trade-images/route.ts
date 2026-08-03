@@ -5,7 +5,14 @@ import { bumpStatsVersion } from "@/lib/statsCache";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { detectImageType, isAllowedImageType, extForMime, MAX_IMAGE_BYTES } from "@/lib/imageValidation";
 import { getValidCloudToken, firstConnectedProvider } from "@/lib/integrations/cloudStorage";
-import { uploadImage, makeFilePublic, directImageUrl, getOrCreateAppFolder, GoogleDriveError } from "@/lib/integrations/googleDrive";
+import {
+  uploadImage,
+  makeFilePublic,
+  directImageUrl,
+  getOrCreateAppFolder,
+  getOrCreateNestedFolders,
+  GoogleDriveError,
+} from "@/lib/integrations/googleDrive";
 import { uploadFile, publishResource, YandexDiskError } from "@/lib/integrations/yandexDisk";
 import { logError } from "@/lib/errorLog";
 
@@ -43,6 +50,30 @@ function buildFilename(
   return `${cleanSymbol}_${stamp}_${resultLabel}.${ext}`;
 }
 
+// Строит подпапки "год/месяц/паттерн" внутри DEAL_FOLDER_NAME — так
+// скриншоты не копятся все в одной куче, а разложены по времени входа и
+// торговому паттерну. Год и месяц — отдельные уровни (в папке года лежат
+// 12 папок месяцев "01".."12"), а не одна папка "год-месяц". Если entryTime
+// не распознан или pattern не задан, используем безопасные фоллбэки, чтобы
+// загрузка не ломалась из-за косметики (та же логика, что в buildFilename).
+function buildFolderSegments(entryTimeIso: string | null, pattern: string | null): string[] {
+  const entryMs = entryTimeIso ? Date.parse(entryTimeIso) : NaN;
+  let year: string;
+  let month: string;
+  if (Number.isFinite(entryMs)) {
+    const d = new Date(entryMs);
+    year = String(d.getUTCFullYear());
+    month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  } else {
+    year = "unknown-date";
+    month = "unknown-date";
+  }
+
+  const cleanPattern = pattern?.trim().replace(/[\\/]/g, "_").slice(0, 60);
+
+  return [year, month, cleanPattern || "no_pattern"];
+}
+
 // Загружает скриншот сделки в облако пользователя (Google Drive или
 // Яндекс.Диск — НЕ на наш сервер) и сохраняет только ссылку в
 // TradeAnnotation. Файл никогда не проходит через постоянное хранилище
@@ -74,6 +105,7 @@ export async function POST(req: Request) {
   const symbolRaw = form.get("symbol");
   const entryTimeRaw = form.get("entryTime");
   const resultRaw = form.get("result");
+  const patternRaw = form.get("pattern");
   if (typeof tradeKey !== "string" || !tradeKey.trim() || tradeKey.length > 200) {
     return badRequest("Некорректный tradeKey");
   }
@@ -103,20 +135,25 @@ export async function POST(req: Request) {
     return badRequest("Файл не распознан как изображение (поддерживаются PNG, JPEG, WEBP, GIF)");
   }
 
+  const entryTimeStr = typeof entryTimeRaw === "string" ? entryTimeRaw : null;
+  const patternStr = typeof patternRaw === "string" ? patternRaw : null;
+
   const filename = buildFilename(
     typeof symbolRaw === "string" ? symbolRaw : null,
-    typeof entryTimeRaw === "string" ? entryTimeRaw : null,
+    entryTimeStr,
     typeof resultRaw === "string" ? resultRaw : null,
     tradeKey,
     extForMime(detected),
   );
+  const folderSegments = buildFolderSegments(entryTimeStr, patternStr);
 
   try {
     let imageUrl: string;
     let imageFileId: string;
 
     if (provider === "google_drive") {
-      const folderId = await getOrCreateAppFolder(accessToken, DEAL_FOLDER_NAME);
+      const dealFolderId = await getOrCreateAppFolder(accessToken, DEAL_FOLDER_NAME);
+      const folderId = await getOrCreateNestedFolders(accessToken, dealFolderId, folderSegments);
       const { id: fileId } = await uploadImage(accessToken, filename, detected, buf, folderId);
       await makeFilePublic(accessToken, fileId);
       imageUrl = directImageUrl(fileId);
@@ -126,7 +163,7 @@ export async function POST(req: Request) {
       // короткоживущий подписанный download-URL. Поэтому imageUrl указывает
       // на наш собственный прокси-роут, который перевыпускает свежую ссылку
       // на каждый просмотр (см. /api/trade-images/view).
-      const { path } = await uploadFile(accessToken, filename, detected, buf);
+      const { path } = await uploadFile(accessToken, filename, detected, buf, folderSegments);
       await publishResource(accessToken, path);
       imageUrl = `/api/trade-images/view?tradeKey=${encodeURIComponent(tradeKey)}`;
       imageFileId = path;

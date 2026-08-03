@@ -23,6 +23,7 @@ export default function TradeImageCell({
   symbol,
   entryTime,
   result,
+  pattern,
   imageUrl,
   imageProvider,
   connected,
@@ -31,11 +32,13 @@ export default function TradeImageCell({
   onPreview,
 }: {
   tradeKey: string;
-  // Только для человекочитаемого имени файла на диске (символ_дата_результат) —
-  // сама привязка идёт по tradeKey, см. /api/trade-images.
+  // Только для человекочитаемого имени файла на диске (символ_дата_результат)
+  // и структуры папок (год-месяц/паттерн) — сама привязка идёт по tradeKey,
+  // см. /api/trade-images.
   symbol: string;
   entryTime: string;
   result: string;
+  pattern: string | null;
   imageUrl: string | null;
   imageProvider?: string | null;
   connected: boolean;
@@ -61,6 +64,7 @@ export default function TradeImageCell({
       form.append("symbol", symbol);
       form.append("entryTime", entryTime);
       form.append("result", result);
+      if (pattern) form.append("pattern", pattern);
       form.append("file", file);
       const res = await fetch("/api/trade-images", { method: "POST", body: form });
       const d = await res.json();

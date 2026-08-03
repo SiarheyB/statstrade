@@ -514,6 +514,7 @@ export default function TradesPage() {
                                 symbol={tr.symbol}
                                 entryTime={tr.entryTime}
                                 result={tr.result}
+                                pattern={a.pattern}
                                 imageUrl={imageOf(tr).url}
                                 imageProvider={imageOf(tr).provider}
                                 connected={cloudConnected}
