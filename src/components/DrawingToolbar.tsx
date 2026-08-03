@@ -6,7 +6,7 @@
  */
 "use client";
 
-import { Minus, ArrowRight, TrendingUp, Square, Magnet, Eye, EyeOff } from "lucide-react";
+import { Minus, ArrowRight, TrendingUp, Square, Magnet, Eye, EyeOff, Lock, Unlock, Undo2 } from "lucide-react";
 import type { DrawingToolType } from "@/lib/drawings";
 
 export type { DrawingToolType };
@@ -18,6 +18,10 @@ type Props = {
   onToggleMagnet: () => void;
   showDrawings: boolean;
   onToggleShowDrawings: () => void;
+  locked: boolean;
+  onToggleLocked: () => void;
+  canUndoMove: boolean;
+  onUndoMove: () => void;
   // Раньше панель стояла отдельной колонкой рядом с графиком и постоянно
   // занимала её ширину (даже когда сама колонка растягивалась на всю высоту
   // графика по cross-axis flex и визуально выглядела как пустое место).
@@ -33,7 +37,7 @@ const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] =
   { type: "rectangle", label: "Прямоугольник", icon: <Square size={14} /> },
 ];
 
-export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings, overlay = false }: Props) {
+export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings, locked, onToggleLocked, canUndoMove, onUndoMove, overlay = false }: Props) {
   return (
     <div
       className={
@@ -81,6 +85,31 @@ export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onTog
         title={showDrawings ? "Скрыть рисунки" : "Показать рисунки"}
       >
         {showDrawings ? <Eye size={14} /> : <EyeOff size={14} />}
+      </button>
+      {/* Кнопка блокировки рисунков (защита от случайного перетаскивания/удаления) */}
+      <button
+        onClick={onToggleLocked}
+        className={`flex items-center justify-center w-7 h-7 rounded transition-colors ${
+          locked
+            ? "bg-accent/20 text-accent border border-accent/40"
+            : "text-muted hover:text-fg hover:bg-bg-muted border border-transparent"
+        }`}
+        title={locked ? "Рисунки заблокированы (нельзя перетащить/удалить)" : "Заблокировать рисунки"}
+      >
+        {locked ? <Lock size={14} /> : <Unlock size={14} />}
+      </button>
+      {/* Отменить последнее перемещение/ресайз рисунка */}
+      <button
+        onClick={onUndoMove}
+        disabled={!canUndoMove}
+        className={`flex items-center justify-center w-7 h-7 rounded transition-colors ${
+          canUndoMove
+            ? "text-muted hover:text-fg hover:bg-bg-muted border border-transparent"
+            : "text-faint/40 border border-transparent cursor-not-allowed"
+        }`}
+        title="Вернуть рисунок на прежнее место"
+      >
+        <Undo2 size={14} />
       </button>
     </div>
   );

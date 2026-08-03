@@ -91,6 +91,9 @@ export default function ForexView() {
   const [selectedDrawingId, setSelectedDrawingId] = useState<string | null>(null);
   const [showDrawingEditor, setShowDrawingEditor] = useState(false);
   const [magnet, setMagnet] = useState(true);
+  const [drawingsLocked, setDrawingsLocked] = useState(false);
+  const [canUndoMove, setCanUndoMove] = useState(false);
+  const lastMovedDrawingRef = useRef<{ id: string; points: DrawingPoint[] } | null>(null);
 
   // Canvas refs — identical rendering pipeline to /dashboard/orderflow (src/lib/candlestickChart.ts)
   const candleCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -217,6 +220,43 @@ export default function ForexView() {
     }
   }, []);
 
+  // Запоминаем геометрию рисунка ДО перетаскивания/ресайза — позволяет
+  // "отменить последнее перемещение" одной кнопкой (см. /dashboard/orderflow).
+  const handleDrawingMoved = useCallback((id: string, previousPoints: DrawingPoint[]) => {
+    lastMovedDrawingRef.current = { id, points: previousPoints };
+    setCanUndoMove(true);
+  }, []);
+
+  const handleUndoMove = useCallback(() => {
+    const last = lastMovedDrawingRef.current;
+    if (!last) return;
+    lastMovedDrawingRef.current = null;
+    setCanUndoMove(false);
+    void updateDrawingApi(last.id, last.points);
+  }, [updateDrawingApi]);
+
+  const deleteDrawingById = useCallback(async (id: string) => {
+    try {
+      const res = await fetch(`/api/forex/drawings?id=${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setDrawings(prev => prev.filter(dd => dd.id !== id));
+        setSelectedDrawingId(null);
+        setShowDrawingEditor(false);
+        if (lastMovedDrawingRef.current?.id === id) {
+          lastMovedDrawingRef.current = null;
+          setCanUndoMove(false);
+        }
+      }
+    } catch (err) {
+      console.error("[forex drawings] delete error:", err);
+    }
+  }, []);
+
+  const handleDeleteSelectedDrawing = useCallback(() => {
+    if (!selectedDrawingId) return;
+    void deleteDrawingById(selectedDrawingId);
+  }, [selectedDrawingId, deleteDrawingById]);
+
   // ─── Pan / zoom / drawing-tools interaction layer (shared with orderflow) ─
 
   const redrawAllRef = useRef<() => void>(() => {});
@@ -233,6 +273,7 @@ export default function ForexView() {
     getDrawings: () => drawings,
     showDrawings,
     magnet,
+    locked: drawingsLocked,
     activeTool,
     setActiveTool,
     drawingPoints,
@@ -245,6 +286,8 @@ export default function ForexView() {
     redraw: () => redrawAllRef.current(),
     getHasMoreHistory: () => hasMoreHistoryRef.current,
     onNeedHistory: () => { void loadMoreHistory(); },
+    onDrawingMoved: handleDrawingMoved,
+    onDeleteSelected: handleDeleteSelectedDrawing,
   });
 
   const load = useCallback(async () => {
@@ -803,18 +846,7 @@ export default function ForexView() {
               </label>
               <button
                 className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
-                onClick={async () => {
-                  try {
-                    const res = await fetch(`/api/forex/drawings?id=${d.id}`, { method: "DELETE" });
-                    if (res.ok) {
-                      setDrawings(prev => prev.filter(dd => dd.id !== d.id));
-                      setSelectedDrawingId(null);
-                      setShowDrawingEditor(false);
-                    }
-                  } catch (err) {
-                    console.error("Failed to delete drawing", err);
-                  }
-                }}
+                onClick={() => void deleteDrawingById(d.id)}
               >
                 {t("of.delete")}
               </button>
@@ -830,6 +862,10 @@ export default function ForexView() {
             onToggleMagnet={() => setMagnet(v => !v)}
             showDrawings={showDrawings}
             onToggleShowDrawings={() => setShowDrawings(v => !v)}
+            locked={drawingsLocked}
+            onToggleLocked={() => setDrawingsLocked(v => !v)}
+            canUndoMove={canUndoMove}
+            onUndoMove={handleUndoMove}
           />
           <canvas
             ref={candleCanvasRef}

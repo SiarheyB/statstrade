@@ -67,6 +67,10 @@ export interface ChartInteractionsOptions {
   getDrawings: () => DrawingRow[];
   showDrawings: boolean;
   magnet: boolean;
+  /** Блокирует выбор/перетаскивание/ресайз существующих рисунков (клик по ним
+   * ведёт себя как клик по пустому месту — пан/зум). Не влияет на создание
+   * новых рисунков активным инструментом. */
+  locked: boolean;
   activeTool: DrawingToolType | null;
   setActiveTool: (tool: DrawingToolType | null) => void;
   drawingPoints: DrawingPoint[];
@@ -84,6 +88,12 @@ export interface ChartInteractionsOptions {
    * реальную загрузку делает вызывающая сторона (страница); хук только
    * троттлит частоту вызовов. */
   onNeedHistory?: () => void;
+  /** Вызывается сразу после того, как перетаскивание/ресайз рисунка сохранены
+   * (updateDrawing уже вызван) — previousPoints это геометрия ДО перетаскивания,
+   * чтобы вызывающая сторона могла реализовать "отменить последнее перемещение". */
+  onDrawingMoved?: (id: string, previousPoints: DrawingPoint[]) => void;
+  /** Delete/Backspace на клавиатуре при выбранном рисунке (если !locked). */
+  onDeleteSelected?: () => void;
 }
 
 // Доля видимого окна от левого края загруженных данных, при приближении к
@@ -347,7 +357,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     }
 
     const drawings = o.getDrawings();
-    if (!o.activeTool && o.showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
+    if (!o.locked && !o.activeTool && o.showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
       const v = viewRef.current;
       if (v) {
         const xspan = v.t1 - v.t0 || 1;
@@ -409,13 +419,17 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     const rs = drawingResizeRef.current;
     if (dd && dd.originalPoints.length > 0) {
       if (rs) {
+        // При ресайзе dd.originalPoints уже перезаписан новой (растянутой)
+        // геометрией в onMove — истинное "до" лежит в rs.originalPoints.
         o.updateDrawing(dd.drawingId, dd.originalPoints);
+        o.onDrawingMoved?.(dd.drawingId, rs.originalPoints);
       } else {
         const newPoints = dd.originalPoints.map((p) => ({
           t: Math.round(p.t + dd.dx),
           price: p.price - dd.dy,
         }));
         o.updateDrawing(dd.drawingId, newPoints);
+        o.onDrawingMoved?.(dd.drawingId, dd.originalPoints);
       }
     }
     drawingDragRef.current = null;
@@ -467,6 +481,24 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     return () => cv.removeEventListener("wheel", onWheel);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.canvasRef.current]);
+
+  // Delete/Backspace удаляет выбранный рисунок — не срабатывает, пока фокус
+  // в текстовом поле (например, в другой части страницы), и не срабатывает
+  // при locked (согласуется с блокировкой drag/resize в onDown выше).
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const o = optsRef.current;
+      if (o.locked || !o.selectedDrawingId || !o.onDeleteSelected) return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable) return;
+      e.preventDefault();
+      o.onDeleteSelected();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return {
     viewRef, layoutRef, boundsRef, hoverRef, snappedRef, dragRef, drawingDragRef, drawingResizeRef,
