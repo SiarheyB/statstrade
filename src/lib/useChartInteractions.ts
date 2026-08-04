@@ -103,6 +103,9 @@ export interface ChartInteractionsOptions {
 const HISTORY_TRIGGER_FRACTION = 0.3;
 // Не долбим бэкенд на каждый mousemove/wheel-тик при быстром скролле.
 const HISTORY_TRIGGER_THROTTLE_MS = 400;
+// Запас слева от самой первой свечи (в долях ширины видимого окна), когда
+// история реально закончилась — иначе первая свеча прилипает ровно к краю.
+const EDGE_PADDING_FRACTION = 0.1;
 
 export function useChartInteractions(opts: ChartInteractionsOptions) {
   const optsRef = useRef(opts);
@@ -148,10 +151,20 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
   // того, что вообще есть в БД/подгружено на клиенте, и видит чёрный холст
   // с "Загрузка истории", хотя грузить уже нечего (или ещё не подгрузилось).
   // Сдвигает t0/t1 на одну и ту же дельту, чтобы не менять масштаб (span).
+  //
+  // Когда история действительно кончилась (getHasMoreHistory() === false —
+  // настоящий край, не просто "ещё не подгрузили"), даём небольшой запас
+  // (EDGE_PADDING_FRACTION) влево от первой свечи — иначе она прилипает
+  // ровно к краю графика без всякого отступа.
   const clampToBounds = useCallback((view: ChartView): ChartView => {
     const b = boundsRef.current;
-    if (!b || view.t0 >= b.t0) return view;
-    const shift = b.t0 - view.t0;
+    if (!b) return view;
+    const o = optsRef.current;
+    const atRealEdge = o.getHasMoreHistory ? !o.getHasMoreHistory() : false;
+    const span = view.t1 - view.t0 || 1;
+    const minT0 = atRealEdge ? b.t0 - span * EDGE_PADDING_FRACTION : b.t0;
+    if (view.t0 >= minT0) return view;
+    const shift = minT0 - view.t0;
     return { ...view, t0: view.t0 + shift, t1: view.t1 + shift };
   }, []);
 
