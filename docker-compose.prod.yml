@@ -156,7 +156,7 @@ services:
       TRADE_RETENTION_DAYS: ${OB_TRADE_RETENTION_DAYS:-30}
       CANDLE_RETENTION_DAYS: ${OB_CANDLE_RETENTION_DAYS:-365}
       # Фича "Рекомендации" (дневные уровни/сетапы пробой-ложный пробой по
-      # всем USDT-парам Binance spot) — см. TRADE_RECOMMENDATIONS_PLAN.md.
+      # всем USDT-M фьючерсам Binance) — см. TRADE_RECOMMENDATIONS_PLAN.md.
       SCAN_ALL_USDT_PAIRS: ${OB_SCAN_ALL_USDT_PAIRS:-false}
       PORT: 8080
       # Bearer-токен для защищённого GET /metrics — его опрашивает админ-панель

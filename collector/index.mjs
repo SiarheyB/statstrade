@@ -255,42 +255,46 @@ async function backfillCandles() {
   }
 }
 
-// === Полный скан дневных свечей по всем USDT-парам Binance spot ===
+// === Полный скан дневных свечей по всем USDT-M бессрочным фьючерсам Binance ===
 // Отдельный, гораздо более широкий скан, чем cfg.symbols/CANDLE_INTERVALS
 // выше — нужен для фичи "Рекомендации" (поиск дневных уровней/сетапов
 // пробой/ложный пробой по всем инструментам, см. TRADE_RECOMMENDATIONS_PLAN.md),
-// а не только по паре-двум, для которых собирается стакан. Тянет ТОЛЬКО "1d"
-// (свечи для уровней, не для интерактивного графика) — вес запроса минимальный
-// (limit<=1500 → ~2 веса), поэтому даже 300-400 пар не создают ощутимой
-// нагрузки на Binance API за один проход.
-const ALL_PAIRS_EXCHANGE = "binance-spot";
+// а не только по паре-двум, для которых собирается стакан. Именно фьючерсы,
+// не спот — торгуем и в лонг, и в шорт, спот для этого не нужен. Тянет ТОЛЬКО
+// "1d" (свечи для уровней, не для интерактивного графика) — вес запроса
+// минимальный (limit<=1500 → ~2 веса), поэтому даже 300+ пар не создают
+// ощутимой нагрузки на Binance API за один проход.
+const ALL_PAIRS_EXCHANGE = "binance-futures";
 let allPairsScanRunning = false;
 let usdtPairsCache = { at: 0, symbols: [] };
 const USDT_PAIRS_CACHE_MS = 12 * 3600_000; // список пар меняется редко — кэш на полдня
 
-async function fetchUsdtSpotSymbols() {
+async function fetchUsdtFuturesSymbols() {
   if (Date.now() - usdtPairsCache.at < USDT_PAIRS_CACHE_MS && usdtPairsCache.symbols.length > 0) {
     return usdtPairsCache.symbols;
   }
-  const res = await fetch("https://api.binance.com/api/v3/exchangeInfo");
+  const res = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo");
   if (!res.ok) throw new Error(`exchangeInfo HTTP ${res.status}`);
   const data = await res.json();
+  // Только бессрочные (PERPETUAL) — квартальные/поставочные контракты
+  // (contractType CURRENT_QUARTER и т.п.) истекают и не нужны для дневных
+  // уровней "на сегодня".
   const symbols = (data.symbols ?? [])
-    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed)
+    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
     .map((s) => s.symbol);
   usdtPairsCache = { at: Date.now(), symbols };
   return symbols;
 }
 
-// Раз в сутки: список USDT-пар + дневные свечи по каждой. Последовательно с
+// Раз в сутки: список USDT-M пар + дневные свечи по каждой. Последовательно с
 // небольшой паузой между запросами — вежливо к rate-limit Binance, спешить
 // некуда (свечи дневные, чаще обновлять их бессмысленно).
 async function scanAllUsdtPairsDaily() {
   if (allPairsScanRunning) return;
   allPairsScanRunning = true;
   try {
-    const symbols = await fetchUsdtSpotSymbols();
-    console.log(`[recommendations] скан дневных свечей: ${symbols.length} USDT-пар`);
+    const symbols = await fetchUsdtFuturesSymbols();
+    console.log(`[recommendations] скан дневных свечей: ${symbols.length} USDT-M фьючерсов`);
     let done = 0;
     for (const symbol of symbols) {
       try {
@@ -964,4 +968,4 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
 export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
-export { fetchUsdtSpotSymbols, scanAllUsdtPairsDaily };
+export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };

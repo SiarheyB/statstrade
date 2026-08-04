@@ -5,7 +5,8 @@
 
 ## 0. Скоуп (сознательно сужен по итогам обсуждения)
 
-Фича ищет на дневном таймфрейме (D1) по **всем торгуемым USDT-парам Binance spot**
+Фича ищет на дневном таймфрейме (D1) по **всем USDT-M бессрочным фьючерсам
+Binance** (не спот — торгуем и в лонг, и в шорт, спот для шорта не годится)
 ценовые уровни, близкие к текущей цене, и для каждого такого уровня оценивает
 **только два** сетапа из документа:
 
@@ -28,18 +29,19 @@
 
 ## 1. Источник данных
 
-- **Список пар**: `GET /api/v3/exchangeInfo` (Binance spot) — фильтр
-  `status=TRADING`, `quoteAsset=USDT`. Ожидаем ~300-400 пар.
-- **Дневные свечи**: `GET /api/v3/klines?interval=1d`, глубина ~250-300 баров
+- **Список пар**: `GET /fapi/v1/exchangeInfo` (Binance USDT-M Futures) — фильтр
+  `status=TRADING`, `quoteAsset=USDT`, `contractType=PERPETUAL` (без квартальных
+  контрактов — они истекают). Ожидаем ~300+ пар.
+- **Дневные свечи**: `GET /fapi/v1/klines?interval=1d`, глубина ~250-300 баров
   (нужно минимум ~130 для критерия «экстремум за последние 6 месяцев» плюс
   запас для ATR/паттернов).
-- Храним в **существующей** таблице `ObCandle` (`symbol`, `exchange='binance-spot'`,
+- Храним в **существующей** таблице `ObCandle` (`symbol`, `exchange='binance-futures'`,
   `interval='1d'`, `t`, `o`, `h`, `l`, `c`, `v`) — схема уже общая, отдельная
   таблица под свечи не нужна. Апсерт идемпотентен (`ON CONFLICT DO UPDATE`),
   так что переиспользование безопасно даже если пара уже частично собирается
   orderbook-коллектором.
-- **Кто собирает**: новая функция в `collector/index.mjs` (например
-  `scanAllUsdtPairsDaily()`), отдельный таймер (раз в сутки — свечи дневные,
+- **Кто собирает**: новая функция в `collector/index.mjs`
+  (`scanAllUsdtPairsDaily()`), отдельный таймер (раз в сутки — свечи дневные,
   чаще не нужно). Работает независимо от `OB_SYMBOLS`/`CANDLE_INTERVALS` —
   это отдельный, гораздо более широкий скан, только `1d`.
 - Защита от перегрузки Binance: тот же паттерн, что уже есть для свечей —
@@ -110,7 +112,7 @@
 ```
 id            String   @id @default(cuid())
 symbol        String
-exchange      String   // "binance-spot"
+exchange      String   // "binance-futures"
 levelPrice    Float
 levelType     String   // break_point | mirror | historical | parabar | gap | pullback_border | range_border | reworked
 strength      Int
@@ -152,8 +154,8 @@ createdAt     DateTime  @default(now())
 ## 7. Порядок выполнения (по шагам, каждый — отдельный коммит)
 
 1. Создать ветку `feature/trade-recommendations`.
-2. `collector`: функция полного скана дневных свечей по всем USDT-парам
-   Binance spot + таймер + защита от повторного запуска.
+2. `collector`: функция полного скана дневных свечей по всем USDT-M
+   бессрочным фьючерсам Binance + таймер + защита от повторного запуска.
 3. Prisma: миграция `LevelSetup`.
 4. `src/lib/recommendations/levels.ts` — детекция уровней, юнит-тесты на
    синтетических свечах (по одному тесту на тип уровня).
