@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getFeedFreshness, ONLINE_THRESHOLD_MS } from "@/lib/admin";
+import { getDeployStatus } from "@/lib/deployStatus";
 import { getServerT } from "@/lib/i18n/server";
-import { Users, Plug, AlertTriangle, Layers, Activity } from "lucide-react";
+import { Users, Plug, AlertTriangle, Layers, Activity, RefreshCw, CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -63,11 +64,31 @@ export default async function AdminOverviewPage() {
   // не делать distinct-скан по разросшейся ObSnapshot (вешал страницу).
   const freshness = await getFeedFreshness();
   const staleFeeds = freshness.filter((f) => f.stale);
+  const deploy = await getDeployStatus();
 
   return (
     <div className="p-6 md:p-8 max-w-6xl">
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.overview.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("admin.overview.subtitle")}</p>
+
+      {/* Актуальность деплоя: сверка GIT_SHA этого контейнера с последним
+          коммитом main на GitHub — без доступа к docker.sock, см. lib/deployStatus.ts. */}
+      {deploy.available && (
+        <div
+          className={`mt-6 card p-4 flex items-center gap-3 text-sm ${deploy.upToDate ? "border-profit/30" : "border-accent/40"}`}
+        >
+          {deploy.upToDate ? (
+            <CheckCircle2 size={18} className="text-profit shrink-0" />
+          ) : (
+            <RefreshCw size={18} className="text-accent shrink-0" />
+          )}
+          <span>
+            {deploy.upToDate
+              ? t("admin.overview.deployUpToDate", { sha: deploy.runningShaShort })
+              : t("admin.overview.deployPending", { running: deploy.runningShaShort, latest: deploy.latestShaShort })}
+          </span>
+        </div>
+      )}
 
       {/* Алерт по карте ордеров: фиды, которые перестали наполняться. */}
       {freshness.length > 0 && (

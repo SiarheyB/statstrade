@@ -29,6 +29,13 @@ ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
 
+# Git-коммит, из которого собран этот образ — для индикатора "актуальная версия
+# развёрнута" в админке (сверяется с последним коммитом main на GitHub, без
+# доступа к docker.sock, см. /api/admin/deploy-status). Не NEXT_PUBLIC — читается
+# только на сервере, не должен попадать в клиентский бандл.
+ARG GIT_SHA=""
+ENV GIT_SHA=$GIT_SHA
+
 # Копируем и делаем исполняемым наш entrypoint-скрипт (авто-фикс миграций).
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
