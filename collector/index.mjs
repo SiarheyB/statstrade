@@ -28,6 +28,12 @@ const cfg = {
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
   rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
   candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
+  // Полный скан дневных свечей по всем USDT-парам Binance spot (фича
+  // "Рекомендации", см. TRADE_RECOMMENDATIONS_PLAN.md). Выключено по
+  // умолчанию — включается явно, чтобы не менять поведение существующих
+  // деплоев без ведома.
+  scanAllUsdtPairs: (process.env.SCAN_ALL_USDT_PAIRS ?? "false") === "true",
+  allPairsScanIntervalMs: Number(process.env.ALL_PAIRS_SCAN_INTERVAL_MS ?? 24 * 3600_000),
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
   metricsToken: process.env.COLLECTOR_METRICS_TOKEN ?? "",
@@ -246,6 +252,60 @@ async function backfillCandles() {
     console.log("[candles] бэкафилл завершён");
   } catch (err) {
     console.error(`[candles] бэкафилл ошибка: ${err.message}`);
+  }
+}
+
+// === Полный скан дневных свечей по всем USDT-парам Binance spot ===
+// Отдельный, гораздо более широкий скан, чем cfg.symbols/CANDLE_INTERVALS
+// выше — нужен для фичи "Рекомендации" (поиск дневных уровней/сетапов
+// пробой/ложный пробой по всем инструментам, см. TRADE_RECOMMENDATIONS_PLAN.md),
+// а не только по паре-двум, для которых собирается стакан. Тянет ТОЛЬКО "1d"
+// (свечи для уровней, не для интерактивного графика) — вес запроса минимальный
+// (limit<=1500 → ~2 веса), поэтому даже 300-400 пар не создают ощутимой
+// нагрузки на Binance API за один проход.
+const ALL_PAIRS_EXCHANGE = "binance-spot";
+let allPairsScanRunning = false;
+let usdtPairsCache = { at: 0, symbols: [] };
+const USDT_PAIRS_CACHE_MS = 12 * 3600_000; // список пар меняется редко — кэш на полдня
+
+async function fetchUsdtSpotSymbols() {
+  if (Date.now() - usdtPairsCache.at < USDT_PAIRS_CACHE_MS && usdtPairsCache.symbols.length > 0) {
+    return usdtPairsCache.symbols;
+  }
+  const res = await fetch("https://api.binance.com/api/v3/exchangeInfo");
+  if (!res.ok) throw new Error(`exchangeInfo HTTP ${res.status}`);
+  const data = await res.json();
+  const symbols = (data.symbols ?? [])
+    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.isSpotTradingAllowed)
+    .map((s) => s.symbol);
+  usdtPairsCache = { at: Date.now(), symbols };
+  return symbols;
+}
+
+// Раз в сутки: список USDT-пар + дневные свечи по каждой. Последовательно с
+// небольшой паузой между запросами — вежливо к rate-limit Binance, спешить
+// некуда (свечи дневные, чаще обновлять их бессмысленно).
+async function scanAllUsdtPairsDaily() {
+  if (allPairsScanRunning) return;
+  allPairsScanRunning = true;
+  try {
+    const symbols = await fetchUsdtSpotSymbols();
+    console.log(`[recommendations] скан дневных свечей: ${symbols.length} USDT-пар`);
+    let done = 0;
+    for (const symbol of symbols) {
+      try {
+        await fetchAndStoreCandlesFor(symbol, ALL_PAIRS_EXCHANGE, "1d");
+      } catch (err) {
+        console.error(`[recommendations] ${symbol} 1d: ${err.message}`);
+      }
+      done++;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    console.log(`[recommendations] скан завершён: ${done}/${symbols.length} пар`);
+  } catch (err) {
+    console.error(`[recommendations] скан ошибка: ${err.message}`);
+  } finally {
+    allPairsScanRunning = false;
   }
 }
 
@@ -874,12 +934,21 @@ const candleTimer = setInterval(fetchAndStoreCandles, 60_000);
 setTimeout(fetchAndStoreCandles, 15_000);
 setTimeout(backfillCandles, 30_000);
 
+// Полный скан USDT-пар (фича "Рекомендации") — раз в сутки, первый запуск
+// через 60с (даём стартовать обычному бэкафиллу первым).
+let allPairsScanTimer = null;
+if (cfg.scanAllUsdtPairs) {
+  allPairsScanTimer = setInterval(scanAllUsdtPairsDaily, cfg.allPairsScanIntervalMs);
+  setTimeout(scanAllUsdtPairsDaily, 60_000);
+}
+
 async function shutdown() {
   clearInterval(writeTimer);
   clearInterval(flushTimer.timer);
   clearInterval(pruneTimer);
   clearInterval(configTimer);
   clearInterval(candleTimer);
+  if (allPairsScanTimer) clearInterval(allPairsScanTimer);
   for (const f of feeds) f.book.close();
   for (const tf of tradeFeeds) tf.trades.close();
   server.close();
@@ -895,3 +964,4 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
 export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
+export { fetchUsdtSpotSymbols, scanAllUsdtPairsDaily };
