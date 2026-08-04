@@ -10,6 +10,15 @@ export default defineConfig({
     css: true,
     setupFiles: ['./vitest.setup.ts'],
     testTimeout: 5000,
+    // .claude/worktrees/** holds temporary agent worktrees (full repo copies) —
+    // without this, vitest's default glob picks up their test files too and
+    // runs everything twice. Keep vitest's own defaults alongside it.
+    exclude: [
+      '**/node_modules/**', '**/dist/**', '**/cypress/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      '**/{karma,rollup,webpack,vite,vitest,jest,ava,babel,nyc,cypress,tsup,build}.config.*',
+      '**/.claude/worktrees/**',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

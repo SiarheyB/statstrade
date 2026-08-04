@@ -90,6 +90,8 @@ export const mockPrisma = {
   tradeAnnotation: {
     findMany: vi.fn().mockResolvedValue([]),
     upsert: vi.fn().mockResolvedValue({}),
+    findUnique: vi.fn().mockResolvedValue(null),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
   },
 
   adminAudit: { create: vi.fn().mockResolvedValue({}) },
@@ -162,6 +164,7 @@ export const mockPrisma = {
   favouriteTicker: {
     findMany: vi.fn().mockResolvedValue([]),
     create: vi.fn().mockResolvedValue({}),
+    upsert: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
     deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
   },
@@ -175,6 +178,8 @@ export const mockPrisma = {
   fxCollectorConfig: {
     findMany: vi.fn().mockResolvedValue([]),
     upsert: vi.fn().mockResolvedValue({}),
+    update: vi.fn().mockResolvedValue({}),
+    delete: vi.fn().mockResolvedValue({}),
   },
   userDrawing: {
     findMany: vi.fn().mockResolvedValue([]),
@@ -193,6 +198,11 @@ export const mockPrisma = {
   announcementRead: {
     findMany: vi.fn().mockResolvedValue([]),
     createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    upsert: vi.fn().mockResolvedValue({}),
+  },
+  // Used by /api/orderflow/history (via lib/orderflow.ts fetchOrderflowCandlesBefore)
+  obCandle: {
+    findMany: vi.fn().mockResolvedValue([]),
   },
 };
 
