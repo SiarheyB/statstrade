@@ -28,6 +28,9 @@ export type SerializedTrade = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  // R-multiple посчитан один раз на сервере (см. /api/stats) — учитывает
+  // риск-профиль аккаунта, если он включён; иначе по дистанции стопа.
+  rr: number | null;
   note: string | null;
   imageUrl: string | null;
   imageProvider: string | null;

@@ -13,6 +13,7 @@ import {
 } from "@/lib/annotations";
 import { canonSymbol } from "@/lib/format";
 import { getCached, setCached, statsVersion } from "@/lib/statsCache";
+import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
 import type { Prisma } from "@prisma/client";
 
 // Дорогая часть stats — загрузка филлов и реконструкция сделок. Кэшируем именно
@@ -299,6 +300,16 @@ export async function GET(req: Request) {
       Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000,
     );
 
+    // RR — единая точка расчёта: считаем один раз здесь (учитывая риск-профиль,
+    // если он включён для аккаунта) и отдаём готовым полем на каждой сделке.
+    // /dashboard/trades показывает его в колонке RR, /dashboard/calendar просто
+    // суммирует t.rr по сделкам месяца — оба места гарантированно видят одно и
+    // то же число, без повторного пересчёта на клиенте.
+    const riskRows = await prisma.riskProfile.findMany({ where: { userId: user.userId } });
+    const riskProfiles: Record<string, RiskProfileData> = { "": defaultRiskProfile() };
+    for (const r of riskRows) riskProfiles[r.accountId] = parseRiskProfile(r);
+    const balanceByAccount = new Map(base.accounts.map((a) => [a.id, a.balance]));
+
     // Serialize trades (Dates -> ISO) for the client table.
     const serializedTrades = filteredTrades.map((t) => ({
       ...t,
@@ -312,6 +323,7 @@ export async function GET(req: Request) {
       imagePublicUrl: t.imagePublicUrl ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),
+      rr: tradeRR(t, t.stopLoss ?? null, riskProfiles, balanceByAccount.get(t.accountId) ?? null),
     }));
 
     const payload = {
