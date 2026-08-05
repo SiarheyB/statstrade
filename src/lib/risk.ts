@@ -91,6 +91,48 @@ export function riskPerTradeAmount(
   return (balance * r.value) / 100;
 }
 
+// --- R-multiple (RR) — shared by /dashboard/trades and /dashboard/calendar
+// so both show the same number for the same trade. ---
+
+export type RRTradeInput = {
+  accountId: string;
+  side: string;
+  entryPrice: number;
+  exitPrice: number;
+  fees: number;
+  qty: number;
+  netPnl: number;
+};
+
+// Stop-loss-distance model: 1R = |entry - stop| price move, fees expressed in
+// the same R units. Used when no risk-manager profile overrides it.
+export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): number | null {
+  if (stopLoss == null) return null;
+  const oneR = Math.abs(tr.entryPrice - stopLoss);
+  if (oneR <= 0) return null;
+  const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
+  const grossR = priceMove / oneR;
+  const feeR = tr.fees / (oneR * tr.qty);
+  return grossR - feeR;
+}
+
+// R-multiple for a trade: if the risk manager is enabled for this account with
+// a configured per-trade risk, R = netPnl / (that money amount) — otherwise
+// falls back to the stop-loss-distance model above.
+export function tradeRR(
+  tr: RRTradeInput,
+  stopLoss: number | null,
+  riskProfiles: Record<string, RiskProfileData>,
+  balance: number | null,
+): number | null {
+  const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
+  if (prof) {
+    const riskAmt = riskPerTradeAmount(prof, balance);
+    if (riskAmt && riskAmt > 0) return tr.netPnl / riskAmt;
+  }
+  return stopDistanceRR(tr, stopLoss);
+}
+
 // --- Status computation ---
 
 export type RiskTrade = { accountId: string; netPnl: number; exitTime: Date; result: string };

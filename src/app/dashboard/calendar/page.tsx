@@ -6,6 +6,7 @@ import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
 import { zonedParts, zonedDateToUtcMs, type TimezoneId } from "@/lib/timezone";
+import { tradeRR, type RiskProfileData } from "@/lib/risk";
 
 type DayStat = { pnl: number; trades: number; wins: number };
 
@@ -30,6 +31,7 @@ export default function CalendarPage() {
   const [view, setView] = useState<{ y: number; m: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [accountId, setAccountId] = useState("all");
+  const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -37,6 +39,22 @@ export default function CalendarPage() {
     if (res.ok) setData(await res.json());
     setLoading(false);
   }, [accountId]);
+
+  // Тот же риск-профиль, что и на /dashboard/trades — RR месяца в календаре
+  // должен быть суммой того же RR, что показан по каждой сделке в таблице
+  // «Сделки» (см. src/lib/risk.ts tradeRR), а не отдельным пересчётом по
+  // дистанции стопа.
+  useEffect(() => {
+    (async () => {
+      const res = await fetch("/api/risk/settings");
+      if (res.ok) setRiskProfiles((await res.json()).profiles ?? {});
+    })();
+  }, []);
+
+  const balanceOf = useCallback(
+    (accId: string): number | null => data?.accounts.find((a) => a.id === accId)?.balance ?? null,
+    [data],
+  );
 
   useEffect(() => {
     load();
@@ -56,14 +74,13 @@ export default function CalendarPage() {
     return map;
   }, [data, timezone]);
 
-  // R-multiple per day for the RR heatmap.
+  // R-multiple per day — та же формула tradeRR(), что и в колонке RR на
+  // /dashboard/trades (учитывает риск-профиль, если он включён для аккаунта).
   const rDaily = useMemo(() => {
     const map = new Map<string, { winR: number; lossR: number; trades: number }>();
     for (const tr of data?.trades ?? []) {
-      if (tr.stopLoss == null) continue;
-      const risk = Math.abs(tr.entryPrice - tr.stopLoss) * tr.qty;
-      if (risk <= 0) continue;
-      const r = tr.netPnl / risk;
+      const r = tradeRR(tr, tr.stopLoss, riskProfiles, balanceOf(tr.accountId));
+      if (r == null) continue;
       const k = dayKey(tr.exitTime, timezone);
       const d = map.get(k) ?? { winR: 0, lossR: 0, trades: 0 };
       if (r >= 0) d.winR += r; else d.lossR += r;
@@ -73,7 +90,7 @@ export default function CalendarPage() {
     return Array.from(map.entries())
       .map(([date, v]) => ({ date, ...v }))
       .sort((a, b) => a.date.localeCompare(b.date));
-  }, [data, timezone]);
+  }, [data, timezone, riskProfiles, balanceOf]);
 
   // Default the view to the month of the most recent trade.
   useEffect(() => {

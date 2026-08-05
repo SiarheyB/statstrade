@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight } from "lucide-react";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
-import { riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
+import { tradeRR, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
 import TradeImageCell from "@/components/TradeImageCell";
@@ -206,15 +206,10 @@ export default function TradesPage() {
   const balanceOf = (accountId: string): number | null =>
     data?.accounts.find((a) => a.id === accountId)?.balance ?? null;
 
-  // R-multiple for a trade. If the risk manager is enabled with a per-trade risk,
-  // R = netPnl / risk (money-based). Otherwise fall back to the stop-loss model.
+  // R-multiple for a trade — shared with /dashboard/calendar (src/lib/risk.ts)
+  // so both pages agree on the same number for the same trade.
   function rrFor(tr: SerializedTrade, stopLoss: number | null): number | null {
-    const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
-    if (prof) {
-      const riskAmt = riskPerTradeAmount(prof, balanceOf(tr.accountId));
-      if (riskAmt && riskAmt > 0) return tr.netPnl / riskAmt;
-    }
-    return rrOf(tr, stopLoss);
+    return tradeRR(tr, stopLoss, riskProfiles, balanceOf(tr.accountId));
   }
 
   const filtered = useMemo(() => {
@@ -796,20 +791,6 @@ function sortVal(tr: SerializedTrade, key: SortKey): number {
   if (key === "exitTime") return new Date(tr.exitTime).getTime();
   if (key === "entryTime") return new Date(tr.entryTime).getTime();
   return tr[key];
-}
-
-// R-multiple: 1R = |entryPrice - stopLoss| (pure price distance, no qty).
-// grossR = priceMove / 1R, then fees are subtracted in R units.
-// e.g. entry=10, stop=8 → 1R=2. exit=16 → grossR=6/2=3R. Fees=5, qty=100
-// → feeR=5/(2*100)=0.025R → netR=3-0.025=2.975R.
-function rrOf(tr: SerializedTrade, stopLoss: number | null): number | null {
-  if (stopLoss == null) return null;
-  const oneR = Math.abs(tr.entryPrice - stopLoss);
-  if (oneR <= 0) return null;
-  const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
-  const grossR = priceMove / oneR;
-  const feeR = tr.fees / (oneR * tr.qty);
-  return grossR - feeR;
 }
 
 function fmtRR(rr: number | null): string {
