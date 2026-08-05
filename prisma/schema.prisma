@@ -745,16 +745,21 @@ model ImportLog {
 // A named strategy/setup with its own written rules ("playbook") — extends
 // the existing free-text `pattern` tag on TradeAnnotation with documentation
 // and (computed on the fly, not stored) performance stats for that pattern.
+// entryPoint optionally narrows the playbook to one specific ТВХ (entry point)
+// value within that pattern — e.g. pattern "Breakout" has several distinct
+// entry-point flavors ("retest", "impulse close", ...), each with its own
+// rules. "" (default) means "any entry point" — the pattern-wide playbook.
 model Playbook {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  name      String // matches a value in the user's patternOptions list
-  rules     String // free-form entry/exit/risk rules text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name       String // matches a value in the user's patternOptions list
+  entryPoint String   @default("") // matches a value in entryPointOptions; "" = any
+  rules      String // free-form entry/exit/risk rules text
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  @@unique([userId, name])
+  @@unique([userId, name, entryPoint])
   @@index([userId])
 }
 

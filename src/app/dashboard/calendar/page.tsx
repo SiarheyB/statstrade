@@ -43,10 +43,12 @@ export default function CalendarPage() {
   }, [load]);
 
   // Per-day aggregates, bucketed by the user's selected display timezone.
+  // Bucketed by entryTime (когда сделка открыта), а не exitTime — так
+  // многодневные сделки видны в календаре в день входа, а не выхода.
   const days = useMemo(() => {
     const map = new Map<string, DayStat>();
     for (const tr of data?.trades ?? []) {
-      const k = dayKey(tr.exitTime, timezone);
+      const k = dayKey(tr.entryTime, timezone);
       const d = map.get(k) ?? { pnl: 0, trades: 0, wins: 0 };
       d.pnl += tr.netPnl;
       d.trades += 1;
@@ -65,7 +67,7 @@ export default function CalendarPage() {
     for (const tr of data?.trades ?? []) {
       const r = tr.rr;
       if (r == null) continue;
-      const k = dayKey(tr.exitTime, timezone);
+      const k = dayKey(tr.entryTime, timezone);
       const d = map.get(k) ?? { winR: 0, lossR: 0, trades: 0 };
       if (r >= 0) d.winR += r; else d.lossR += r;
       d.trades += 1;
@@ -80,7 +82,7 @@ export default function CalendarPage() {
   useEffect(() => {
     if (view || !data?.trades?.length) return;
     const last = data.trades.reduce(
-      (mx, tr) => Math.max(mx, new Date(tr.exitTime).getTime()),
+      (mx, tr) => Math.max(mx, new Date(tr.entryTime).getTime()),
       0,
     );
     const { y, mo } = zonedParts(last, timezone);
@@ -179,8 +181,8 @@ export default function CalendarPage() {
   const selectedTrades: SerializedTrade[] =
     selected && data
       ? data.trades
-          .filter((tr) => dayKey(tr.exitTime, timezone) === selected)
-          .sort((a, b) => new Date(a.exitTime).getTime() - new Date(b.exitTime).getTime())
+          .filter((tr) => dayKey(tr.entryTime, timezone) === selected)
+          .sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime())
       : [];
 
   return (

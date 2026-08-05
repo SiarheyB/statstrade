@@ -29,6 +29,7 @@ const mockPlaybook = {
   id: "pb-1",
   userId: "u1",
   name: "Scalping",
+  entryPoint: "",
   rules: "rule 1",
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -103,6 +104,29 @@ describe("PUT /api/playbooks", () => {
     expect(body.playbook.name).toBe("Scalping");
     expect(mockPrisma.playbook.upsert).toHaveBeenCalledOnce();
   });
+
+  it("defaults entryPoint to '' (pattern-wide playbook) when omitted", async () => {
+    asUser();
+    await PUT(new Request(base, {
+      method: "PUT",
+      body: JSON.stringify({ name: "Scalping", rules: "rule 1" }),
+    }));
+    const call = mockPrisma.playbook.upsert.mock.calls[0][0];
+    expect(call.where.userId_name_entryPoint.entryPoint).toBe("");
+    expect(call.create.entryPoint).toBe("");
+  });
+
+  it("upserts a playbook scoped to a specific entry point", async () => {
+    asUser();
+    const res = await PUT(new Request(base, {
+      method: "PUT",
+      body: JSON.stringify({ name: "Breakout", entryPoint: "Retest", rules: "wait for retest" }),
+    }));
+    expect(res.status).toBe(200);
+    const call = mockPrisma.playbook.upsert.mock.calls.at(-1)[0];
+    expect(call.where.userId_name_entryPoint).toEqual({ userId: "u1", name: "Breakout", entryPoint: "Retest" });
+    expect(call.create).toMatchObject({ name: "Breakout", entryPoint: "Retest" });
+  });
 });
 
 describe("DELETE /api/playbooks", () => {
@@ -123,12 +147,22 @@ describe("DELETE /api/playbooks", () => {
     expect(res.status).toBe(400);
   });
 
-  it("deletes playbook by name", async () => {
+  it("deletes playbook by name, defaulting entryPoint to '' (pattern-wide)", async () => {
     asUser();
     const res = await DELETE(new Request(`${base}?name=Scalping`));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
-    expect(mockPrisma.playbook.deleteMany).toHaveBeenCalledOnce();
+    expect(mockPrisma.playbook.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "u1", name: "Scalping", entryPoint: "" },
+    });
+  });
+
+  it("deletes only the playbook for the given entry point, leaving others with the same name", async () => {
+    asUser();
+    await DELETE(new Request(`${base}?name=Breakout&entryPoint=Retest`));
+    expect(mockPrisma.playbook.deleteMany).toHaveBeenCalledWith({
+      where: { userId: "u1", name: "Breakout", entryPoint: "Retest" },
+    });
   });
 });
