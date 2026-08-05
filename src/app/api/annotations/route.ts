@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
+import { recomputeRRForTradeKey } from "@/lib/analytics/rr";
 
 const schema = z.object({
   tradeKey: z.string().min(1).max(200),
@@ -47,6 +48,11 @@ export async function PUT(req: Request) {
       create: { userId: user.userId, tradeKey, ...data },
       update: data,
     });
+    // stopLoss — единственное поле аннотации, влияющее на RR; остальные
+    // (ТВХ, паттерн и т.п.) его не трогают, пересчёт им не нужен.
+    if (parsed.data.stopLoss !== undefined) {
+      await recomputeRRForTradeKey(tradeKey).catch(() => {});
+    }
     bumpStatsVersion(user.userId);
     return NextResponse.json({
       tradeKey: result.tradeKey,

@@ -190,6 +190,10 @@ model Trade {
   returnPct  Float
   fillCount  Int
   result     String // win | loss | breakeven
+  // R-multiple — посчитан и сохранён один раз (см. lib/analytics/rr.ts),
+  // а не при каждом запросе /api/stats. Пересчитывается точечно при: ребилде
+  // сделок аккаунта, правке stopLoss в TradeAnnotation, смене риск-профиля.
+  rr Float?
 
   @@index([accountId, exitTime])
   @@index([accountId, symbol, market])
@@ -228,6 +232,8 @@ model ImportedTrade {
   comment      String?
   importedAt   DateTime @default(now())
   importBatch  String? // id of the upload batch (for rollback)
+  // R-multiple — та же схема, что у Trade.rr (см. lib/analytics/rr.ts).
+  rr Float?
 
   @@unique([accountId, externalId])
   @@index([accountId])

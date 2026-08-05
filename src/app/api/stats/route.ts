@@ -13,7 +13,6 @@ import {
 } from "@/lib/annotations";
 import { canonSymbol } from "@/lib/format";
 import { getCached, setCached, statsVersion } from "@/lib/statsCache";
-import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
 import type { Prisma } from "@prisma/client";
 
 // Дорогая часть stats — загрузка филлов и реконструкция сделок. Кэшируем именно
@@ -83,7 +82,7 @@ async function buildBase(
           id: true, symbol: true, base: true, quote: true, market: true, exchange: true,
           accountId: true, side: true, entryTime: true, exitTime: true, qty: true,
           entryPrice: true, exitPrice: true, grossPnl: true, fees: true, netPnl: true,
-          returnPct: true, fillCount: true, result: true,
+          returnPct: true, fillCount: true, result: true, rr: true,
         },
       })
     : [];
@@ -108,6 +107,7 @@ async function buildBase(
     returnPct: r.returnPct,
     fillCount: r.fillCount,
     result: r.result as TradeResult,
+    rr: r.rr,
   }));
 
   // Счётчик филлов для шапки («N trades · M fills») — лёгкий COUNT по индексу.
@@ -137,7 +137,7 @@ async function buildBase(
           market: true, source: true, side: true, entryTime: true, exitTime: true,
           qty: true, entryPrice: true, exitPrice: true, grossProfit: true, swap: true,
           netPnl: true, commission: true, lots: true, pips: true, currency: true,
-          stopLoss: true,
+          stopLoss: true, rr: true,
         },
       })
     : [];
@@ -169,6 +169,7 @@ async function buildBase(
     assetClass: "forex",
     accountCurrency: it.currency,
     stopLoss: it.stopLoss,
+    rr: it.rr,
   }));
 
   const trades = [...cryptoTrades, ...importedTrades].sort(
@@ -300,15 +301,11 @@ export async function GET(req: Request) {
       Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000,
     );
 
-    // RR — единая точка расчёта: считаем один раз здесь (учитывая риск-профиль,
-    // если он включён для аккаунта) и отдаём готовым полем на каждой сделке.
-    // /dashboard/trades показывает его в колонке RR, /dashboard/calendar просто
-    // суммирует t.rr по сделкам месяца — оба места гарантированно видят одно и
-    // то же число, без повторного пересчёта на клиенте.
-    const riskRows = await prisma.riskProfile.findMany({ where: { userId: user.userId } });
-    const riskProfiles: Record<string, RiskProfileData> = { "": defaultRiskProfile() };
-    for (const r of riskRows) riskProfiles[r.accountId] = parseRiskProfile(r);
-    const balanceByAccount = new Map(base.accounts.map((a) => [a.id, a.balance]));
+    // RR уже посчитан и сохранён на самой сделке (Trade.rr / ImportedTrade.rr —
+    // см. lib/analytics/rr.ts, пересчитывается точечно при ребилде сделок,
+    // правке stopLoss и смене риск-профиля). Здесь просто читаем готовое
+    // значение — /dashboard/trades и /dashboard/calendar видят одно и то же
+    // число без повторного вычисления на клиенте.
 
     // Serialize trades (Dates -> ISO) for the client table.
     const serializedTrades = filteredTrades.map((t) => ({
@@ -323,7 +320,7 @@ export async function GET(req: Request) {
       imagePublicUrl: t.imagePublicUrl ?? null,
       entryTime: t.entryTime.toISOString(),
       exitTime: t.exitTime.toISOString(),
-      rr: tradeRR(t, t.stopLoss ?? null, riskProfiles, balanceByAccount.get(t.accountId) ?? null),
+      rr: t.rr ?? null,
     }));
 
     const payload = {

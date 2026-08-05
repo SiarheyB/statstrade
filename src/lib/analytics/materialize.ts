@@ -11,6 +11,7 @@ import { prisma } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { reconstructTrades } from "./positions";
 import type { RoundTripTrade } from "./types";
+import { recomputeRRForAccount } from "./rr";
 
 export type TradeGroup = { symbol: string; market: string };
 
@@ -74,6 +75,10 @@ export async function rebuildTradeGroups(
       ? [prisma.trade.createMany({ data: trades.map(toRow), skipDuplicates: true })]
       : []),
   ]);
+  // deleteMany+createMany обнуляет rr на пересобранных строках — досчитываем
+  // сразу же, иначе Сделки/Календарь показывали бы пусто до следующего
+  // изменения stopLoss/риск-профиля.
+  await recomputeRRForAccount(accountId);
 }
 
 // Полная пересборка аккаунта + отметка tradesRebuiltAt (бэкафилл, демо-данные).
@@ -94,6 +99,7 @@ export async function rebuildAccountTrades(accountId: string): Promise<void> {
       data: { tradesRebuiltAt: new Date() },
     }),
   ]);
+  await recomputeRRForAccount(accountId);
 }
 
 // Ленивый бэкафилл: пересобрать аккаунты, у которых Trade ещё не строился
