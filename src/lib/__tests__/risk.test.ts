@@ -6,6 +6,8 @@ import {
   serializeRiskPerTrade,
   riskPerTradeAmount,
   computeAccountRisk,
+  periodStart,
+  periodEnd,
   type RiskTrade,
 } from "@/lib/risk";
 
@@ -16,6 +18,40 @@ const may = (d: number) => new Date(`2024-05-${String(d).padStart(2, "0")}T10:00
 function trade(netPnl: number, result: string, exitTime: Date, accountId = "a1"): RiskTrade {
   return { accountId, netPnl, exitTime, result };
 }
+
+describe("periodStart / periodEnd", () => {
+  // 2024-06-15 — суббота.
+  const sat = new Date("2024-06-15T12:00:00Z");
+  // 2024-06-16 — воскресенье: пограничный день недели (getUTCDay() === 0).
+  const sun = new Date("2024-06-16T12:00:00Z");
+
+  it("начало периода: день / неделя (с понедельника) / месяц / год", () => {
+    expect(periodStart("day", sat)).toBe(Date.UTC(2024, 5, 15));
+    expect(periodStart("week", sat)).toBe(Date.UTC(2024, 5, 10)); // пн 10 июня
+    expect(periodStart("week", sun)).toBe(Date.UTC(2024, 5, 10)); // вс относится к той же неделе
+    expect(periodStart("month", sat)).toBe(Date.UTC(2024, 5, 1));
+    expect(periodStart("year", sat)).toBe(Date.UTC(2024, 0, 1));
+  });
+
+  it("конец периода = начало следующего", () => {
+    expect(periodEnd("day", sat)).toBe(Date.UTC(2024, 5, 16));
+    expect(periodEnd("week", sat)).toBe(Date.UTC(2024, 5, 17)); // след. понедельник
+    expect(periodEnd("month", sat)).toBe(Date.UTC(2024, 6, 1));
+    expect(periodEnd("year", sat)).toBe(Date.UTC(2025, 0, 1));
+  });
+
+  it("в воскресенье неделя заканчивается завтра, а не через 8 дней", () => {
+    expect(periodEnd("week", sun)).toBe(Date.UTC(2024, 5, 17));
+  });
+
+  it("каждый период непустой и непрерывный", () => {
+    for (const p of ["day", "week", "month", "year"] as const) {
+      expect(periodEnd(p, sat)).toBeGreaterThan(periodStart(p, sat));
+      // Начало следующего периода = его конец: сетка без дыр и нахлёстов.
+      expect(periodStart(p, new Date(periodEnd(p, sat)))).toBe(periodEnd(p, sat));
+    }
+  });
+});
 
 describe("risk profile parsing", () => {
   it("defaultRiskProfile is all-off", () => {

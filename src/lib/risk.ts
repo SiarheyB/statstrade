@@ -156,7 +156,10 @@ export type AccountRisk = {
 
 const WARN_RATIO = 0.8;
 
-function periodStart(key: PeriodKey, now: Date): number {
+// Начало периода (UTC). Экспортируется, чтобы riskManager.getNetStopsCount
+// пользовался ЭТОЙ реализацией, а не своей копией — расхождение уже приводило
+// к тому, что годовой лимит отсчитывался от начала месяца.
+export function periodStart(key: PeriodKey, now: Date): number {
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   const d = now.getUTCDate();
@@ -167,6 +170,22 @@ function periodStart(key: PeriodKey, now: Date): number {
   }
   if (key === "month") return Date.UTC(y, m, 1);
   return Date.UTC(y, 0, 1);
+}
+
+// Начало СЛЕДУЮЩЕГО периода (UTC) — момент, когда счётчик обнуляется.
+// Используется как TTL кэша в getNetStopsCount: держать значение дольше нельзя,
+// иначе после смены суток/недели показывался бы прошлый период.
+export function periodEnd(key: PeriodKey, now: Date): number {
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const d = now.getUTCDate();
+  if (key === "day") return Date.UTC(y, m, d + 1);
+  if (key === "week") {
+    const diff = (now.getUTCDay() + 6) % 7; // days since Monday
+    return Date.UTC(y, m, d - diff + 7);
+  }
+  if (key === "month") return Date.UTC(y, m + 1, 1);
+  return Date.UTC(y + 1, 0, 1);
 }
 
 // Net loss within a period: sum of ALL trades' P&L (wins offset losses).

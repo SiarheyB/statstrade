@@ -1,6 +1,12 @@
 import { prisma } from "./db";
 import { Cache } from "./cache";
-import { parseRiskProfile, riskPerTradeAmount, defaultRiskProfile } from "./risk";
+import {
+  parseRiskProfile,
+  riskPerTradeAmount,
+  defaultRiskProfile,
+  periodStart,
+  periodEnd,
+} from "./risk";
 
 type Limits = {
   dailyStops?: number;
@@ -106,19 +112,11 @@ export async function getNetStopsCount(
   const cached = Cache.get<number>(cacheKey);
   if (cached !== undefined) return cached;
 
+  // Границы периода берём из lib/risk.ts (одна реализация на весь риск-модуль).
+  // Локальная копия этой логики отсчитывала "year" от начала МЕСЯЦА — годовой
+  // лимит фактически совпадал с месячным.
   const now = new Date();
-  let from: Date;
-  if (period === "day") {
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  } else if (period === "week") {
-    const diff = (now.getUTCDay() + 6) % 7; // Monday = 0
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff));
-  } else if (period === "month") {
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  } else {
-    // year
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  }
+  const from = new Date(periodStart(period, now));
 
   // Получаем **все** закрытые сделки за период, сначала находим аккаунт пользователя
   const tradeAccount = await prisma.exchangeAccount.findFirst({
@@ -190,21 +188,10 @@ export async function getNetStopsCount(
     used = Math.max(0, Math.ceil(-netR - 1e-9));
   }
 
-  // TTL: оставшееся время до конца периода
-  let ttlMs = 0;
-  if (period === "day") {
-    ttlMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
-  } else if (period === "week") {
-    const nextMonday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + (8 - now.getUTCDay())));
-    ttlMs = nextMonday.getTime() - now.getTime();
-  } else if (period === "month") {
-    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    ttlMs = nextMonth.getTime() - now.getTime();
-  } else {
-    // year
-    const nextYear = new Date(Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), 1));
-    ttlMs = nextYear.getTime() - now.getTime();
-  }
+  // TTL: оставшееся время до конца периода (тот же периодный календарь, что и
+  // в periodStart — прошлая копия для "week" в воскресенье уезжала на 8 дней
+  // вперёд, а для "year" держала значение почти год).
+  const ttlMs = periodEnd(period, now) - now.getTime();
 
   Cache.set(cacheKey, used, ttlMs);
   return used;

@@ -20,11 +20,18 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/cache", () => ({ Cache: { get: mocks.cacheGet, set: mocks.cacheSet } }));
-vi.mock("@/lib/risk", () => ({
-  parseRiskProfile: mocks.parseRiskProfile,
-  defaultRiskProfile: mocks.defaultRiskProfile,
-  riskPerTradeAmount: mocks.riskPerTradeAmount,
-}));
+// periodStart/periodEnd НЕ мокаем — это чистые функции календаря, и именно их
+// корректность проверяют тесты границ периода ниже.
+vi.mock("@/lib/risk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/risk")>();
+  return {
+    periodStart: actual.periodStart,
+    periodEnd: actual.periodEnd,
+    parseRiskProfile: mocks.parseRiskProfile,
+    defaultRiskProfile: mocks.defaultRiskProfile,
+    riskPerTradeAmount: mocks.riskPerTradeAmount,
+  };
+});
 
 import { getNetStopsCount } from "@/lib/riskManager";
 
@@ -85,5 +92,40 @@ describe("getNetStopsCount", () => {
     mocks.tradeFindMany.mockResolvedValue([{ netPnl: -2000, result: "loss" }]); // -2R
     const r = await getNetStopsCount("u", "e", "year");
     expect(r).toBe(2);
+  });
+
+  it("годовой период отсчитывается от 1 января, а не от начала месяца", async () => {
+    mocks.tradeFindMany.mockResolvedValue([]);
+    await getNetStopsCount("u", "e", "year");
+    const from = mocks.tradeFindMany.mock.calls[0][0].where.exitTime.gte as Date;
+    expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  });
+
+  it("окно каждого периода совпадает с календарём riskManager", async () => {
+    const now = new Date();
+    const expected: Record<string, number> = {
+      day: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+      month: Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+      year: Date.UTC(now.getUTCFullYear(), 0, 1),
+    };
+    for (const period of ["day", "month", "year"] as const) {
+      mocks.tradeFindMany.mockClear();
+      mocks.tradeFindMany.mockResolvedValue([]);
+      await getNetStopsCount("u", "e", period);
+      const from = mocks.tradeFindMany.mock.calls[0][0].where.exitTime.gte as Date;
+      expect(from.getTime()).toBe(expected[period]);
+    }
+  });
+
+  it("TTL кэша не переживает конец периода", async () => {
+    mocks.tradeFindMany.mockResolvedValue([{ netPnl: -2000, result: "loss" }]);
+    const before = Date.now();
+    await getNetStopsCount("u", "e", "year");
+    const ttl = mocks.cacheSet.mock.calls[0][2] as number;
+    const yearEnd = Date.UTC(new Date().getUTCFullYear() + 1, 0, 1);
+    // Раньше TTL считался как "этот же месяц в следующем году" — значение
+    // могло пережить 1 января и показать счётчик прошлого года.
+    expect(before + ttl).toBeLessThanOrEqual(yearEnd);
+    expect(ttl).toBeGreaterThan(0);
   });
 });

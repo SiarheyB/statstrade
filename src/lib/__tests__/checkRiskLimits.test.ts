@@ -20,7 +20,12 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-vi.mock("@/lib/risk", () => ({
+// periodStart/periodEnd — чистые функции календаря, берём настоящие.
+vi.mock("@/lib/risk", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/risk")>();
+  return {
+  periodStart: actual.periodStart,
+  periodEnd: actual.periodEnd,
   parseRiskProfile: vi.fn((row) => {
     if (!row) return { enabled: false, maxStopsPerDay: null, riskPerTrade: { on: false, value: 0, unit: "pct" }, lossLimits: {} };
     // parseRiskProfile processes the row from DB - return the enabled flag
@@ -28,7 +33,8 @@ vi.mock("@/lib/risk", () => ({
   }),
   defaultRiskProfile: vi.fn(() => ({ enabled: true, lossLimits: { day: { on: false, value: 0 }, week: { on: false, value: 0 }, month: { on: false, value: 0 }, year: { on: false, value: 0 } } })),
   riskPerTradeAmount: vi.fn().mockReturnValue(1000),
-}));
+  };
+});
 
 vi.mock("@/lib/cache", () => ({ Cache: { get: mocks.cacheGet, set: mocks.cacheSet } }));
 
