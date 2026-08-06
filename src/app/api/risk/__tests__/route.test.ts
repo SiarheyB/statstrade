@@ -7,8 +7,8 @@ import {
 } from "@/lib/__tests__/helpers/routeMocks";
 import { GET } from "@/app/api/risk/route";
 
-vi.mock("@/lib/analytics/positions", () => ({
-  reconstructTrades: vi.fn().mockReturnValue([]),
+vi.mock("@/lib/analytics/materialize", () => ({
+  ensureAccountTrades: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("@/lib/risk", () => ({
@@ -50,26 +50,24 @@ vi.mock("@/lib/risk", () => ({
   ),
 }));
 
-const base = "https://example.com/api/risk";
-
 describe("GET /api/risk", () => {
   beforeEach(() => {
     mockGetAuthUser.mockReset();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([]);
-    mockPrisma.fill.findMany.mockResolvedValue([]);
+    mockPrisma.trade.findMany.mockResolvedValue([]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([]);
     vi.clearAllMocks();
   });
 
   it("returns 401 when not authenticated", async () => {
     asGuest();
-    const res = await GET(new Request(base));
+    const res = await GET();
     expect(res.status).toBe(401);
   });
 
   it("returns 200 with empty accounts when user has no exchange accounts", async () => {
     asUser();
-    const res = await GET(new Request(base));
+    const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveProperty("accounts");
@@ -85,28 +83,19 @@ describe("GET /api/risk", () => {
       { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000 },
       { id: "acc-2", label: "Second", exchange: "binance", balance: 5000 },
     ]);
-    mockPrisma.fill.findMany.mockResolvedValue([
+    mockPrisma.trade.findMany.mockResolvedValue([
       {
-        id: "fill-1",
-        symbol: "BTCUSDT",
-        base: "BTC",
-        quote: "USDT",
-        market: "futures",
-        side: "buy",
-        price: 50000,
-        amount: 0.1,
-        fee: 5,
-        feeCurrency: "USDT",
-        timestamp: new Date("2024-01-01T10:00:00Z"),
-        exchange: "bybit",
         accountId: "acc-1",
+        netPnl: -120,
+        exitTime: new Date("2024-01-01T10:00:00Z"),
+        result: "loss",
       },
     ]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([
       { accountId: "", enabled: true, maxStopsPerDay: 3 },
     ]);
 
-    const res = await GET(new Request(base));
+    const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.accounts.length).toBe(2);
@@ -129,17 +118,41 @@ describe("GET /api/risk", () => {
       },
     ]);
 
-    const res = await GET(new Request(base));
+    const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.accounts[0].custom).toBe(true);
     expect(body.accounts[0].enabled).toBe(true);
   });
 
+  it("reads materialized trades (not fills) and only from the start of the year", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findMany.mockResolvedValue([
+      { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000, tradesRebuiltAt: new Date() },
+    ]);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+
+    // Реконструкции из филлов больше нет — читаем таблицу Trade.
+    expect(mockPrisma.fill.findMany).not.toHaveBeenCalled();
+    const args = mockPrisma.trade.findMany.mock.calls[0][0];
+    expect(args.where.accountId).toEqual({ in: ["acc-1"] });
+    const from = args.where.exitTime.gte as Date;
+    expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  });
+
+  it("skips the trade query entirely when the user has no exchange accounts", async () => {
+    asUser();
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(mockPrisma.trade.findMany).not.toHaveBeenCalled();
+  });
+
   it("returns 500 when prisma query fails", async () => {
     asUser();
     mockPrisma.exchangeAccount.findMany.mockRejectedValueOnce(new Error("DB error"));
-    const res = await GET(new Request(base));
+    const res = await GET();
     expect(res.status).toBe(500);
   });
 });
