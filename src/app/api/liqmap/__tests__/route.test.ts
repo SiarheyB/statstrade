@@ -43,7 +43,7 @@ describe("GET /api/liqmap", () => {
   it("returns 400 when computeLiqMap yields no data", async () => {
     asUser();
     const { computeLiqMap } = await import("@/lib/liqmap");
-    (computeLiqMap as unknown as vi.Mock).mockResolvedValueOnce(null);
+    (computeLiqMap as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce(null);
     const res = await GET(new Request(`${base}?exchange=all&symbol=BTCUSDT&tf=7d`));
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: expect.stringContaining("Нет данных") });

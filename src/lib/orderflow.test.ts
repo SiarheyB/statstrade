@@ -55,7 +55,7 @@ describe("/api/orderflow[GET]", () => {
 
   it("успешно обрабатывает запрос с валидным tz=UTC+3", async () => {
     const { buildPayload } = await import("@/lib/orderflow");
-    (buildPayload as vi.Mock).mockResolvedValue({
+    (buildPayload as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       symbol: "BTCUSDT",
       exchange: "binance-spot",
       range: "1h",
@@ -80,7 +80,7 @@ describe("/api/orderflow[GET]", () => {
 
   it("кэширует ответ на TTL", async () => {
     const { buildPayload } = await import("@/lib/orderflow");
-    (buildPayload as vi.Mock).mockResolvedValue({
+    (buildPayload as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       symbol: "BTCUSDT",
       exchange: "binance-spot",
       range: "1h",
@@ -112,7 +112,7 @@ describe("/api/orderflow[GET]", () => {
 
   it("возвращает 400 при невалидном tz", async () => {
     const { isTimezone } = await import("@/lib/timezone");
-    (isTimezone as vi.Mock).mockReturnValueOnce(false);
+    (isTimezone as unknown as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
 
     const url = makeUrl({
       symbol: "BTCUSDT",

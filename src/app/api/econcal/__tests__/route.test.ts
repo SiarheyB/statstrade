@@ -36,7 +36,7 @@ describe("GET /api/econcal", () => {
   it("returns 500 when getCalendar throws", async () => {
     asUser();
     const { getCalendar } = await import("@/lib/econcal");
-    (getCalendar as unknown as vi.Mock).mockRejectedValueOnce(new Error("Calendar fetch failed"));
+    (getCalendar as unknown as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error("Calendar fetch failed"));
     const res = await GET(new Request(base));
     expect(res.status).toBe(500);
   });
