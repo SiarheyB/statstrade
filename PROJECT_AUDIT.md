@@ -1,0 +1,495 @@
+# Аудит TradeStats — пересчёты «на лету» → БД + общее состояние проекта
+
+Дата: 2026-08-06 · ветка `main` (`f10fafe`)
+Проверено: 510 TS/TSX-файлов, 90 API-роутов, 39 моделей Prisma, коллекторы.
+
+Факты по инструментам (прогнал прямо сейчас):
+- `npx vitest run` → **244 файла / 1712 тестов — все зелёные** (40 с).
+- `npx tsc --noEmit` → **170 ошибок**, из них 169 в тестах, 1 в `src/__mocks__/api.ts`
+  (все — `Cannot find name 'vi'` и рассинхрон типов тестов с прод-типами).
+- `npx eslint .` → **455 errors / 142 warnings**, из них **104 error в `src/`**
+  (381 `no-explicit-any`, 38 `react-hooks/set-state-in-effect`, 10 `static-components`,
+  8 `purity`, 5 `refs`).
+
+---
+
+## 0. TL;DR — что даст максимум прироста
+
+Статусы: `[ ]` не сделано, `[x]` выполнено.
+
+| # | Ст. | Что | Эффект | Цена |
+|---|-----|-----|--------|------|
+| 1 | **[x]** | `/api/risk` перестал использовать материализованные `Trade` — грузит **все филлы** юзера и реконструирует сделки на каждый запрос | Огромный: баннер риска висит на дашборде и «Сделках» | 30 мин |
+| 2 | [ ] | `/api/stats` отдаёт **весь массив сделок** на клиент на каждой странице (дашборд, сделки, календарь, аналитика) | Мегабайты JSON + сериализация; при 10k сделок ≈ 7 МБ | 1–2 дня (постранично + агрегаты) |
+| 3 | [ ] | Таблица **`TradeDaily`** (день × аккаунт) вместо агрегации всех сделок на клиенте (календарь, daily-график, тренд 30д, месячные бакеты) | Календарь/дашборд перестают зависеть от размера истории | 1 день |
+| 4 | [ ] | Колонки **MFE/MAE** в `Trade` вместо клиентского пересчёта через N HTTP к бирже | Exit Efficiency из «30 с и рейт-лимит» → мгновенно | 0.5 дня |
+| 5 | [ ] | **`ObTradeRollup`** (минутные бакеты buy/sell/count) — delta/CVD/speed-of-tape перестают сканировать сырую партиционированную ленту | Orderflow опрашивается каждые 3 с — это главный источник нагрузки на БД | 1 день |
+| 6 | [ ] | **`ObFootprintRollup`** по свече — footprint сейчас GROUP BY по сырью на каждый опрос | То же | 0.5 дня |
+| 7 | [ ] | Liqmap: алгоритм **O(n²)** (до 12 млн итераций/запрос) + 3 внешних HTTP, кэш только в памяти на 60 с | Один из самых дорогих эндпоинтов | 0.5 дня |
+| 8 | [ ] | БАГ: `computeSpeedOfTape` считает `COUNT(*)` строк `ObTrade` = число снапшотов, а не сделок | Метрика показывает почти константу | 15 мин (+колонка) |
+| 9 | **[x]** | БАГ: forex `computeBA` читает `FxCandle` **без фильтра по `interval`** | Смешивает 5m/15m/1h/1d/1w; на `1w` тянет год 5-минуток | 5 мин |
+| 10 | **[x]** | БАГ: `getNetStopsCount` для периода `year` считает от **начала месяца** | Годовой лимит риска фактически = месячному | 5 мин |
+
+---
+
+# ЧАСТЬ 1. Пересчёты на лету → что положить в БД
+
+## 1.1 Карта пересчётов
+
+| Место | Что пересчитывается | Когда | Заменяется на |
+|---|---|---|---|
+| `src/app/api/stats/route.ts:299` | `computeMetrics()` — ~60 метрик, equity-кривая, 10 разрезов | каждый GET | `TradeStatsSnapshot` / агрегаты в SQL |
+| `src/app/api/stats/route.ts:118` | `prisma.fill.count()` | каждый GET | счётчик `ExchangeAccount.fillCount` |
+| `src/app/api/risk/route.ts:21-41` | `findMany(Fill)` + `reconstructTrades()` по **всем** филлам юзера | каждый рендер `RiskBanner` | чтение `Trade` (уже материализовано!) |
+| `src/lib/riskManager.ts:134` | `getNetStopsCount` — 3 запроса + суммирование | на проверку лимита | `TradeDaily` + 1 агрегат |
+| `src/app/dashboard/calendar/page.tsx:48-79` | группировка всех сделок по дням + сумма R | на клиенте, каждый рендер | `TradeDaily` (или SQL GROUP BY с tz) |
+| `src/app/dashboard/page.tsx:61-102` | `computeTrend` — 30д vs предыдущие 30д | на клиенте | поле в метриках сервера |
+| `src/app/dashboard/analytics/page.tsx:77-127` | 3 гистограммы по всем сделкам (**[x]** свой `rrOf()` убран — читаем `tr.rr`) | на клиенте | серверные бакеты |
+| `src/app/dashboard/trades/page.tsx` | фильтры/сортировка/пагинация по всему массиву | на клиенте | серверная пагинация |
+| `src/lib/analytics/exitEfficiency.ts` | MFE/MAE: N параллельных HTTP к бирже за свечами | по кнопке, каждый раз заново | колонки в `Trade` |
+| `src/lib/mentorShare.ts:19` | `findMany` без `select` + `computeMetrics` | каждый просмотр share-ссылки | тот же снапшот метрик |
+| `src/lib/orderflow.ts:283` `computeDelta` | GROUP BY по сырому `ObTrade` | каждые 3 с на клиента | `ObTradeRollup` |
+| `src/lib/orderflow.ts:340` `computeFootprint` | GROUP BY по `ObFootprint` (цена × свеча) | каждые 3 с | `ObFootprintRollup` |
+| `src/lib/orderflow.ts:612` профиль стакана | подзапрос `MAX(t)` по сырому `ObSnapshot` **дважды** | каждые 3 с | `ObLatestBook` (1 строка на symbol×exchange) |
+| `src/lib/orderflow.ts:1154` `computeSpeedOfTape` | `COUNT(*)` по `ObTrade` | 12 с TTL | `SUM(tradeCount)` из rollup |
+| `src/lib/orderflow.ts:692` `computeVolumeProfile` | разложение свечей по бинам | 12 с TTL | кэш в БД по (symbol, period) |
+| `src/lib/orderflow.ts:849` `computeDivergence` | свечи + дельта + поиск экстремумов | 12 с TTL | `ObSignal`, пишет коллектор |
+| `src/lib/orderflow.ts:1231` `computeAbsorption` | скан всех свечей + footprint | 12 с TTL | `ObSignal` |
+| `src/lib/liqmap.ts:180-204` | O(n²) построение сетки + 3 внешних HTTP | 60 с TTL в памяти | `LiqMapSnapshot` + фикс алгоритма |
+| `src/app/api/forex/route.ts:100-165` | BA/delta/CVD из `FxCandle` | 3 с TTL | те же rollup-принципы, что в крипте |
+
+## 1.2 Блок A — статистика сделок (самое ценное для UI)
+
+### A1. [x] `/api/risk` — регресс, чинить первым — **ВЫПОЛНЕНО**
+
+Было:
+```ts
+// src/app/api/risk/route.ts:21
+const fills = await prisma.fill.findMany({ where: { account: { userId: user.userId } } });
+const trades = reconstructTrades(inputs);   // ← реконструкция ВСЕЙ истории
+```
+
+Таблица `Trade` для этого и заведена (`prisma/schema.prisma:170`). Роут просто не
+перевели. Плюс `findMany` без `select` тянул все колонки филлов.
+
+Стало (`src/app/api/risk/route.ts`):
+- чтение `prisma.trade.findMany` с `select` ровно под `RiskTrade`
+  (`accountId, netPnl, exitTime, result`);
+- окно `exitTime >= начало текущего года (UTC)` — самый широкий лимит риск-
+  менеджера это `year`, всё старше на статус не влияет;
+- `where.accountId: { in: [...] }` по уже загруженным аккаунтам вместо join
+  через `account: { userId }`;
+- при нуле аккаунтов запрос к `Trade` вообще не выполняется;
+- добавлен `ensureAccountTrades()` — одноразовый бэкафилл для legacy-аккаунтов
+  (иначе у них риск показал бы ноль), тот же путь, что в `/api/stats`.
+
+Тесты роута переписаны под новую реализацию (+2 новых: «читаем Trade, а не Fill,
+и только с начала года», «без аккаунтов запроса нет»). Побочно: `tsc`-ошибок
+стало 165 вместо 170 (в этом тест-файле `GET()` вызывался с лишним аргументом).
+
+### A2. Таблица `TradeDaily` — дневные агрегаты
+
+Закрывает: календарь, `metrics.daily`, `byDayOfWeek`/`byMonth`, тренд 30д,
+`getNetStopsCount`, месячную сводку, PnL-хитмап.
+
+```prisma
+model TradeDaily {
+  accountId String
+  day       DateTime @db.Date   // календарный день в UTC
+  trades    Int      @default(0)
+  wins      Int      @default(0)
+  losses    Int      @default(0)
+  netPnl    Float    @default(0)
+  grossProfit Float  @default(0)
+  grossLoss   Float  @default(0)
+  fees      Float    @default(0)
+  volume    Float    @default(0)
+  winR      Float    @default(0)   // Σ положительных rr
+  lossR     Float    @default(0)   // Σ отрицательных rr
+  rTrades   Int      @default(0)   // сколько сделок с посчитанным rr
+  account   ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@id([accountId, day])
+  @@index([day])
+}
+```
+
+Наполнение — **одним SQL**, без выгрузки в Node, в тех же точках, где уже
+вызывается `recomputeRRForAccount` (`src/lib/analytics/rr.ts:9-18`):
+
+```sql
+INSERT INTO "TradeDaily" (...)
+SELECT "accountId", date_trunc('day', "exitTime")::date, COUNT(*), ...
+FROM "Trade" WHERE "accountId" = $1
+GROUP BY 1, 2
+ON CONFLICT ("accountId","day") DO UPDATE SET ...;
+```
+
+Точки пересчёта (уже существуют, добавить один вызов):
+`materialize.rebuildTradeGroups` / `rebuildAccountTrades`, `/api/annotations` PUT
+(меняет stopLoss → rr), `/api/risk/settings` PUT, `/api/accounts/[id]/import`.
+
+**Важный нюанс — таймзона.** Календарь бакетит по `entryTime` в таймзоне
+пользователя (`calendar/page.tsx:20`), а `metrics.daily` — по `exitTime` в UTC
+(`metrics.ts:284`). Это уже сейчас даёт расхождение цифр между «Календарём» и
+графиком daily P&L на дашборде. Варианты:
+1. хранить в `TradeDaily` день по UTC, а на сервере отдавать календарь через
+   `date_trunc('day', "entryTime" AT TIME ZONE $tz)` — точно и без клиента;
+2. решить, что бакетим по одному полю (`exitTime`), и убрать расхождение.
+
+Рекомендация: сделать endpoint `GET /api/calendar?month=…&tz=…&accountId=…`,
+который отдаёт готовую сетку 42 ячеек + месячную сводку. Клиент перестаёт
+получать сделки вообще (кроме списка выбранного дня — отдельный запрос).
+
+### A3. Серверная пагинация «Сделок»
+
+`src/app/dashboard/trades/page.tsx:92` — `fetch("/api/stats")` без параметров,
+т.е. **вся история**, чтобы показать 25 строк. Нужен
+`GET /api/trades?page=&sort=&filters…` с `take/skip` по индексу
+`[accountId, exitTime]`. `/api/stats` остаётся только для метрик.
+
+Побочный выигрыш: `statsCache` (`src/lib/statsCache.ts:16`) сейчас **вообще не
+кэширует** пользователей с >8000 сделок — то есть ровно тех, кому кэш нужнее
+всего. После разделения кэшируется лёгкий payload метрик, а не сделки.
+
+### A4. Снапшот метрик (опционально, после A2)
+
+```prisma
+model TradeStatsSnapshot {
+  userId    String
+  scope     String   // "all" | accountId
+  market    String   // all | spot | futures | forex
+  metrics   Json
+  tradeCount Int
+  version   Int      // = statsVersion, для инвалидации
+  updatedAt DateTime @updatedAt
+  @@id([userId, scope, market])
+}
+```
+
+Даёт кэш, переживающий рестарт контейнера (сейчас всё в памяти процесса —
+watchtower обновляет образ каждые ~2 минуты, кэш обнуляется).
+
+### A5. Мелочи, которые убирают запросы
+
+- `ExchangeAccount.fillCount Int @default(0)` — инкрементить в `sync.ts` при
+  вставке филлов; убирает `COUNT` из `stats/route.ts:118`.
+- Денормализовать `userId` в `Trade`/`ImportedTrade` + `@@index([userId, exitTime])`.
+  Сейчас каждый запрос идёт через подзапрос по `ExchangeAccount`; для будущих
+  SQL-агрегатов «по всем аккаунтам» это один индексный скан вместо join.
+- `src/lib/mentorShare.ts:19-21` — `findMany` без `select`, тянет все колонки
+  обеих таблиц. Добавить `select` (как уже сделано в `/api/stats`).
+
+## 1.3 Блок B — MFE/MAE (exit efficiency)
+
+`src/lib/analytics/exitEfficiency.ts` запускается **в браузере**, делает до
+`maxTrades` параллельных `GET /api/trade-chart`, каждый из которых ходит в ccxt
+за свечами. Результат никуда не сохраняется — следующий клик считает всё заново.
+
+Но MFE/MAE закрытой сделки **неизменны**. Это классический кандидат в БД:
+
+```prisma
+model Trade {
+  // …
+  mfePct      Float?    // максимальный ход в плюс, %
+  maePct      Float?    // максимальная просадка, %
+  capturedPct Float?    // сколько из движения забрали
+  bestPrice   Float?
+  mfeAt       DateTime? // когда посчитано (null = ещё не считали)
+}
+```
+
+Считать фоново после `rebuildTradeGroups` (или отдельным воркером в коллекторе,
+чтобы не грузить Next-процесс), пачками, с уважением к рейт-лимитам биржи.
+Тогда карточка Exit Efficiency открывается мгновенно и без внешних запросов,
+а «худшие сделки» можно показывать прямо в таблице сделок.
+
+## 1.4 Блок C — orderflow (самый горячий контур)
+
+Клиент опрашивает `/api/orderflow` **каждые 3 секунды** (`orderflow/page.tsx:649`),
+плюс отдельные эндпоинты divergence / imbalance / absorption / volume-profile
+с TTL 12 с. Каждый промах кэша = тяжёлые агрегации по партиционированным таблицам.
+
+### C1. `ObTradeRollup` — минутные бакеты ленты
+
+```prisma
+model ObTradeRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3)  // начало минуты
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+  trades   Int      @default(0)          // ← реальное число сделок
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+  @@index([bucket])                      // для pruneOld
+}
+```
+
+Пишет коллектор ровно тем же механизмом, что `ObSnapshotRollup`
+(`collector/index.mjs:399-465` — аккумулятор в памяти + flush по границе минуты).
+`computeDelta` и `computeSpeedOfTape` переключаются на него; при пустом rollup —
+fallback на сырьё, как уже сделано в `computeBA`/`computeOrderflow`.
+
+**Это же чинит баг #8**: сейчас `COUNT(*)` по `ObTrade` считает снапшоты
+(коллектор пишет одну агрегированную строку на тик, см. `collector/trades.mjs:29`),
+а не сделки. «Скорость ленты» показывает ≈ константу 60/`snapshotMs`.
+Нужен реальный счётчик — его же можно добавить и в сырой `ObTrade`.
+
+### C2. `ObFootprintRollup` — footprint по свече
+
+`computeFootprint` каждый раз делает `GROUP BY bucket, price` по сырью для окна
+в 400–800 свечей. Коллектор может сразу писать агрегат по фиксированной сетке
+(5m — базовый интервал, остальные ТФ складываются из него):
+
+```prisma
+model ObFootprintRollup {
+  symbol   String
+  exchange String
+  interval String   // "5m"
+  bucket   DateTime @db.Timestamptz(3)
+  price    Float
+  buyVol   Float @default(0)
+  sellVol  Float @default(0)
+  @@id([symbol, exchange, interval, bucket, price])
+  @@index([symbol, exchange, interval, bucket])
+}
+```
+
+### C3. `ObLatestBook` — текущий профиль стакана
+
+`src/lib/orderflow.ts:612-622` на каждый запрос выполняет запрос с коррелированным
+подзапросом `MAX("t")` по сырому `ObSnapshot` — по сути дважды сканирует окно
+ради «последнего снапшота». Коллектор и так держит его в памяти:
+
+```prisma
+model ObLatestBook {
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3)
+  levels   Json     // [{price, bidVol, askVol}]
+  mid      Float
+  @@id([symbol, exchange])
+}
+```
+Одна строка на пару, `upsert` на каждый тик — дёшево, читается по PK.
+
+### C4. `ObSignal` — дивергенции и абсорбция
+
+Оба детектора детерминированы по закрытым свечам и одинаковы для всех
+пользователей. Считать их в коллекторе на закрытии свечи и складывать в таблицу:
+
+```prisma
+model ObSignal {
+  id       String   @id @default(cuid())
+  symbol   String
+  exchange String
+  interval String
+  kind     String   // divergence | absorption
+  subtype  String   // regular_bullish | …
+  t        DateTime @db.Timestamptz(3)
+  strength Int
+  payload  Json
+  @@index([symbol, exchange, interval, t])
+}
+```
+Роуты становятся простыми `SELECT … WHERE t BETWEEN …`.
+
+### C5. Volume Profile
+
+Дешевле остальных (читает `ObCandle`), но при `period=30d` и `bins=500` это уже
+заметно. Достаточно кэша в БД по ключу `(symbol, exchange, period, bins)` с
+TTL 1–5 минут, либо оставить как есть — приоритет низкий.
+
+## 1.5 Блок D — liqmap
+
+`src/lib/liqmap.ts:180-204`: для каждой свечи × 6 плеч × 2 стороны ищется первое
+касание уровня **линейным проходом вперёд** → O(n² · 12). При `limit = 1000`
+это ~12 млн итераций **на каждый промах 60-секундного кэша**, плюс 3 внешних
+HTTP к Binance/Bybit/OKX.
+
+Два независимых улучшения:
+1. **Алгоритм.** Заменить внутренний поиск на предпосчитанные префиксные
+   массивы (running max high / running min low справа налево + бинарный поиск,
+   или монотонный стек) → O(n log n). Результат идентичный.
+2. **Персистентность.** `LiqMapSnapshot(exchange, symbol, tf, grid Json, builtAt)`
+   + прогрев популярных пар (BTC/ETH/SOL) фоновым джобом. Сейчас после каждого
+   рестарта контейнера (watchtower — раз в пару минут при активном деплое)
+   первый пользователь платит полную цену.
+
+## 1.6 Блок E — forex
+
+- **[x] БАГ (ВЫПОЛНЕНО):** `computeBA` (`src/app/api/forex/route.ts`) не
+  фильтровал по `interval` → выбирал свечи **всех** таймфреймов одновременно.
+  Для `range=1w` окно = 52 недели, значит читался год 5-минутных свечей по паре
+  и мешался с недельными: ряд с дублирующимися таймстемпами («пила» на панели
+  B/A) плюс сотни тысяч лишних строк в Node.
+  **Фикс:** `computeBA` принимает `interval` и получает тот же `sourceInterval`,
+  что и `computeDelta` (для `12h` это `1h` — таймфрейм собирается агрегацией).
+  Остальные forex-роуты (`history`, `imbalance`, `divergence`, `volume-profile`)
+  проверены — там фильтр по `interval` уже был.
+  Тесты: два новых — «все три запроса к `FxCandle` идут с одним интервалом» и
+  «для `12h` используется исходный `1h`».
+- Хардкод `exchange: "finnhub"` в трёх местах роута, при этом в схеме
+  `FxCandle.exchange` дефолт `"twelvedata"`, а комментарии говорят про Dukascopy
+  и Twelve Data (`prisma/schema.prisma:604-643`, `src/lib/forexActivity.ts:1-10`).
+  Источник менялся дважды, комментарии и дефолты не обновили — вынести источник
+  в одну константу/ENV.
+- `symbol` из query не валидируется (в отличие от orderflow-роута, где есть
+  и очистка, и проверка длины).
+
+---
+
+# ЧАСТЬ 2. Найденные баги корректности
+
+| № | Файл | Проблема |
+|---|------|----------|
+| B1 | `src/lib/orderflow.ts:1170` | Speed of Tape считает снапшоты, а не сделки (см. C1) |
+| B2 | ~~`src/app/api/forex/route.ts:102`~~ | **[x] исправлено** — `computeBA` без `interval` смешивал таймфреймы |
+| B3 | ~~`src/lib/riskManager.ts:118-121`~~ | **[x] исправлено** — для периода `year` начало отсчёта было **началом месяца**: годовой лимит равнялся месячному. Заодно чинился TTL кэша (см. ниже) |
+| B4 | ~~`src/app/dashboard/analytics/page.tsx:21-29`~~ | **[x] исправлено** — R пересчитывался по формуле «движение цены / дистанция стопа» в ТРЁХ местах (`analytics/page.tsx` `rrOf`, `metrics.ts` `avgRR`, `metrics.ts` дневные `winR/lossR`), игнорируя риск-профиль. Теперь везде читается сохранённый `Trade.rr` — как уже делал «Календарь» |
+| B5 | календарь vs дашборд | Календарь бакетит по `entryTime` в таймзоне юзера, `metrics.daily` — по `exitTime` в UTC. Многодневная сделка попадает в разные дни в разных экранах |
+| B6 | `src/lib/riskManager.ts:177` | `Cache.set(cacheKey, 0, 0)` — TTL 0 мс, запись протухает мгновенно (кэш не работает для «лимит не задан») |
+| B7 | `src/lib/orderflow.ts:117-159` | В live-пути `fetchOrderflowCandles` ходит в Binance **на каждый** запрос (каждые 3 с на активного пользователя) и делает `INSERT … ON CONFLICT`. При нескольких зрителях — лишние записи в БД и внешние запросы; свечи и так пишет коллектор раз в 60 с |
+| B8 | все роуты orderflow/liqmap/forex | In-memory `Map`-кэши **без ограничения размера и без вытеснения** (`absorption/route.ts:40` ключ = вся query-строка). Медленная утечка памяти в долгоживущем контейнере. `src/lib/cache.ts` — та же история (нет eviction, `any` в типе) |
+| B9 | ~~`src/lib/riskManager.ts` (TTL)~~ | **[x] исправлено (найдено при B3)** — TTL кэша считался своей копией календаря: для `year` = «этот же месяц в следующем году» (значение переживало 1 января и показывало счётчик прошлого года), для `week` в **воскресенье** = +8 дней вместо +1 |
+
+---
+
+# ЧАСТЬ 3. Общее состояние проекта
+
+## 3.1 Что сделано хорошо
+
+- Материализация сделок (`Trade`) и вынос RR в БД — правильное направление,
+  дальше просто надо доделать до конца (см. A1).
+- Rollup-таблицы для стакана + партиционирование по дням + DROP PARTITION вместо
+  DELETE — грамотно.
+- Комментарии в схеме и в «горячих» местах объясняют *почему*, а не *что*.
+  Редкость и большая ценность.
+- 1712 тестов, все зелёные; есть интеграционный тест ретеншна коллектора в CI.
+- Безопасность: CSP, HSTS, шифрование токенов AES-GCM, 2FA, rate-limit,
+  `serverError()` не светит внутренности наружу.
+
+## 3.2 Технический долг
+
+**Зависимости**
+- `package.json:29` — **`"vi": "^1.0.0"`**. Это не vitest, а пустой пакет-пустышка
+  с npm (`main: index.js`, без кода). Попал сюда из-за `import { vi } from "vi"`
+  в тестах. Классический вектор typosquatting — удалить, импортировать `vi` из
+  `vitest` (или включить `globals: true`, что уже сделано в `vitest.config.ts`).
+
+**Типы и линт**
+- 169 ошибок `tsc` в тестах — в `tsconfig.json` нет `"types": ["vitest/globals"]`
+  и тесты не исключены из `include`. `next build` в Docker выполняет тайпчек по
+  этому же tsconfig — стоит проверить, не проходит ли сборка только по случайности.
+- 104 ошибки eslint в `src/` — в основном `any` и правила `react-hooks` из
+  нового плагина (`set-state-in-effect`, `refs`, `purity`). Часть из них —
+  реальные потенциальные баги рендера (`useChartInteractions.ts:112` — запись в
+  ref во время рендера).
+- Рекомендация: включить `eslint --max-warnings` в CI **после** разбора текущего
+  долга, иначе новый долг накапливается незаметно.
+
+**Репозиторий**
+- `log.txt` одновременно в `.gitignore` и **закоммичен** (`git ls-files` его видит,
+  и он изменён прямо сейчас). Нужен `git rm --cached log.txt`.
+- В корне 9 планов-документов на ~250 КБ (`FEATURE_IDEAS.md` 72 КБ,
+  `IMPLEMENTATION_PLAN.md` 50 КБ, `README.md` 44 КБ, `TRADE_IMAGE_LINK_PLAN.md`,
+  `LOGS_PLAN.md`, `FOREX_PLAN.md`, `LAZY_HISTORY_PLAN.md`, `coverage-plan.md`,
+  `IMPLEMENTATION_SUMMARY.md`,
+  `IMPROVEMENTS_CHECKLIST.md`). Их место в `docs/` — корень должен читаться за
+  10 секунд. В `README.md` при этом раздел «Деплой на VPS» устарел (в `CLAUDE.md`
+  это уже отмечено).
+- `.idea/`, `coverage/`, `backup/`, `graphify-out/` в рабочем дереве — проверить,
+  что ничего лишнего не в git.
+
+**Docker / деплой (сервер слабый — тут это важно)**
+- `Dockerfile` — одностадийный `node:24-slim`: в финальный образ попадают
+  исходники, dev-зависимости, `.next/cache`. Multi-stage + `output: "standalone"`
+  в `next.config.ts` уменьшит образ в разы → быстрее pull у watchtower и меньше
+  диска на мини-ПК.
+- `npm install` вместо `npm ci` в Dockerfile и в CI. Это уже отмечено в
+  `CLAUDE.md` как «ломает прод», но правильный фикс — починить lockfile
+  и перейти на `npm ci` (детерминированная сборка), а не жить с `install`.
+- Кэши в памяти плохо сочетаются с деплоем: watchtower проверяет GHCR каждые
+  ~120 с и перезапускает контейнер на каждом новом образе — любой прогретый
+  кэш при этом умирает (`statsCache`, кэши orderflow/liqmap). Ещё один аргумент за
+  персистентные агрегаты (Часть 1) — они переживают рестарт.
+
+**Архитектура**
+- `src/app/dashboard/orderflow/page.tsx` — 1449 строк, 30+ `useState` в одном
+  компоненте; `ForexView.tsx` — 930 строк с дублирующей логикой отрисовки.
+  Общий canvas-слой (`candlestickChart.ts` + `useChartInteractions.ts`) уже есть —
+  стоит довести до конца и вынести панели в отдельные компоненты.
+- `src/lib/orderflow.ts` — 1385 строк: heatmap, свечи, дельта, footprint, B/A,
+  volume profile, дивергенции, абсорбция. Просится разбиение на модули
+  (`orderflow/heatmap.ts`, `orderflow/signals.ts`, …), особенно если появятся
+  rollup-таблицы.
+- `computeMetrics` (541 строка) делает ~15 отдельных проходов по массиву +
+  несколько `[...sorted].sort()`. Для 10k сделок это доли секунды, но при
+  переходе на серверные агрегаты бóльшую часть можно посчитать в SQL.
+
+## 3.3 Наблюдаемость
+
+Есть `ErrorLog` + `ImportLog` + админка. Чего не хватает для «слабого сервера»:
+- тайминги медленных запросов (Prisma `$on("query")` с порогом, или просто
+  логировать длительность в `/api/orderflow` и `/api/stats`);
+- метрика попаданий/промахов кэшей (сейчас нельзя ответить, работает ли
+  `statsCache` вообще при текущем размере лимитов);
+- `HEALTHCHECK` в compose для `app`/`collector`.
+
+---
+
+# ЧАСТЬ 4. Порядок внедрения
+
+**Этап 0 — быстрые победы (полдня)**
+1. [x] A1 — `/api/risk` на `Trade` + фильтр по времени.
+2. [x] B2 — `interval` в forex `computeBA`.
+3. [x] B3 — начало года в `getNetStopsCount`.
+   `periodStart`/`periodEnd` вынесены в `src/lib/risk.ts` как единственная
+   реализация периодного календаря; `riskManager` использует их вместо
+   собственной копии, из-за которой и разошлись границы.
+4. [x] B4 — R везде читается из БД, а не пересчитывается.
+   Убраны три копии формулы «движение цены / дистанция стопа»:
+   `analytics/page.tsx` → `rrOf`, `metrics.ts` → `avgRR`, `metrics.ts` →
+   дневные `winR/lossR` (питают R-декомпозицию дневного графика и `RHeatmap`).
+   Все три теперь берут `Trade.rr` / `ImportedTrade.rr`. Побочный эффект:
+   если у аккаунта включён риск-профиль, в R-статистику попадают ВСЕ сделки,
+   а не только те, у которых проставлен стоп.
+5. [ ] Удалить пакет `vi`, добавить `types: ["vitest/globals"]` в tsconfig.
+6. [ ] `git rm --cached log.txt`.
+
+**Этап 1 — агрегаты сделок (2–3 дня)**
+7. `TradeDaily` + наполнение в существующих точках пересчёта RR.
+8. `GET /api/calendar` (сетка месяца из `TradeDaily`, tz-aware).
+9. `GET /api/trades` с серверной пагинацией; «Сделки» перестают качать всё.
+10. `fillCount` на аккаунте, `select` в `mentorShare`.
+
+**Этап 2 — orderflow (2–3 дня)**
+11. `ObTradeRollup` (+ реальный счётчик сделок → фикс B1).
+12. `ObFootprintRollup`.
+13. `ObLatestBook`.
+14. Ограничить размер всех in-memory кэшей (B8) — общий helper с LRU + TTL.
+15. Убрать поход в Binance из `fetchOrderflowCandles` в live-пути (B7).
+
+**Этап 3 — тяжёлое (по желанию)**
+16. MFE/MAE в `Trade` + фоновый воркер.
+17. `ObSignal` (дивергенции/абсорбция) в коллекторе.
+18. Liqmap: O(n log n) + `LiqMapSnapshot`.
+19. `TradeStatsSnapshot` вместо памяти процесса.
+
+**Этап 4 — гигиена**
+20. Разбор eslint-долга + гейт в CI.
+21. Multi-stage Dockerfile + `output: standalone`, `npm ci`.
+22. Планы из корня → `docs/`, актуализировать README.
+23. Разбиение `orderflow.ts` и страницы orderflow.
+
+---
+
+## Приложение: проверенные факты
+
+```
+npx vitest run          → 244 files / 1712 tests passed        (0 fail)
+npx tsc --noEmit        → 170 errors (169 в тестах, 1 в src/__mocks__/api.ts)
+npx eslint .            → 455 errors / 142 warnings (104 errors в src/)
+git ls-files | wc -l    → 816
+```
