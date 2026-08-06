@@ -65,6 +65,23 @@ describe("GET /api/forex", () => {
     expect(body.cvd).not.toBeNull();
   });
 
+  it("filters every FxCandle query by a single interval (candles, B/A, delta)", async () => {
+    await GET(new Request(`${base}?symbol=EUR/USD&range=1h`));
+    const intervals = mockPrisma.fxCandle.findMany.mock.calls.map(
+      (c) => (c[0] as { where: { interval?: string } }).where.interval,
+    );
+    expect(intervals.length).toBe(3); // свечи + B/A + delta
+    expect(intervals.every((i) => i === "1h")).toBe(true);
+  });
+
+  it("uses the aggregation source interval for 12h (not supported upstream)", async () => {
+    await GET(new Request(`${base}?symbol=EUR/USD&range=12h`));
+    const intervals = mockPrisma.fxCandle.findMany.mock.calls.map(
+      (c) => (c[0] as { where: { interval?: string } }).where.interval,
+    );
+    expect(intervals.every((i) => i === "1h")).toBe(true);
+  });
+
   it("returns 500 when prisma throws", async () => {
     mockPrisma.fxCandle.findMany.mockRejectedValue(new Error("db down"));
     const res = await GET(new Request(`${base}?symbol=EUR/USD&range=1h`));

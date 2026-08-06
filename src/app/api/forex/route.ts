@@ -98,11 +98,16 @@ async function fetchCandles(symbol: string, range: string, fromMs: number, toMs:
 // Аппроксимируем B/A из OHLCV: bid = low, ask = high каждой свечи.
 // bidSum/askSum — это цена bid/ask, умноженная на 10000 для отображения.
 
-async function computeBA(symbol: string, fromMs: number, toMs: number) {
+async function computeBA(symbol: string, fromMs: number, toMs: number, interval: string) {
+  // ВАЖНО: фильтр по interval обязателен. Без него выборка захватывала свечи
+  // ВСЕХ таймфреймов сразу (5m + 15m + 1h + 4h + 1d + 1w) — ряд получался с
+  // дублирующимися таймстемпами и «пилой» на панели B/A, а на широких окнах
+  // (range=1w → год истории) в Node тянулись сотни тысяч лишних строк.
   const rows = await prisma.fxCandle.findMany({
     where: {
       symbol,
       exchange: "finnhub",
+      interval,
       t: { gte: new Date(fromMs), lte: new Date(toMs) },
     },
     orderBy: { t: "asc" },
@@ -200,7 +205,7 @@ export async function GET(req: Request) {
         const sourceInterval = AGGREGATE_FROM[range] ?? range;
         const [candles, ba, deltaRes] = await Promise.all([
           fetchCandles(symbol, range, fromMs, toMs),
-          computeBA(symbol, fromMs, toMs),
+          computeBA(symbol, fromMs, toMs, sourceInterval),
           computeDelta(symbol, fromMs, toMs, sourceInterval),
         ]);
         return {
