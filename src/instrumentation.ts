@@ -2,9 +2,23 @@
 // the in-process auto-sync scheduler (Node runtime only).
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-  if (process.env.ENABLE_SCHEDULER === "false") return;
-  const { startScheduler } = await import("./lib/scheduler");
-  startScheduler();
+
+  if (process.env.ENABLE_SCHEDULER !== "false") {
+    const { startScheduler } = await import("./lib/scheduler");
+    startScheduler();
+  }
+
+  // Не гейтим на ENABLE_SCHEDULER — на проде он "false" (синк гоняет системный
+  // крон хоста), но бэкафилл rr должен отработать при каждом старте контейнера
+  // независимо от этого. Fire-and-forget: не блокирует старт сервера, ошибки
+  // только логируются. После первого успешного прогона — no-op (сделок с
+  // rr=NULL уже не остаётся).
+  import("./lib/analytics/rr")
+    .then(({ backfillMissingRR }) => backfillMissingRR())
+    .then(({ accounts }) => {
+      if (accounts > 0) console.log(`[rr-backfill] пересчитан rr для ${accounts} аккаунт(ов)`);
+    })
+    .catch((err) => console.error("[rr-backfill] ошибка:", err));
 }
 
 // Global catch for errors NOT already handled by a route's own try/catch (the

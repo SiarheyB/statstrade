@@ -10,6 +10,12 @@
 //    (профиль влияет на риск сразу всех сделок аккаунта).
 //  - /api/accounts/[id]/import: импорт форекс-отчёта — новые ImportedTrade
 //    ещё без rr, нужен recomputeRRForAccount.
+//  - instrumentation.ts (register(), однократно при старте процесса) —
+//    backfillMissingRR() досчитывает rr для сделок, у которых он ещё NULL
+//    (например, сделки, синхронизированные ДО того, как появилась колонка
+//    rr — точечные триггеры выше на них не срабатывали и не сработают, пока
+//    что-то в них не изменится). После первого успешного прогона это no-op
+//    (запрос ничего не находит), так что безопасно оставлять на каждый старт.
 
 import { prisma } from "@/lib/db";
 import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
@@ -128,4 +134,25 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
     stopLoss, ctx.profiles, ctx.balance,
   );
   await prisma.importedTrade.update({ where: { id: importedTrade.id }, data: { rr } });
+}
+
+// Разовый (по факту — на каждый старт процесса, но дешёвый после первого
+// прогона) бэкафилл: находит аккаунты, у которых есть хоть одна сделка с
+// rr = NULL, и пересчитывает их целиком через recomputeRRForAccount. Нужен
+// для сделок, попавших в БД до появления колонки rr — точечные хуки
+// (materialize/annotations/risk settings) их не затронут, пока в них что-то
+// не изменится вручную.
+export async function backfillMissingRR(): Promise<{ accounts: number }> {
+  const [cryptoGaps, importedGaps] = await Promise.all([
+    prisma.trade.findMany({ where: { rr: null }, select: { accountId: true }, distinct: ["accountId"] }),
+    prisma.importedTrade.findMany({ where: { rr: null }, select: { accountId: true }, distinct: ["accountId"] }),
+  ]);
+  const accountIds = new Set([
+    ...cryptoGaps.map((r) => r.accountId),
+    ...importedGaps.map((r) => r.accountId),
+  ]);
+  for (const id of accountIds) {
+    await recomputeRRForAccount(id).catch(() => {});
+  }
+  return { accounts: accountIds.size };
 }
