@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import type { StatsResponse } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { EquityChart, DrawdownChart, Histogram } from "@/components/charts.lazy";
 import { Term } from "@/components/Term";
@@ -16,16 +16,6 @@ function compact(n: number): string {
   const s = n < 0 ? "-" : "";
   if (a >= 1000) return `${s}${(a / 1000).toFixed(1)}k`;
   return `${s}${Math.round(a)}`;
-}
-
-function rrOf(tr: SerializedTrade): number | null {
-  if (tr.stopLoss == null) return null;
-  const oneR = Math.abs(tr.entryPrice - tr.stopLoss);
-  if (oneR <= 0) return null;
-  const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
-  const grossR = priceMove / oneR;
-  const feeR = tr.fees / (oneR * tr.qty);
-  return grossR - feeR;
 }
 
 export default function AnalyticsPage() {
@@ -93,8 +83,11 @@ export default function AnalyticsPage() {
     }));
   }, [trades]);
 
+  // Распределение R — по сохранённому в БД tr.rr (то же число, что в колонке RR
+  // на «Сделках» и в сводке «Календаря»). Своей формулы здесь больше нет:
+  // она игнорировала риск-профиль аккаунта и показывала другие бакеты.
   const rBins = useMemo<Bin[]>(() => {
-    const rs = trades.map(rrOf).filter((r): r is number => r != null);
+    const rs = trades.map((tr) => tr.rr).filter((r): r is number => r != null);
     if (!rs.length) return [];
     const defs: { label: string; test: (r: number) => boolean; tone: "profit" | "loss" }[] = [
       { label: "≤ -2R", test: (r) => r <= -2, tone: "loss" },

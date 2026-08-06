@@ -16,7 +16,9 @@ vi.mock("@/components/charts.lazy", () => ({
   EquityChart: () => <div data-testid="equity-chart" />,
   DrawdownChart: () => <div data-testid="drawdown-chart" />,
   Histogram: ({ data }: { data: unknown[] }) => (
-    <div data-testid="histogram">{data.length} bins</div>
+    <div data-testid="histogram" data-bins={JSON.stringify(data)}>
+      {data.length} bins
+    </div>
   ),
 }));
 
@@ -136,6 +138,51 @@ describe("AnalyticsPage", () => {
     expect(screen.getByTestId("monte-carlo-card")).toBeInTheDocument();
     expect(screen.getByText("1.90")).toBeInTheDocument(); // profitFactor via fmtRatio
     expect(screen.getByText("Main (binance)")).toBeInTheDocument();
+  });
+
+  it("buckets the R distribution by the stored rr, not by the stop distance", async () => {
+    // entry 100 → exit 110, стоп 95, комиссия 1: старая формула по дистанции
+    // стопа дала бы (10/5) − 1/5 = +1.8R → корзина «1…2».
+    // В БД сохранён rr = 2.5 (риск-профиль аккаунта) → корзина «2…3».
+    const trades = [makeTrade({ rr: 2.5 })];
+    global.fetch = vi.fn((url: string) => {
+      if (url.startsWith("/api/stats")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(makeStatsResponse(trades)) });
+      }
+      if (url.startsWith("/api/accounts")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: "acc-1", capital: 5000 }]) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+    }) as any;
+
+    render(<AnalyticsPage />);
+    await waitFor(() => expect(screen.getByTestId("equity-chart")).toBeInTheDocument());
+
+    // Второй Histogram на странице — распределение R.
+    const raw = screen.getAllByTestId("histogram")[1].getAttribute("data-bins")!;
+    const bins = JSON.parse(raw) as { label: string; count: number }[];
+    const byLabel = Object.fromEntries(bins.map((b) => [b.label, b.count]));
+    expect(byLabel["2…3"]).toBe(1);
+    expect(byLabel["1…2"]).toBe(0);
+  });
+
+  it("drops trades without a stored rr from the R distribution", async () => {
+    const trades = [makeTrade({ rr: null })];
+    global.fetch = vi.fn((url: string) => {
+      if (url.startsWith("/api/stats")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(makeStatsResponse(trades)) });
+      }
+      if (url.startsWith("/api/accounts")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: "acc-1", capital: 5000 }]) });
+      }
+      return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
+    }) as any;
+
+    render(<AnalyticsPage />);
+    await waitFor(() => expect(screen.getByTestId("equity-chart")).toBeInTheDocument());
+
+    const raw = screen.getAllByTestId("histogram")[1].getAttribute("data-bins")!;
+    expect(JSON.parse(raw)).toEqual([]);
   });
 
   it("refetches stats when account selector changes", async () => {

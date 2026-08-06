@@ -164,6 +164,15 @@ function emptySide(): SideStats {
   return { trades: 0, netPnl: 0, winRate: 0, wins: 0, losses: 0 };
 }
 
+// R-multiple сделки — берём ГОТОВЫЙ из БД (Trade.rr / ImportedTrade.rr,
+// посчитан один раз в lib/analytics/rr.ts с учётом риск-профиля аккаунта).
+// Раньше здесь была своя формула «движение цены / дистанция стопа»: она
+// игнорировала риск-профиль и давала другие числа, чем колонка RR в «Сделках»
+// и сводка в «Календаре», которые уже читают сохранённое значение.
+function rMultiple(t: RoundTripTrade): number | null {
+  return t.rr ?? null;
+}
+
 function bucketStats(
   trades: RoundTripTrade[],
   keyFn: (t: RoundTripTrade) => string,
@@ -270,15 +279,6 @@ export function computeMetrics(
     : 0;
 
   // daily P&L series and daily returns for Sharpe/Sortino
-  // Helper: dollar-based R-multiple for a trade. Risk = |entry - stop| × qty.
-// Returns null when the stop is unset or zero (= 1R would be $0).
-function rMultiple(t: RoundTripTrade): number | null {
-  if (t.stopLoss == null) return null;
-  const risk = Math.abs(t.entryPrice - t.stopLoss) * t.qty;
-  if (risk <= 0) return null;
-  return t.netPnl / risk;
-}
-
 const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR: number; lossR: number }>();
   for (const t of sorted) {
     const key = t.exitTime.toISOString().slice(0, 10);
@@ -442,14 +442,12 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
   const kellyPct =
     kellyFracPayoff > 0 ? (w - (1 - w) / kellyFracPayoff) * 100 : 0;
 
-  // Average realized R-multiple, measured in dollar terms where the stop distance
-  // × qty is 1R. Exiting exactly at the stop is -1R (before fees).
+  // Средний реализованный R — среднее по сохранённым в БД значениям (см.
+  // rMultiple выше). Сделки без rr (нет ни риск-профиля, ни стопа) не участвуют.
   const rMultiples: number[] = [];
   for (const tr of sorted) {
-    if (tr.stopLoss == null) continue;
-    const risk = Math.abs(tr.entryPrice - tr.stopLoss) * tr.qty;
-    if (risk <= 0) continue;
-    rMultiples.push(tr.netPnl / risk);
+    const r = rMultiple(tr);
+    if (r != null) rMultiples.push(r);
   }
   const avgRR = rMultiples.length ? mean(rMultiples) : 0;
 

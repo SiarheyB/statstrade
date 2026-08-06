@@ -271,25 +271,45 @@ describe("computeMetrics", () => {
     expect(m.totalCommission).toBe(8);
   });
 
-  it("computes avgRR from stop-loss trades", () => {
+  it("computes avgRR from the stored rr, not from the stop distance", () => {
     const trades = [
-      // Long, qty 1, entry 100, stop 90 (risk $10), exit 120 => netPnl $20, +2R
-      makeTrade({ id: "t1", side: "long", qty: 1, entryPrice: 100, exitPrice: 120, stopLoss: 90, fees: 0, netPnl: 20 }),
-      // Long, qty 1, entry 100, stop 90 (risk $10), exit 80 => netPnl $-20, -2R
-      makeTrade({ id: "t2", side: "long", qty: 1, entryPrice: 100, exitPrice: 80, stopLoss: 90, fees: 0, netPnl: -20 }),
-      // No stop-loss => ignored
-      makeTrade({ id: "t3", side: "long", entryPrice: 100, exitPrice: 110 }),
+      makeTrade({ id: "t1", rr: 2 }),
+      makeTrade({ id: "t2", rr: -2 }),
+      // Стоп есть, но rr не посчитан (нет ни профиля, ни валидной дистанции) =>
+      // сделка в среднее не входит.
+      makeTrade({ id: "t3", side: "long", qty: 1, entryPrice: 100, exitPrice: 110, stopLoss: 90 }),
     ];
     const m = computeMetrics(trades);
     expect(m.avgRR).toBeCloseTo(0, 5); // (+2 + -2) / 2 = 0
   });
 
-  it("handles stop-loss with zero risk (skipped)", () => {
+  it("ignores the stop-loss distance when rr disagrees with it", () => {
+    // Профиль риска задан: 1R = фиксированная сумма, поэтому rr в БД (+0.5)
+    // НЕ совпадает с «движением цены / дистанцией стопа» (было бы +1).
+    const trades = [
+      makeTrade({ id: "t1", side: "long", qty: 1, entryPrice: 100, exitPrice: 110, stopLoss: 90, fees: 0, netPnl: 10, rr: 0.5 }),
+    ];
+    const m = computeMetrics(trades);
+    expect(m.avgRR).toBe(0.5);
+  });
+
+  it("leaves avgRR at 0 when no trade has a stored rr", () => {
     const trades = [
       makeTrade({ id: "t1", side: "long", entryPrice: 100, exitPrice: 110, stopLoss: 100 }),
     ];
     const m = computeMetrics(trades);
-    expect(m.avgRR).toBe(0); // risk = 0 => skipped
+    expect(m.avgRR).toBe(0);
+  });
+
+  it("builds the daily R decomposition from the stored rr", () => {
+    const trades = [
+      makeTrade({ id: "t1", rr: 2, exitTime: new Date("2024-01-01T10:00:00Z") }),
+      makeTrade({ id: "t2", rr: -1, exitTime: new Date("2024-01-01T14:00:00Z") }),
+      makeTrade({ id: "t3", rr: null, exitTime: new Date("2024-01-01T16:00:00Z") }),
+    ];
+    const m = computeMetrics(trades);
+    expect(m.daily[0].winR).toBe(2);
+    expect(m.daily[0].lossR).toBe(-1);
   });
 
   it("computes daily series (cumulative P&L)", () => {
