@@ -13,10 +13,18 @@ export async function register() {
   // независимо от этого. Fire-and-forget: не блокирует старт сервера, ошибки
   // только логируются. После первого успешного прогона — no-op (сделок с
   // rr=NULL уже не остаётся).
+  // Порядок важен: winR/lossR в дневных агрегатах складываются из rr, поэтому
+  // бэкафилл агрегатов идёт ПОСЛЕ бэкафилла rr. Оба после первого успешного
+  // прогона — no-op (записей без rr / аккаунтов без агрегатов не остаётся).
   import("./lib/analytics/rr")
     .then(({ backfillMissingRR }) => backfillMissingRR())
     .then(({ accounts }) => {
       if (accounts > 0) console.log(`[rr-backfill] пересчитан rr для ${accounts} аккаунт(ов)`);
+    })
+    .then(() => import("./lib/analytics/daily"))
+    .then(({ backfillMissingTradeDaily }) => backfillMissingTradeDaily())
+    .then(({ accounts }) => {
+      if (accounts > 0) console.log(`[daily-backfill] агрегаты для ${accounts} аккаунт(ов)`);
     })
     .catch((err) => console.error("[rr-backfill] ошибка:", err));
 }

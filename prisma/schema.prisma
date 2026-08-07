@@ -158,6 +158,7 @@ model ExchangeAccount {
   fills          Fill[]
   importedTrades ImportedTrade[]
   trades         Trade[]
+  tradeDaily     TradeDaily[]
 
   @@index([userId])
 }
@@ -197,6 +198,43 @@ model Trade {
 
   @@index([accountId, exitTime])
   @@index([accountId, symbol, market])
+}
+
+// Дневной агрегат по закрытым сделкам аккаунта — одна строка на (аккаунт, день).
+// Считается ОДИН РАЗ при изменении сделок (см. lib/analytics/daily.ts), а не на
+// каждый запрос: раньше риск-менеджер и дашборд тянули все сделки за период и
+// складывали их в Node.
+//
+// День = календарная дата exitTime в UTC. Это осознанно совпадает с
+// Metrics.daily (lib/analytics/metrics.ts) и с периодным календарём риск-
+// менеджера (periodStart() в lib/risk.ts — там тоже Date.UTC), поэтому суммы
+// отсюда сходятся с этими экранами до цента.
+// NB: «Календарь» (/dashboard/calendar) бакетит по entryTime и в таймзоне
+// пользователя — другая нарезка, эту таблицу он использовать НЕ может, пока
+// расхождение не будет разрешено отдельно.
+//
+// Агрегат покрывает и crypto (Trade), и импортированные форекс/MT-сделки
+// (ImportedTrade) — обе таблицы сворачиваются в одни и те же строки.
+model TradeDaily {
+  accountId String
+  account   ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  day       DateTime        @db.Date // календарный день exitTime в UTC
+  trades    Int             @default(0)
+  wins      Int             @default(0)
+  losses    Int             @default(0)
+  netPnl    Float           @default(0)
+  grossProfit Float         @default(0) // Σ netPnl прибыльных сделок
+  grossLoss   Float         @default(0) // Σ |netPnl| убыточных (положительное число)
+  fees      Float           @default(0)
+  // R-мультипликаторы: суммы уже сохранённого Trade.rr / ImportedTrade.rr —
+  // не пересчитываются (см. lib/analytics/rr.ts). netR = winR + lossR.
+  winR      Float           @default(0) // Σ положительных rr
+  lossR     Float           @default(0) // Σ отрицательных rr (отрицательное число)
+  rTrades   Int             @default(0) // сколько сделок дня имеют посчитанный rr
+  updatedAt DateTime        @updatedAt
+
+  @@id([accountId, day])
+  @@index([day])
 }
 
 // A closed round-trip imported from a MetaTrader 4/5 report (or entered
