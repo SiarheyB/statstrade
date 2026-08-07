@@ -21,8 +21,8 @@ export async function register() {
     .then(({ accounts }) => {
       if (accounts > 0) console.log(`[rr-backfill] пересчитан rr для ${accounts} аккаунт(ов)`);
     })
-    .then(() => import("./lib/analytics/daily"))
-    .then(({ backfillMissingTradeDaily }) => backfillMissingTradeDaily())
+    .then(() => import("./lib/analytics/hourly"))
+    .then(({ backfillMissingTradeHourly }) => backfillMissingTradeHourly())
     .then(({ accounts }) => {
       if (accounts > 0) console.log(`[daily-backfill] агрегаты для ${accounts} аккаунт(ов)`);
     })

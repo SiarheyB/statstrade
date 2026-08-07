@@ -19,7 +19,7 @@
 
 import { prisma } from "@/lib/db";
 import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
-import { rebuildTradeDaily, rebuildTradeDailyForDay } from "./daily";
+import { rebuildTradeHourly, rebuildTradeHourlyForTrade } from "./hourly";
 
 async function loadRiskContext(accountId: string) {
   const account = await prisma.exchangeAccount.findUnique({
@@ -64,7 +64,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
   // Дневные агрегаты пересобираем ДАЖЕ когда сделок не осталось — иначе после
   // удаления/перезалива сделок в TradeDaily висели бы устаревшие дни.
   if (cryptoTrades.length === 0 && importedTrades.length === 0) {
-    await rebuildTradeDaily(accountId);
+    await rebuildTradeHourly(accountId);
     return;
   }
 
@@ -100,7 +100,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
   await prisma.$transaction(updates);
   // winR/lossR в дневных агрегатах складываются из только что записанного rr,
   // поэтому пересборка идёт строго после транзакции.
-  await rebuildTradeDaily(accountId);
+  await rebuildTradeHourly(accountId);
 }
 
 // Пересчитать и сохранить rr только для ОДНОЙ сделки — используется после
@@ -123,7 +123,7 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
     const rr = tradeRR(cryptoTrade, ann?.stopLoss ?? null, ctx.profiles, ctx.balance);
     await prisma.trade.update({ where: { id: tradeKey }, data: { rr } });
     // Меняется одна сделка → пересобираем только её день, а не всю историю.
-    await rebuildTradeDailyForDay(accountId, cryptoTrade.exitTime);
+    await rebuildTradeHourlyForTrade(accountId, cryptoTrade.exitTime);
     return;
   }
 
@@ -145,7 +145,7 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
     stopLoss, ctx.profiles, ctx.balance,
   );
   await prisma.importedTrade.update({ where: { id: importedTrade.id }, data: { rr } });
-  await rebuildTradeDailyForDay(accountId, importedTrade.exitTime);
+  await rebuildTradeHourlyForTrade(accountId, importedTrade.exitTime);
 }
 
 // Разовый (по факту — на каждый старт процесса, но дешёвый после первого

@@ -2,25 +2,29 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { ensureAccountTrades } from "@/lib/analytics/materialize";
-import { parseRiskProfile, computeAccountRisk, type RiskDay } from "@/lib/risk";
+import { parseRiskProfile, computeAccountRisk } from "@/lib/risk";
+import { periodStart, type HourBucket } from "@/lib/analytics/periods";
+import { tzOffsetFromRequest } from "@/lib/tzParam";
 
 // Current risk status per account (monitoring only).
 //
-// Читает ДНЕВНЫЕ АГРЕГАТЫ (таблица TradeDaily, см. lib/analytics/daily.ts).
+// Читает ПОЧАСОВЫЕ АГРЕГАТЫ (таблица TradeHourly, см. lib/analytics/hourly.ts).
 // История эндпоинта: сначала он реконструировал сделки из всех филлов юзера,
-// потом читал материализованные Trade, теперь — готовые суммы по дням.
-// RiskBanner висит на дашборде и «Сделках», т.е. дёргается на каждый их рендер,
-// а строк тут максимум по числу торговых дней аккаунта (≤365 в окне), а не по
-// числу сделок.
+// потом читал материализованные Trade, теперь — готовые суммы по часам.
+// RiskBanner висит на дашборде и «Сделках», т.е. дёргается на каждый их рендер.
 //
-// Числа не меняются: границы всех окон риск-менеджера проходят по границам
-// суток UTC (periodStart() в lib/risk.ts), а TradeDaily нарезан ровно так же.
+// Окна лимитов (день/неделя/месяц/год) считаются в ТАЙМЗОНЕ ПОЛЬЗОВАТЕЛЯ:
+// клиент присылает свой сдвиг в минутах (?tzOffset), почасовые бакеты
+// складываются в локальные сутки. Дневной агрегат для этого не годился бы —
+// один UTC-день попадает на два локальных.
 //
-// Окно — с начала текущего года по UTC: самый широкий лимит риск-менеджера это
-// "year", дни старше него на статус не влияют.
-export async function GET() {
+// Окно выборки — с начала локального года: самый широкий лимит это "year",
+// часы старше него на статус не влияют.
+export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+
+  const offsetMinutes = tzOffsetFromRequest(req);
 
   try {
     // Only live exchange accounts are risk-monitored; imported (forex) accounts
@@ -35,21 +39,27 @@ export async function GET() {
     await ensureAccountTrades(accounts);
 
     const now = new Date();
-    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const dayRows = accounts.length
-      ? await prisma.tradeDaily.findMany({
+    const yearStart = new Date(periodStart("year", now, offsetMinutes));
+    const hourRows = accounts.length
+      ? await prisma.tradeHourly.findMany({
           where: {
             accountId: { in: accounts.map((a) => a.id) },
-            day: { gte: yearStart },
+            hour: { gte: yearStart },
           },
-          select: { accountId: true, day: true, netPnl: true, wins: true, losses: true },
+          select: {
+            accountId: true, hour: true, netPnl: true, wins: true, losses: true,
+            winR: true, lossR: true, trades: true,
+          },
         })
       : [];
 
-    const byAccount = new Map<string, RiskDay[]>();
-    for (const r of dayRows) {
+    const byAccount = new Map<string, HourBucket[]>();
+    for (const r of hourRows) {
       const arr = byAccount.get(r.accountId) ?? [];
-      arr.push({ day: r.day, netPnl: r.netPnl, wins: r.wins, losses: r.losses });
+      arr.push({
+        hour: r.hour, netPnl: r.netPnl, wins: r.wins, losses: r.losses,
+        winR: r.winR, lossR: r.lossR, trades: r.trades,
+      });
       byAccount.set(r.accountId, arr);
     }
 
@@ -60,7 +70,9 @@ export async function GET() {
     const accountRisks = accounts.map((a) => {
       const override = profileMap.get(a.id);
       const profile = override ? parseRiskProfile(override) : def;
-      const risk = computeAccountRisk(a.id, byAccount.get(a.id) ?? [], a.balance, profile, now);
+      const risk = computeAccountRisk(
+        a.id, byAccount.get(a.id) ?? [], a.balance, profile, offsetMinutes, now,
+      );
       return { ...risk, label: a.label, exchange: a.exchange, custom: !!override };
     });
 

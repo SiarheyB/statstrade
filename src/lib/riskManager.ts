@@ -1,12 +1,7 @@
 import { prisma } from "./db";
 import { Cache } from "./cache";
-import {
-  parseRiskProfile,
-  riskPerTradeAmount,
-  defaultRiskProfile,
-  periodStart,
-  periodEnd,
-} from "./risk";
+import { parseRiskProfile, riskPerTradeAmount, defaultRiskProfile } from "./risk";
+import { periodStart, periodEnd } from "./analytics/periods";
 
 type Limits = {
   dailyStops?: number;
@@ -24,7 +19,8 @@ type Period = "day" | "week" | "month" | "year";
 export async function checkRiskLimits(
   userId: string,
   exchangeId: string,
-  orderType: "stop" | "limit" | "market"
+  orderType: "stop" | "limit" | "market",
+  offsetMinutes = 0,
 ) {
   if (orderType !== "stop") return; // ограничения только на стоп‑ордера
 
@@ -77,10 +73,10 @@ export async function checkRiskLimits(
     month,
     year,
   ] = await Promise.all([
-    getNetStopsCount(userId, exchangeId, "day"),
-    getNetStopsCount(userId, exchangeId, "week"),
-    getNetStopsCount(userId, exchangeId, "month"),
-    getNetStopsCount(userId, exchangeId, "year"),
+    getNetStopsCount(userId, exchangeId, "day", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "week", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "month", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "year", offsetMinutes),
   ]);
 
   if (limits.dailyStops && day >= limits.dailyStops) {
@@ -106,17 +102,17 @@ export async function checkRiskLimits(
 export async function getNetStopsCount(
   userId: string,
   exchangeId: string,
-  period: Period
+  period: Period,
+  offsetMinutes = 0,
 ): Promise<number> {
-  const cacheKey = `netStops:${userId}:${exchangeId}:${period}`;
+  const cacheKey = `netStops:${userId}:${exchangeId}:${period}:${offsetMinutes}`;
   const cached = Cache.get<number>(cacheKey);
   if (cached !== undefined) return cached;
 
-  // Границы периода берём из lib/risk.ts (одна реализация на весь риск-модуль).
-  // Локальная копия этой логики отсчитывала "year" от начала МЕСЯЦА — годовой
-  // лимит фактически совпадал с месячным.
+  // Границы периода — одна реализация на весь риск-модуль
+  // (lib/analytics/periods.ts), в таймзоне пользователя.
   const now = new Date();
-  const from = new Date(periodStart(period, now));
+  const from = new Date(periodStart(period, now, offsetMinutes));
 
   // Получаем **все** закрытые сделки за период, сначала находим аккаунт пользователя
   const tradeAccount = await prisma.exchangeAccount.findFirst({
@@ -129,14 +125,14 @@ export async function getNetStopsCount(
 
   if (!tradeAccount) return 0;
 
-  // Суммарный P&L за период — одним агрегатом по дневным сводкам
-  // (TradeDaily, см. lib/analytics/daily.ts). Раньше сюда тянулись ВСЕ сделки
-  // за период и складывались в Node. Результат тот же: границы периодов идут
-  // по границам суток UTC, ровно по ним же нарезан TradeDaily.
-  const totals = await prisma.tradeDaily.aggregate({
+  // Суммарный P&L за период — одним агрегатом по почасовым сводкам
+  // (TradeHourly, см. lib/analytics/hourly.ts). Раньше сюда тянулись ВСЕ сделки
+  // за период и складывались в Node. Часовая гранулярность нужна, чтобы окно
+  // могло начинаться в полночь ЛОКАЛЬНЫХ суток пользователя, а не UTC.
+  const totals = await prisma.tradeHourly.aggregate({
     where: {
       accountId: tradeAccount.id,
-      day: { gte: from },
+      hour: { gte: from },
     },
     _sum: { netPnl: true },
   });
@@ -192,7 +188,7 @@ export async function getNetStopsCount(
   // TTL: оставшееся время до конца периода (тот же периодный календарь, что и
   // в periodStart — прошлая копия для "week" в воскресенье уезжала на 8 дней
   // вперёд, а для "year" держала значение почти год).
-  const ttlMs = periodEnd(period, now) - now.getTime();
+  const ttlMs = periodEnd(period, now, offsetMinutes) - now.getTime();
 
   Cache.set(cacheKey, used, ttlMs);
   return used;

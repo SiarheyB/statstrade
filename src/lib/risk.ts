@@ -1,9 +1,18 @@
 // Risk-manager domain: limit configuration, parsing, and status computation.
 // Monitoring/alerting only — it never blocks trades on the exchange.
 
+import {
+  PERIODS,
+  sumInPeriod,
+  type PeriodKey,
+  type HourBucket,
+} from "./analytics/periods";
+
+// Периодный календарь живёт в analytics/periods.ts (он же обслуживает
+// «Календарь» и агрегаты). Ре-экспорт — чтобы не переписывать импортёров.
+export { PERIODS, periodStart, periodEnd, type PeriodKey } from "./analytics/periods";
+
 export type LossUnit = "pct" | "amount";
-export type PeriodKey = "day" | "week" | "month" | "year";
-export const PERIODS: PeriodKey[] = ["day", "week", "month", "year"];
 
 export type PeriodLimit = { on: boolean; value: number; unit: LossUnit };
 export type LossLimits = Record<PeriodKey, PeriodLimit>;
@@ -135,12 +144,11 @@ export function tradeRR(
 
 // --- Status computation ---
 
-// Строка дневного агрегата (TradeDaily), из которой считается статус риска.
-// Раньше сюда приходил список ВСЕХ сделок за окно и складывался в Node; теперь
-// суммирование сделано один раз при изменении сделок (lib/analytics/daily.ts).
-// day — календарный день exitTime в UTC (полночь), т.е. та же нарезка, что даёт
-// periodStart() ниже.
-export type RiskDay = { day: Date; netPnl: number; wins: number; losses: number };
+// Статус риска считается из почасового агрегата (TradeHourly). Раньше сюда
+// приходил список ВСЕХ сделок за окно и складывался в Node; теперь суммирование
+// сделано один раз при изменении сделок (lib/analytics/hourly.ts), а границы
+// окон берутся в таймзоне пользователя (lib/analytics/periods.ts).
+export type { HourBucket } from "./analytics/periods";
 
 export type LimitState = "ok" | "warning" | "breached";
 export type LimitStatus = {
@@ -161,49 +169,17 @@ export type AccountRisk = {
 
 const WARN_RATIO = 0.8;
 
-// Начало периода (UTC). Экспортируется, чтобы riskManager.getNetStopsCount
-// пользовался ЭТОЙ реализацией, а не своей копией — расхождение уже приводило
-// к тому, что годовой лимит отсчитывался от начала месяца.
-export function periodStart(key: PeriodKey, now: Date): number {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const d = now.getUTCDate();
-  if (key === "day") return Date.UTC(y, m, d);
-  if (key === "week") {
-    const diff = (now.getUTCDay() + 6) % 7; // days since Monday
-    return Date.UTC(y, m, d - diff);
-  }
-  if (key === "month") return Date.UTC(y, m, 1);
-  return Date.UTC(y, 0, 1);
-}
-
-// Начало СЛЕДУЮЩЕГО периода (UTC) — момент, когда счётчик обнуляется.
-// Используется как TTL кэша в getNetStopsCount: держать значение дольше нельзя,
-// иначе после смены суток/недели показывался бы прошлый период.
-export function periodEnd(key: PeriodKey, now: Date): number {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const d = now.getUTCDate();
-  if (key === "day") return Date.UTC(y, m, d + 1);
-  if (key === "week") {
-    const diff = (now.getUTCDay() + 6) % 7; // days since Monday
-    return Date.UTC(y, m, d - diff + 7);
-  }
-  if (key === "month") return Date.UTC(y, m + 1, 1);
-  return Date.UTC(y + 1, 0, 1);
-}
-
 // Net loss within a period: sum of ALL trades' P&L (wins offset losses).
 // Consistent with getNetStopsCount() and the "stops" day-counter — a +3R
 // take-profit offsets −3R of losses, showing the net drawdown.
-// Суммирует дневные агрегаты; результат тот же, что при суммировании отдельных
-// сделок, потому что границы периодов проходят строго по границам суток UTC.
-function lossInPeriod(days: RiskDay[], key: PeriodKey, now: Date): number {
-  const start = periodStart(key, now);
-  let net = 0;
-  for (const d of days) {
-    if (d.day.getTime() >= start) net += d.netPnl;
-  }
+// Суммирует почасовые агрегаты; границы периода — в таймзоне пользователя.
+function lossInPeriod(
+  hours: HourBucket[],
+  key: PeriodKey,
+  now: Date,
+  offsetMinutes: number,
+): number {
+  const net = sumInPeriod(hours, key, now, offsetMinutes).netPnl;
   return net < 0 ? -net : 0;
 }
 
@@ -221,9 +197,10 @@ const worse = (a: LimitState, b: LimitState): LimitState => {
 
 export function computeAccountRisk(
   accountId: string,
-  days: RiskDay[],
+  hours: HourBucket[],
   balance: number | null,
   profile: RiskProfileData,
+  offsetMinutes: number,
   now: Date = new Date(),
 ): AccountRisk {
   if (!profile.enabled) {
@@ -238,25 +215,22 @@ export function computeAccountRisk(
   // profit shows 0 stops used). Without a 1R setting we fall back to a 1:1 net
   // count (losses − wins). This is what the trader means by "учитывать стопы и
   // тейки": two stops then one take should not trip the limit.
+  //
+  // «Сегодня» — локальные сутки пользователя, а не UTC.
   if (profile.maxStopsPerDay && profile.maxStopsPerDay > 0) {
-    const dayStart = periodStart("day", now);
-    const today = days.filter((d) => d.day.getTime() >= dayStart);
+    const today = sumInPeriod(hours, "day", now, offsetMinutes);
     const rAmount = riskPerTradeAmount(profile, balance);
 
     let used: number;
     if (rAmount && rAmount > 0) {
       // Net drawdown in R: losses add, wins subtract (by their R-multiple).
-      // Σ(netPnl)/rAmount == Σ(netPnl/rAmount) — дневной агрегат даёт то же
-      // число, что поштучный проход по сделкам.
-      let netPnl = 0;
-      for (const d of today) netPnl += d.netPnl;
-      used = -(netPnl / rAmount);
+      // Σ(netPnl)/rAmount == Σ(netPnl/rAmount) — агрегат даёт то же число, что
+      // поштучный проход по сделкам.
+      used = -(today.netPnl / rAmount);
     } else {
       // No 1R configured → net count: each stop +1, each take −1.
       // Безубыточные сделки не в счёт — их нет ни в wins, ни в losses.
-      let net = 0;
-      for (const d of today) net += d.losses - d.wins;
-      used = net;
+      used = today.losses - today.wins;
     }
     // Стопы — счётчик, показываем целыми и консервативно: частично «съеденный»
     // стоп (0.96R) считается использованным целиком. Эпсилон — чтобы ровные
@@ -285,7 +259,7 @@ export function computeAccountRisk(
     } else {
       limitAmount = cfg.value;
     }
-    const used = lossInPeriod(days, p, now);
+    const used = lossInPeriod(hours, p, now, offsetMinutes);
     limits.push({
       key: p,
       unit: "amount",

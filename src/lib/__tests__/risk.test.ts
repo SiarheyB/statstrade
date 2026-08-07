@@ -6,10 +6,8 @@ import {
   serializeRiskPerTrade,
   riskPerTradeAmount,
   computeAccountRisk,
-  periodStart,
-  periodEnd,
-  type RiskDay,
 } from "@/lib/risk";
+import type { HourBucket } from "@/lib/analytics/periods";
 
 const NOW = new Date("2024-06-15T12:00:00Z");
 const today = (h: number) => new Date(`2024-06-15T${String(h).padStart(2, "0")}:00:00Z`);
@@ -21,61 +19,31 @@ function trade(netPnl: number, result: string, exitTime: Date): TestTrade {
   return { netPnl, exitTime, result };
 }
 
-// Свернуть сделки в дневные агрегаты — ровно так же, как это делает SQL в
-// lib/analytics/daily.ts (день = дата exitTime в UTC, безубыточные не попадают
-// ни в wins, ни в losses). Кейсы ниже остаются описанными в терминах СДЕЛОК:
-// так видно, что переход риск-менеджера на TradeDaily не изменил ни одного
+// Свернуть сделки в ЧАСОВЫЕ бакеты — ровно так же, как это делает SQL в
+// lib/analytics/hourly.ts (час = начало часа exitTime в UTC, безубыточные не
+// попадают ни в wins, ни в losses). Кейсы ниже остаются описанными в терминах
+// СДЕЛОК: так видно, что переход риск-менеджера на агрегат не изменил ни одного
 // ожидаемого числа.
-function toDays(trades: TestTrade[]): RiskDay[] {
-  const map = new Map<number, RiskDay>();
+function toHours(trades: TestTrade[]): HourBucket[] {
+  const map = new Map<number, HourBucket>();
   for (const t of trades) {
     const key = Date.UTC(
       t.exitTime.getUTCFullYear(),
       t.exitTime.getUTCMonth(),
       t.exitTime.getUTCDate(),
+      t.exitTime.getUTCHours(),
     );
-    const d = map.get(key) ?? { day: new Date(key), netPnl: 0, wins: 0, losses: 0 };
-    d.netPnl += t.netPnl;
-    if (t.result === "win") d.wins += 1;
-    else if (t.result === "loss") d.losses += 1;
-    map.set(key, d);
+    const h = map.get(key) ?? {
+      hour: new Date(key), netPnl: 0, wins: 0, losses: 0, winR: 0, lossR: 0, trades: 0,
+    };
+    h.netPnl += t.netPnl;
+    h.trades += 1;
+    if (t.result === "win") h.wins += 1;
+    else if (t.result === "loss") h.losses += 1;
+    map.set(key, h);
   }
   return [...map.values()];
 }
-
-describe("periodStart / periodEnd", () => {
-  // 2024-06-15 — суббота.
-  const sat = new Date("2024-06-15T12:00:00Z");
-  // 2024-06-16 — воскресенье: пограничный день недели (getUTCDay() === 0).
-  const sun = new Date("2024-06-16T12:00:00Z");
-
-  it("начало периода: день / неделя (с понедельника) / месяц / год", () => {
-    expect(periodStart("day", sat)).toBe(Date.UTC(2024, 5, 15));
-    expect(periodStart("week", sat)).toBe(Date.UTC(2024, 5, 10)); // пн 10 июня
-    expect(periodStart("week", sun)).toBe(Date.UTC(2024, 5, 10)); // вс относится к той же неделе
-    expect(periodStart("month", sat)).toBe(Date.UTC(2024, 5, 1));
-    expect(periodStart("year", sat)).toBe(Date.UTC(2024, 0, 1));
-  });
-
-  it("конец периода = начало следующего", () => {
-    expect(periodEnd("day", sat)).toBe(Date.UTC(2024, 5, 16));
-    expect(periodEnd("week", sat)).toBe(Date.UTC(2024, 5, 17)); // след. понедельник
-    expect(periodEnd("month", sat)).toBe(Date.UTC(2024, 6, 1));
-    expect(periodEnd("year", sat)).toBe(Date.UTC(2025, 0, 1));
-  });
-
-  it("в воскресенье неделя заканчивается завтра, а не через 8 дней", () => {
-    expect(periodEnd("week", sun)).toBe(Date.UTC(2024, 5, 17));
-  });
-
-  it("каждый период непустой и непрерывный", () => {
-    for (const p of ["day", "week", "month", "year"] as const) {
-      expect(periodEnd(p, sat)).toBeGreaterThan(periodStart(p, sat));
-      // Начало следующего периода = его конец: сетка без дыр и нахлёстов.
-      expect(periodStart(p, new Date(periodEnd(p, sat)))).toBe(periodEnd(p, sat));
-    }
-  });
-});
 
 describe("risk profile parsing", () => {
   it("defaultRiskProfile is all-off", () => {
@@ -157,14 +125,14 @@ describe("computeAccountRisk", () => {
   };
 
   it("is off when the profile is disabled", () => {
-    const r = computeAccountRisk("a1", [], 1000, defaultRiskProfile(), NOW);
+    const r = computeAccountRisk("a1", [], 1000, defaultRiskProfile(), 0, NOW);
     expect(r.enabled).toBe(false);
     expect(r.state).toBe("off");
     expect(r.limits).toEqual([]);
   });
 
   it("reports ok with no configured limits", () => {
-    const r = computeAccountRisk("a1", [], 1000, onProfile(), NOW);
+    const r = computeAccountRisk("a1", [], 1000, onProfile(), 0, NOW);
     expect(r.state).toBe("ok");
     expect(r.limits).toEqual([]);
   });
@@ -173,7 +141,7 @@ describe("computeAccountRisk", () => {
     const profile = onProfile();
     profile.maxStopsPerDay = 3;
     const trades = [trade(-100, "loss", today(9)), trade(-100, "loss", today(10)), trade(100, "win", today(11))];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     const stops = r.limits.find((l) => l.key === "stops")!;
     expect(stops.used).toBe(1); // 2 losses − 1 win
     expect(stops.state).toBe("ok");
@@ -184,7 +152,7 @@ describe("computeAccountRisk", () => {
     const profile = onProfile();
     profile.maxStopsPerDay = 2;
     const trades = [trade(-100, "loss", today(9)), trade(-100, "loss", today(10))];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     expect(r.limits.find((l) => l.key === "stops")!.state).toBe("breached");
   });
 
@@ -192,7 +160,7 @@ describe("computeAccountRisk", () => {
     const profile = onProfile();
     profile.maxStopsPerDay = 5;
     const trades = [trade(-100, "loss", today(9)), trade(-100, "loss", today(10)), trade(-100, "loss", today(11)), trade(-100, "loss", today(12))];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     expect(r.limits.find((l) => l.key === "stops")!.state).toBe("warning");
   });
 
@@ -202,7 +170,7 @@ describe("computeAccountRisk", () => {
     profile.riskPerTrade = { on: true, value: 100, unit: "amount" };
     // 2 stops (−1R each) + 1 take (+3R) → net profit → 0 stops used.
     const trades = [trade(-100, "loss", today(9)), trade(-100, "loss", today(10)), trade(300, "win", today(11))];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     expect(r.limits.find((l) => l.key === "stops")!.used).toBe(0);
   });
 
@@ -213,7 +181,7 @@ describe("computeAccountRisk", () => {
       trade(-60, "loss", new Date("2024-06-02T10:00:00Z")),
       trade(-60, "loss", new Date("2024-06-10T10:00:00Z")),
     ]; // 120 loss in June
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW); // limit = 100
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW); // limit = 100
     const m = r.limits.find((l) => l.key === "month")!;
     expect(m.limit).toBe(100);
     expect(m.used).toBe(120);
@@ -224,7 +192,7 @@ describe("computeAccountRisk", () => {
     const profile = onProfile();
     profile.lossLimits.day = { on: true, value: 200, unit: "amount" };
     const trades = [trade(-90, "loss", today(9))];
-    const r = computeAccountRisk("a1", toDays(trades), null, profile, NOW); // pct would need balance; amount doesn't
+    const r = computeAccountRisk("a1", toHours(trades), null, profile, 0, NOW); // pct would need balance; amount doesn't
     const d = r.limits.find((l) => l.key === "day")!;
     expect(d.limit).toBe(200);
     expect(d.used).toBe(90);
@@ -241,7 +209,7 @@ describe("computeAccountRisk", () => {
       trade(-11, "loss", new Date("2024-06-14T10:00:00Z")),
       trade(30, "win", new Date("2024-06-14T14:00:00Z")),
     ];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     const w = r.limits.find((l) => l.key === "week")!;
     expect(w.used).toBe(3); // net loss = $3, not $33
     expect(w.state).toBe("ok");
@@ -250,14 +218,16 @@ describe("computeAccountRisk", () => {
   it("nets wins against losses in month loss limit", () => {
     const profile = onProfile();
     profile.lossLimits.month = { on: true, value: 500, unit: "amount" };
-    // 3 losses (−$100, −$100, −$100) + 1 win (+$250) = −$50 net → used = 50
+    // 3 losses (−$100, −$100, −$100) + 1 win (+$250) = −$50 net → used = 50.
+    // Все даты строго ДО NOW: закрытая сделка не может лежать в будущем, и окно
+    // периода ограничено текущим моментом.
     const trades = [
       trade(-100, "loss", new Date("2024-06-05T10:00:00Z")),
+      trade(-100, "loss", new Date("2024-06-10T10:00:00Z")),
       trade(-100, "loss", new Date("2024-06-12T10:00:00Z")),
-      trade(-100, "loss", new Date("2024-06-19T10:00:00Z")),
-      trade(250, "win", new Date("2024-06-20T14:00:00Z")),
+      trade(250, "win", new Date("2024-06-14T14:00:00Z")),
     ];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     const m = r.limits.find((l) => l.key === "month")!;
     expect(m.used).toBe(50); // net loss = $50, not $300
     expect(m.state).toBe("ok");
@@ -266,14 +236,14 @@ describe("computeAccountRisk", () => {
   it("nets wins against losses in year loss limit", () => {
     const profile = onProfile();
     profile.lossLimits.year = { on: true, value: 10000, unit: "amount" };
-    // 3 losses (−$1000) + 1 win (+$2500) = −$500 net → used = 500
+    // 3 losses (−$1000) + 1 win (+$2500) = −$500 net → used = 500 (даты до NOW).
     const trades = [
       trade(-1000, "loss", new Date("2024-02-10T10:00:00Z")),
-      trade(-1000, "loss", new Date("2024-05-15T10:00:00Z")),
-      trade(-1000, "loss", new Date("2024-08-20T10:00:00Z")),
-      trade(2500, "win", new Date("2024-11-10T14:00:00Z")),
+      trade(-1000, "loss", new Date("2024-03-15T10:00:00Z")),
+      trade(-1000, "loss", new Date("2024-04-20T10:00:00Z")),
+      trade(2500, "win", new Date("2024-05-10T14:00:00Z")),
     ];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     const y = r.limits.find((l) => l.key === "year")!;
     expect(y.used).toBe(500); // net loss = $500, not $3000
     expect(y.state).toBe("ok");
@@ -283,7 +253,7 @@ describe("computeAccountRisk", () => {
     const profile = onProfile();
     profile.lossLimits.month = { on: true, value: 10, unit: "pct" };
     const trades = [trade(-60, "loss", may(2))];
-    const r = computeAccountRisk("a1", toDays(trades), null, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), null, profile, 0, NOW);
     expect(r.limits.find((l) => l.key === "month")).toBeUndefined();
   });
 
@@ -292,7 +262,7 @@ describe("computeAccountRisk", () => {
     profile.maxStopsPerDay = 5;
     profile.lossLimits.month = { on: true, value: 10000, unit: "amount" };
     const trades = [trade(-100, "loss", today(9)), trade(-100, "loss", today(10)), trade(-100, "loss", today(11)), trade(-100, "loss", today(12))];
-    const r = computeAccountRisk("a1", toDays(trades), 1000, profile, NOW);
+    const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     // stops: 4 used / 5 → warning; month: 400/10000 → ok → aggregate = warning
     expect(r.state).toBe("warning");
   });

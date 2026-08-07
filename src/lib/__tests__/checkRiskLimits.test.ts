@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   riskProfileFindFirst: vi.fn(),
   exchangeAccountFindFirst: vi.fn(),
   exchangeAccountFindUnique: vi.fn(),
-  dailyAggregate: vi.fn(),
+  hourlyAggregate: vi.fn(),
   cacheGet: vi.fn(),
   cacheSet: vi.fn(),
 }));
@@ -16,16 +16,11 @@ vi.mock("@/lib/db", () => ({
     user: { findUnique: mocks.userFindUnique },
     riskProfile: { findFirst: mocks.riskProfileFindFirst },
     exchangeAccount: { findFirst: mocks.exchangeAccountFindFirst, findUnique: mocks.exchangeAccountFindUnique },
-    tradeDaily: { aggregate: mocks.dailyAggregate },
+    tradeHourly: { aggregate: mocks.hourlyAggregate },
   },
 }));
 
-// periodStart/periodEnd — чистые функции календаря, берём настоящие.
-vi.mock("@/lib/risk", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/risk")>();
-  return {
-  periodStart: actual.periodStart,
-  periodEnd: actual.periodEnd,
+vi.mock("@/lib/risk", () => ({
   parseRiskProfile: vi.fn((row) => {
     if (!row) return { enabled: false, maxStopsPerDay: null, riskPerTrade: { on: false, value: 0, unit: "pct" }, lossLimits: {} };
     // parseRiskProfile processes the row from DB - return the enabled flag
@@ -33,8 +28,7 @@ vi.mock("@/lib/risk", async (importOriginal) => {
   }),
   defaultRiskProfile: vi.fn(() => ({ enabled: true, lossLimits: { day: { on: false, value: 0 }, week: { on: false, value: 0 }, month: { on: false, value: 0 }, year: { on: false, value: 0 } } })),
   riskPerTradeAmount: vi.fn().mockReturnValue(1000),
-  };
-});
+}));
 
 vi.mock("@/lib/cache", () => ({ Cache: { get: mocks.cacheGet, set: mocks.cacheSet } }));
 
@@ -48,7 +42,7 @@ describe("checkRiskLimits", () => {
     mocks.userFindUnique.mockResolvedValue({ id: "u" });
     mocks.exchangeAccountFindFirst.mockResolvedValue({ id: "acc" });
     mocks.exchangeAccountFindUnique.mockResolvedValue({ capital: 10000 });
-    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
+    mocks.hourlyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
     mocks.cacheGet.mockReturnValue(undefined);
   });
 
@@ -89,7 +83,7 @@ describe("checkRiskLimits", () => {
 
     // Trade data that results in exactly 3 stops used
     // R = 1000, so -1000 = -1R each. 3 losses = -3R -> ceil(3) = 3 used
-    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -3000 } });
+    mocks.hourlyAggregate.mockResolvedValue({ _sum: { netPnl: -3000 } });
 
     // Should reject because dayUsage (3) >= dailyLimit (3)
     await expect(checkRiskLimits("u", "e", "stop")).rejects.toThrow(/Дневной лимит стоп‑ордеров \(3\) уже достигнут/);
@@ -113,7 +107,7 @@ describe("checkRiskLimits", () => {
     mocks.exchangeAccountFindUnique.mockResolvedValue({ capital: 10000 });
 
     // Trade data that results in 2 stops used (below limit)
-    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } });
+    mocks.hourlyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } });
 
     // Should resolve because dayUsage (2) < dailyLimit (3)
     await expect(checkRiskLimits("u", "e", "stop")).resolves.toBeUndefined();

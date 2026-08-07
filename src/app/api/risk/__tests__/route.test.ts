@@ -50,24 +50,26 @@ vi.mock("@/lib/risk", () => ({
   ),
 }));
 
+const base = "https://example.com/api/risk";
+
 describe("GET /api/risk", () => {
   beforeEach(() => {
     mockGetAuthUser.mockReset();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([]);
-    mockPrisma.tradeDaily.findMany.mockResolvedValue([]);
+    mockPrisma.tradeHourly.findMany.mockResolvedValue([]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([]);
     vi.clearAllMocks();
   });
 
   it("returns 401 when not authenticated", async () => {
     asGuest();
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(401);
   });
 
   it("returns 200 with empty accounts when user has no exchange accounts", async () => {
     asUser();
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body).toHaveProperty("accounts");
@@ -83,14 +85,14 @@ describe("GET /api/risk", () => {
       { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000 },
       { id: "acc-2", label: "Second", exchange: "binance", balance: 5000 },
     ]);
-    mockPrisma.tradeDaily.findMany.mockResolvedValue([
-      { accountId: "acc-1", day: new Date("2024-01-01T00:00:00Z"), netPnl: -120, wins: 0, losses: 1 },
+    mockPrisma.tradeHourly.findMany.mockResolvedValue([
+      { accountId: "acc-1", hour: new Date("2024-01-01T10:00:00Z"), netPnl: -120, wins: 0, losses: 1, winR: 0, lossR: -1, trades: 1 },
     ]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([
       { accountId: "", enabled: true, maxStopsPerDay: 3 },
     ]);
 
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.accounts.length).toBe(2);
@@ -113,43 +115,67 @@ describe("GET /api/risk", () => {
       },
     ]);
 
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.accounts[0].custom).toBe(true);
     expect(body.accounts[0].enabled).toBe(true);
   });
 
-  it("reads daily aggregates (not fills, not raw trades) from the start of the year", async () => {
+  it("reads hourly aggregates (not fills, not raw trades) from the start of the year", async () => {
     asUser();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([
       { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000, tradesRebuiltAt: new Date() },
     ]);
 
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(200);
 
     // Ни реконструкции из филлов, ни построчного чтения сделок — только
-    // дневные агрегаты.
+    // почасовые агрегаты.
     expect(mockPrisma.fill.findMany).not.toHaveBeenCalled();
     expect(mockPrisma.trade.findMany).not.toHaveBeenCalled();
-    const args = mockPrisma.tradeDaily.findMany.mock.calls[0][0];
+    const args = mockPrisma.tradeHourly.findMany.mock.calls[0][0];
     expect(args.where.accountId).toEqual({ in: ["acc-1"] });
-    const from = args.where.day.gte as Date;
+    const from = args.where.hour.gte as Date;
+    expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
+  });
+
+  it("shifts the window with the caller timezone offset", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findMany.mockResolvedValue([
+      { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000, tradesRebuiltAt: new Date() },
+    ]);
+
+    await GET(new Request(`${base}?tzOffset=180`));
+    const from = mockPrisma.tradeHourly.findMany.mock.calls[0][0].where.hour.gte as Date;
+    const now = new Date();
+    const local = new Date(now.getTime() + 3 * 3600_000);
+    expect(from.getTime()).toBe(Date.UTC(local.getUTCFullYear(), 0, 1) - 3 * 3600_000);
+  });
+
+  it("ignores an out-of-range tzOffset", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findMany.mockResolvedValue([
+      { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000, tradesRebuiltAt: new Date() },
+    ]);
+
+    await GET(new Request(`${base}?tzOffset=99999`));
+    const from = mockPrisma.tradeHourly.findMany.mock.calls[0][0].where.hour.gte as Date;
     expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
   });
 
   it("skips the aggregate query entirely when the user has no exchange accounts", async () => {
     asUser();
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(200);
-    expect(mockPrisma.tradeDaily.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tradeHourly.findMany).not.toHaveBeenCalled();
   });
 
   it("returns 500 when prisma query fails", async () => {
     asUser();
     mockPrisma.exchangeAccount.findMany.mockRejectedValueOnce(new Error("DB error"));
-    const res = await GET();
+    const res = await GET(new Request(base));
     expect(res.status).toBe(500);
   });
 });

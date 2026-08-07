@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { ShieldAlert, ShieldCheck, ShieldX, X } from "lucide-react";
 import { fmtUsd } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
+import { tzOffsetForServer } from "@/lib/timezone";
 import type { AccountRisk, LimitStatus } from "@/lib/risk";
 
 type RiskResp = AccountRisk & { label: string; exchange: string };
@@ -17,7 +18,7 @@ const STYLES = {
 const RANK = { off: 0, ok: 1, warning: 2, breached: 3 } as const;
 
 export default function RiskBanner({ accountId }: { accountId: string }) {
-  const { t } = useI18n();
+  const { t, timezone } = useI18n();
   const [risks, setRisks] = useState<RiskResp[]>([]);
   // Ephemeral dismiss: closes for now, reappears on a page refresh / remount.
   const [dismissed, setDismissed] = useState(false);
@@ -25,7 +26,9 @@ export default function RiskBanner({ accountId }: { accountId: string }) {
   useEffect(() => {
     let alive = true;
     (async () => {
-      const res = await fetch("/api/risk");
+      // Окна лимитов считаются в таймзоне пользователя — сервер её не знает,
+      // поэтому шлём сдвиг в минутах.
+      const res = await fetch(`/api/risk?tzOffset=${tzOffsetForServer(timezone)}`);
       if (res.ok && alive) {
         const d = await res.json();
         setRisks(d.accounts ?? []);
@@ -34,7 +37,7 @@ export default function RiskBanner({ accountId }: { accountId: string }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [timezone]);
 
   if (dismissed) return null;
 
