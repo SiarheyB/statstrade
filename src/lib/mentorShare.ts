@@ -14,11 +14,37 @@ export function generateShareToken(): string {
 // this stays simple rather than threading an unauthenticated request through
 // the full authenticated stats pipeline.
 export async function computePublicSummary(userId: string) {
-  const [tradeRows, importedRows, accounts] = await Promise.all([
-    prisma.trade.findMany({ where: { account: { userId } }, orderBy: { exitTime: "asc" } }),
-    prisma.importedTrade.findMany({ where: { account: { userId } }, orderBy: { exitTime: "asc" } }),
-    prisma.exchangeAccount.findMany({ where: { userId }, select: { balance: true } }),
+  // select строго под то, что читает computeMetrics ниже: без него findMany
+  // тянул ВСЕ колонки обеих таблиц по всей истории пользователя — а ссылку
+  // может открыть кто угодно, у кого она есть, сколько угодно раз.
+  const accountRows = await prisma.exchangeAccount.findMany({
+    where: { userId },
+    select: { id: true, balance: true },
+  });
+  const accountIds = accountRows.map((a) => a.id);
+  const [tradeRows, importedRows] = await Promise.all([
+    prisma.trade.findMany({
+      where: { accountId: { in: accountIds } },
+      orderBy: { exitTime: "asc" },
+      select: {
+        id: true, symbol: true, base: true, quote: true, market: true, exchange: true,
+        accountId: true, side: true, entryTime: true, exitTime: true, qty: true,
+        entryPrice: true, exitPrice: true, grossPnl: true, fees: true, netPnl: true,
+        returnPct: true, fillCount: true, result: true, rr: true,
+      },
+    }),
+    prisma.importedTrade.findMany({
+      where: { accountId: { in: accountIds } },
+      orderBy: { exitTime: "asc" },
+      select: {
+        accountId: true, externalId: true, symbol: true, base: true, quote: true,
+        market: true, source: true, side: true, entryTime: true, exitTime: true,
+        qty: true, entryPrice: true, exitPrice: true, grossProfit: true, swap: true,
+        netPnl: true, commission: true, lots: true, pips: true, rr: true,
+      },
+    }),
   ]);
+  const accounts = accountRows;
 
   const cryptoTrades: RoundTripTrade[] = tradeRows.map((r) => (
     {
@@ -42,6 +68,7 @@ export async function computePublicSummary(userId: string) {
       returnPct: r.returnPct,
       fillCount: r.fillCount,
       result: r.result as TradeResult,
+      rr: r.rr,
     }
   ));
 
@@ -70,6 +97,7 @@ export async function computePublicSummary(userId: string) {
       lots: it.lots,
       pips: it.pips,
       swap: it.swap,
+      rr: it.rr,
     }
   ));
 

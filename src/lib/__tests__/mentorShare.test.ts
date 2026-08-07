@@ -37,6 +37,19 @@ describe('mentorShare module', () => {
     mocks.exchangeAccountFindMany.mockResolvedValue([]);
   });
 
+  it('scopes trades by the user accounts and selects only needed columns', async () => {
+    mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a1', balance: 500 }]);
+    await computePublicSummary('user123');
+
+    for (const call of [mocks.tradeFindMany, mocks.importedTradeFindMany]) {
+      const args = call.mock.calls[0][0];
+      // Публичная ссылка открывается без входа и сколько угодно раз — тянуть
+      // все колонки всей истории тут нельзя.
+      expect(args.select).toBeTruthy();
+      expect(args.where).toEqual({ accountId: { in: ['a1'] } });
+    }
+  });
+
   it('returns default capital when no accounts found', async () => {
     const result = await computePublicSummary('user123');
     expect(result.totalTrades).toBe(0);

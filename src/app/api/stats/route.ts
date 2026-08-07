@@ -51,8 +51,10 @@ async function buildBase(
   }));
   const ownedIds = new Set(accounts.map((a) => a.id));
 
+  // Фильтруем по уже загруженным id аккаунтов вместо join через
+  // account: { userId } — запрос идёт прямо по индексу [accountId, exitTime].
   const where: Prisma.TradeWhereInput = {
-    account: { userId },
+    accountId: { in: [...ownedIds] },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) {
     where.accountId = accountId;
@@ -110,8 +112,14 @@ async function buildBase(
     rr: r.rr,
   }));
 
-  // Счётчик филлов для шапки («N trades · M fills») — лёгкий COUNT по индексу.
-  const fillWhere: Prisma.FillWhereInput = { account: { userId } };
+  // Счётчик филлов для шапки («N trades · M fills»).
+  //
+  // Денормализовать его в колонку ExchangeAccount намеренно НЕ стали: счётчик
+  // питает одну строчку подзаголовка, а поддерживать его пришлось бы во всех
+  // путях записи филлов (синк, импорт, демо-данные, удаление аккаунта) — цена
+  // рассинхрона выше пользы. Вместо этого убран join: фильтруем по уже
+  // загруженным id аккаунтов, и COUNT идёт прямо по индексу [accountId].
+  const fillWhere: Prisma.FillWhereInput = { accountId: { in: [...ownedIds] } };
   if (accountId !== "all" && ownedIds.has(accountId)) fillWhere.accountId = accountId;
   if (market === "spot") fillWhere.market = "spot";
   else if (market === "futures") fillWhere.market = { in: ["swap", "future"] };
@@ -119,7 +127,7 @@ async function buildBase(
 
   // Imported (forex / MetaTrader) closed round-trips — money taken as-is.
   const importedWhere: Prisma.ImportedTradeWhereInput = {
-    account: { userId },
+    accountId: { in: [...ownedIds] },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
   if (fromMs != null || toMs != null) {
