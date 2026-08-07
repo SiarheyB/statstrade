@@ -1,14 +1,14 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight } from "lucide-react";
-import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import type { SerializedTrade, AccountSummary } from "@/lib/types";
 import { tradeRR, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
 import TradeImageCell from "@/components/TradeImageCell";
 import ImagePreviewModal from "@/components/ImagePreviewModal";
-import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNum, fmtNumSmart, fmtSymbol, canonSymbol } from "@/lib/format";
+import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNumSmart, fmtSymbol } from "@/lib/format";
 import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
 import { Pagination } from "@/components/Pagination";
@@ -28,6 +28,23 @@ type Ann = {
 const PAGE_SIZE = 25;
 const UNSET = "__unset__";
 
+// Ответ /api/trades: страница сделок + общее число под пагинацию. symbols
+// приходит только на первый запрос (withMeta=1).
+type TradesResponse = {
+  trades: SerializedTrade[];
+  total: number;
+  page: number;
+  pageSize: number;
+  symbols?: string[];
+};
+
+type TagOptions = {
+  entryPointOptions: string[];
+  entryTypeOptions: string[];
+  mistakeOptions: string[];
+  patternOptions: string[];
+};
+
 // Short market label for the table/exports.
 function marketShort(market: string): string {
   if (market === "spot") return "spot";
@@ -38,12 +55,20 @@ function marketShort(market: string): string {
 export default function TradesPage() {
   const { t, timezone } = useI18n();
   const { anySyncing, completedAt, syncAll } = useSync();
-  const [data, setData] = useState<StatsResponse | null>(null);
+  const [data, setData] = useState<TradesResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Словари фильтров приходят из своих эндпоинтов, а не вместе со сделками:
+  // от страницы/фильтров они не зависят и перезапрашивать их незачем.
+  const [symbols, setSymbols] = useState<string[]>([]);
+  const [accounts, setAccounts] = useState<AccountSummary[]>([]);
+  const [options, setOptions] = useState<TagOptions>({
+    entryPointOptions: [], entryTypeOptions: [], mistakeOptions: [], patternOptions: [],
+  });
   const [ann, setAnn] = useState<Record<string, Ann>>({});
   const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null; publicUrl: string | null }>>({});
   const [cloudConnected, setCloudConnected] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
   const [symbolFilter, setSymbolFilter] = useState("all");
@@ -54,7 +79,6 @@ export default function TradesPage() {
   const [etFilter, setEtFilter] = useState("all");
   const [mtFilter, setMtFilter] = useState("all");
   const [ptFilter, setPtFilter] = useState("all");
-  const [openFilter, setOpenFilter] = useState("all");
   const [sortKey, setSortKey] = useState<SortKey>("exitTime");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -90,24 +114,58 @@ export default function TradesPage() {
     setChart(null);
   }
 
+  // Параметры выборки для сервера. Фильтры, сортировка и страница целиком
+  // обслуживаются в БД — раньше страница тянула /api/stats без параметров, то
+  // есть ВСЮ историю сделок (плюс ~60 метрик, ни одна из которых тут не нужна),
+  // и фильтровала/резала её в браузере ради 25 строк.
+  const queryParams = useCallback(
+    (over: Record<string, string> = {}) =>
+      new URLSearchParams({
+        accountId: accountFilter,
+        symbol: symbolFilter,
+        market: marketFilter,
+        side: sideFilter,
+        result: resultFilter,
+        entryPoint: epFilter,
+        entryType: etFilter,
+        mistake: mtFilter,
+        pattern: ptFilter,
+        sort: sortKey,
+        dir: sortDir,
+        page: String(page),
+        pageSize: String(PAGE_SIZE),
+        ...over,
+      }),
+    [accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter,
+     epFilter, etFilter, mtFilter, ptFilter, sortKey, sortDir, page],
+  );
+
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/stats");
+    // Список тикеров для фильтра требует прохода по всем сделкам, поэтому
+    // просим его только один раз — пока он ещё не загружен.
+    const withMeta: Record<string, string> = symbols.length === 0 ? { withMeta: "1" } : {};
+    const res = await fetch(`/api/trades?${queryParams(withMeta)}`);
     if (res.ok) {
-      const d: StatsResponse = await res.json();
+      const d: TradesResponse = await res.json();
       setData(d);
-      const map: Record<string, Ann> = {};
-      for (const tr of d.trades) {
-        map[tr.id] = {
-          entryPoint: tr.entryPoint,
-          entryType: tr.entryType,
-          mistake: tr.mistake,
-          pattern: tr.pattern,
-          stopLoss: tr.stopLoss,
-          note: tr.note,
-        };
-      }
-      setAnn(map);
+      if (d.symbols) setSymbols(d.symbols);
+      // Аннотации накапливаем по мере просмотра страниц: правки ниже пишутся в
+      // это же состояние, поэтому затирать его целиком нельзя.
+      setAnn((prev) => {
+        const next = { ...prev };
+        for (const tr of d.trades) {
+          next[tr.id] = {
+            entryPoint: tr.entryPoint,
+            entryType: tr.entryType,
+            mistake: tr.mistake,
+            pattern: tr.pattern,
+            stopLoss: tr.stopLoss,
+            note: tr.note,
+          };
+        }
+        return next;
+      });
       // images (imageUrl/imageProvider overrides) НЕ трогаем на каждый load() —
       // imageOf() и так падает обратно на tr.imageUrl/tr.imageProvider из
       // свежих данных, когда явного оверрайда нет. Сбрасывать его здесь
@@ -115,11 +173,27 @@ export default function TradesPage() {
       // (например, из-за фонового автосинка) сразу после аплоада.
     }
     setLoading(false);
-  }, []);
+    // symbols намеренно НЕ в зависимостях: иначе первая же загрузка (которая их
+    // и проставляет) немедленно вызвала бы вторую.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryParams]);
 
   useEffect(() => {
     load();
   }, [load]);
+
+  // Словари тегов и счета живут в своих эндпоинтах и от фильтров не зависят —
+  // грузим один раз.
+  useEffect(() => {
+    (async () => {
+      const [settings, accs] = await Promise.all([
+        fetch("/api/settings").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch("/api/accounts").then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]);
+      if (settings) setOptions(settings);
+      if (Array.isArray(accs)) setAccounts(accs);
+    })();
+  }, []);
 
   // Статус подключения облака (Google Drive и/или Яндекс.Диск) — определяет,
   // показывать ли кнопку «Загрузить» или ссылку в настройки в детальной
@@ -155,31 +229,10 @@ export default function TradesPage() {
     })();
   }, []);
 
-  const epOptions = data?.entryPointOptions ?? [];
-  const etOptions = data?.entryTypeOptions ?? [];
-  const mtOptions = data?.mistakeOptions ?? [];
-  const ptOptions = data?.patternOptions ?? [];
-
-  // Unique open-date groupings for the "Открытие" filter. Groups by local calendar day
-  // in the user's timezone (fmtDate returns a long date like "07.07.2026"), so each
-  // option is a distinct trading day. Sorted newest-first to match the close filter.
-  const openDateOptions = useMemo(() => {
-    const set = new Map<string, number>();
-    for (const tr of data?.trades ?? []) {
-      const key = fmtDate(tr.entryTime); // long date, local tz
-      set.set(key, (set.get(key) ?? 0) + 1);
-    }
-    return [...set.entries()]
-      .sort((a, b) => (a[0] < b[0] ? 1 : -1))
-      .map(([label, count]) => ({ label, count }));
-  }, [data]);
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  const openCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const tr of data?.trades ?? []) m.set(fmtDate(tr.entryTime), (m.get(fmtDate(tr.entryTime)) ?? 0) + 1);
-    return m;
-  }, [data, fmtDate]);
+  const epOptions = options.entryPointOptions;
+  const etOptions = options.entryTypeOptions;
+  const mtOptions = options.mistakeOptions;
+  const ptOptions = options.patternOptions;
 
   function annOf(tr: SerializedTrade): Ann {
     return (
@@ -204,7 +257,7 @@ export default function TradesPage() {
   }
 
   const balanceOf = (accountId: string): number | null =>
-    data?.accounts.find((a) => a.id === accountId)?.balance ?? null;
+    accounts.find((a) => a.id === accountId)?.balance ?? null;
 
   // R-multiple for a trade — shared with /dashboard/calendar (src/lib/risk.ts)
   // so both pages agree on the same number for the same trade.
@@ -212,51 +265,12 @@ export default function TradesPage() {
     return tradeRR(tr, stopLoss, riskProfiles, balanceOf(tr.accountId));
   }
 
-  const filtered = useMemo(() => {
-    let rows = data?.trades ?? [];
-    if (accountFilter !== "all") rows = rows.filter((tr) => tr.accountId === accountFilter);
-    if (symbolFilter !== "all") rows = rows.filter((tr) => canonSymbol(tr.symbol) === symbolFilter);
-    if (marketFilter === "spot") rows = rows.filter((tr) => tr.market === "spot");
-    else if (marketFilter === "futures") rows = rows.filter((tr) => tr.market === "swap" || tr.market === "future");
-    else if (marketFilter === "forex") rows = rows.filter((tr) => tr.market === "forex" || tr.market === "metal" || tr.market === "cfd");
-    if (sideFilter !== "all") rows = rows.filter((tr) => tr.side === sideFilter);
-    if (resultFilter !== "all") rows = rows.filter((tr) => tr.result === resultFilter);
-    if (epFilter !== "all")
-      rows = rows.filter((tr) => {
-        const v = annOf(tr).entryPoint;
-        return epFilter === UNSET ? !v : v === epFilter;
-      });
-    if (etFilter !== "all")
-      rows = rows.filter((tr) => {
-        const v = annOf(tr).entryType;
-        return etFilter === UNSET ? !v : v === etFilter;
-      });
-    if (mtFilter !== "all")
-      rows = rows.filter((tr) => {
-        const v = annOf(tr).mistake;
-        return mtFilter === UNSET ? !v : v === mtFilter;
-      });
-    if (ptFilter !== "all")
-      rows = rows.filter((tr) => {
-        const v = annOf(tr).pattern;
-        return ptFilter === UNSET ? !v : v === ptFilter;
-      });
-
-  if (openFilter !== "all")
-    rows = rows.filter((tr) => {
-      const v = fmtDate(tr.entryTime);
-      return openFilter === UNSET ? !v : v === openFilter;
-    });
-    return [...rows].sort((a, b) => {
-      const av = sortVal(a, sortKey);
-      const bv = sortVal(b, sortKey);
-      return sortDir === "asc" ? av - bv : bv - av;
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data, ann, accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter, epFilter, etFilter, mtFilter, ptFilter, openFilter, sortKey, sortDir]);
-
-  const pageRows = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  // Фильтрация и сортировка выполнены на сервере — здесь только то, что он
+  // прислал. Список тегов у строки берём из локального состояния ann, чтобы
+  // правка сразу отражалась в UI до перезагрузки страницы.
+  const pageRows = data?.trades ?? [];
+  const total = data?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -271,7 +285,20 @@ export default function TradesPage() {
     return r === "win" ? t("trades.win") : r === "loss" ? t("trades.loss") : t("trades.breakeven");
   }
 
-  function exportCsv() {
+  // Выгрузка идёт по ВСЕМУ отфильтрованному набору, а не по текущей странице,
+  // поэтому запрашивает его отдельно (all=1) — на экране остаются 25 строк.
+  async function exportCsv() {
+    setExporting(true);
+    let exportRows: SerializedTrade[] = [];
+    try {
+      const res = await fetch(`/api/trades?${queryParams({ all: "1" })}`);
+      if (!res.ok) return;
+      exportRows = ((await res.json()) as TradesResponse).trades;
+    } catch {
+      return;
+    } finally {
+      setExporting(false);
+    }
     const headers = [
       t("trades.col.symbol"), t("trades.col.side"), t("trades.col.market"),
       t("trades.export.open"), t("trades.export.close"), t("trades.export.durationMin"),
@@ -281,7 +308,7 @@ export default function TradesPage() {
       t("trades.col.pattern"), t("trades.col.entryPoint"),
       t("trades.col.entryType"), t("trades.col.mistake"), t("trades.col.image"),
     ];
-    const rows = filtered.map((tr) => {
+    const rows = exportRows.map((tr) => {
       const a = annOf(tr);
       const rr = rrFor(tr, a.stopLoss);
       const image = imageOf(tr);
@@ -329,7 +356,7 @@ export default function TradesPage() {
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-semibold">{t("trades.title")}</h1>
-          <p className="text-sm text-muted">{t("trades.subtitle", { n: filtered.length })}</p>
+          <p className="text-sm text-muted">{t("trades.subtitle", { n: total })}</p>
         </div>
         <div className="flex gap-2">
           <button
@@ -342,9 +369,10 @@ export default function TradesPage() {
           </button>
           <button
             onClick={exportCsv}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong"
+            disabled={exporting}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-60"
           >
-            <FileDown size={14} /> {t("trades.csv")}
+            <FileDown size={14} className={exporting ? "animate-pulse" : ""} /> {t("trades.csv")}
           </button>
         </div>
       </div>
@@ -353,11 +381,11 @@ export default function TradesPage() {
       <div className="flex flex-wrap gap-2 mb-4">
         <select className={SELECT} value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("trades.allAccounts")}</option>
-          {data?.accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
         </select>
         <SearchSelect
           value={symbolFilter}
-          options={data?.symbols ?? []}
+          options={symbols}
           allLabel={t("trades.allSymbols")}
           placeholder={t("trades.searchSymbol")}
           renderLabel={fmtSymbol}
@@ -404,7 +432,7 @@ export default function TradesPage() {
 
       {loading ? (
         <div className="text-sm text-faint">{t("common.loading")}</div>
-      ) : filtered.length === 0 ? (
+      ) : total === 0 ? (
         <div className="card p-10 text-center text-muted">{t("trades.empty")}</div>
       ) : (
         <div className="card overflow-hidden">
@@ -785,12 +813,6 @@ function SideBadge({ side }: { side: string }) {
       <Term name={long ? "Long" : "Short"}>{long ? "Long" : "Short"}</Term>
     </span>
   );
-}
-
-function sortVal(tr: SerializedTrade, key: SortKey): number {
-  if (key === "exitTime") return new Date(tr.exitTime).getTime();
-  if (key === "entryTime") return new Date(tr.entryTime).getTime();
-  return tr[key];
 }
 
 function fmtRR(rr: number | null): string {

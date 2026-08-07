@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import TradesPage from "../page";
-import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import type { SerializedTrade } from "@/lib/types";
 
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({
@@ -69,22 +69,52 @@ function makeTrade(overrides: Partial<SerializedTrade> = {}): SerializedTrade {
   } as SerializedTrade;
 }
 
-function makeStats(trades: SerializedTrade[]): StatsResponse {
+// Ответ /api/trades. Страница теперь не получает метрики и словари вместе со
+// сделками — они приходят из /api/settings и /api/accounts.
+function makeTradesResponse(trades: SerializedTrade[], total = trades.length) {
   return {
-    metrics: {} as StatsResponse["metrics"],
     trades,
-    fillCount: trades.length,
+    total,
+    page: 0,
+    pageSize: 25,
     symbols: [...new Set(trades.map((t) => t.symbol))],
-    accounts: [{ id: "acc1", label: "My Account", exchange: "binance", balance: 1000 }],
-    entryPointOptions: [],
-    entryTypeOptions: [],
-    mistakeOptions: [],
-    patternOptions: [],
   };
 }
 
 function jsonRes(body: unknown, ok = true) {
   return Promise.resolve({ ok, json: () => Promise.resolve(body) });
+}
+
+// Мини-«сервер»: отдаёт переданные строки на /api/trades и заглушки на
+// сопутствующие эндпоинты. Фильтрация/сортировка теперь на бэкенде, поэтому
+// тесты проверяют, что страница ПРОСИТ правильное, а не то, как она режет
+// массив у себя.
+function installFetch(rowsFor: (params: URLSearchParams) => SerializedTrade[]) {
+  const fn = vi.fn((url: string) => {
+    const u = String(url);
+    if (u.startsWith("/api/trades")) {
+      const params = new URLSearchParams(u.split("?")[1] ?? "");
+      return jsonRes(makeTradesResponse(rowsFor(params)));
+    }
+    if (u === "/api/settings") {
+      return jsonRes({
+        entryPointOptions: [], entryTypeOptions: [], mistakeOptions: [], patternOptions: [],
+      });
+    }
+    if (u === "/api/accounts") {
+      return jsonRes([{ id: "acc1", label: "My Account", exchange: "binance", balance: 1000 }]);
+    }
+    if (u === "/api/risk/settings") return jsonRes({ profiles: {} });
+    return jsonRes({ connected: false });
+  });
+  global.fetch = fn as unknown as typeof fetch;
+  return fn;
+}
+
+// Параметры последнего запроса к /api/trades.
+function lastTradesParams(fn: ReturnType<typeof installFetch>): URLSearchParams {
+  const calls = fn.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith("/api/trades"));
+  return new URLSearchParams(calls[calls.length - 1].split("?")[1] ?? "");
 }
 
 beforeEach(() => {
@@ -95,13 +125,7 @@ beforeEach(() => {
   } else {
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:mock");
   }
-  global.fetch = vi.fn((url: string) => {
-    if (url === "/api/stats") return jsonRes(makeStats([]));
-    if (url === "/api/integrations/google-drive") return jsonRes({ connected: false });
-    if (url === "/api/integrations/yandex-disk") return jsonRes({ connected: false });
-    if (url === "/api/risk/settings") return jsonRes({ profiles: {} });
-    return jsonRes({});
-  }) as unknown as typeof fetch;
+  installFetch(() => []);
 });
 
 describe("TradesPage", () => {
@@ -116,23 +140,29 @@ describe("TradesPage", () => {
   });
 
   it("renders trades once loaded", async () => {
-    const trade = makeTrade();
-    global.fetch = vi.fn((url: string) => {
-      if (url === "/api/stats") return jsonRes(makeStats([trade]));
-      return jsonRes({ connected: false });
-    }) as unknown as typeof fetch;
-
+    installFetch(() => [makeTrade()]);
     render(<TradesPage />);
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
   });
 
-  it("expands a trade row on click to show detail fields", async () => {
-    const trade = makeTrade();
-    global.fetch = vi.fn((url: string) => {
-      if (url === "/api/stats") return jsonRes(makeStats([trade]));
-      return jsonRes({ connected: false });
-    }) as unknown as typeof fetch;
+  it("asks the server for the ticker list only on the first load", async () => {
+    const fn = installFetch(() => [makeTrade()]);
+    render(<TradesPage />);
+    await screen.findByText("BTCUSDT");
 
+    const first = new URLSearchParams(
+      String(fn.mock.calls.map((c) => String(c[0])).find((u) => u.startsWith("/api/trades"))!.split("?")[1]),
+    );
+    expect(first.get("withMeta")).toBe("1");
+
+    // Смена фильтра → новый запрос, но словарь тикеров уже есть.
+    fireEvent.change(screen.getByDisplayValue("Long + Short"), { target: { value: "long" } });
+    await waitFor(() => expect(lastTradesParams(fn).get("side")).toBe("long"));
+    expect(lastTradesParams(fn).get("withMeta")).toBeNull();
+  });
+
+  it("expands a trade row on click to show detail fields", async () => {
+    installFetch(() => [makeTrade()]);
     render(<TradesPage />);
     const row = (await screen.findByText("BTCUSDT")).closest("tr");
     expect(row).toBeTruthy();
@@ -140,43 +170,47 @@ describe("TradesPage", () => {
     expect(await screen.findByText("mocked-trade-image-cell")).toBeInTheDocument();
   });
 
-  it("filters trades by side", async () => {
+  it("passes the side filter to the server and renders what it returns", async () => {
     const longTrade = makeTrade({ id: "t-long", symbol: "LONGCOIN", side: "long" });
     const shortTrade = makeTrade({ id: "t-short", symbol: "SHORTCOIN", side: "short" });
-    global.fetch = vi.fn((url: string) => {
-      if (url === "/api/stats") return jsonRes(makeStats([longTrade, shortTrade]));
-      return jsonRes({ connected: false });
-    }) as unknown as typeof fetch;
+    const fn = installFetch((params) => {
+      const side = params.get("side");
+      return side === "all" || !side
+        ? [longTrade, shortTrade]
+        : [longTrade, shortTrade].filter((t) => t.side === side);
+    });
 
     render(<TradesPage />);
     await screen.findByText("LONGCOIN");
     expect(screen.getByText("SHORTCOIN")).toBeInTheDocument();
 
-    const sideSelect = screen.getByDisplayValue("Long + Short");
-    fireEvent.change(sideSelect, { target: { value: "long" } });
+    fireEvent.change(screen.getByDisplayValue("Long + Short"), { target: { value: "long" } });
 
-    await waitFor(() => {
-      expect(screen.queryByText("SHORTCOIN")).not.toBeInTheDocument();
-    });
+    await waitFor(() => expect(screen.queryByText("SHORTCOIN")).not.toBeInTheDocument());
     expect(screen.getByText("LONGCOIN")).toBeInTheDocument();
+    expect(lastTradesParams(fn).get("side")).toBe("long");
   });
 
-  it("sorts trades by clicking a sortable column header", async () => {
-    const t1 = makeTrade({ id: "t1", symbol: "AAA", netPnl: 5 });
-    const t2 = makeTrade({ id: "t2", symbol: "BBB", netPnl: 50 });
-    global.fetch = vi.fn((url: string) => {
-      if (url === "/api/stats") return jsonRes(makeStats([t1, t2]));
-      return jsonRes({ connected: false });
-    }) as unknown as typeof fetch;
-
+  it("passes sort key and direction to the server", async () => {
+    const fn = installFetch(() => [makeTrade({ id: "t1", symbol: "AAA", netPnl: 5 })]);
     render(<TradesPage />);
     await screen.findByText("AAA");
-    const netPnlHeader = screen.getByText("trades.col.netPnl");
-    fireEvent.click(netPnlHeader);
-    fireEvent.click(netPnlHeader);
-    // Just verify no crash and rows still present after re-sort toggling
-    expect(screen.getByText("AAA")).toBeInTheDocument();
-    expect(screen.getByText("BBB")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("trades.col.netPnl"));
+    await waitFor(() => expect(lastTradesParams(fn).get("sort")).toBe("netPnl"));
+    expect(lastTradesParams(fn).get("dir")).toBe("desc");
+
+    fireEvent.click(screen.getByText("trades.col.netPnl"));
+    await waitFor(() => expect(lastTradesParams(fn).get("dir")).toBe("asc"));
+  });
+
+  it("resets to the first page when a filter changes", async () => {
+    const fn = installFetch(() => [makeTrade()]);
+    render(<TradesPage />);
+    await screen.findByText("BTCUSDT");
+    fireEvent.change(screen.getByDisplayValue("Long + Short"), { target: { value: "short" } });
+    await waitFor(() => expect(lastTradesParams(fn).get("side")).toBe("short"));
+    expect(lastTradesParams(fn).get("page")).toBe("0");
   });
 
   it("triggers syncAll when clicking the sync button", async () => {
@@ -186,15 +220,18 @@ describe("TradesPage", () => {
     expect(mockSyncAll).toHaveBeenCalled();
   });
 
-  it("calls exportCsv download flow when clicking csv button", async () => {
-    const trade = makeTrade();
-    global.fetch = vi.fn((url: string) => {
-      if (url === "/api/stats") return jsonRes(makeStats([trade]));
-      return jsonRes({ connected: false });
-    }) as unknown as typeof fetch;
+  it("requests the full filtered set (all=1) when exporting to CSV", async () => {
+    const fn = installFetch(() => [makeTrade()]);
     render(<TradesPage />);
     await screen.findByText("BTCUSDT");
-    // downloadCsv relies on DOM APIs; just ensure clicking doesn't throw
-    expect(() => fireEvent.click(screen.getByText("trades.csv"))).not.toThrow();
+
+    fireEvent.click(screen.getByText("trades.csv"));
+
+    await waitFor(() => {
+      const exportCall = fn.mock.calls
+        .map((c) => String(c[0]))
+        .find((u) => u.startsWith("/api/trades") && u.includes("all=1"));
+      expect(exportCall).toBeTruthy();
+    });
   });
 });
