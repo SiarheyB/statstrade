@@ -63,6 +63,10 @@ export const mockPrisma = {
     delete: vi.fn().mockResolvedValue({}),
   },
   trade: { findMany: vi.fn().mockResolvedValue([]) },
+  tradeDaily: {
+    findMany: vi.fn().mockResolvedValue([]),
+    aggregate: vi.fn().mockResolvedValue({ _sum: { netPnl: null } }),
+  },
 
   fill: {
     count: vi.fn().mockResolvedValue(0),

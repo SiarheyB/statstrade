@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({
   riskProfileFindFirst: vi.fn(),
   exchangeAccountFindFirst: vi.fn(),
   exchangeAccountFindUnique: vi.fn(),
-  tradeFindMany: vi.fn(),
+  dailyAggregate: vi.fn(),
   cacheGet: vi.fn(),
   cacheSet: vi.fn(),
 }));
@@ -16,7 +16,7 @@ vi.mock("@/lib/db", () => ({
     user: { findUnique: mocks.userFindUnique },
     riskProfile: { findFirst: mocks.riskProfileFindFirst },
     exchangeAccount: { findFirst: mocks.exchangeAccountFindFirst, findUnique: mocks.exchangeAccountFindUnique },
-    trade: { findMany: mocks.tradeFindMany },
+    tradeDaily: { aggregate: mocks.dailyAggregate },
   },
 }));
 
@@ -48,7 +48,7 @@ describe("checkRiskLimits", () => {
     mocks.userFindUnique.mockResolvedValue({ id: "u" });
     mocks.exchangeAccountFindFirst.mockResolvedValue({ id: "acc" });
     mocks.exchangeAccountFindUnique.mockResolvedValue({ capital: 10000 });
-    mocks.tradeFindMany.mockResolvedValue([]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
     mocks.cacheGet.mockReturnValue(undefined);
   });
 
@@ -89,11 +89,7 @@ describe("checkRiskLimits", () => {
 
     // Trade data that results in exactly 3 stops used
     // R = 1000, so -1000 = -1R each. 3 losses = -3R -> ceil(3) = 3 used
-    mocks.tradeFindMany.mockResolvedValue([
-      { netPnl: -1000, result: "loss" },
-      { netPnl: -1000, result: "loss" },
-      { netPnl: -1000, result: "loss" },
-    ]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -3000 } });
 
     // Should reject because dayUsage (3) >= dailyLimit (3)
     await expect(checkRiskLimits("u", "e", "stop")).rejects.toThrow(/Дневной лимит стоп‑ордеров \(3\) уже достигнут/);
@@ -117,10 +113,7 @@ describe("checkRiskLimits", () => {
     mocks.exchangeAccountFindUnique.mockResolvedValue({ capital: 10000 });
 
     // Trade data that results in 2 stops used (below limit)
-    mocks.tradeFindMany.mockResolvedValue([
-      { netPnl: -1000, result: "loss" },
-      { netPnl: -1000, result: "loss" },
-    ]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } });
 
     // Should resolve because dayUsage (2) < dailyLimit (3)
     await expect(checkRiskLimits("u", "e", "stop")).resolves.toBeUndefined();

@@ -129,16 +129,18 @@ export async function getNetStopsCount(
 
   if (!tradeAccount) return 0;
 
-  const trades = await prisma.trade.findMany({
+  // Суммарный P&L за период — одним агрегатом по дневным сводкам
+  // (TradeDaily, см. lib/analytics/daily.ts). Раньше сюда тянулись ВСЕ сделки
+  // за период и складывались в Node. Результат тот же: границы периодов идут
+  // по границам суток UTC, ровно по ним же нарезан TradeDaily.
+  const totals = await prisma.tradeDaily.aggregate({
     where: {
       accountId: tradeAccount.id,
-      exitTime: { gte: from },
+      day: { gte: from },
     },
-    select: {
-      netPnl: true,
-      result: true, // "loss" | "win" | "breakeven"
-    },
+    _sum: { netPnl: true },
   });
+  const periodNetPnl = totals._sum.netPnl ?? 0;
 
   // Получаем профиль риска пользователя (из таблицы RiskProfile)
   const riskProfileRecord = await prisma.riskProfile.findFirst({
@@ -176,11 +178,10 @@ export async function getNetStopsCount(
     return 0;
   }
 
-  let netR = 0;
-  for (const t of trades) {
-    // netPnl уже в валюте; делим на стоимость 1R, получаем R‑мультипликатор
-    netR += t.netPnl / rAmount;
-  }
+  // netPnl уже в валюте; делим на стоимость 1R, получаем R‑мультипликатор.
+  // Σ(netPnl)/rAmount == Σ(netPnl/rAmount), поэтому деление одной суммы даёт
+  // ровно то же, что прежний поштучный проход по сделкам.
+  const netR = periodNetPnl / rAmount;
 
   // Чистое «затраченные» стопы (отрицательный netR → положительное количество)
   let used = 0;

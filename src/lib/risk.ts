@@ -135,7 +135,12 @@ export function tradeRR(
 
 // --- Status computation ---
 
-export type RiskTrade = { accountId: string; netPnl: number; exitTime: Date; result: string };
+// Строка дневного агрегата (TradeDaily), из которой считается статус риска.
+// Раньше сюда приходил список ВСЕХ сделок за окно и складывался в Node; теперь
+// суммирование сделано один раз при изменении сделок (lib/analytics/daily.ts).
+// day — календарный день exitTime в UTC (полночь), т.е. та же нарезка, что даёт
+// periodStart() ниже.
+export type RiskDay = { day: Date; netPnl: number; wins: number; losses: number };
 
 export type LimitState = "ok" | "warning" | "breached";
 export type LimitStatus = {
@@ -191,11 +196,13 @@ export function periodEnd(key: PeriodKey, now: Date): number {
 // Net loss within a period: sum of ALL trades' P&L (wins offset losses).
 // Consistent with getNetStopsCount() and the "stops" day-counter — a +3R
 // take-profit offsets −3R of losses, showing the net drawdown.
-function lossInPeriod(trades: RiskTrade[], key: PeriodKey, now: Date): number {
+// Суммирует дневные агрегаты; результат тот же, что при суммировании отдельных
+// сделок, потому что границы периодов проходят строго по границам суток UTC.
+function lossInPeriod(days: RiskDay[], key: PeriodKey, now: Date): number {
   const start = periodStart(key, now);
   let net = 0;
-  for (const t of trades) {
-    if (t.exitTime.getTime() >= start) net += t.netPnl;
+  for (const d of days) {
+    if (d.day.getTime() >= start) net += d.netPnl;
   }
   return net < 0 ? -net : 0;
 }
@@ -214,7 +221,7 @@ const worse = (a: LimitState, b: LimitState): LimitState => {
 
 export function computeAccountRisk(
   accountId: string,
-  trades: RiskTrade[],
+  days: RiskDay[],
   balance: number | null,
   profile: RiskProfileData,
   now: Date = new Date(),
@@ -233,22 +240,22 @@ export function computeAccountRisk(
   // тейки": two stops then one take should not trip the limit.
   if (profile.maxStopsPerDay && profile.maxStopsPerDay > 0) {
     const dayStart = periodStart("day", now);
-    const today = trades.filter((t) => t.exitTime.getTime() >= dayStart);
+    const today = days.filter((d) => d.day.getTime() >= dayStart);
     const rAmount = riskPerTradeAmount(profile, balance);
 
     let used: number;
     if (rAmount && rAmount > 0) {
       // Net drawdown in R: losses add, wins subtract (by their R-multiple).
-      let netR = 0;
-      for (const t of today) netR += t.netPnl / rAmount;
-      used = -netR;
+      // Σ(netPnl)/rAmount == Σ(netPnl/rAmount) — дневной агрегат даёт то же
+      // число, что поштучный проход по сделкам.
+      let netPnl = 0;
+      for (const d of today) netPnl += d.netPnl;
+      used = -(netPnl / rAmount);
     } else {
       // No 1R configured → net count: each stop +1, each take −1.
+      // Безубыточные сделки не в счёт — их нет ни в wins, ни в losses.
       let net = 0;
-      for (const t of today) {
-        if (t.result === "loss") net += 1;
-        else if (t.result === "win") net -= 1;
-      }
+      for (const d of today) net += d.losses - d.wins;
       used = net;
     }
     // Стопы — счётчик, показываем целыми и консервативно: частично «съеденный»
@@ -278,7 +285,7 @@ export function computeAccountRisk(
     } else {
       limitAmount = cfg.value;
     }
-    const used = lossInPeriod(trades, p, now);
+    const used = lossInPeriod(days, p, now);
     limits.push({
       key: p,
       unit: "amount",

@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   accFindFirst: vi.fn(),
   accFindUnique: vi.fn(),
-  tradeFindMany: vi.fn(),
+  dailyAggregate: vi.fn(),
   riskFindFirst: vi.fn(),
   cacheGet: vi.fn(),
   cacheSet: vi.fn(),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({
   prisma: {
     exchangeAccount: { findFirst: mocks.accFindFirst, findUnique: mocks.accFindUnique },
-    trade: { findMany: mocks.tradeFindMany },
+    tradeDaily: { aggregate: mocks.dailyAggregate },
     riskProfile: { findFirst: mocks.riskFindFirst },
   },
 }));
@@ -61,7 +61,7 @@ describe("getNetStopsCount", () => {
   });
 
   it("возвращает 0 и кэширует, когда rAmount <= 0 (нет ограничений)", async () => {
-    mocks.tradeFindMany.mockResolvedValue([]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
     mocks.riskPerTradeAmount.mockReturnValue(0);
     mocks.accFindUnique.mockResolvedValue({ balance: 1000 });
     const r = await getNetStopsCount("u", "e", "day");
@@ -70,34 +70,28 @@ describe("getNetStopsCount", () => {
   });
 
   it("считает использованные стопы из чистых убытков (неделя)", async () => {
-    mocks.tradeFindMany.mockResolvedValue([
-      { netPnl: -3000, result: "loss" },
-      { netPnl: 1000, result: "win" }, // -3R +1R = -2R -> used 2
-    ]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } });
     const r = await getNetStopsCount("u", "e", "week");
     expect(r).toBe(2);
     expect(mocks.cacheSet).toHaveBeenCalledTimes(1);
   });
 
   it("возвращает 0, когда netR >= 0 (прибыль перекрывает стопы)", async () => {
-    mocks.tradeFindMany.mockResolvedValue([
-      { netPnl: -1000, result: "loss" },
-      { netPnl: 3000, result: "win" }, // -1R +3R = +2R -> 0
-    ]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 2000 } });
     const r = await getNetStopsCount("u", "e", "month");
     expect(r).toBe(0);
   });
 
   it("считает годовой период (ветка year)", async () => {
-    mocks.tradeFindMany.mockResolvedValue([{ netPnl: -2000, result: "loss" }]); // -2R
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } }); // -2R
     const r = await getNetStopsCount("u", "e", "year");
     expect(r).toBe(2);
   });
 
   it("годовой период отсчитывается от 1 января, а не от начала месяца", async () => {
-    mocks.tradeFindMany.mockResolvedValue([]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
     await getNetStopsCount("u", "e", "year");
-    const from = mocks.tradeFindMany.mock.calls[0][0].where.exitTime.gte as Date;
+    const from = mocks.dailyAggregate.mock.calls[0][0].where.day.gte as Date;
     expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
   });
 
@@ -109,16 +103,16 @@ describe("getNetStopsCount", () => {
       year: Date.UTC(now.getUTCFullYear(), 0, 1),
     };
     for (const period of ["day", "month", "year"] as const) {
-      mocks.tradeFindMany.mockClear();
-      mocks.tradeFindMany.mockResolvedValue([]);
+      mocks.dailyAggregate.mockClear();
+      mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: 0 } });
       await getNetStopsCount("u", "e", period);
-      const from = mocks.tradeFindMany.mock.calls[0][0].where.exitTime.gte as Date;
+      const from = mocks.dailyAggregate.mock.calls[0][0].where.day.gte as Date;
       expect(from.getTime()).toBe(expected[period]);
     }
   });
 
   it("TTL кэша не переживает конец периода", async () => {
-    mocks.tradeFindMany.mockResolvedValue([{ netPnl: -2000, result: "loss" }]);
+    mocks.dailyAggregate.mockResolvedValue({ _sum: { netPnl: -2000 } });
     const before = Date.now();
     await getNetStopsCount("u", "e", "year");
     const ttl = mocks.cacheSet.mock.calls[0][2] as number;

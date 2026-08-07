@@ -54,7 +54,7 @@ describe("GET /api/risk", () => {
   beforeEach(() => {
     mockGetAuthUser.mockReset();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([]);
-    mockPrisma.trade.findMany.mockResolvedValue([]);
+    mockPrisma.tradeDaily.findMany.mockResolvedValue([]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([]);
     vi.clearAllMocks();
   });
@@ -83,13 +83,8 @@ describe("GET /api/risk", () => {
       { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000 },
       { id: "acc-2", label: "Second", exchange: "binance", balance: 5000 },
     ]);
-    mockPrisma.trade.findMany.mockResolvedValue([
-      {
-        accountId: "acc-1",
-        netPnl: -120,
-        exitTime: new Date("2024-01-01T10:00:00Z"),
-        result: "loss",
-      },
+    mockPrisma.tradeDaily.findMany.mockResolvedValue([
+      { accountId: "acc-1", day: new Date("2024-01-01T00:00:00Z"), netPnl: -120, wins: 0, losses: 1 },
     ]);
     mockPrisma.riskProfile.findMany.mockResolvedValue([
       { accountId: "", enabled: true, maxStopsPerDay: 3 },
@@ -125,7 +120,7 @@ describe("GET /api/risk", () => {
     expect(body.accounts[0].enabled).toBe(true);
   });
 
-  it("reads materialized trades (not fills) and only from the start of the year", async () => {
+  it("reads daily aggregates (not fills, not raw trades) from the start of the year", async () => {
     asUser();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([
       { id: "acc-1", label: "Main", exchange: "bybit", balance: 10000, tradesRebuiltAt: new Date() },
@@ -134,19 +129,21 @@ describe("GET /api/risk", () => {
     const res = await GET();
     expect(res.status).toBe(200);
 
-    // Реконструкции из филлов больше нет — читаем таблицу Trade.
+    // Ни реконструкции из филлов, ни построчного чтения сделок — только
+    // дневные агрегаты.
     expect(mockPrisma.fill.findMany).not.toHaveBeenCalled();
-    const args = mockPrisma.trade.findMany.mock.calls[0][0];
+    expect(mockPrisma.trade.findMany).not.toHaveBeenCalled();
+    const args = mockPrisma.tradeDaily.findMany.mock.calls[0][0];
     expect(args.where.accountId).toEqual({ in: ["acc-1"] });
-    const from = args.where.exitTime.gte as Date;
+    const from = args.where.day.gte as Date;
     expect(from.getTime()).toBe(Date.UTC(new Date().getUTCFullYear(), 0, 1));
   });
 
-  it("skips the trade query entirely when the user has no exchange accounts", async () => {
+  it("skips the aggregate query entirely when the user has no exchange accounts", async () => {
     asUser();
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(mockPrisma.trade.findMany).not.toHaveBeenCalled();
+    expect(mockPrisma.tradeDaily.findMany).not.toHaveBeenCalled();
   });
 
   it("returns 500 when prisma query fails", async () => {
