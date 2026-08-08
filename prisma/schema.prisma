@@ -325,6 +325,10 @@ model ObTrade {
   t        DateTime @db.Timestamptz(3)
   buyVol   Float    @default(0)
   sellVol  Float    @default(0)
+  // Сколько ПЕЧАТЕЙ попало в этот тик. Строка агрегирует все сделки интервала,
+  // поэтому COUNT(*) по таблице даёт частоту опроса коллектора, а не активность
+  // рынка — «скорость ленты» должна суммировать именно это поле.
+  trades   Int      @default(0)
 
   @@index([symbol, exchange, t]) // выборка exchange="all" идёт по префиксу symbol
 }
@@ -493,6 +497,24 @@ model ObSnapshotRollup {
   @@index([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
   @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval, без symbol
+}
+
+// Минутный rollup ленты сделок — то же, что ObSnapshotRollup для стакана.
+// Дельта/CVD и «скорость ленты» читают его вместо сырого ObTrade: сырьё
+// партиционировано по дням и на широком окне (до 800 свечей таймфрейма) даёт
+// агрегацию по сотням тысяч строк на КАЖДЫЙ опрос, а фронт опрашивает
+// orderflow каждые 3 секунды.
+model ObTradeRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало минутного бакета (UTC)
+  buyVol   Float    @default(0) // Σ агрессивных покупок за минуту
+  sellVol  Float    @default(0) // Σ агрессивных продаж
+  trades   Int      @default(0) // Σ печатей (для скорости ленты)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+  @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval
 }
 
 // Метаданные минутного бакета: сколько снапшотов в него попало (делитель для

@@ -23,10 +23,10 @@
 | 2 | [ ] | `/api/stats` отдаёт **весь массив сделок** на клиент на каждой странице (дашборд, сделки, календарь, аналитика) | Мегабайты JSON + сериализация; при 10k сделок ≈ 7 МБ | 1–2 дня (постранично + агрегаты) |
 | 3 | **[~]** | Таблица **`TradeDaily`** (день × аккаунт) — слой данных готов, потребители следующим шагом вместо агрегации всех сделок на клиенте (календарь, daily-график, тренд 30д, месячные бакеты) | Календарь/дашборд перестают зависеть от размера истории | 1 день |
 | 4 | [ ] | Колонки **MFE/MAE** в `Trade` вместо клиентского пересчёта через N HTTP к бирже | Exit Efficiency из «30 с и рейт-лимит» → мгновенно | 0.5 дня |
-| 5 | [ ] | **`ObTradeRollup`** (минутные бакеты buy/sell/count) — delta/CVD/speed-of-tape перестают сканировать сырую партиционированную ленту | Orderflow опрашивается каждые 3 с — это главный источник нагрузки на БД | 1 день |
+| 5 | **[x]** | **`ObTradeRollup`** (минутные бакеты buy/sell/count) — delta/CVD/speed-of-tape перестают сканировать сырую партиционированную ленту | Orderflow опрашивается каждые 3 с — это главный источник нагрузки на БД | 1 день |
 | 6 | [ ] | **`ObFootprintRollup`** по свече — footprint сейчас GROUP BY по сырью на каждый опрос | То же | 0.5 дня |
 | 7 | [ ] | Liqmap: алгоритм **O(n²)** (до 12 млн итераций/запрос) + 3 внешних HTTP, кэш только в памяти на 60 с | Один из самых дорогих эндпоинтов | 0.5 дня |
-| 8 | [ ] | БАГ: `computeSpeedOfTape` считает `COUNT(*)` строк `ObTrade` = число снапшотов, а не сделок | Метрика показывает почти константу | 15 мин (+колонка) |
+| 8 | **[x]** | БАГ: `computeSpeedOfTape` считает `COUNT(*)` строк `ObTrade` = число снапшотов, а не сделок | Метрика показывает почти константу | 15 мин (+колонка) |
 | 9 | **[x]** | БАГ: forex `computeBA` читает `FxCandle` **без фильтра по `interval`** | Смешивает 5m/15m/1h/1d/1w; на `1w` тянет год 5-минуток | 5 мин |
 | 10 | **[x]** | БАГ: `getNetStopsCount` для периода `year` считает от **начала месяца** | Годовой лимит риска фактически = месячному | 5 мин |
 
@@ -48,10 +48,10 @@
 | `src/app/dashboard/trades/page.tsx` | фильтры/сортировка/пагинация по всему массиву | на клиенте | серверная пагинация |
 | `src/lib/analytics/exitEfficiency.ts` | MFE/MAE: N параллельных HTTP к бирже за свечами | по кнопке, каждый раз заново | колонки в `Trade` |
 | `src/lib/mentorShare.ts:19` | `findMany` без `select` + `computeMetrics` | каждый просмотр share-ссылки | тот же снапшот метрик |
-| `src/lib/orderflow.ts:283` `computeDelta` | GROUP BY по сырому `ObTrade` | каждые 3 с на клиента | `ObTradeRollup` |
+| ~~`src/lib/orderflow.ts:283` `computeDelta`~~ | **[x]** GROUP BY по сырому `ObTrade` | было: каждые 3 с на клиента | `ObTradeRollup` (fallback на сырьё) |
 | `src/lib/orderflow.ts:340` `computeFootprint` | GROUP BY по `ObFootprint` (цена × свеча) | каждые 3 с | `ObFootprintRollup` |
 | `src/lib/orderflow.ts:612` профиль стакана | подзапрос `MAX(t)` по сырому `ObSnapshot` **дважды** | каждые 3 с | `ObLatestBook` (1 строка на symbol×exchange) |
-| `src/lib/orderflow.ts:1154` `computeSpeedOfTape` | `COUNT(*)` по `ObTrade` | 12 с TTL | `SUM(tradeCount)` из rollup |
+| ~~`src/lib/orderflow.ts:1154` `computeSpeedOfTape`~~ | **[x]** `COUNT(*)` по `ObTrade` | было: 12 с TTL | `SUM(trades)` из `ObTradeRollup` |
 | `src/lib/orderflow.ts:692` `computeVolumeProfile` | разложение свечей по бинам | 12 с TTL | кэш в БД по (symbol, period) |
 | `src/lib/orderflow.ts:849` `computeDivergence` | свечи + дельта + поиск экстремумов | 12 с TTL | `ObSignal`, пишет коллектор |
 | `src/lib/orderflow.ts:1231` `computeAbsorption` | скан всех свечей + footprint | 12 с TTL | `ObSignal` |
@@ -260,7 +260,7 @@ model Trade {
 плюс отдельные эндпоинты divergence / imbalance / absorption / volume-profile
 с TTL 12 с. Каждый промах кэша = тяжёлые агрегации по партиционированным таблицам.
 
-### C1. `ObTradeRollup` — минутные бакеты ленты
+### C1. [x] ВЫПОЛНЕНО — `ObTradeRollup` — минутные бакеты ленты
 
 ```prisma
 model ObTradeRollup {
@@ -394,7 +394,7 @@ HTTP к Binance/Bybit/OKX.
 
 | № | Файл | Проблема |
 |---|------|----------|
-| B1 | `src/lib/orderflow.ts:1170` | Speed of Tape считает снапшоты, а не сделки (см. C1) |
+| B1 | ~~`src/lib/orderflow.ts:1170`~~ | **[x] исправлено** — Speed of Tape считал строки `ObTrade` (тики коллектора), а не сделки. Коллектор теперь считает печати (`collector/trades.mjs`), метрика суммирует `trades` |
 | B2 | ~~`src/app/api/forex/route.ts:102`~~ | **[x] исправлено** — `computeBA` без `interval` смешивал таймфреймы |
 | B3 | ~~`src/lib/riskManager.ts:118-121`~~ | **[x] исправлено** — для периода `year` начало отсчёта было **началом месяца**: годовой лимит равнялся месячному. Заодно чинился TTL кэша (см. ниже) |
 | B4 | ~~`src/app/dashboard/analytics/page.tsx:21-29`~~ | **[x] исправлено** — R пересчитывался по формуле «движение цены / дистанция стопа» в ТРЁХ местах (`analytics/page.tsx` `rrOf`, `metrics.ts` `avgRR`, `metrics.ts` дневные `winR/lossR`), игнорируя риск-профиль. Теперь везде читается сохранённый `Trade.rr` — как уже делал «Календарь» |

@@ -423,10 +423,49 @@ function accumulateRollup(symbol, exchange, t, rows, mid) {
   }
 }
 
+// То же для ленты сделок (ObTradeRollup): дельта/CVD и «скорость ленты»
+// читают минутные суммы вместо сырого ObTrade.
+const tradeRollup = new Map(); // key -> { symbol, exchange, bucketMs, buyVol, sellVol, trades }
+
+function accumulateTradeRollup(symbol, exchange, t, buyVol, sellVol, count) {
+  const bucketMs = Math.floor(t.getTime() / 60_000) * 60_000;
+  const key = `${symbol}|${exchange}|${bucketMs}`;
+  let e = tradeRollup.get(key);
+  if (!e) {
+    e = { symbol, exchange, bucketMs, buyVol: 0, sellVol: 0, trades: 0 };
+    tradeRollup.set(key, e);
+  }
+  e.buyVol += buyVol;
+  e.sellVol += sellVol;
+  e.trades += count;
+}
+
+async function flushTradeRollup(curBucket) {
+  for (const [key, e] of tradeRollup) {
+    if (e.bucketMs >= curBucket) continue;
+    tradeRollup.delete(key);
+    if (e.buyVol === 0 && e.sellVol === 0 && e.trades === 0) continue;
+    try {
+      await pool.query(
+        `INSERT INTO "ObTradeRollup" ("symbol","exchange","bucket","buyVol","sellVol","trades")
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT ("symbol","exchange","bucket")
+         DO UPDATE SET "buyVol" = "ObTradeRollup"."buyVol" + EXCLUDED."buyVol",
+                       "sellVol" = "ObTradeRollup"."sellVol" + EXCLUDED."sellVol",
+                       "trades" = "ObTradeRollup"."trades" + EXCLUDED."trades"`,
+        [e.symbol, e.exchange, new Date(e.bucketMs), e.buyVol, e.sellVol, e.trades],
+      );
+    } catch (err) {
+      console.error(`[rollup] flush ленты ошибка ${key}: ${err.message}`);
+    }
+  }
+}
+
 // Сбрасываем в БД все бакеты, чья минута уже завершилась (bucketMs < текущей
 // минуты). Upsert (ON CONFLICT) — на случай рестарта коллектора посреди минуты.
 async function flushRollup(now) {
   const curBucket = Math.floor(now.getTime() / 60_000) * 60_000;
+  await flushTradeRollup(curBucket);
   for (const [key, e] of rollup) {
     if (e.bucketMs >= curBucket) continue;
     rollup.delete(key);
@@ -526,9 +565,13 @@ async function writeSnapshot() {
   const fpRows = [];
   const bigRows = [];
   for (const tf of tradeFeeds) {
-    const { buyVol, sellVol, footprint, big } = tf.trades.drain();
+    const { buyVol, sellVol, count, footprint, big } = tf.trades.drain();
     const m = metricFor(`${tf.exchange}:${tf.symbol}`);
-    if (buyVol !== 0 || sellVol !== 0) { tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]); m.deltaRows += 1; }
+    if (buyVol !== 0 || sellVol !== 0) {
+      tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol, count]);
+      accumulateTradeRollup(tf.symbol, tf.exchange, t, buyVol, sellVol, count);
+      m.deltaRows += 1;
+    }
     for (const lvl of footprint) {
       if (lvl.buy === 0 && lvl.sell === 0) continue;
       fpRows.push([tf.symbol, tf.exchange, t, lvl.price, lvl.buy, lvl.sell]);
@@ -543,13 +586,13 @@ async function writeSnapshot() {
     const values = [];
     const params = [];
     tRows.forEach((r, i) => {
-      const b = i * 5;
-      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5})`);
+      const b = i * 6;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
       params.push(...r);
     });
     try {
       await pool.query(
-        `INSERT INTO "ObTrade" ("symbol","exchange","t","buyVol","sellVol") VALUES ` + values.join(","),
+        `INSERT INTO "ObTrade" ("symbol","exchange","t","buyVol","sellVol","trades") VALUES ` + values.join(","),
         params,
       );
     } catch (err) {
@@ -719,6 +762,13 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObTradeRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
     // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
     // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
     // ленивой подгрузки графика). Раньше здесь был DELETE по
@@ -843,6 +893,31 @@ async function backfillRollup() {
     console.log("[rollup] бэкафилл завершён");
   } catch (err) {
     console.error(`[rollup] бэкафилл ошибка: ${err.message}`);
+  }
+}
+
+// Бэкафилл rollup ленты из сырого ObTrade. Нужен, чтобы дельта/CVD работали на
+// уже накопленной истории сразу после деплоя, а не только на новых данных.
+// Поле trades у старых строк = 0 (счётчик печатей появился вместе с этой
+// таблицей), поэтому «скорость ленты» на исторических окнах будет нулевой,
+// пока не наберутся свежие минуты — раньше она там показывала не ноль, а
+// бессмысленную константу (частоту опроса коллектора).
+async function backfillTradeRollup() {
+  try {
+    const { rows } = await pool.query(`SELECT 1 FROM "ObTradeRollup" LIMIT 1`);
+    if (rows.length > 0) return;
+    console.log("[rollup] бэкафилл ленты из ObTrade…");
+    await pool.query(
+      `INSERT INTO "ObTradeRollup" ("symbol","exchange","bucket","buyVol","sellVol","trades")
+       SELECT "symbol", "exchange", date_trunc('minute', "t"),
+              SUM("buyVol"), SUM("sellVol"), COALESCE(SUM("trades"), 0)::int
+       FROM "ObTrade"
+       GROUP BY "symbol", "exchange", date_trunc('minute', "t")
+       ON CONFLICT ("symbol","exchange","bucket") DO NOTHING`,
+    );
+    console.log("[rollup] бэкафилл ленты завершён");
+  } catch (err) {
+    console.error(`[rollup] бэкафилл ленты ошибка: ${err.message}`);
   }
 }
 

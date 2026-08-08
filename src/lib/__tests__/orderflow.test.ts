@@ -77,9 +77,24 @@ describe("fetchOrderflowCandles", () => {
 });
 
 describe("computeDelta", () => {
-  it("returns null on empty rows", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]);
+  it("returns null when both the rollup and the raw fallback are empty", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // ObTradeRollup
+    mocks.queryRaw.mockResolvedValueOnce([]); // fallback на сырой ObTrade
     expect(await computeDelta("BTCUSDT", "binance", 0, 1000, 4)).toBeNull();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("не трогает сырьё, когда rollup ответил", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{ col: 0, buy: 1, sell: 1 }]);
+    await computeDelta("BTCUSDT", "binance", 0, 1000, 4);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("падает на сырой ObTrade, пока rollup не наполнен", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // rollup пуст
+    mocks.queryRaw.mockResolvedValueOnce([{ col: 1, buy: 7, sell: 2 }]);
+    const d = await computeDelta("BTCUSDT", "binance", 0, 1000, 4);
+    expect(d!.delta).toEqual([0, 5, 0, 0]);
   });
 
   it("builds buy/sell/delta/cvd arrays and clamps cols", async () => {

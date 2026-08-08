@@ -266,10 +266,14 @@ export type DeltaSeries = {
   cvd: number[]; // кумулятивная дельта
 };
 
-// Дельта/кумулятивная дельта из ленты сделок (ObTrade). Корзины времени
-// совпадают по сетке с heatmap (cols). Агрегация прямо в Postgres: раньше сюда
-// переносились все сырые строки за окно (сотни тысяч при широком таймфрейме),
-// хотя дальше они просто суммировались по корзинам.
+// Дельта/кумулятивная дельта из ленты сделок. Корзины времени совпадают по
+// сетке с heatmap (cols).
+//
+// Быстрый путь — минутный rollup (ObTradeRollup): одна строка на
+// symbol×exchange×минуту вместо сырых тиков. Ширина колонки здесь всегда
+// заметно больше минуты (самое узкое окно — 400 пятиминуток ≈ 8 мин на
+// колонку), так что минутная гранулярность ничего не огрубляет. Если rollup
+// ещё пуст (свежий деплой до бэкафилла) — падаем на сырой ObTrade.
 export async function computeDelta(
   symbol: string,
   exchange: string,
@@ -279,15 +283,26 @@ export async function computeDelta(
 ): Promise<DeltaSeries | null> {
   const xspan = toMs - fromMs || 1;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
-  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
-  const rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
-    SELECT ${colExpr}::int AS col,
+  const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+  let rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+    SELECT ${colExprR}::int AS col,
            SUM("buyVol")::float8 AS buy,
            SUM("sellVol")::float8 AS sell
-    FROM "ObTrade"
-    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+    FROM "ObTradeRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
     GROUP BY col
   `;
+  if (rows.length === 0) {
+    const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+    rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+      SELECT ${colExpr}::int AS col,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM "ObTrade"
+      WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY col
+    `;
+  }
   if (rows.length === 0) return null;
 
   const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
@@ -1148,8 +1163,18 @@ export async function computeImbalance(
 }
 
 /**
- * Speed of Tape — количество сделок в минуту по данным ObTrade.
- * Читает ObTrade за период, группирует по минутным бакетам.
+ * Speed of Tape — количество сделок в минуту.
+ *
+ * БЫЛО: COUNT(*) по ObTrade. Коллектор пишет ОДНУ строку на свой тик, агрегируя
+ * все сделки интервала, поэтому счёт строк давал частоту опроса коллектора
+ * (≈60/snapshotMs), а не активность рынка — метрика показывала почти константу.
+ * СТАЛО: SUM("trades") — реальное число печатей, которое коллектор теперь
+ * считает (см. collector/trades.mjs).
+ *
+ * Источник — минутный ObTradeRollup, что совпадает с бакетом метрики один в
+ * один. Fallback на сырьё — пока rollup не наполнен; у строк ObTrade, записанных
+ * до появления счётчика, trades = 0, поэтому на старой истории метрика покажет
+ * ноль вместо прежней бессмысленной константы.
  */
 export async function computeSpeedOfTape(
   symbol: string,
@@ -1163,17 +1188,26 @@ export async function computeSpeedOfTape(
   const xspan = toMs - fromMs || 1;
   const cols = Math.max(1, Math.ceil(xspan / bucketMs));
 
-  // Считаем количество сделок в каждом бакете.
-  const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const bucketExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${bucketMs})::int`;
 
-  const rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
-    SELECT ${bucketExpr} AS bucket, COUNT(*)::int AS cnt
-    FROM "ObTrade"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+  let rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
+    SELECT ${bucketExprR} AS bucket, SUM("trades")::int AS cnt
+    FROM "ObTradeRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" < ${to} ${exFilter}
     GROUP BY bucket
     ORDER BY bucket
   `;
+  if (rows.length === 0) {
+    const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
+    rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
+      SELECT ${bucketExpr} AS bucket, SUM("trades")::int AS cnt
+      FROM "ObTrade"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+      GROUP BY bucket
+      ORDER BY bucket
+    `;
+  }
 
   if (rows.length === 0) return null;
 
