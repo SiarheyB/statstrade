@@ -58,13 +58,22 @@ const CANDLE_INTERVAL: Record<string, string> = {
 // синхронизацией свечей занимается collector.
 // Если в БД ещё нет данных (collector не успел) — возвращаем пустой массив;
 // live-обновление (3с) подтянет их при следующем опросе.
+// opts.live — нужна ли СВЕЖАЯ формирующаяся свеча.
+//
+// Ради неё функция ходит в Binance на каждый вызов, и это 366 из ~400 мс
+// (измерено). Графику это нужно: он опрашивает /api/orderflow раз в 3 с и
+// показывает текущую свечу в реальном времени. А детекторам дивергенций и
+// абсорбции — нет: они анализируют ЗАКРЫТЫЕ свечи, и живая последняя им
+// ничего не даёт. Раньше они платили за неё те же 366 мс на каждый опрос.
 export async function fetchOrderflowCandles(
   symbol: string,
   exchange: string,
   range: string,
   fromMs: number,
   toMs: number,
+  opts: { live?: boolean } = {},
 ): Promise<OfCandle[]> {
+  const live = opts.live !== false;
   const interval = CANDLE_INTERVAL[range] ?? "1m";
 
   // URL для запросов к Binance (используется и при fallback, и при live-обновлении)
@@ -114,7 +123,7 @@ export async function fetchOrderflowCandles(
     // 2 свечи с Binance, чтобы обновить h/l/c/v текущей свечи.
     // Это лёгкий запрос (2 свечи) — не перегружает ни Binance, ни БД.
     // ═══════════════════════════════════════════════════════════════════
-    if (result.length > 0 && urlBase) {
+    if (live && result.length > 0 && urlBase) {
       try {
         const latestUrl = `${urlBase}?symbol=${symbol}&interval=${interval}&limit=2`;
         const latestRes = await fetch(latestUrl);
@@ -936,7 +945,9 @@ export async function computeDivergence(
   const maxBars = opts?.maxDivergenceBars ?? 30;
 
   // 1. Получаем свечи и дельту.
-  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  // live: false — дивергенции считаются по закрытым свечам, поход в Binance
+  // за формирующейся свечой здесь только тратил бы ~366 мс на каждый опрос.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs, { live: false });
   if (candles.length < minBars) return null;
 
   const deltaSeries = await computeDelta(symbol, exchange, fromMs, toMs);
@@ -1343,7 +1354,8 @@ export async function computeAbsorption(
   const lookback = opts?.lookback ?? 10;
 
   // 1. Получаем свечи.
-  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  // live: false — см. computeDivergence: абсорбция тоже про закрытые свечи.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs, { live: false });
   if (candles.length < lookback + minCandles) return null;
 
   // 2. Получаем footprint (buyVol, sellVol) для каждой свечи.

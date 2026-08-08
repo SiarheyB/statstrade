@@ -76,6 +76,39 @@ describe("fetchOrderflowCandles", () => {
   });
 });
 
+describe("fetchOrderflowCandles: живая свеча", () => {
+  // Ради формирующейся свечи функция ходит в Binance. Графику это нужно
+  // (опрос раз в 3 с), детекторам — нет: 366 из ~400 мс их времени уходило
+  // именно сюда.
+  // Ровно столько, сколько ждёт окно 1h (CANDLES_IN_WINDOW). При меньшем
+  // числе срабатывает ДРУГОЙ путь — дозагрузка истории с биржи, и она от
+  // live не зависит.
+  const rows = Array.from({ length: 800 }, (_, i) => ({
+    t: new Date(i * 3600_000), o: 1, h: 2, l: 0.5, c: 1.5,
+  }));
+
+  it("по умолчанию дозапрашивает свежую свечу", async () => {
+    mocks.obCandleFindMany.mockResolvedValue(rows);
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, json: async () => [],
+    } as unknown as Response);
+    await fetchOrderflowCandles("BTCUSDT", "binance-futures", "1h", 0, 1e12);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("с live:false в сеть не ходит", async () => {
+    mocks.obCandleFindMany.mockResolvedValue(rows);
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, json: async () => [],
+    } as unknown as Response);
+    const out = await fetchOrderflowCandles("BTCUSDT", "binance-futures", "1h", 0, 1e12, { live: false });
+    expect(spy).not.toHaveBeenCalled();
+    expect(out.length).toBe(rows.length);
+    spy.mockRestore();
+  });
+});
+
 describe("computeDelta", () => {
   it("returns null when both the rollup and the raw fallback are empty", async () => {
     mocks.queryRaw.mockResolvedValueOnce([]); // ObTradeRollup

@@ -50,10 +50,14 @@ export default function CalendarPage() {
   // иначе перелистывание месяцев отбрасывало бы пользователя назад.
   const jumped = useRef(false);
 
+  // Текущий месяц фиксируется ОДИН РАЗ при монтировании, а не считается во
+  // время рендера: Date.now() в рендере — нечистый вызов (react-hooks/purity),
+  // и результат всё равно не обновлялся бы сам при пересечении полуночи.
+  const [today] = useState(() => Date.now());
   const defaultView = useMemo(() => {
-    const zp = zonedParts(Date.now(), timezone);
+    const zp = zonedParts(today, timezone);
     return { y: zp.y, m: zp.mo };
-  }, [timezone]);
+  }, [today, timezone]);
   const v = view ?? defaultView;
 
   const load = useCallback(async () => {
