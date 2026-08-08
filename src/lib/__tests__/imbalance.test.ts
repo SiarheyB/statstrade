@@ -110,7 +110,7 @@ describe("computeSpeedOfTape", () => {
 
   it("counts 1 trade per minute correctly", async () => {
     // 1 bucket (60000ms = 1 минута), 1 сделка
-    mocks.queryRaw.mockResolvedValue([{ bucket: 0, cnt: 1 }]);
+    mocks.queryRaw.mockResolvedValue([{ slot: 0, cnt: 1 }]);
     const result = await computeSpeedOfTape("BTCUSDT", "binance-futures", 0, 60000, 60000);
     expect(result).not.toBeNull();
     expect(result!.tradesPerMin[0]).toBe(1);
@@ -120,7 +120,7 @@ describe("computeSpeedOfTape", () => {
 
   it("counts 100 trades per minute and detects spike", async () => {
     // 1 bucket с 100 сделками
-    mocks.queryRaw.mockResolvedValue([{ bucket: 0, cnt: 100 }]);
+    mocks.queryRaw.mockResolvedValue([{ slot: 0, cnt: 100 }]);
     const result = await computeSpeedOfTape("BTCUSDT", "binance-futures", 0, 60000, 60000);
     expect(result).not.toBeNull();
     expect(result!.tradesPerMin[0]).toBe(100);
@@ -133,9 +133,9 @@ describe("computeSpeedOfTape", () => {
   it("handles multiple buckets", async () => {
     // 3 бакета по 1 мин, 0, 50, 0 сделок
     mocks.queryRaw.mockResolvedValue([
-      { bucket: 0, cnt: 0 },
-      { bucket: 1, cnt: 50 },
-      { bucket: 2, cnt: 0 },
+      { slot: 0, cnt: 0 },
+      { slot: 1, cnt: 50 },
+      { slot: 2, cnt: 0 },
     ]);
     const result = await computeSpeedOfTape("BTCUSDT", "binance-futures", 0, 180000, 60000);
     expect(result).not.toBeNull();

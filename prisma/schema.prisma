@@ -517,6 +517,28 @@ model ObTradeRollup {
   @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval
 }
 
+// Rollup футпринта: объём покупок/продаж по ценовым уровням в ПЯТИМИНУТНОМ
+// бакете. Пять минут — наименьший таймфрейм графика, а все остальные (15m, 1h,
+// 4h, 12h, 1d, 1w) кратны ему, поэтому любой из них собирается из этих строк
+// точно, без огрубления.
+//
+// Сырой ObFootprint пишется на каждый тик коллектора (≈1/с) на каждый ценовой
+// уровень — на окне в 400–800 свечей это сотни тысяч строк, и раньше они
+// сворачивались заново на КАЖДЫЙ опрос (фронт дёргает orderflow раз в 3 с).
+model ObFootprintRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало 5-минутного бакета (UTC)
+  price    Float
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+  @@index([bucket]) // pruneOld()
+}
+
 // Метаданные минутного бакета: сколько снапшотов в него попало (делитель для
 // усреднения «высоты стен») и Σ mid (для B/A-зоны ±1%). Маленькая таблица —
 // один ряд на (symbol,exchange,минута).

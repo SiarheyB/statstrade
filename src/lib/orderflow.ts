@@ -341,6 +341,12 @@ const CANDLE_MS: Record<string, number> = {
 
 // Footprint-кластеры: объём покупок/продаж по ценовым уровням внутри свечи.
 // Источник — лента сделок Binance (ObFootprint), поэтому всегда binance-futures.
+//
+// Быстрый путь — ObFootprintRollup (5-минутные бакеты × уровень). Пять минут это
+// младший таймфрейм графика, а остальные кратны ему, поэтому свеча любого ТФ
+// собирается из целых бакетов точно. Сырьё пишется на каждый тик коллектора на
+// каждый уровень, и сворачивать его заново на каждый опрос (раз в 3 с) — самая
+// дорогая часть orderflow. Fallback на сырьё, пока rollup не наполнен.
 export async function computeFootprint(
   symbol: string,
   exchange: string,
@@ -349,28 +355,47 @@ export async function computeFootprint(
   toMs: number,
 ): Promise<Footprint | null> {
   const interval = CANDLE_MS[range] ?? 60_000;
-  // Группировка по свече (время открытия) и цене — в Postgres, вместо переноса
-  // всех сырых строк за окно в Node (уровни × снапшоты — быстро растёт).
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
-  const rows = await prisma.$queryRaw<
-    { bucket: bigint; price: number; buy: number; sell: number }[]
+  // ВАЖНО: алиас НЕ должен называться "bucket". В Postgres GROUP BY сначала
+  // ищет колонку входной таблицы и только потом алиас SELECT, а в
+  // ObFootprintRollup колонка "bucket" есть — группировка молча шла по сырому
+  // 5-минутному бакету, уровни не схлопывались в свечу таймфрейма, и maxVol
+  // (яркость кластеров) считался по 5-минуткам вместо свечи.
+  let rows = await prisma.$queryRaw<
+    { candle: bigint; price: number; buy: number; sell: number }[]
   >`
-    SELECT (floor(extract(epoch from "t") * 1000 / ${interval}) * ${interval})::int8 AS bucket,
+    SELECT (floor(extract(epoch from "bucket") * 1000 / ${interval}) * ${interval})::int8 AS candle,
            "price" AS price,
            SUM("buyVol")::float8 AS buy,
            SUM("sellVol")::float8 AS sell
-    FROM "ObFootprint"
-    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
-    GROUP BY bucket, "price"
-    ORDER BY bucket
+    FROM "ObFootprintRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
+    GROUP BY candle, "price"
+    ORDER BY candle
   `;
+  if (rows.length === 0) {
+    // Группировка по свече и цене — в Postgres, вместо переноса всех сырых строк
+    // за окно в Node (уровни × снапшоты — быстро растёт).
+    rows = await prisma.$queryRaw<
+      { candle: bigint; price: number; buy: number; sell: number }[]
+    >`
+      SELECT (floor(extract(epoch from "t") * 1000 / ${interval}) * ${interval})::int8 AS candle,
+             "price" AS price,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM "ObFootprint"
+      WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY candle, "price"
+      ORDER BY candle
+    `;
+  }
   if (rows.length === 0) return null;
 
   let maxVol = 0;
   const byCandle = new Map<number, FootprintLevel[]>();
   for (const r of rows) {
     if (r.buy === 0 && r.sell === 0) continue;
-    const t = Number(r.bucket);
+    const t = Number(r.candle);
     let levels = byCandle.get(t);
     if (!levels) { levels = []; byCandle.set(t, levels); }
     levels.push({ price: r.price, buy: r.buy, sell: r.sell });
@@ -1191,21 +1216,25 @@ export async function computeSpeedOfTape(
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
   const bucketExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${bucketMs})::int`;
 
-  let rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
-    SELECT ${bucketExprR} AS bucket, SUM("trades")::int AS cnt
+  // Алиас не "bucket" — см. пояснение в computeFootprint: иначе GROUP BY
+  // связался бы с одноимённой колонкой ObTradeRollup. Здесь бакет метрики
+  // совпадает с минутой rollup, так что итог случайно сходился, но при другом
+  // bucketMs результат был бы неверным.
+  let rows = await prisma.$queryRaw<{ slot: number; cnt: number }[]>`
+    SELECT ${bucketExprR} AS slot, SUM("trades")::int AS cnt
     FROM "ObTradeRollup"
     WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" < ${to} ${exFilter}
-    GROUP BY bucket
-    ORDER BY bucket
+    GROUP BY slot
+    ORDER BY slot
   `;
   if (rows.length === 0) {
     const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
-    rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
-      SELECT ${bucketExpr} AS bucket, SUM("trades")::int AS cnt
+    rows = await prisma.$queryRaw<{ slot: number; cnt: number }[]>`
+      SELECT ${bucketExpr} AS slot, SUM("trades")::int AS cnt
       FROM "ObTrade"
       WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
-      GROUP BY bucket
-      ORDER BY bucket
+      GROUP BY slot
+      ORDER BY slot
     `;
   }
 
@@ -1214,7 +1243,7 @@ export async function computeSpeedOfTape(
   // Заполняем массив.
   const tradesPerMin = new Array(cols).fill(0);
   for (const r of rows) {
-    const c = Math.max(0, Math.min(cols - 1, r.bucket));
+    const c = Math.max(0, Math.min(cols - 1, r.slot));
     tradesPerMin[c] += r.cnt;
   }
 

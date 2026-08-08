@@ -24,7 +24,7 @@
 | 3 | **[~]** | Таблица **`TradeDaily`** (день × аккаунт) — слой данных готов, потребители следующим шагом вместо агрегации всех сделок на клиенте (календарь, daily-график, тренд 30д, месячные бакеты) | Календарь/дашборд перестают зависеть от размера истории | 1 день |
 | 4 | [ ] | Колонки **MFE/MAE** в `Trade` вместо клиентского пересчёта через N HTTP к бирже | Exit Efficiency из «30 с и рейт-лимит» → мгновенно | 0.5 дня |
 | 5 | **[x]** | **`ObTradeRollup`** (минутные бакеты buy/sell/count) — delta/CVD/speed-of-tape перестают сканировать сырую партиционированную ленту | Orderflow опрашивается каждые 3 с — это главный источник нагрузки на БД | 1 день |
-| 6 | [ ] | **`ObFootprintRollup`** по свече — footprint сейчас GROUP BY по сырью на каждый опрос | То же | 0.5 дня |
+| 6 | **[x]** | **`ObFootprintRollup`** по свече — footprint сейчас GROUP BY по сырью на каждый опрос | То же | 0.5 дня |
 | 7 | [ ] | Liqmap: алгоритм **O(n²)** (до 12 млн итераций/запрос) + 3 внешних HTTP, кэш только в памяти на 60 с | Один из самых дорогих эндпоинтов | 0.5 дня |
 | 8 | **[x]** | БАГ: `computeSpeedOfTape` считает `COUNT(*)` строк `ObTrade` = число снапшотов, а не сделок | Метрика показывает почти константу | 15 мин (+колонка) |
 | 9 | **[x]** | БАГ: forex `computeBA` читает `FxCandle` **без фильтра по `interval`** | Смешивает 5m/15m/1h/1d/1w; на `1w` тянет год 5-минуток | 5 мин |
@@ -49,7 +49,7 @@
 | `src/lib/analytics/exitEfficiency.ts` | MFE/MAE: N параллельных HTTP к бирже за свечами | по кнопке, каждый раз заново | колонки в `Trade` |
 | `src/lib/mentorShare.ts:19` | `findMany` без `select` + `computeMetrics` | каждый просмотр share-ссылки | тот же снапшот метрик |
 | ~~`src/lib/orderflow.ts:283` `computeDelta`~~ | **[x]** GROUP BY по сырому `ObTrade` | было: каждые 3 с на клиента | `ObTradeRollup` (fallback на сырьё) |
-| `src/lib/orderflow.ts:340` `computeFootprint` | GROUP BY по `ObFootprint` (цена × свеча) | каждые 3 с | `ObFootprintRollup` |
+| ~~`src/lib/orderflow.ts:340` `computeFootprint`~~ | **[x]** GROUP BY по `ObFootprint` (цена × свеча) | было: каждые 3 с | `ObFootprintRollup` (5-мин бакеты, fallback на сырьё) |
 | `src/lib/orderflow.ts:612` профиль стакана | подзапрос `MAX(t)` по сырому `ObSnapshot` **дважды** | каждые 3 с | `ObLatestBook` (1 строка на symbol×exchange) |
 | ~~`src/lib/orderflow.ts:1154` `computeSpeedOfTape`~~ | **[x]** `COUNT(*)` по `ObTrade` | было: 12 с TTL | `SUM(trades)` из `ObTradeRollup` |
 | `src/lib/orderflow.ts:692` `computeVolumeProfile` | разложение свечей по бинам | 12 с TTL | кэш в БД по (symbol, period) |
@@ -402,6 +402,7 @@ HTTP к Binance/Bybit/OKX.
 | B6 | `src/lib/riskManager.ts:177` | `Cache.set(cacheKey, 0, 0)` — TTL 0 мс, запись протухает мгновенно (кэш не работает для «лимит не задан») |
 | B7 | `src/lib/orderflow.ts:117-159` | В live-пути `fetchOrderflowCandles` ходит в Binance **на каждый** запрос (каждые 3 с на активного пользователя) и делает `INSERT … ON CONFLICT`. При нескольких зрителях — лишние записи в БД и внешние запросы; свечи и так пишет коллектор раз в 60 с |
 | B8 | все роуты orderflow/liqmap/forex | In-memory `Map`-кэши **без ограничения размера и без вытеснения** (`absorption/route.ts:40` ключ = вся query-строка). Медленная утечка памяти в долгоживущем контейнере. `src/lib/cache.ts` — та же история (нет eviction, `any` в типе) |
+| B10 | ~~`src/lib/orderflow.ts` (rollup-запросы)~~ | **[x] найдено и исправлено при пункте 6** — алиас `AS bucket` в `GROUP BY` связывался с ОДНОИМЁННОЙ КОЛОНКОЙ rollup-таблицы, а не с выражением `SELECT` (Postgres сначала ищет входную колонку). Футпринт не схлопывался в свечу таймфрейма: уровни дублировались, `maxVol` (яркость кластеров) считался по 5-минуткам. В `computeSpeedOfTape` та же коллизия сходилась случайно — бакет метрики совпадал с минутой rollup. Алиасы переименованы в `candle`/`slot` |
 | B9 | ~~`src/lib/riskManager.ts` (TTL)~~ | **[x] исправлено (найдено при B3)** — TTL кэша считался своей копией календаря: для `year` = «этот же месяц в следующем году» (значение переживало 1 января и показывало счётчик прошлого года), для `week` в **воскресенье** = +8 дней вместо +1 |
 
 ---

@@ -114,16 +114,24 @@ describe("computeDelta", () => {
 });
 
 describe("computeFootprint", () => {
-  it("returns null on empty rows", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]);
+  it("returns null when both the rollup and the raw fallback are empty", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // ObFootprintRollup
+    mocks.queryRaw.mockResolvedValueOnce([]); // fallback на сырой ObFootprint
     expect(await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000)).toBeNull();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
   });
 
-  it("groups levels by bucket, skips zero-volume rows, tracks maxVol", async () => {
+  it("не трогает сырьё, когда rollup ответил", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{ candle: BigInt(0), price: 1, buy: 1, sell: 1 }]);
+    await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("groups levels by candle, skips zero-volume rows, tracks maxVol", async () => {
     mocks.queryRaw.mockResolvedValueOnce([
-      { bucket: BigInt(1000), price: 100, buy: 2, sell: 3 },
-      { bucket: BigInt(1000), price: 101, buy: 0, sell: 0 }, // пропускается
-      { bucket: BigInt(2000), price: 102, buy: 4, sell: 1 },
+      { candle: BigInt(1000), price: 100, buy: 2, sell: 3 },
+      { candle: BigInt(1000), price: 101, buy: 0, sell: 0 }, // пропускается
+      { candle: BigInt(2000), price: 102, buy: 4, sell: 1 },
     ]);
     const fp = await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000);
     expect(fp).not.toBeNull();

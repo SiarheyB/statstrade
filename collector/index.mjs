@@ -440,6 +440,60 @@ function accumulateTradeRollup(symbol, exchange, t, buyVol, sellVol, count) {
   e.trades += count;
 }
 
+// Rollup футпринта: 5-минутные бакеты × ценовой уровень. Пять минут — младший
+// таймфрейм графика, остальные кратны ему, поэтому собираются точно.
+const FP_BUCKET_MS = 300_000;
+const fpRollup = new Map(); // key -> { symbol, exchange, bucketMs, prices: Map<price,{buy,sell}> }
+
+function accumulateFootprintRollup(symbol, exchange, t, levels) {
+  if (levels.length === 0) return;
+  const bucketMs = Math.floor(t.getTime() / FP_BUCKET_MS) * FP_BUCKET_MS;
+  const key = `${symbol}|${exchange}|${bucketMs}`;
+  let e = fpRollup.get(key);
+  if (!e) {
+    e = { symbol, exchange, bucketMs, prices: new Map() };
+    fpRollup.set(key, e);
+  }
+  for (const lvl of levels) {
+    if (lvl.buy === 0 && lvl.sell === 0) continue;
+    const cell = e.prices.get(lvl.price) ?? { buy: 0, sell: 0 };
+    cell.buy += lvl.buy;
+    cell.sell += lvl.sell;
+    e.prices.set(lvl.price, cell);
+  }
+}
+
+async function flushFootprintRollup(now) {
+  const curBucket = Math.floor(now.getTime() / FP_BUCKET_MS) * FP_BUCKET_MS;
+  for (const [key, e] of fpRollup) {
+    if (e.bucketMs >= curBucket) continue;
+    fpRollup.delete(key);
+    if (e.prices.size === 0) continue;
+    const bucket = new Date(e.bucketMs);
+    try {
+      const values = [];
+      const params = [];
+      let i = 0;
+      for (const [price, cell] of e.prices) {
+        const b = i * 6;
+        values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+        params.push(e.symbol, e.exchange, bucket, price, cell.buy, cell.sell);
+        i += 1;
+      }
+      await pool.query(
+        `INSERT INTO "ObFootprintRollup" ("symbol","exchange","bucket","price","buyVol","sellVol")
+         VALUES ${values.join(",")}
+         ON CONFLICT ("symbol","exchange","bucket","price")
+         DO UPDATE SET "buyVol" = "ObFootprintRollup"."buyVol" + EXCLUDED."buyVol",
+                       "sellVol" = "ObFootprintRollup"."sellVol" + EXCLUDED."sellVol"`,
+        params,
+      );
+    } catch (err) {
+      console.error(`[rollup] flush футпринта ошибка ${key}: ${err.message}`);
+    }
+  }
+}
+
 async function flushTradeRollup(curBucket) {
   for (const [key, e] of tradeRollup) {
     if (e.bucketMs >= curBucket) continue;
@@ -466,6 +520,7 @@ async function flushTradeRollup(curBucket) {
 async function flushRollup(now) {
   const curBucket = Math.floor(now.getTime() / 60_000) * 60_000;
   await flushTradeRollup(curBucket);
+  await flushFootprintRollup(now);
   for (const [key, e] of rollup) {
     if (e.bucketMs >= curBucket) continue;
     rollup.delete(key);
@@ -572,6 +627,7 @@ async function writeSnapshot() {
       accumulateTradeRollup(tf.symbol, tf.exchange, t, buyVol, sellVol, count);
       m.deltaRows += 1;
     }
+    accumulateFootprintRollup(tf.symbol, tf.exchange, t, footprint);
     for (const lvl of footprint) {
       if (lvl.buy === 0 && lvl.sell === 0) continue;
       fpRows.push([tf.symbol, tf.exchange, t, lvl.price, lvl.buy, lvl.sell]);
@@ -769,6 +825,13 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObFootprintRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
     // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
     // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
     // ленивой подгрузки графика). Раньше здесь был DELETE по
@@ -918,6 +981,29 @@ async function backfillTradeRollup() {
     console.log("[rollup] бэкафилл ленты завершён");
   } catch (err) {
     console.error(`[rollup] бэкафилл ленты ошибка: ${err.message}`);
+  }
+}
+
+// Бэкафилл rollup футпринта из сырого ObFootprint — чтобы кластеры работали на
+// уже накопленной истории сразу после деплоя.
+async function backfillFootprintRollup() {
+  try {
+    const { rows } = await pool.query(`SELECT 1 FROM "ObFootprintRollup" LIMIT 1`);
+    if (rows.length > 0) return;
+    console.log("[rollup] бэкафилл футпринта из ObFootprint…");
+    await pool.query(
+      `INSERT INTO "ObFootprintRollup" ("symbol","exchange","bucket","price","buyVol","sellVol")
+       SELECT "symbol", "exchange",
+              to_timestamp(floor(extract(epoch from "t") / 300) * 300),
+              "price", SUM("buyVol"), SUM("sellVol")
+       FROM "ObFootprint"
+       GROUP BY "symbol", "exchange",
+                to_timestamp(floor(extract(epoch from "t") / 300) * 300), "price"
+       ON CONFLICT ("symbol","exchange","bucket","price") DO NOTHING`,
+    );
+    console.log("[rollup] бэкафилл футпринта завершён");
+  } catch (err) {
+    console.error(`[rollup] бэкафилл футпринта ошибка: ${err.message}`);
   }
 }
 
