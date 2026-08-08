@@ -16,6 +16,17 @@ export async function register() {
   // Порядок важен: winR/lossR в дневных агрегатах складываются из rr, поэтому
   // бэкафилл агрегатов идёт ПОСЛЕ бэкафилла rr. Оба после первого успешного
   // прогона — no-op (записей без rr / аккаунтов без агрегатов не остаётся).
+  // MFE/MAE закрытых сделок — тем же фоновым порядком, что rr и агрегаты.
+  // Планировщик тут не подходит: на проде ENABLE_SCHEDULER=false. Порция
+  // небольшая — очередь разгребается и заходами на «Аналитику»
+  // (см. /api/exit-efficiency).
+  import("./lib/analytics/mfe")
+    .then(({ fillMissingMfe }) => fillMissingMfe({ limit: 50 }))
+    .then(({ filled, failed }) => {
+      if (filled || failed) console.log(`[mfe] посчитано ${filled}, не удалось ${failed}`);
+    })
+    .catch((err) => console.error("[mfe] ошибка:", err));
+
   import("./lib/analytics/rr")
     .then(({ backfillMissingRR }) => backfillMissingRR())
     .then(({ accounts }) => {
