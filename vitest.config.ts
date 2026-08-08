@@ -4,6 +4,14 @@ import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
   plugins: [tsconfigPaths()],
+  // Алиас задан ЯВНО, а не только через vite-tsconfig-paths: плагин применяет
+  // маппинг лишь к файлам, попадающим в `include` из tsconfig.json, а тесты
+  // оттуда исключены (иначе `next build` тайп-чекает их и падает — см.
+  // комментарий в tsconfig.json). Без этой строки все импорты "@/…" в тестах
+  // переставали резолвиться.
+  resolve: {
+    alias: { "@": resolve(__dirname, "./src") },
+  },
   test: {
     environment: 'jsdom',
     globals: true,

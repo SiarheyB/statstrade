@@ -1,0 +1,20 @@
+{
+  // Тайп-чек ТЕСТОВ. Отдельно от tsconfig.json, потому что `next build`
+  // проверяет всё, что попадает в его include, и падал бы на расхождениях
+  // типов моков с прод-типами (см. комментарий в tsconfig.json).
+  //
+  // Запуск: npx tsc -p tsconfig.test.json --noEmit
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "next-env.d.ts",
+    "src/vitest-globals.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    "**/*.mts"
+  ],
+  "exclude": ["node_modules", ".next"]
+}
