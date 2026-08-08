@@ -41,6 +41,8 @@ export async function GET(req: Request) {
     entryType: p("entryType"),
     mistake: p("mistake"),
     pattern: p("pattern"),
+    from: url.searchParams.get("from"),
+    to: url.searchParams.get("to"),
   };
 
   const sortParam = url.searchParams.get("sort") ?? "exitTime";

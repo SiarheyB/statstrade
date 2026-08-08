@@ -62,8 +62,18 @@ describe("GET /api/trades", () => {
     expect(callArgs().filters).toEqual({
       accountId: "acc1", symbol: "BTCUSDT", market: "futures", side: "long",
       result: "win", entryPoint: "Retest", entryType: "Limit",
-      mistake: "__unset__", pattern: "Breakout",
+      mistake: "__unset__", pattern: "Breakout", from: null, to: null,
     });
+  });
+
+  it("passes the exit-time window through (день в «Календаре»)", async () => {
+    asUser();
+    await GET(new Request(
+      `${base}?from=2026-03-02T21:00:00Z&to=2026-03-03T21:00:00Z`,
+    ));
+    const f = callArgs().filters;
+    expect(f.from).toBe("2026-03-02T21:00:00Z");
+    expect(f.to).toBe("2026-03-03T21:00:00Z");
   });
 
   it("falls back to exitTime for an unknown sort key (no SQL injection surface)", async () => {

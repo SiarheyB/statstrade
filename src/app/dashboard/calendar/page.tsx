@@ -1,99 +1,121 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import type { SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
-import { zonedParts, zonedDateToUtcMs, type TimezoneId } from "@/lib/timezone";
+import { zonedParts, zonedDateToUtcMs, tzOffsetForServer, type TimezoneId } from "@/lib/timezone";
 
-type DayStat = { pnl: number; trades: number; wins: number };
+// Дневной агрегат в том виде, в каком его отдаёт /api/calendar.
+type DayStat = {
+  date: string;
+  netPnl: number;
+  trades: number;
+  wins: number;
+  losses: number;
+  winR: number;
+  lossR: number;
+  rTrades: number;
+};
+
+type AccountOption = { id: string; label: string; exchange: string };
 
 const DAY_MS = 24 * 3600 * 1000;
 
 function pad(n: number): string {
   return String(n).padStart(2, "0");
 }
-// Calendar day the trade falls on, in the user's selected display timezone —
-// so a trade closed at 23:40 local doesn't silently land on "tomorrow" just
-// because the server stored it in UTC.
-function dayKey(iso: string, tz: TimezoneId): string {
-  const { y, mo, d } = zonedParts(new Date(iso).getTime(), tz);
-  return `${y}-${pad(mo + 1)}-${pad(d)}`;
+
+// Границы сетки (6 недель с понедельника) как UTC-инстанты: сервер фильтрует
+// почасовые агрегаты именно по ним.
+function gridRange(y: number, m: number, tz: TimezoneId): { start: number; end: number } {
+  const first = zonedDateToUtcMs(y, m, 1, tz);
+  const offset = (zonedParts(first, tz).day + 6) % 7; // Mon=0
+  const start = first - offset * DAY_MS;
+  return { start, end: start + 42 * DAY_MS };
 }
 
 export default function CalendarPage() {
   const { t, locale, timezone } = useI18n();
   const loc = locale === "en" ? "en-US" : "ru-RU";
-  const [data, setData] = useState<StatsResponse | null>(null);
+  const [days, setDays] = useState<Map<string, DayStat>>(new Map());
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<{ y: number; m: number } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [selectedTrades, setSelectedTrades] = useState<SerializedTrade[]>([]);
   const [accountId, setAccountId] = useState("all");
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await fetch(`/api/stats?accountId=${encodeURIComponent(accountId)}`);
-    if (res.ok) setData(await res.json());
-    setLoading(false);
-  }, [accountId]);
-
-  useEffect(() => {
-    load();
-  }, [load]);
-
-  // Per-day aggregates, bucketed by the user's selected display timezone.
-  // Bucketed by entryTime (когда сделка открыта), а не exitTime — так
-  // многодневные сделки видны в календаре в день входа, а не выхода.
-  const days = useMemo(() => {
-    const map = new Map<string, DayStat>();
-    for (const tr of data?.trades ?? []) {
-      const k = dayKey(tr.entryTime, timezone);
-      const d = map.get(k) ?? { pnl: 0, trades: 0, wins: 0 };
-      d.pnl += tr.netPnl;
-      d.trades += 1;
-      if (tr.result === "win") d.wins += 1;
-      map.set(k, d);
-    }
-    return map;
-  }, [data, timezone]);
-
-  // R-multiple per day — просто суммируем tr.rr, уже посчитанный один раз на
-  // сервере (/api/stats, см. src/lib/risk.ts tradeRR) для колонки RR в
-  // /dashboard/trades. Никакого отдельного пересчёта тут больше нет — то же
-  // самое число, что видно по каждой сделке.
-  const rDaily = useMemo(() => {
-    const map = new Map<string, { winR: number; lossR: number; trades: number }>();
-    for (const tr of data?.trades ?? []) {
-      const r = tr.rr;
-      if (r == null) continue;
-      const k = dayKey(tr.entryTime, timezone);
-      const d = map.get(k) ?? { winR: 0, lossR: 0, trades: 0 };
-      if (r >= 0) d.winR += r; else d.lossR += r;
-      d.trades += 1;
-      map.set(k, d);
-    }
-    return Array.from(map.entries())
-      .map(([date, v]) => ({ date, ...v }))
-      .sort((a, b) => a.date.localeCompare(b.date));
-  }, [data, timezone]);
-
-  // Default the view to the month of the most recent trade.
-  useEffect(() => {
-    if (view || !data?.trades?.length) return;
-    const last = data.trades.reduce(
-      (mx, tr) => Math.max(mx, new Date(tr.entryTime).getTime()),
-      0,
-    );
-    const { y, mo } = zonedParts(last, timezone);
-    setView({ y, m: mo });
-  }, [data, view, timezone]);
+  // На первое открытие прыгаем в месяц последней сделки — но только один раз,
+  // иначе перелистывание месяцев отбрасывало бы пользователя назад.
+  const jumped = useRef(false);
 
   const defaultView = useMemo(() => {
     const zp = zonedParts(Date.now(), timezone);
     return { y: zp.y, m: zp.mo };
   }, [timezone]);
   const v = view ?? defaultView;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { start, end } = gridRange(v.y, v.m, timezone);
+    const params = new URLSearchParams({
+      accountId,
+      from: new Date(start).toISOString(),
+      to: new Date(end).toISOString(),
+      tzOffset: String(tzOffsetForServer(timezone)),
+    });
+    const res = await fetch(`/api/calendar?${params}`);
+    if (res.ok) {
+      const d = (await res.json()) as {
+        days: DayStat[];
+        accounts: AccountOption[];
+        latest: string | null;
+      };
+      setDays(new Map(d.days.map((x) => [x.date, x])));
+      setAccounts(d.accounts);
+      if (!jumped.current && d.latest) {
+        jumped.current = true;
+        const [ly, lm] = d.latest.split("-").map(Number);
+        if (ly !== v.y || lm - 1 !== v.m) setView({ y: ly, m: lm - 1 });
+      }
+    }
+    setLoading(false);
+  }, [v.y, v.m, accountId, timezone]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Сделки выбранного дня — отдельным запросом по границам локальных суток.
+  // Раньше страница фильтровала их из всей истории, лежавшей в браузере.
+  useEffect(() => {
+    if (!selected) {
+      setSelectedTrades([]);
+      return;
+    }
+    let alive = true;
+    (async () => {
+      const [y, mo, d] = selected.split("-").map(Number);
+      const start = zonedDateToUtcMs(y, mo - 1, d, timezone);
+      const params = new URLSearchParams({
+        accountId,
+        from: new Date(start).toISOString(),
+        to: new Date(start + DAY_MS).toISOString(),
+        sort: "exitTime",
+        dir: "asc",
+        pageSize: "200",
+      });
+      const res = await fetch(`/api/trades?${params}`);
+      if (res.ok && alive) {
+        const d2 = (await res.json()) as { trades: SerializedTrade[] };
+        setSelectedTrades(d2.trades);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [selected, accountId, timezone]);
 
   const weekdays = useMemo(() => {
     const f = new Intl.DateTimeFormat(loc, { weekday: "short", timeZone: "UTC" });
@@ -108,19 +130,13 @@ export default function CalendarPage() {
 
   // 6-week grid starting on Monday.
   const grid = useMemo(() => {
-    const first = zonedDateToUtcMs(v.y, v.m, 1, timezone);
-    const offset = (zonedParts(first, timezone).day + 6) % 7; // Mon=0
-    const start = first - offset * DAY_MS;
+    const { start } = gridRange(v.y, v.m, timezone);
     const cells: { date: string; inMonth: boolean; stat?: DayStat }[] = [];
     for (let i = 0; i < 42; i++) {
       const ts = start + i * DAY_MS;
       const zp = zonedParts(ts, timezone);
       const date = `${zp.y}-${pad(zp.mo + 1)}-${pad(zp.d)}`;
-      cells.push({
-        date,
-        inMonth: zp.mo === v.m,
-        stat: days.get(date),
-      });
+      cells.push({ date, inMonth: zp.mo === v.m, stat: days.get(date) });
     }
     return cells;
   }, [v, days, timezone]);
@@ -130,27 +146,24 @@ export default function CalendarPage() {
     let pnl = 0, trades = 0, wins = 0, best = 0;
     for (const c of grid) {
       if (!c.inMonth || !c.stat) continue;
-      pnl += c.stat.pnl;
+      pnl += c.stat.netPnl;
       trades += c.stat.trades;
       wins += c.stat.wins;
-      best = Math.max(best, c.stat.pnl);
+      best = Math.max(best, c.stat.netPnl);
     }
     return { pnl, trades, winRate: trades ? (wins / trades) * 100 : 0, best };
   }, [grid]);
 
-  // Total R for the current month view.
+  // Total R for the current month view — сумма уже сохранённых rr (winR+lossR).
   const monthR = useMemo(() => {
-    const rMap = new Map(rDaily.map((d) => [d.date, d]));
     let totalR = 0, rTrades = 0;
     for (const c of grid) {
-      if (!c.inMonth) continue;
-      const rd = rMap.get(c.date);
-      if (!rd) continue;
-      totalR += rd.winR + rd.lossR;
-      rTrades += rd.trades;
+      if (!c.inMonth || !c.stat) continue;
+      totalR += c.stat.winR + c.stat.lossR;
+      rTrades += c.stat.rTrades;
     }
     return { totalR, rTrades };
-  }, [grid, rDaily]);
+  }, [grid]);
 
   const weeks = useMemo(() => {
     const rows: (typeof grid)[] = [];
@@ -160,6 +173,7 @@ export default function CalendarPage() {
 
   function shiftMonth(delta: number) {
     setSelected(null);
+    jumped.current = true;
     let m = v.m + delta;
     let y = v.y;
     while (m < 0) { m += 12; y -= 1; }
@@ -168,6 +182,7 @@ export default function CalendarPage() {
   }
   function goToday() {
     setSelected(null);
+    jumped.current = true;
     const zp = zonedParts(Date.now(), timezone);
     setView({ y: zp.y, m: zp.mo });
   }
@@ -177,13 +192,6 @@ export default function CalendarPage() {
     if (pnl === 0) return "var(--color-surface-2)";
     return pnl > 0 ? "rgba(22,199,132,0.14)" : "rgba(234,57,67,0.14)";
   }
-
-  const selectedTrades: SerializedTrade[] =
-    selected && data
-      ? data.trades
-          .filter((tr) => dayKey(tr.entryTime, timezone) === selected)
-          .sort((a, b) => new Date(a.entryTime).getTime() - new Date(b.entryTime).getTime())
-      : [];
 
   return (
     <div className="px-6 py-5 max-w-6xl mx-auto">
@@ -199,7 +207,7 @@ export default function CalendarPage() {
             onChange={(e) => setAccountId(e.target.value)}
           >
             <option value="all">{t("dash.allAccounts")}</option>
-            {data?.accounts.map((a) => (
+            {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.label} ({a.exchange})
               </option>
@@ -243,7 +251,7 @@ export default function CalendarPage() {
 
           <div className="space-y-1.5">
             {weeks.map((week, wi) => {
-              const weekPnl = week.reduce((s, c) => s + (c.inMonth && c.stat ? c.stat.pnl : 0), 0);
+              const weekPnl = week.reduce((s, c) => s + (c.inMonth && c.stat ? c.stat.netPnl : 0), 0);
               const weekHas = week.some((c) => c.inMonth && c.stat);
               return (
                 <div key={wi} className="grid grid-cols-[repeat(7,1fr)_3rem] gap-1.5">
@@ -255,7 +263,7 @@ export default function CalendarPage() {
                         key={c.date}
                         onClick={() => has && setSelected(c.date === selected ? null : c.date)}
                         disabled={!has}
-                        style={{ backgroundColor: cellColor(c.stat?.pnl) }}
+                        style={{ backgroundColor: cellColor(c.stat?.netPnl) }}
                         className={`min-h-[64px] rounded-lg border p-1.5 text-left transition ${
                           c.inMonth ? "border-border" : "border-transparent opacity-40"
                         } ${has ? "cursor-pointer hover:border-border-strong" : "cursor-default"} ${
@@ -265,8 +273,8 @@ export default function CalendarPage() {
                         <div className="text-[11px] text-faint">{day}</div>
                         {c.stat && (
                           <>
-                            <div className={`mt-1 text-xs font-semibold tabular-nums ${c.stat.pnl >= 0 ? "text-profit" : "text-loss"}`}>
-                              {fmtUsd(c.stat.pnl, { sign: true })}
+                            <div className={`mt-1 text-xs font-semibold tabular-nums ${c.stat.netPnl >= 0 ? "text-profit" : "text-loss"}`}>
+                              {fmtUsd(c.stat.netPnl, { sign: true })}
                             </div>
                             <div className="text-[10px] text-faint">
                               {c.stat.trades} · {((c.stat.wins / c.stat.trades) * 100).toFixed(0)}%

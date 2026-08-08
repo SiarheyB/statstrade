@@ -74,6 +74,7 @@ export type HourBucket = {
   winR: number;
   lossR: number;
   trades: number;
+  rTrades?: number; // сколько сделок часа имеют посчитанный rr
 };
 
 export type DayBucket = {
@@ -84,6 +85,7 @@ export type DayBucket = {
   winR: number;
   lossR: number;
   trades: number;
+  rTrades: number;
 };
 
 // Свернуть часовые агрегаты в локальные дни пользователя.
@@ -92,7 +94,7 @@ export function bucketByLocalDay(hours: HourBucket[], offsetMinutes: number): Da
   for (const h of hours) {
     const date = localDayKey(h.hour.getTime(), offsetMinutes);
     const b = map.get(date) ?? {
-      date, netPnl: 0, wins: 0, losses: 0, winR: 0, lossR: 0, trades: 0,
+      date, netPnl: 0, wins: 0, losses: 0, winR: 0, lossR: 0, trades: 0, rTrades: 0,
     };
     b.netPnl += h.netPnl;
     b.wins += h.wins;
@@ -100,6 +102,7 @@ export function bucketByLocalDay(hours: HourBucket[], offsetMinutes: number): Da
     b.winR += h.winR;
     b.lossR += h.lossR;
     b.trades += h.trades;
+    b.rTrades += h.rTrades ?? 0;
     map.set(date, b);
   }
   return [...map.values()].sort((a, b) => a.date.localeCompare(b.date));

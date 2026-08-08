@@ -30,6 +30,10 @@ export type TradeFilters = {
   entryType: string;
   mistake: string;
   pattern: string;
+  // Окно по времени ВЫХОДА (ISO или null). Используется «Календарём» для
+  // списка сделок выбранного дня: границы локальных суток он считает сам.
+  from?: string | null;
+  to?: string | null;
 };
 
 export const UNSET = "__unset__";
@@ -184,6 +188,14 @@ export async function queryTrades(
   }
   if (filters.result === "win" || filters.result === "loss" || filters.result === "breakeven") {
     where.push(Prisma.sql`t."result" = ${filters.result}`);
+  }
+  const fromDate = filters.from ? new Date(filters.from) : null;
+  const toDate = filters.to ? new Date(filters.to) : null;
+  if (fromDate && !Number.isNaN(fromDate.getTime())) {
+    where.push(Prisma.sql`t."exitTime" >= ${fromDate}`);
+  }
+  if (toDate && !Number.isNaN(toDate.getTime())) {
+    where.push(Prisma.sql`t."exitTime" < ${toDate}`);
   }
 
   // Фильтры по аннотациям. Конкретное значение → id IN (ключи с этим значением);
