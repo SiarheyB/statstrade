@@ -50,7 +50,7 @@
 | `src/lib/mentorShare.ts:19` | `findMany` без `select` + `computeMetrics` | каждый просмотр share-ссылки | тот же снапшот метрик |
 | ~~`src/lib/orderflow.ts:283` `computeDelta`~~ | **[x]** GROUP BY по сырому `ObTrade` | было: каждые 3 с на клиента | `ObTradeRollup` (fallback на сырьё) |
 | ~~`src/lib/orderflow.ts:340` `computeFootprint`~~ | **[x]** GROUP BY по `ObFootprint` (цена × свеча) | было: каждые 3 с | `ObFootprintRollup` (5-мин бакеты, fallback на сырьё) |
-| `src/lib/orderflow.ts:612` профиль стакана | подзапрос `MAX(t)` по сырому `ObSnapshot` **дважды** | каждые 3 с | `ObLatestBook` (1 строка на symbol×exchange) |
+| ~~`src/lib/orderflow.ts:612` профиль стакана~~ | **[x]** подзапрос `MAX(t)` по сырому `ObSnapshot` **дважды** | было: каждые 3 с | `ObLatestBook` (1 строка на symbol×exchange, чтение по PK) |
 | ~~`src/lib/orderflow.ts:1154` `computeSpeedOfTape`~~ | **[x]** `COUNT(*)` по `ObTrade` | было: 12 с TTL | `SUM(trades)` из `ObTradeRollup` |
 | `src/lib/orderflow.ts:692` `computeVolumeProfile` | разложение свечей по бинам | 12 с TTL | кэш в БД по (symbol, period) |
 | `src/lib/orderflow.ts:849` `computeDivergence` | свечи + дельта + поиск экстремумов | 12 с TTL | `ObSignal`, пишет коллектор |
@@ -401,7 +401,7 @@ HTTP к Binance/Bybit/OKX.
 | B5 | ~~календарь vs дашборд~~ | **[x] решено** — календарь бакетил по `entryTime` в tz юзера, `metrics.daily` — по `exitTime` в UTC. Принято: день сделки **везде по `exitTime`**, границы суток — **в таймзоне пользователя**. Фундамент готов (см. пункт 11), остался перевод самого «Календаря» |
 | B6 | `src/lib/riskManager.ts:177` | `Cache.set(cacheKey, 0, 0)` — TTL 0 мс, запись протухает мгновенно (кэш не работает для «лимит не задан») |
 | B7 | `src/lib/orderflow.ts:117-159` | В live-пути `fetchOrderflowCandles` ходит в Binance **на каждый** запрос (каждые 3 с на активного пользователя) и делает `INSERT … ON CONFLICT`. При нескольких зрителях — лишние записи в БД и внешние запросы; свечи и так пишет коллектор раз в 60 с |
-| B8 | все роуты orderflow/liqmap/forex | In-memory `Map`-кэши **без ограничения размера и без вытеснения** (`absorption/route.ts:40` ключ = вся query-строка). Медленная утечка памяти в долгоживущем контейнере. `src/lib/cache.ts` — та же история (нет eviction, `any` в типе) |
+| B8 | ~~все роуты orderflow/liqmap/forex~~ | **[x] исправлено** — 10 самодельных `Map`-кэшей без предела размера и вытеснения заменены на общий `lib/routeCache.ts` (TTL + предел записей + дедупликация «в полёте»); убраны 3 отдельные `inflight`-мапы. Осталось: `src/lib/cache.ts` (нет eviction, `any` в типе) — им пользуется только счётчик стопов |
 | B10 | ~~`src/lib/orderflow.ts` (rollup-запросы)~~ | **[x] найдено и исправлено при пункте 6** — алиас `AS bucket` в `GROUP BY` связывался с ОДНОИМЁННОЙ КОЛОНКОЙ rollup-таблицы, а не с выражением `SELECT` (Postgres сначала ищет входную колонку). Футпринт не схлопывался в свечу таймфрейма: уровни дублировались, `maxVol` (яркость кластеров) считался по 5-минуткам. В `computeSpeedOfTape` та же коллизия сходилась случайно — бакет метрики совпадал с минутой rollup. Алиасы переименованы в `candle`/`slot` |
 | B9 | ~~`src/lib/riskManager.ts` (TTL)~~ | **[x] исправлено (найдено при B3)** — TTL кэша считался своей копией календаря: для `year` = «этот же месяц в следующем году» (значение переживало 1 января и показывало счётчик прошлого года), для `week` в **воскресенье** = +8 дней вместо +1 |
 

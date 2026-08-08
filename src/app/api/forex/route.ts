@@ -4,6 +4,7 @@ import { forexAccessError } from "@/lib/forexAccess";
 import { prisma } from "@/lib/db";
 import { isTimezone, normalizeTimezone } from "@/lib/timezone";
 import { candleActivity } from "@/lib/forexActivity";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 30;
 
@@ -44,8 +45,7 @@ const AGGREGATE_FROM: Record<string, string | undefined> = {
 };
 
 const TTL_MS = 3000;
-const cache = new Map<string, { at: number; data: unknown }>();
-const inflight = new Map<string, Promise<unknown>>();
+const cache = createRouteCache(TTL_MS);
 
 type CandleRow = { t: Date; o: number; h: number; l: number; c: number; v: number };
 type BaRow = { t: number; bidSum: number; askSum: number; volSum: number };
@@ -193,37 +193,30 @@ export async function GET(req: Request) {
   }
 
   const key = `${symbol}|${range}|${timezone ?? "none"}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
 
   try {
-    let p = inflight.get(key);
-    if (!p) {
-      p = (async () => {
-        const toMs = Date.now();
-        const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
-        const sourceInterval = AGGREGATE_FROM[range] ?? range;
-        const [candles, ba, deltaRes] = await Promise.all([
-          fetchCandles(symbol, range, fromMs, toMs),
-          computeBA(symbol, fromMs, toMs, sourceInterval),
-          computeDelta(symbol, fromMs, toMs, sourceInterval),
-        ]);
-        return {
-          symbol,
-          range,
-          from: fromMs,
-          to: toMs,
-          candles,
-          ba,
-          delta: deltaRes?.delta ?? null,
-          cvd: deltaRes?.cvd ?? null,
-          timezone: timezone || "auto",
-        };
-      })().finally(() => inflight.delete(key));
-      inflight.set(key, p);
-    }
-    const data = await p;
-    cache.set(key, { at: Date.now(), data });
+    // fetch = кэш + дедупликация «в полёте» (см. lib/routeCache.ts).
+    const data = await cache.fetch(key, async () => {
+      const toMs = Date.now();
+      const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
+      const sourceInterval = AGGREGATE_FROM[range] ?? range;
+      const [candles, ba, deltaRes] = await Promise.all([
+        fetchCandles(symbol, range, fromMs, toMs),
+        computeBA(symbol, fromMs, toMs, sourceInterval),
+        computeDelta(symbol, fromMs, toMs, sourceInterval),
+      ]);
+      return {
+        symbol,
+        range,
+        from: fromMs,
+        to: toMs,
+        candles,
+        ba,
+        delta: deltaRes?.delta ?? null,
+        cvd: deltaRes?.cvd ?? null,
+        timezone: timezone || "auto",
+      };
+    });
     return NextResponse.json(data);
   } catch (err) {
     return serverError((err as Error).message);

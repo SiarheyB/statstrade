@@ -539,6 +539,24 @@ model ObFootprintRollup {
   @@index([bucket]) // pruneOld()
 }
 
+// Последний снапшот стакана — одна строка на (symbol, exchange). Профиль
+// текущего стакана (столбик bid/ask справа от heatmap) читается по PK вместо
+// поиска MAX(t) по сырому ObSnapshot: тот запрос выполнялся на КАЖДЫЙ опрос
+// orderflow (раз в 3 с) и дважды сканировал окно — коррелированный подзапрос
+// плюс внешняя выборка.
+//
+// levels — JSON [{ price, bidVol, askVol }] того же снапшота, что писался в
+// ObSnapshot: уровни уже отфильтрованы порогом minCoins.
+model ObLatestBook {
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3) // время снапшота
+  mid      Float
+  levels   Json
+
+  @@id([symbol, exchange])
+}
+
 // Метаданные минутного бакета: сколько снапшотов в него попало (делитель для
 // усреднения «высоты стен») и Σ mid (для B/A-зоны ±1%). Маленькая таблица —
 // один ряд на (symbol,exchange,минута).

@@ -10,6 +10,7 @@ import {
   DEFAULT_CANDLES,
 } from "@/lib/orderflow";
 import { isTimezone, normalizeTimezone } from "@/lib/timezone";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 30;
 
@@ -51,8 +52,7 @@ type Payload = {
 // соединений Prisma (Timed out fetching a connection). Теперь одинаковые запросы
 // в пределах TTL переиспользуют результат, а наложившиеся — общий промис.
 const TTL_MS = 3000;
-const cache = new Map<string, { at: number; data: Payload }>();
-const inflight = new Map<string, Promise<Payload>>();
+const cache = createRouteCache(TTL_MS);
 
 async function buildPayload(symbol: string, exchange: string, range: string, tf: number): Promise<Payload> {
   const toMs = Date.now();
@@ -91,22 +91,14 @@ export async function GET(req: Request) {
   }
 
   const key = `${symbol}|${exchange}|${range}|${timezone ?? "none"}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
-
   try {
-    let p = inflight.get(key);
-    if (!p) {
-      p = buildPayload(symbol, exchange, range, tf).finally(() => inflight.delete(key));
-      inflight.set(key, p);
-    }
-    const data = await p;
-    // Add timezone to response for frontend consistency
-    const response = {
-      ...data,
-      timezone: timezone || "auto" // Default to auto if not provided
-    };
-    cache.set(key, { at: Date.now(), data: response });
+    // fetch = кэш + дедупликация «в полёте»: пока считается первый запрос,
+    // параллельные переиспользуют его промис, а не запускают вторую тяжёлую
+    // агрегацию (фронт опрашивает эндпоинт раз в 3 секунды).
+    const response = await cache.fetch(key, async () => ({
+      ...(await buildPayload(symbol, exchange, range, tf)),
+      timezone: timezone || "auto", // Default to auto if not provided
+    }));
     return NextResponse.json(response);
   } catch (err) {
     return serverError((err as Error).message);

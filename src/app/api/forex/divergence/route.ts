@@ -3,6 +3,7 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
 import { prisma } from "@/lib/db";
 import { candleActivity } from "@/lib/forexActivity";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 20;
 
@@ -14,7 +15,7 @@ const PERIODS = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 // Медвежья дивергенция: цена делает новый максимум, но активность падает.
 
 const TTL_MS = 5000;
-const cache = new Map<string, { at: number; data: unknown }>();
+const cache = createRouteCache(TTL_MS);
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -32,7 +33,7 @@ export async function GET(req: Request) {
 
   const key = `${symbol}|${period}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
+  if (hit) return NextResponse.json(hit);
 
   try {
     // 12h не поддерживается Twelve Data — агрегируем из 1h

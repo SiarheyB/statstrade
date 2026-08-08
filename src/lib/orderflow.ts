@@ -648,18 +648,49 @@ export async function computeOrderflow(
   for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
   const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
 
-  // Профиль текущего стакана: самый свежий снапшот каждой биржи (окно ~5с).
-  const lastRows = await prisma.$queryRaw<
-    { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[]
-  >`
-    SELECT "t", "exchange", "price", "bidVol", "askVol"
-    FROM "ObSnapshot"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
-      AND "t" >= (
-        SELECT MAX("t") FROM "ObSnapshot"
-        WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
-      ) - interval '5 seconds'
-  `;
+  // Профиль текущего стакана.
+  //
+  // Быстрый путь — таблица ObLatestBook (одна строка на symbol×exchange,
+  // коллектор перезаписывает её на каждом тике): чтение по первичному ключу
+  // вместо поиска MAX(t) коррелированным подзапросом по сырому ObSnapshot,
+  // который сканировал окно дважды на КАЖДЫЙ опрос orderflow.
+  //
+  // Он применим только когда окно заканчивается «сейчас» — а /api/orderflow
+  // всегда просит to = Date.now(). Для исторического окна (если такой вызов
+  // появится) и пока таблица не наполнена — прежний путь по сырью.
+  const isLive = Date.now() - toMs < 5 * 60_000;
+  type BookLevel = { price: number; bidVol: number; askVol: number };
+  let lastRows: { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[] = [];
+
+  if (isLive) {
+    const books = await prisma.obLatestBook.findMany({
+      where: { symbol, ...(exchange === "all" ? {} : { exchange }) },
+      select: { t: true, exchange: true, levels: true },
+    });
+    for (const b of books) {
+      // Прежняя выборка требовала, чтобы снапшот попадал в окно. Сохраняем это:
+      // если коллектор стоит, строка протухла и профиль показывать по ней нельзя.
+      if (b.t.getTime() < fromMs || b.t.getTime() > toMs) continue;
+      for (const lvl of b.levels as unknown as BookLevel[]) {
+        lastRows.push({ t: b.t, exchange: b.exchange, price: lvl.price, bidVol: lvl.bidVol, askVol: lvl.askVol });
+      }
+    }
+  }
+
+  if (lastRows.length === 0) {
+    lastRows = await prisma.$queryRaw<
+      { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[]
+    >`
+      SELECT "t", "exchange", "price", "bidVol", "askVol"
+      FROM "ObSnapshot"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+        AND "t" >= (
+          SELECT MAX("t") FROM "ObSnapshot"
+          WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+        ) - interval '5 seconds'
+    `;
+  }
+
   const profileBid = new Array(bins).fill(0);
   const profileAsk = new Array(bins).fill(0);
   let price: number;

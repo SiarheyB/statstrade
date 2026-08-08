@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { computeDivergence } from "@/lib/orderflow";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 30;
 
@@ -20,7 +21,7 @@ const DEFAULT_LOOKBACK = 50;
 
 // Кэш ответа (TTL 12с, как в основном /api/orderflow).
 const TTL_MS = 12000;
-const cache = new Map<string, { at: number; data: unknown }>();
+const cache = createRouteCache(TTL_MS);
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -65,9 +66,7 @@ export async function GET(req: Request) {
   // Проверка кэша.
   const cacheKey = `${symbol}:${exchange}:${periodKey}:${minStrength}:${lookbackBars}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < TTL_MS) {
-    return NextResponse.json(cached.data);
-  }
+  if (cached) return NextResponse.json(cached);
 
   const toMs = Date.now();
   const fromMs = toMs - periodMs;
@@ -90,7 +89,7 @@ export async function GET(req: Request) {
     };
 
     // Кэшируем.
-    cache.set(cacheKey, { at: Date.now(), data: payload });
+    cache.set(cacheKey, payload);
 
     return NextResponse.json(payload);
   } catch (e) {

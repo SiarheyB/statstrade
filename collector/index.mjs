@@ -581,9 +581,32 @@ function startRollupFlushBeat() {
   return state;
 }
 
+// Последний снапшот стакана — одна строка на (symbol, exchange), перезаписывается
+// на каждом тике. Профиль текущего стакана читает её по PK вместо поиска MAX(t)
+// по сырому ObSnapshot на каждый опрос orderflow.
+async function writeLatestBooks(books) {
+  for (const [symbol, exchange, t, mid, rows] of books) {
+    if (mid == null || rows.length === 0) continue;
+    // Формат тот же, что уходит в ObSnapshot: [symbol, exchange, t, price, bid, ask].
+    const levels = rows.map((r) => ({ price: r[3], bidVol: r[4], askVol: r[5] }));
+    try {
+      await pool.query(
+        `INSERT INTO "ObLatestBook" ("symbol","exchange","t","mid","levels")
+         VALUES ($1,$2,$3,$4,$5::jsonb)
+         ON CONFLICT ("symbol","exchange")
+         DO UPDATE SET "t" = EXCLUDED."t", "mid" = EXCLUDED."mid", "levels" = EXCLUDED."levels"`,
+        [symbol, exchange, t, mid, JSON.stringify(levels)],
+      );
+    } catch (err) {
+      console.error(`[write] ObLatestBook ошибка ${symbol}|${exchange}: ${err.message}`);
+    }
+  }
+}
+
 async function writeSnapshot() {
   const t = new Date();
   const rows = [];
+  const latestBooks = [];
   for (const feed of feeds) {
     const { rows: r, mid } = rowsForFeed(feed, t);
     const m = metricFor(`${feed.exchange}:${feed.symbol}`);
@@ -592,7 +615,9 @@ async function writeSnapshot() {
     m.lastWriteAt = t.toISOString();
     rows.push(...r);
     accumulateRollup(feed.symbol, feed.exchange, t, r, mid);
+    latestBooks.push([feed.symbol, feed.exchange, t, mid, r]);
   }
+  await writeLatestBooks(latestBooks);
   // Сбрасываем завершённые минутные бакеты в rollup-таблицы (не блокирует запись
   // сырых снапшотов — flush идёт после основного INSERT ниже).
 
