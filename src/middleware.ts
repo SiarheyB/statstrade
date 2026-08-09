@@ -40,6 +40,17 @@ export async function middleware(req: NextRequest) {
   const claims = secret ? await verifySessionClaims(token, secret) : null;
   const valid = !!claims;
 
+  // Второй рубеж для админского API. Гард ниже смотрит на префикс "/admin", а
+  // путь "/api/admin/..." начинается с "/api" и под него НЕ подпадал — из-за
+  // этого роуты бэкапа какое-то время были доступны анонимно (SECURITY_AUDIT.md).
+  // Роль (ADMIN_EMAILS) здесь не проверяем: в edge-рантайме middleware env
+  // может быть подставлен на этапе сборки, а образ собирается без этой
+  // переменной. Роль проверяет getAdminSession() в каждом роуте; здесь мы
+  // гарантируем только то, что анонима не будет ни при каких обстоятельствах.
+  if (pathname.startsWith("/api/admin") && !valid) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
   // Protect the dashboard and admin area (the admin-role check is enforced in
   // the /admin layout & API since it needs ADMIN_EMAILS; here we only require a
   // valid session).

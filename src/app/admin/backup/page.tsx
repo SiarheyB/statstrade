@@ -18,9 +18,9 @@ type OpType =
 
 type OpStatus = 'pending' | 'running' | 'success' | 'error' | 'canceled';
 
+// Абсолютный путь на диске сервера API больше не отдаёт — работаем по имени.
 interface BackupFile {
   name: string;
-  path: string;
   size: number;
   modified: number;
 }
@@ -474,7 +474,7 @@ export default function AdminBackupPage() {
                 <div className='space-y-2 max-h-72 overflow-y-auto'>
                   {files.map((f) => (
                     <div
-                      key={f.path}
+                      key={f.name}
                       onClick={() => setSelectedFile(f.name)}
                       className={clsx(
                         'flex items-center justify-between p-3 rounded-lg cursor-pointer transition-colors',
