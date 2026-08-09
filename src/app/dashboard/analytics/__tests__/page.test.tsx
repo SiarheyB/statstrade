@@ -65,10 +65,22 @@ function makeTrade(overrides: Partial<Record<string, unknown>> = {}) {
   };
 }
 
-function makeStatsResponse(trades: unknown[]) {
+// Корзины R теперь считает сервер — тест проверяет, что страница рисует
+// именно ТО, что пришло, а не пересчитывает сама.
+const R_BINS_25 = [
+  { label: "1…2", count: 0, tone: "loss" },
+  { label: "2…3", count: 1, tone: "profit" },
+];
+
+function makeStatsResponse(trades: unknown[], bins: unknown[] = R_BINS_25) {
   return {
     metrics: {
       tradeCount: trades.length,
+      pnlBins: [{ label: "0", count: trades.length, tone: "profit" }],
+      rBins: bins,
+      holdBins: [{ label: "< 1h", count: trades.length, tone: "neutral" }],
+      trend: null,
+      scopeAccounts: [{ accountId: "acc-1", exchange: "binance" }],
       sharpe: 1.2,
       sortino: 1.5,
       calmar: 0.8,
@@ -77,7 +89,6 @@ function makeStatsResponse(trades: unknown[]) {
       recoveryFactor: 2.1,
       equityCurve: [{ t: 1, equity: 10000, pnl: 0 }],
     },
-    trades,
     fillCount: trades.length,
     symbols: ["BTCUSDT"],
     accounts: [{ id: "acc-1", label: "Main", exchange: "binance", balance: 10000 }],
@@ -140,10 +151,7 @@ describe("AnalyticsPage", () => {
     expect(screen.getByText("Main (binance)")).toBeInTheDocument();
   });
 
-  it("buckets the R distribution by the stored rr, not by the stop distance", async () => {
-    // entry 100 → exit 110, стоп 95, комиссия 1: старая формула по дистанции
-    // стопа дала бы (10/5) − 1/5 = +1.8R → корзина «1…2».
-    // В БД сохранён rr = 2.5 (риск-профиль аккаунта) → корзина «2…3».
+  it("рисует корзины R из ответа сервера, ничего не пересчитывая", async () => {
     const trades = [makeTrade({ rr: 2.5 })];
     global.fetch = vi.fn((url: string) => {
       if (url.startsWith("/api/stats")) {
@@ -166,11 +174,11 @@ describe("AnalyticsPage", () => {
     expect(byLabel["1…2"]).toBe(0);
   });
 
-  it("drops trades without a stored rr from the R distribution", async () => {
+  it("пустые корзины с сервера рисуются как пустые", async () => {
     const trades = [makeTrade({ rr: null })];
     global.fetch = vi.fn((url: string) => {
       if (url.startsWith("/api/stats")) {
-        return Promise.resolve({ ok: true, json: () => Promise.resolve(makeStatsResponse(trades)) });
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(makeStatsResponse(trades, [])) });
       }
       if (url.startsWith("/api/accounts")) {
         return Promise.resolve({ ok: true, json: () => Promise.resolve([{ id: "acc-1", capital: 5000 }]) });

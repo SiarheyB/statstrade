@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
+import { playbookStats } from "@/lib/analytics/playbookStats";
 
 function featureDisabled() {
   return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
@@ -14,11 +15,14 @@ export async function GET() {
   try {
     const feature = await getFeatureConfig("playbooks");
     if (!feature.enabled) return featureDisabled();
-    const playbooks = await prisma.playbook.findMany({
-      where: { userId: user.userId },
-      orderBy: [{ name: "asc" }, { entryPoint: "asc" }],
-    });
-    return NextResponse.json({ playbooks, maxPerUser: feature.maxPerUser });
+    const [playbooks, stats] = await Promise.all([
+      prisma.playbook.findMany({
+        where: { userId: user.userId },
+        orderBy: [{ name: "asc" }, { entryPoint: "asc" }],
+      }),
+      playbookStats(user.userId),
+    ]);
+    return NextResponse.json({ playbooks, stats, maxPerUser: feature.maxPerUser });
   } catch (err) {
     return serverError((err as Error).message);
   }

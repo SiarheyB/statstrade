@@ -9,15 +9,6 @@ import { ExitEfficiencyCard } from "@/components/ExitEfficiencyCard";
 import { MonteCarloCard } from "@/components/MonteCarloCard";
 import { fmtRatio } from "@/lib/format";
 
-type Bin = { label: string; count: number; tone?: "profit" | "loss" | "neutral" };
-
-function compact(n: number): string {
-  const a = Math.abs(n);
-  const s = n < 0 ? "-" : "";
-  if (a >= 1000) return `${s}${(a / 1000).toFixed(1)}k`;
-  return `${s}${Math.round(a)}`;
-}
-
 export default function AnalyticsPage() {
   const { t } = useI18n();
   const [data, setData] = useState<StatsResponse | null>(null);
@@ -62,62 +53,6 @@ export default function AnalyticsPage() {
   }, []);
 
   const m = data?.metrics;
-  const trades = data?.trades ?? [];
-
-  const pnlBins = useMemo<Bin[]>(() => {
-    const vals = trades.map((t) => t.netPnl);
-    if (!vals.length) return [];
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    const n = 9;
-    const step = (max - min) / n || 1;
-    const bins = Array.from({ length: n }, (_, i) => ({ lo: min + i * step, count: 0 }));
-    for (const v of vals) {
-      const idx = Math.min(n - 1, Math.max(0, Math.floor((v - min) / step)));
-      bins[idx].count++;
-    }
-    return bins.map((b) => ({
-      label: compact(b.lo),
-      count: b.count,
-      tone: (b.lo + step / 2 >= 0 ? "profit" : "loss") as "profit" | "loss",
-    }));
-  }, [trades]);
-
-  // Распределение R — по сохранённому в БД tr.rr (то же число, что в колонке RR
-  // на «Сделках» и в сводке «Календаря»). Своей формулы здесь больше нет:
-  // она игнорировала риск-профиль аккаунта и показывала другие бакеты.
-  const rBins = useMemo<Bin[]>(() => {
-    const rs = trades.map((tr) => tr.rr).filter((r): r is number => r != null);
-    if (!rs.length) return [];
-    const defs: { label: string; test: (r: number) => boolean; tone: "profit" | "loss" }[] = [
-      { label: "≤ -2R", test: (r) => r <= -2, tone: "loss" },
-      { label: "-2…-1", test: (r) => r > -2 && r < -1, tone: "loss" },
-      { label: "-1…0", test: (r) => r >= -1 && r < 0, tone: "loss" },
-      { label: "0…1", test: (r) => r >= 0 && r < 1, tone: "profit" },
-      { label: "1…2", test: (r) => r >= 1 && r < 2, tone: "profit" },
-      { label: "2…3", test: (r) => r >= 2 && r < 3, tone: "profit" },
-      { label: "≥ 3R", test: (r) => r >= 3, tone: "profit" },
-    ];
-    return defs.map((d) => ({ label: d.label, count: rs.filter(d.test).length, tone: d.tone }));
-  }, [trades]);
-
-  const holdBins = useMemo<Bin[]>(() => {
-    if (!trades.length) return [];
-    const H = 3600_000;
-    const defs: { label: string; test: (ms: number) => boolean }[] = [
-      { label: "< 1h", test: (ms) => ms < H },
-      { label: "1–4h", test: (ms) => ms >= H && ms < 4 * H },
-      { label: "4–12h", test: (ms) => ms >= 4 * H && ms < 12 * H },
-      { label: "12–24h", test: (ms) => ms >= 12 * H && ms < 24 * H },
-      { label: "1–3d", test: (ms) => ms >= 24 * H && ms < 72 * H },
-      { label: "> 3d", test: (ms) => ms >= 72 * H },
-    ];
-    return defs.map((d) => ({
-      label: d.label,
-      count: trades.filter((t) => d.test(t.durationMs)).length,
-      tone: "neutral" as const,
-    }));
-  }, [trades]);
 
   const ratios = m
     ? [
@@ -188,13 +123,13 @@ export default function AnalyticsPage() {
               <h3 className="font-medium text-sm mb-3">
                 <Term name="P&L">{t("an.pnlDist")}</Term>
               </h3>
-              <Histogram data={pnlBins} />
+              <Histogram data={m.pnlBins} />
             </div>
             <div className="card p-5">
               <h3 className="font-medium text-sm mb-3">
                 <Term name="RR">{t("an.rDist")}</Term>
               </h3>
-              <Histogram data={rBins} />
+              <Histogram data={m.rBins} />
             </div>
           </div>
 
@@ -202,11 +137,20 @@ export default function AnalyticsPage() {
             <h3 className="font-medium text-sm mb-3">
               <Term desc={t("an.holdDistHint")}>{t("an.holdDist")}</Term>
             </h3>
-            <Histogram data={holdBins} height={220} />
+            <Histogram data={m.holdBins} height={220} />
           </div>
 
-          <ExitEfficiencyCard trades={trades} accounts={data?.accounts ?? []} />
-          <MonteCarloCard trades={trades} capital={capital} accounts={data?.accounts ?? []} />
+          {/* Обе карточки теперь получают ГОТОВЫЙ результат с сервера:
+              MFE/MAE лежат в БД, Monte Carlo считается в /api/monte-carlo.
+              Массив сделок им больше не нужен — только область расчёта. */}
+          <ExitEfficiencyCard scope={m.scopeAccounts} accounts={data?.accounts ?? []} />
+          <MonteCarloCard
+            scope={m.scopeAccounts}
+            accounts={data?.accounts ?? []}
+            accountId={accountId}
+            capital={capital}
+            tradeCount={m.tradeCount}
+          />
         </div>
       )}
     </div>

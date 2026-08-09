@@ -79,7 +79,9 @@ describe("GET /api/stats", () => {
     expect(body).toHaveProperty("metrics");
     expect(body).toHaveProperty("accounts");
     expect(body).toHaveProperty("entryPointOptions");
-    expect(Array.isArray(body.trades)).toBe(true);
+    // Массива сделок в ответе больше нет — только метрики и словари.
+    expect(body.trades).toBeUndefined();
+    expect(body.metrics).toBeDefined();
   });
 
   it("returns 500 when a prisma query fails", async () => {
@@ -220,7 +222,7 @@ describe("GET /api/stats", () => {
     expect(body.metrics).toBeDefined();
   });
 
-  it("returns empty trades array when no trades match filters", async () => {
+  it("returns zeroed metrics (and no trades array) when nothing matches filters", async () => {
     asUser();
     mockPrisma.trade.findMany.mockResolvedValue([]);
     mockPrisma.fill.count.mockResolvedValue(0);
@@ -228,8 +230,9 @@ describe("GET /api/stats", () => {
     const res = await GET(new Request(`${base}?symbol=NONEXISTENT`));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(Array.isArray(body.trades)).toBe(true);
-    expect(body.trades.length).toBe(0);
+    // Массива сделок в ответе больше нет — только метрики и словари.
+    expect(body.trades).toBeUndefined();
+    expect(body.metrics.tradeCount).toBe(0);
   });
 
   it("handles user with no custom options (uses defaults)", async () => {

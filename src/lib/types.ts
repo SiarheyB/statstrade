@@ -53,7 +53,9 @@ export type AccountSummary = {
 
 export type StatsResponse = {
   metrics: Metrics;
-  trades: SerializedTrade[];
+  // Массива сделок здесь НЕТ намеренно: постраничный список отдаёт
+  // /api/trades, дневную сетку — /api/calendar, а всё, что раньше считалось
+  // на клиенте по всей истории (гистограммы, тренд 30д), считает сервер.
   fillCount: number;
   symbols: string[];
   accounts: AccountSummary[];

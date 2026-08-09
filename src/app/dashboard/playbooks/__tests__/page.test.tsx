@@ -14,13 +14,20 @@ vi.mock("@/lib/i18n/provider", () => ({
 }));
 
 type MockPlaybook = { id: string; name: string; entryPoint?: string; rules: string; updatedAt: string };
-type MockTrade = { pattern: string | null; entryPoint: string | null; result: "win" | "loss" | "breakeven"; netPnl: number };
+// Строка агрегата, как её отдаёт /api/playbooks.
+type MockStatRow = {
+  pattern: string;
+  entryPoint: string;
+  trades: number;
+  winRate: number;
+  netPnl: number;
+};
 
 function mockFetchImpl({
   featureEnabled = true,
   maxPerUser = 20,
   playbooks = [] as MockPlaybook[],
-  trades = [] as MockTrade[],
+  stats = [] as MockStatRow[],
   entryPointOptions = [] as string[],
 } = {}) {
   return vi.fn((url: string, init?: RequestInit) => {
@@ -50,13 +57,12 @@ function mockFetchImpl({
       if (init?.method === "DELETE") {
         return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
       }
-      return Promise.resolve({ ok: true, json: () => Promise.resolve({ playbooks }) });
+      // Статистику по (паттерн, ТВХ) считает СЕРВЕР одним агрегатом — страница
+      // её только раскладывает по карточкам (см. /api/playbooks).
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ playbooks, stats }) });
     }
-    if (url.startsWith("/api/stats")) {
-      return Promise.resolve({
-        ok: true,
-        json: () => Promise.resolve({ trades, entryPointOptions, metrics: {} }),
-      });
+    if (url.startsWith("/api/settings")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({ entryPointOptions }) });
     }
     return Promise.resolve({ ok: false, json: () => Promise.resolve({}) });
   }) as any;
@@ -87,14 +93,15 @@ describe("PlaybooksPage", () => {
     await waitFor(() => expect(screen.getByText("playbooks.empty")).toBeInTheDocument());
   });
 
-  it("renders playbooks with stats computed from matching trades, and allows editing + saving rules", async () => {
+  it("рисует статистику, пришедшую с сервера, и сохраняет правила", async () => {
     global.fetch = mockFetchImpl({
       playbooks: [{ id: "pb1", name: "Breakout", rules: "Wait for volume", updatedAt: new Date().toISOString() }],
-      trades: [
-        { pattern: "Breakout", entryPoint: "Retest", result: "win", netPnl: 100 }, // has entry point — belongs to its own playbook, must not count here
-        { pattern: "Breakout", entryPoint: "Impulse", result: "win", netPnl: 40 }, // ditto
-        { pattern: "Breakout", entryPoint: null, result: "loss", netPnl: -20 }, // no entry point — this is the one that counts
-        { pattern: "Reversal", entryPoint: null, result: "win", netPnl: 999 }, // different pattern — must not count
+      // Так это приходит с сервера: отдельные строки на каждую (паттерн, ТВХ).
+      stats: [
+        { pattern: "Breakout", entryPoint: "Retest", trades: 1, winRate: 100, netPnl: 100 },
+        { pattern: "Breakout", entryPoint: "Impulse", trades: 1, winRate: 100, netPnl: 40 },
+        { pattern: "Breakout", entryPoint: "", trades: 1, winRate: 0, netPnl: -20 },
+        { pattern: "Reversal", entryPoint: "", trades: 1, winRate: 100, netPnl: 999 },
       ],
     });
 
@@ -118,9 +125,9 @@ describe("PlaybooksPage", () => {
   it("scopes stats to the matching entry point when the playbook narrows to one ТВХ", async () => {
     global.fetch = mockFetchImpl({
       playbooks: [{ id: "pb1", name: "Breakout", entryPoint: "Retest", rules: "", updatedAt: new Date().toISOString() }],
-      trades: [
-        { pattern: "Breakout", entryPoint: "Retest", result: "win", netPnl: 100 },
-        { pattern: "Breakout", entryPoint: "Impulse", result: "win", netPnl: 40 }, // different ТВХ — must not count
+      stats: [
+        { pattern: "Breakout", entryPoint: "Retest", trades: 1, winRate: 100, netPnl: 100 },
+        { pattern: "Breakout", entryPoint: "Impulse", trades: 1, winRate: 100, netPnl: 40 },
       ],
     });
 
@@ -130,15 +137,15 @@ describe("PlaybooksPage", () => {
     expect(screen.getByText("+100.00 $")).toBeInTheDocument();
   });
 
-  it("keeps the no-entry-point and specific-entry-point playbooks for the same pattern mutually exclusive (no double counting)", async () => {
+  it("разводит плейбук без ТВХ и плейбук конкретной ТВХ по своим карточкам", async () => {
     global.fetch = mockFetchImpl({
       playbooks: [
         { id: "pb1", name: "Breakout", rules: "", updatedAt: new Date().toISOString() },
         { id: "pb2", name: "Breakout", entryPoint: "Retest", rules: "", updatedAt: new Date().toISOString() },
       ],
-      trades: [
-        { pattern: "Breakout", entryPoint: "Retest", result: "win", netPnl: 100 },
-        { pattern: "Breakout", entryPoint: null, result: "win", netPnl: 30 },
+      stats: [
+        { pattern: "Breakout", entryPoint: "Retest", trades: 1, winRate: 100, netPnl: 100 },
+        { pattern: "Breakout", entryPoint: "", trades: 1, winRate: 100, netPnl: 30 },
       ],
     });
 
@@ -155,7 +162,7 @@ describe("PlaybooksPage", () => {
   it("shows noTrades hint for playbooks without matching stats", async () => {
     global.fetch = mockFetchImpl({
       playbooks: [{ id: "pb1", name: "Reversal", rules: "", updatedAt: new Date().toISOString() }],
-      trades: [],
+      stats: [],
     });
     render(<PlaybooksPage />);
     await waitFor(() => expect(screen.getByText("Reversal")).toBeInTheDocument());

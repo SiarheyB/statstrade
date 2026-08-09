@@ -2,11 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { TrendingUp } from "lucide-react";
-import type { SerializedTrade, AccountSummary } from "@/lib/types";
+import type { AccountSummary } from "@/lib/types";
+import type { ScopeAccount } from "@/lib/analytics/metrics";
 import { useI18n } from "@/lib/i18n/provider";
 import { Term } from "@/components/Term";
 import { fmtPct, fmtUsd, fmtSymbol } from "@/lib/format";
-import { pickRecentTrades } from "@/lib/analytics/exitEfficiency";
 import { scopeLabel } from "@/lib/analytics/scopeLabel";
 
 type FeatureValue = { enabled: boolean; maxTrades: number; concurrency: number };
@@ -26,16 +26,21 @@ type Summary = {
   worst: { id: string; symbol: string; capturedPct: number }[];
 };
 
-export function ExitEfficiencyCard({ trades, accounts }: { trades: SerializedTrade[]; accounts: AccountSummary[] }) {
+export function ExitEfficiencyCard({
+  scope: scopeAccounts,
+  accounts,
+}: {
+  // Пары (счёт, биржа) из выборки — считает сервер. Раньше сюда приходил весь
+  // массив сделок, из которого брались ровно эти две колонки.
+  scope: ScopeAccount[];
+  accounts: AccountSummary[];
+}) {
   const { t } = useI18n();
   const [feature, setFeature] = useState<FeatureValue | null>(null);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const scope = useMemo(() => {
-    if (!feature) return "";
-    return scopeLabel(pickRecentTrades(trades, feature.maxTrades), accounts);
-  }, [trades, accounts, feature]);
+  const scope = useMemo(() => scopeLabel(scopeAccounts, accounts), [scopeAccounts, accounts]);
 
   useEffect(() => {
     let alive = true;
@@ -67,7 +72,7 @@ export function ExitEfficiencyCard({ trades, accounts }: { trades: SerializedTra
     };
   }, [feature?.enabled]);
 
-  if (!feature || !feature.enabled || trades.length === 0) return null;
+  if (!feature || !feature.enabled || scopeAccounts.length === 0) return null;
 
   async function run() {
     setBusy(true);

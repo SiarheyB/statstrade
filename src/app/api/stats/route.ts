@@ -315,25 +315,13 @@ export async function GET(req: Request) {
     // значение — /dashboard/trades и /dashboard/calendar видят одно и то же
     // число без повторного вычисления на клиенте.
 
-    // Serialize trades (Dates -> ISO) for the client table.
-    const serializedTrades = filteredTrades.map((t) => ({
-      ...t,
-      entryPoint: t.entryPoint ?? null,
-      entryType: t.entryType ?? null,
-      mistake: t.mistake ?? null,
-      stopLoss: t.stopLoss ?? null,
-      note: t.note ?? null,
-      imageUrl: t.imageUrl ?? null,
-      imageProvider: t.imageProvider ?? null,
-      imagePublicUrl: t.imagePublicUrl ?? null,
-      entryTime: t.entryTime.toISOString(),
-      exitTime: t.exitTime.toISOString(),
-      rr: t.rr ?? null,
-    }));
-
+    // trades в ответе БОЛЬШЕ НЕТ. Раньше сюда уезжала вся история сделок
+    // пользователя (мегабайты при большом счёте) ради трёх гистограмм и
+    // четырёх стрелок на карточках — теперь и то, и другое считает сервер
+    // (см. pnlBins/rBins/holdBins/trend в lib/analytics/metrics.ts).
+    // Постраничный список живёт в /api/trades, дневная сетка — в /api/calendar.
     const payload = {
       metrics,
-      trades: serializedTrades,
       fillCount: base.fillCount,
       symbols: base.symbols,
       accounts: base.accounts,

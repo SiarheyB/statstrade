@@ -26,6 +26,19 @@ export type Bucket = {
 };
 
 export type EquityPoint = { t: number; equity: number; pnl: number };
+// Гистограммы и тренд считаются ЗДЕСЬ, а не на клиенте: раньше ради них
+// /api/stats отдавал в браузер весь массив сделок (мегабайты при большой
+// истории), хотя на экране из него получались три столбчатых диаграммы и
+// четыре числа.
+export type HistBin = { label: string; count: number; tone: "profit" | "loss" | "neutral" };
+export type Trend = {
+  netPnl: number; // Δ доходности на капитал за 30 дней, п.п.
+  winRate: number; // Δ win rate, п.п.
+  profitFactor: number | null; // относительное изменение, %
+  expectancy: number | null;
+};
+// Пары (счёт, биржа), попавшие в выборку — для подписи «область расчёта».
+export type ScopeAccount = { accountId: string; exchange: string };
 export type DailyPoint = { date: string; pnl: number; cumulative: number; trades: number; winRate: number; winR: number; lossR: number };
 
 export type Metrics = {
@@ -124,6 +137,13 @@ export type Metrics = {
   byMistake: Bucket[]; // ошибки
   byPattern: Bucket[]; // паттерн
   bySession: Bucket[]; // торговая сессия (forex)
+  // распределения (раньше строились на клиенте по всему массиву сделок)
+  pnlBins: HistBin[];
+  rBins: HistBin[];
+  holdBins: HistBin[];
+  // «последние 30 дней против предыдущих 30» для карточек дашборда
+  trend: Trend | null;
+  scopeAccounts: ScopeAccount[];
 };
 
 // Trading session from the entry hour (UTC). Mutually exclusive bins.
@@ -196,9 +216,112 @@ function bucketStats(
   }));
 }
 
+function compactNum(n: number): string {
+  const a = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (a >= 1000) return `${sign}${(a / 1000).toFixed(1)}k`;
+  return `${sign}${Math.round(a)}`;
+}
+
+// Распределение P&L по 9 равным корзинам. Перенесено со страницы «Аналитика»
+// без изменений формулы.
+function pnlHistogram(trades: RoundTripTrade[]): HistBin[] {
+  const vals = trades.map((t) => t.netPnl);
+  if (!vals.length) return [];
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+  const n = 9;
+  const step = (max - min) / n || 1;
+  const bins = Array.from({ length: n }, (_, i) => ({ lo: min + i * step, count: 0 }));
+  for (const v of vals) {
+    const idx = Math.min(n - 1, Math.max(0, Math.floor((v - min) / step)));
+    bins[idx].count++;
+  }
+  return bins.map((b) => ({
+    label: compactNum(b.lo),
+    count: b.count,
+    tone: (b.lo + step / 2 >= 0 ? "profit" : "loss") as "profit" | "loss",
+  }));
+}
+
+// Распределение R — по СОХРАНЁННОМУ rr (см. rMultiple выше).
+function rHistogram(trades: RoundTripTrade[]): HistBin[] {
+  const rs = trades.map(rMultiple).filter((r): r is number => r != null);
+  if (!rs.length) return [];
+  const defs: { label: string; test: (r: number) => boolean; tone: "profit" | "loss" }[] = [
+    { label: "≤ -2R", test: (r) => r <= -2, tone: "loss" },
+    { label: "-2…-1", test: (r) => r > -2 && r < -1, tone: "loss" },
+    { label: "-1…0", test: (r) => r >= -1 && r < 0, tone: "loss" },
+    { label: "0…1", test: (r) => r >= 0 && r < 1, tone: "profit" },
+    { label: "1…2", test: (r) => r >= 1 && r < 2, tone: "profit" },
+    { label: "2…3", test: (r) => r >= 2 && r < 3, tone: "profit" },
+    { label: "≥ 3R", test: (r) => r >= 3, tone: "profit" },
+  ];
+  return defs.map((d) => ({ label: d.label, count: rs.filter(d.test).length, tone: d.tone }));
+}
+
+function holdHistogram(trades: RoundTripTrade[]): HistBin[] {
+  if (!trades.length) return [];
+  const H = 3600_000;
+  const defs: { label: string; test: (ms: number) => boolean }[] = [
+    { label: "< 1h", test: (ms) => ms < H },
+    { label: "1–4h", test: (ms) => ms >= H && ms < 4 * H },
+    { label: "4–12h", test: (ms) => ms >= 4 * H && ms < 12 * H },
+    { label: "12–24h", test: (ms) => ms >= 12 * H && ms < 24 * H },
+    { label: "1–3d", test: (ms) => ms >= 24 * H && ms < 72 * H },
+    { label: "> 3d", test: (ms) => ms >= 72 * H },
+  ];
+  return defs.map((d) => ({
+    label: d.label,
+    count: trades.filter((t) => d.test(t.durationMs)).length,
+    tone: "neutral" as const,
+  }));
+}
+
+// «Последние 30 дней против предыдущих 30» — перенесено с дашборда дословно,
+// включая клампы и правило «относительный % только при одинаковом знаке».
+function computeTrend(trades: RoundTripTrade[], capital: number, now: number): Trend | null {
+  const D30 = 30 * 86_400_000;
+  const ms = (t: RoundTripTrade) => t.exitTime.getTime();
+  const recent = trades.filter((t) => ms(t) >= now - D30);
+  const prior = trades.filter((t) => ms(t) >= now - 2 * D30 && ms(t) < now - D30);
+  if (recent.length === 0 || prior.length === 0) return null;
+
+  const agg = (arr: RoundTripTrade[]) => {
+    const net = arr.reduce((s, t) => s + t.netPnl, 0);
+    const wins = arr.filter((t) => t.result === "win");
+    const gp = wins.reduce((s, t) => s + t.netPnl, 0);
+    const gl = Math.abs(arr.filter((t) => t.result === "loss").reduce((s, t) => s + t.netPnl, 0));
+    return {
+      net,
+      winRate: (wins.length / arr.length) * 100,
+      pf: gl > 0 ? gp / gl : gp > 0 ? Infinity : 0,
+      exp: net / arr.length,
+    };
+  };
+  const r = agg(recent);
+  const p = agg(prior);
+  const clamp = (x: number) => Math.max(-300, Math.min(300, x));
+  const rel = (a: number, b: number) =>
+    b !== 0 && Number.isFinite(a) && Math.sign(a) === Math.sign(b)
+      ? clamp(((a - b) / Math.abs(b)) * 100)
+      : null;
+  const cap = capital > 0 ? capital : 10000;
+  return {
+    netPnl: ((r.net - p.net) / cap) * 100,
+    winRate: r.winRate - p.winRate,
+    profitFactor:
+      Number.isFinite(p.pf) && p.pf > 0 && Number.isFinite(r.pf)
+        ? clamp(((r.pf - p.pf) / p.pf) * 100)
+        : null,
+    expectancy: rel(r.exp, p.exp),
+  };
+}
+
 export function computeMetrics(
   trades: RoundTripTrade[],
   initialCapital = 10000,
+  now: number = Date.now(),
 ): Metrics {
   const sorted = [...trades].sort(
     (a, b) => a.exitTime.getTime() - b.exitTime.getTime(),
@@ -535,5 +658,14 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
     byMistake,
     byPattern,
     bySession,
+    pnlBins: pnlHistogram(sorted),
+    rBins: rHistogram(sorted),
+    holdBins: holdHistogram(sorted),
+    trend: computeTrend(sorted, initialCapital, now),
+    scopeAccounts: [
+      ...new Map(
+        sorted.map((t) => [`${t.accountId}|${t.exchange}`, { accountId: t.accountId, exchange: t.exchange }]),
+      ).values(),
+    ],
   };
 }

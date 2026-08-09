@@ -11,9 +11,8 @@ vi.mock("@/lib/format", () => ({
   fmtSymbol: (val: string) => val,
 }));
 vi.mock("@/lib/analytics/scopeLabel", () => ({ scopeLabel: () => "All trades" }));
-vi.mock("@/lib/analytics/exitEfficiency", () => ({ pickRecentTrades: () => [] }));
 
-const trade = { id: "t1", exchange: "binance", exitTime: "2026-03-01T00:00:00Z" } as never;
+const scope = [{ accountId: "acc-1", exchange: "binance" }];
 
 const summary = {
   analyzed: 12,
@@ -48,7 +47,7 @@ describe("ExitEfficiencyCard", () => {
 
   it("ничего не рендерит, когда фича выключена админом", async () => {
     mockFetch({ enabled: false, maxTrades: 60, concurrency: 3 }, summary);
-    const { container } = render(<ExitEfficiencyCard trades={[trade]} accounts={[]} />);
+    const { container } = render(<ExitEfficiencyCard scope={scope} accounts={[]} />);
     await waitFor(() => expect(urls.some((u) => u.startsWith("/api/features"))).toBe(true));
     expect(container.textContent).toBe("");
     // Сводку не запрашиваем вовсе.
@@ -57,7 +56,7 @@ describe("ExitEfficiencyCard", () => {
 
   it("берёт готовую сводку с сервера и не считает MFE в браузере", async () => {
     mockFetch({ enabled: true, maxTrades: 60, concurrency: 3 }, summary);
-    render(<ExitEfficiencyCard trades={[trade]} accounts={[]} />);
+    render(<ExitEfficiencyCard scope={scope} accounts={[]} />);
 
     await waitFor(() => expect(screen.getByText("4.50%")).toBeInTheDocument());
     expect(screen.getByText("1.25%")).toBeInTheDocument();
@@ -70,13 +69,13 @@ describe("ExitEfficiencyCard", () => {
 
   it("сообщает, что часть сделок ещё считается в фоне", async () => {
     mockFetch({ enabled: true, maxTrades: 60, concurrency: 3 }, { ...summary, pending: 7 });
-    render(<ExitEfficiencyCard trades={[trade]} accounts={[]} />);
+    render(<ExitEfficiencyCard scope={scope} accounts={[]} />);
     await waitFor(() => expect(screen.getByText("an.exitEfficiencyPending")).toBeInTheDocument());
   });
 
   it("кнопка перечитывает сводку", async () => {
     mockFetch({ enabled: true, maxTrades: 60, concurrency: 3 }, summary);
-    render(<ExitEfficiencyCard trades={[trade]} accounts={[]} />);
+    render(<ExitEfficiencyCard scope={scope} accounts={[]} />);
     await waitFor(() => expect(screen.getByText("4.50%")).toBeInTheDocument());
 
     const before = urls.filter((u) => u.startsWith("/api/exit-efficiency")).length;
