@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { createDrawing, getDrawings, updateDrawing, deleteDrawing } from "@/lib/drawings";
 import type { DrawingToolType, DrawingPoint } from "@/lib/drawings";
 
@@ -51,10 +52,12 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol")?.toUpperCase();
-
-  if (!symbol) return badRequest("symbol is required");
-  if (!/^[A-Z0-9/-]+$/.test(symbol)) return badRequest("invalid symbol");
+  // Тот же валидатор, что и в остальных форекс-роутах: раньше regex не
+  // ограничивал длину, и в запрос уходила строка любого размера.
+  const raw = url.searchParams.get("symbol");
+  if (!raw) return badRequest("symbol is required");
+  const symbol = normalizeFxSymbol(raw);
+  if (!symbol) return badRequest("invalid symbol");
 
   try {
     const drawings = await getDrawings({ userId: user.userId, symbol, exchange: EXCHANGE });

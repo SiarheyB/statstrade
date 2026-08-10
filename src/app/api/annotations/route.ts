@@ -42,6 +42,26 @@ export async function PUT(req: Request) {
 
   const data = { entryPoint, entryType, mistake, pattern, stopLoss, note };
 
+  // tradeKey принимался любой. Сама аннотация создаётся в строке автора и
+  // чужие цифры не искажает (recomputeRRForTradeKey читает аннотацию ВЛАДЕЛЬЦА
+  // сделки), но пересчёт при этом идёт по чужому аккаунту: перезаписывается
+  // чужой Trade.rr и пересобираются чужие часовые агрегаты. То есть чужой
+  // ключ — это способ бесплатно нагружать чужие данные записью.
+  //
+  // accountId — префикс до первого двоеточия и для крипты (Trade.id), и для
+  // импортированных ("accountId:externalId"), см. lib/analytics/rr.ts.
+  const sep = tradeKey.indexOf(":");
+  const accountId = sep === -1 ? tradeKey : tradeKey.slice(0, sep);
+  const owner = await prisma.exchangeAccount.findUnique({
+    where: { id: accountId },
+    select: { userId: true },
+  });
+  // Аккаунта нет — атаковать нечего, пусть аннотация сохранится (так же, как
+  // раньше). Аккаунт есть и он чужой — отказ.
+  if (owner && owner.userId !== user.userId) {
+    return badRequest("Сделка не найдена");
+  }
+
   try {
     const result = await prisma.tradeAnnotation.upsert({
       where: { userId_tradeKey: { userId: user.userId, tradeKey } },

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { prisma } from "@/lib/db";
 import { createRouteCache } from "@/lib/routeCache";
 
@@ -33,7 +34,8 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol") ?? "EUR/USD";
+  const symbol = normalizeFxSymbol(url.searchParams.get("symbol"));
+  if (!symbol) return badRequest("Некорректная валютная пара");
   const period = url.searchParams.get("period") ?? "1d";
 
   if (!PERIODS.includes(period as typeof PERIODS[number])) {
