@@ -173,6 +173,8 @@ export const mockPrisma = {
   },
   favouriteTicker: {
     findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn().mockResolvedValue(null),
+    count: vi.fn().mockResolvedValue(0),
     create: vi.fn().mockResolvedValue({}),
     upsert: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
