@@ -97,6 +97,11 @@ type Resp = {
   bigTrades: BigTrade[];
 };
 
+// Кусок истории, догруженный через /api/orderflow/history: свой heatmap и свой
+// футпринт на свой отрезок времени. Раньше история приходила только свечами, и
+// при скролле влево карта лимиток с кластерами просто обрывалась.
+type HistorySegment = { from: number; to: number; heatmap: ObHeatmap | null; footprint: Footprint | null };
+
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
@@ -104,6 +109,8 @@ const DEFAULT_VISIBLE = 100;
 // превышении обрезаем самый старый конец — если пользователь доскроллит
 // туда снова, история перезапросится тем же механизмом, что и в первый раз.
 const MAX_HISTORY_CANDLES = 4000;
+// Столько кусков наложений держим в памяти (каждый ~240×110 чисел + растр).
+const MAX_HISTORY_SEGMENTS = 8;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
 const FALLBACK_SYMBOLS = ["BTCUSDT", "ETHUSDT"];
 
@@ -219,6 +226,9 @@ export default function OrderflowPage() {
   // (до MAX_HISTORY_CANDLES) на каждый вызов, включая чисто hover-редрои.
   const rangeCacheRef = useRef<{
     candles: Candle[]; priceMin: number; priceMax: number;
+    // segments = historyVersion: догрузка куска расширяет диапазон цен, поэтому
+    // кэш границ должен по нему инвалидироваться.
+    segments: number;
     fYMin: number; fYMax: number; candleStep: number;
   } | null>(null);
   // Кэш агрегации footprint по рядам (buy/sell на бакет цены) — раньше
@@ -235,6 +245,11 @@ export default function OrderflowPage() {
   // data.candles[0].t. hasMoreHistoryRef=false — реально упёрлись в край
   // данных в БД (CANDLE_RETENTION_DAYS коллектора).
   const historyRef = useRef<Candle[]>([]);
+  // Наложения (heatmap/футпринт) догруженных кусков — по одному на запрос.
+  const historySegmentsRef = useRef<HistorySegment[]>([]);
+  // Готовые растры heatmap сегментов. sig = настройки яркости/порога: при их
+  // смене растры недействительны, проще собрать заново, чем инвалидировать.
+  const segOffscreenRef = useRef<{ sig: string; map: Map<number, HTMLCanvasElement> }>({ sig: "", map: new Map() });
   const hasMoreHistoryRef = useRef(true);
   const loadingHistoryRef = useRef(false);
   // Курсор "до какой точки уже точно всё запрошено" — отдельно от historyRef,
@@ -246,6 +261,28 @@ export default function OrderflowPage() {
   const earliestFetchedRef = useRef<number | null>(null);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // Футпринт живого окна + куски истории. Идентичность объекта должна меняться
+  // только когда реально пришли новые данные: ниже кэш строк футпринта
+  // сравнивает fp по ссылке (fpCache.fp === fp).
+  const mergedFootprint = useMemo<Footprint | null>(() => {
+    const live = data?.footprint ?? null;
+    const segs = historySegmentsRef.current.filter((sg) => sg.footprint && sg.footprint.candles.length);
+    if (!segs.length) return live;
+    const byT = new Map<number, { t: number; levels: FootprintLevel[] }>();
+    for (const sg of segs) for (const c of sg.footprint!.candles) byT.set(c.t, c);
+    // Живое окно кладём последним — свежая версия свечи важнее исторической.
+    if (live) for (const c of live.candles) byT.set(c.t, c);
+    let maxVol = live?.maxVol ?? 0;
+    for (const sg of segs) if (sg.footprint!.maxVol > maxVol) maxVol = sg.footprint!.maxVol;
+    return {
+      interval: live?.interval ?? segs[segs.length - 1].footprint!.interval,
+      maxVol,
+      candles: [...byT.values()].sort((a, b) => a.t - b.t),
+    };
+    // historyVersion — сигнал "сегменты изменились" (сами они лежат в ref).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, historyVersion]);
 
   const gamma = useMemo(() => 1 - (brightness / 100) * 0.8, [brightness]);
   const minT = useMemo(() => minPct / 100, [minPct]);
@@ -379,7 +416,10 @@ export default function OrderflowPage() {
         setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
         return;
       }
-      const d = await res.json() as { candles: Candle[]; hasMore: boolean };
+      const d = await res.json() as {
+        candles: Candle[]; hasMore: boolean;
+        heatmap?: ObHeatmap | null; footprint?: Footprint | null;
+      };
       if (!d.candles?.length) {
         hasMoreHistoryRef.current = false;
         setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
@@ -393,6 +433,20 @@ export default function OrderflowPage() {
         merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
       }
       historyRef.current = merged;
+      if (d.heatmap || d.footprint) {
+        const seg: HistorySegment = {
+          from: d.candles[0].t,
+          to: before,
+          heatmap: d.heatmap ?? null,
+          footprint: d.footprint ?? null,
+        };
+        const segs = [...historySegmentsRef.current, seg].sort((a, b) => a.from - b.from);
+        // Тот же принцип, что и с MAX_HISTORY_CANDLES: держим память конечной,
+        // выбрасывая самые старые куски (при возврате туда они перезапросятся).
+        historySegmentsRef.current = segs.length > MAX_HISTORY_SEGMENTS
+          ? segs.slice(segs.length - MAX_HISTORY_SEGMENTS)
+          : segs;
+      }
       setHistoryVersion((v) => v + 1);
     } catch {
       // тихая сетевая ошибка — следующий триггер (pan/zoom) попробует снова,
@@ -711,7 +765,8 @@ export default function OrderflowPage() {
     const fullT1 = data.to;
     let fYMin: number, fYMax: number, candleStep: number;
     const rc = rangeCacheRef.current;
-    if (rc && rc.candles === candles && rc.priceMin === hm.priceMin && rc.priceMax === hm.priceMax) {
+    if (rc && rc.candles === candles && rc.priceMin === hm.priceMin && rc.priceMax === hm.priceMax
+        && rc.segments === historyVersion) {
       fYMin = rc.fYMin;
       fYMax = rc.fYMax;
       candleStep = rc.candleStep;
@@ -722,8 +777,19 @@ export default function OrderflowPage() {
         if (k.l < fYMin) fYMin = k.l;
         if (k.h > fYMax) fYMax = k.h;
       }
+      // Границы по цене раньше считались только по ЖИВОМУ heatmap, поэтому
+      // стены из догруженных кусков могли оказаться выше/ниже видимой области
+      // и выглядеть как «истории нет».
+      for (const seg of historySegmentsRef.current) {
+        if (!seg.heatmap) continue;
+        if (seg.heatmap.priceMin < fYMin) fYMin = seg.heatmap.priceMin;
+        if (seg.heatmap.priceMax > fYMax) fYMax = seg.heatmap.priceMax;
+      }
       candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
-      rangeCacheRef.current = { candles, priceMin: hm.priceMin, priceMax: hm.priceMax, fYMin, fYMax, candleStep };
+      rangeCacheRef.current = {
+        candles, priceMin: hm.priceMin, priceMax: hm.priceMax,
+        segments: historyVersion, fYMin, fYMax, candleStep,
+      };
     }
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
     if (!viewRef.current) {
@@ -746,6 +812,38 @@ export default function OrderflowPage() {
     ctx.clip();
 
     if (showLiq) {
+      // Сначала — догруженные куски истории (каждый со своей сеткой времени и
+      // цен), затем поверх живое окно. Без этого при скролле влево оставались
+      // одни свечи: карта лимиток заканчивалась на границе исходного окна.
+      const sig = `${minT}:${gamma}`;
+      if (segOffscreenRef.current.sig !== sig) {
+        segOffscreenRef.current = { sig, map: new Map() };
+      }
+      const segMap = segOffscreenRef.current.map;
+      ctx.imageSmoothingEnabled = false;
+      for (const seg of historySegmentsRef.current) {
+        const shm = seg.heatmap;
+        if (!shm || !shm.cols || !shm.times.length) continue;
+        const segT0 = shm.times[0];
+        const segT1 = shm.times[shm.cols - 1];
+        if (segT1 < t0 || segT0 > t1) continue; // целиком за пределами видимого окна
+        let raster = segMap.get(seg.from);
+        if (!raster) {
+          raster = buildOffscreen(shm, minT, gamma);
+          segMap.set(seg.from, raster);
+        }
+        const x0 = sx(segT0);
+        const x1 = sx(segT1);
+        const yTop = sy(shm.priceMax);
+        const yBot = sy(shm.priceMin);
+        ctx.drawImage(
+          raster,
+          0, 0, shm.cols, shm.bins,
+          x0, yTop, Math.max(1, x1 - x0), Math.max(1, yBot - yTop),
+        );
+      }
+      ctx.imageSmoothingEnabled = true;
+
       const key = `${data.from}:${data.to}:${minT}:${gamma}`;
       if (!offRef.current || offRef.current.key !== key) {
         offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma) };
@@ -824,7 +922,7 @@ export default function OrderflowPage() {
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
 
-    const fp = data.footprint;
+    const fp = mergedFootprint;
     const colW = fp ? (fp.interval / xspan) * plotW : 0;
     if (clusters && fp && fp.maxVol > 0 && fp.candles.length) {
       const rowPx = colW >= 80 ? 12 : colW >= 50 ? 10 : colW >= 32 ? 8 : 6;
@@ -1032,7 +1130,7 @@ export default function OrderflowPage() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet, getMergedCandles]);
+  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet, getMergedCandles, mergedFootprint, historyVersion]);
 
   const drawDelta = useCallback(() => {
     const cv = deltaRef.current;
@@ -1104,6 +1202,8 @@ export default function OrderflowPage() {
     lastResetKeyRef.current = key;
     viewRef.current = null;
     historyRef.current = [];
+    historySegmentsRef.current = [];
+    segOffscreenRef.current = { sig: "", map: new Map() };
     hasMoreHistoryRef.current = true;
     earliestFetchedRef.current = null;
     setHistoryVersion((v) => v + 1);

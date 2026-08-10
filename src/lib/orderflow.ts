@@ -231,14 +231,39 @@ export async function fetchOrderflowCandles(
   return [];
 }
 
-// Догрузка истории свечей "влево" (пагинация по курсору `before`), для
-// динамической подгрузки при скролле/зуме графика. В отличие от
-// fetchOrderflowCandles — читает строго из БД (ObCandle), без похода в
-// Binance: история не может появиться на бирже "задним числом", а поход в
-// Binance на каждый шаг скролла был бы слишком дорогим. Возвращает свечи
-// строго раньше `beforeMs`, отсортированные по возрастанию времени, плюс
-// признак того, что дальше в БД данных больше нет (реальный край истории,
-// ограниченный CANDLE_RETENTION_DAYS коллектора).
+// Длительность свечи по таймфрейму — нужна, чтобы посчитать окно добора с
+// биржи. Держим рядом с CANDLE_INTERVAL, чтобы наборы не разъезжались.
+const RANGE_MS: Record<string, number> = {
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
+
+function klinesUrlBase(exchange: string): string | null {
+  return exchange === "binance-futures"
+    ? "https://fapi.binance.com/fapi/v1/klines"
+    : exchange === "binance-spot"
+      ? "https://api.binance.com/api/v3/klines"
+      : null;
+}
+
+// Догрузка истории свечей "влево" (пагинация по курсору `before`) при
+// скролле/зуме графика. Возвращает свечи строго раньше `beforeMs`, по
+// возрастанию времени, плюс признак "дальше есть ещё".
+//
+// Раньше функция читала СТРОГО из ObCandle, сознательно не ходя в Binance
+// ("история не может появиться задним числом"). На практике это упиралось в
+// то, что в ObCandle истории просто нет: таблицу наполняет fetchOrderflowCandles
+// ровно на ширину окна (CANDLES_IN_WINDOW × ТФ), а старее туда никто не
+// пишет. На 5m это 400 свечей ≈ 33 часа — скролл влево сразу отвечал
+// "свечей 0, hasMore=false", график упирался в «начало истории», и вместе со
+// свечами обрывались карта лимиток и кластеры, хотя в ObSnapshotRollup лежали
+// ещё сутки данных. Поэтому: если БД не отдала полную страницу — добираем с
+// биржи и сохраняем в ObCandle, чтобы следующий скролл шёл уже из БД.
 export async function fetchOrderflowCandlesBefore(
   symbol: string,
   exchange: string,
@@ -257,14 +282,67 @@ export async function fetchOrderflowCandlesBefore(
       select: { t: true, o: true, h: true, l: true, c: true },
     });
   } catch {
-    return { candles: [], hasMore: false };
+    rows = [];
   }
-  const candles = rows
-    .map((r) => ({ t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c }))
-    .sort((a, b) => a.t - b.t);
-  // hasMore=true означает "получили полную страницу, дальше в БД скорее
-  // всего ещё есть данные"; false — упёрлись в реальный край истории.
-  return { candles, hasMore: rows.length === limit };
+
+  const byTime = new Map<number, OfCandle>();
+  for (const r of rows) {
+    byTime.set(r.t.getTime(), { t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c });
+  }
+
+  // Полная страница из БД — добор не нужен.
+  if (rows.length >= limit) {
+    const candles = [...byTime.values()].sort((a, b) => a.t - b.t);
+    return { candles, hasMore: true };
+  }
+
+  const urlBase = klinesUrlBase(exchange);
+  const tfMs = RANGE_MS[range];
+  if (urlBase && tfMs) {
+    const endTime = beforeMs - 1;
+    const startTime = beforeMs - limit * tfMs;
+    try {
+      const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
+        + `&startTime=${startTime}&endTime=${endTime}&limit=${Math.min(1500, limit)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const raw = (await res.json()) as (string | number)[][];
+        for (const k of raw) {
+          const t = Number(k[0]);
+          if (t >= beforeMs) continue; // строго раньше курсора
+          byTime.set(t, { t, o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]) });
+        }
+        // Сохраняем, чтобы следующий скролл в этот же диапазон шёл из БД.
+        try {
+          for (let i = 0; i < raw.length; i += CANDLE_INSERT_BATCH) {
+            const batch = raw.slice(i, i + CANDLE_INSERT_BATCH);
+            const values = batch.map((k) => Prisma.sql`
+              (${symbol}, ${exchange}, ${interval}, ${new Date(Number(k[0]))},
+               ${Number(k[1])}, ${Number(k[2])}, ${Number(k[3])}, ${Number(k[4])}, ${Number(k[5])})
+            `);
+            if (!values.length) continue;
+            await prisma.$executeRaw(
+              Prisma.sql`INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+                         VALUES ${Prisma.join(values)}
+                         ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+                           "h" = EXCLUDED."h",
+                           "l" = EXCLUDED."l",
+                           "c" = EXCLUDED."c",
+                           "v" = EXCLUDED."v"`,
+            );
+          }
+        } catch (dbErr) {
+          console.error(`[fetchOrderflowCandlesBefore] DB save error: ${(dbErr as Error).message}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[fetchOrderflowCandlesBefore] Binance fetch error: ${(e as Error).message}`);
+    }
+  }
+
+  const candles = [...byTime.values()].sort((a, b) => a.t - b.t);
+  // hasMore=true — набрали полную страницу, дальше почти наверняка ещё есть.
+  return { candles, hasMore: candles.length >= limit };
 }
 
 export type DeltaSeries = {
