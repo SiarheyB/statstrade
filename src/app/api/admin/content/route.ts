@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdminSession, notFound, recordAudit } from "@/lib/admin";
 import { badRequest, serverError } from "@/lib/api";
 import { refreshNews } from "@/lib/news";
+import { getFeatureConfig } from "@/lib/featureConfig";
 import { refreshCalendar } from "@/lib/econcal";
 
 export const maxDuration = 60;
@@ -21,6 +22,12 @@ export async function POST(req: Request) {
 
   try {
     if (body.feed === "news") {
+      // Выключенная фича «Новости» замораживает ленту целиком — включая
+      // ручное обновление отсюда (иначе кнопка молча противоречит рубильнику).
+      const cfg = await getFeatureConfig("newsFeed");
+      if (!cfg.enabled) {
+        return badRequest("Раздел «Новости» выключен в /admin/features — включите его, чтобы обновлять ленту.");
+      }
       const en = await refreshNews("en");
       const ru = await refreshNews("ru");
       const added = [...en, ...ru].reduce((s, r) => s + (r.added ?? 0), 0);

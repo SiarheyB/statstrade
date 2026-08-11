@@ -1069,6 +1069,11 @@ const en: Dict = {
   "admin.content.lastUpdate": "Last update: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Next: {title} — {time}",
+  "admin.content.newsRetention":
+    "Auto-cleanup: news older than {days} d are deleted on every feed refresh. Change it in Features → «Новости» (retentionDays).",
+  "admin.content.newsRetentionOff":
+    "Auto-cleanup is off (retentionDays = 0) — the news table grows without limit. Set it in Features → «Новости».",
+  "admin.content.newsDisabled": "Section is disabled in Features — the feed is not refreshed and old items are not deleted.",
   "admin.content.refresh": "refresh",
   "admin.content.error": "Error",
 
@@ -2199,6 +2204,11 @@ const ru: Dict = {
   "admin.content.lastUpdate": "Последнее обновление: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Ближайшее: {title} — {time}",
+  "admin.content.newsRetention":
+    "Автоочистка: новости старше {days} дн. удаляются при каждом обновлении ленты. Изменить — в разделе «Функции» → «Новости» (retentionDays).",
+  "admin.content.newsRetentionOff":
+    "Автоочистка выключена (retentionDays = 0) — таблица новостей растёт без ограничений. Задать срок — в разделе «Функции» → «Новости».",
+  "admin.content.newsDisabled": "Раздел выключен в «Функциях» — лента не обновляется и старые новости не удаляются.",
   "admin.content.refresh": "обновить",
   "admin.content.error": "Ошибка",
 

@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
   findFirst: vi.fn().mockResolvedValue(null),
   findMany: vi.fn().mockResolvedValue([]),
   createMany: vi.fn().mockResolvedValue({ count: 0 }),
+  deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  // Нет строки в FeatureConfig = фича включена с дефолтами (см. featureConfig.ts).
+  featureFindUnique: vi.fn().mockResolvedValue(null),
+  featureUpsert: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -13,7 +17,9 @@ vi.mock('@/lib/db', () => ({
       findFirst: mocks.findFirst,
       findMany: mocks.findMany,
       createMany: mocks.createMany,
+      deleteMany: mocks.deleteMany,
     },
+    featureConfig: { findUnique: mocks.featureFindUnique, upsert: mocks.featureUpsert },
   },
 }));
 
@@ -28,6 +34,9 @@ describe('news module', () => {
     mocks.findFirst.mockResolvedValue(null);
     mocks.findMany.mockResolvedValue([]);
     mocks.createMany.mockResolvedValue({ count: 0 });
+    mocks.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.featureFindUnique.mockResolvedValue(null);
+    mocks.featureUpsert.mockResolvedValue({});
   });
 
   describe('asLang', () => {
@@ -97,6 +106,79 @@ describe('news module', () => {
       const res = await getNews({ lang: 'en', force: true });
       expect(res.refreshed).toBeDefined();
       expect(fetchMock).toHaveBeenCalled();
+    });
+
+    it('returns cached items without waiting for the feeds when they are stale', async () => {
+      mocks.findMany.mockResolvedValue([
+        { id: 'n1', lang: 'ru', title: 't', url: 'u', publishedAt: new Date() },
+      ]);
+      // Фид, который никогда не отвечает: запрос всё равно должен вернуться.
+      const fetchMock = vi.fn().mockReturnValue(new Promise(() => {}));
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await getNews({ lang: 'ru' });
+      expect(res.items).toHaveLength(1);
+      expect(res.refreshing).toBe(true);
+      expect(res.refreshed).toEqual([]);
+    });
+
+    it('does not touch the feeds when the last attempt was recent', async () => {
+      mocks.findMany.mockResolvedValue([
+        { id: 'n1', lang: 'en', title: 't', url: 'u', publishedAt: new Date() },
+      ]);
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'newsFeedState',
+        enabled: true,
+        config: JSON.stringify({ en: Date.now(), ru: Date.now() }),
+      });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await getNews({ lang: 'en' });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(res.refreshing).toBe(false);
+    });
+
+    it('does not touch the feeds when the feature is disabled', async () => {
+      mocks.featureFindUnique.mockResolvedValue({ key: 'newsFeed', enabled: false, config: null });
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const res = await getNews({ lang: 'en', force: true });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(mocks.deleteMany).not.toHaveBeenCalled();
+      expect(res.refreshed).toEqual([]);
+    });
+  });
+
+  describe('retention', () => {
+    it('deletes items older than retentionDays after a refresh', async () => {
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'newsFeed',
+        enabled: true,
+        config: JSON.stringify({ retentionDays: 3 }),
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve('<rss></rss>') }),
+      );
+      await getNews({ lang: 'en', force: true });
+      expect(mocks.deleteMany).toHaveBeenCalled();
+      const cutoff = mocks.deleteMany.mock.calls[0][0].where.publishedAt.lt as Date;
+      const days = (Date.now() - cutoff.getTime()) / 86_400_000;
+      expect(days).toBeGreaterThan(2.9);
+      expect(days).toBeLessThan(3.1);
+    });
+
+    it('deletes nothing when retentionDays is 0', async () => {
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'newsFeed',
+        enabled: true,
+        config: JSON.stringify({ retentionDays: 0 }),
+      });
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, text: () => Promise.resolve('<rss></rss>') }),
+      );
+      await getNews({ lang: 'en', force: true });
+      expect(mocks.deleteMany).not.toHaveBeenCalled();
     });
   });
 });

@@ -15,6 +15,8 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     newsItem: { count: vi.fn(), findFirst: vi.fn() },
     economicEvent: { count: vi.fn(), findFirst: vi.fn() },
+    // Нет строки = фича «Новости» включена с дефолтным retentionDays.
+    featureConfig: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 

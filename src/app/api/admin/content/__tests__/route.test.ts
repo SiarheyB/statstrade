@@ -8,6 +8,7 @@ import {
   mockRecordAudit,
 } from "@/lib/__tests__/helpers/routeMocks";
 import { POST } from "@/app/api/admin/content/route";
+import { getFeatureConfig } from "@/lib/featureConfig";
 
 vi.mock("@/lib/news", () => ({ refreshNews: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/econcal", () => ({ refreshCalendar: vi.fn().mockResolvedValue([]) }));
@@ -18,6 +19,7 @@ beforeEach(() => {
   mockGetAuthUser.mockReset();
   mockGetAdminSession.mockReset();
   mockRecordAudit.mockReset();
+  vi.mocked(getFeatureConfig).mockResolvedValue({ enabled: true, retentionDays: 2 } as never);
 });
 
 describe("POST /api/admin/content", () => {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import { Newspaper, RefreshCw, ExternalLink, ChevronLeft, ChevronRight } from "lucide-react";
 import { fmtDate } from "@/lib/format";
@@ -19,6 +19,7 @@ type Item = {
 type Source = { id: string; name: string };
 
 const PAGE_SIZE = 12;
+const BACKGROUND_RECHECK_MS = 6000;
 const PILL_STYLES = ["bg-warn/15 text-warn", "bg-accent/15 text-accent", "bg-profit/15 text-profit"];
 
 export default function NewsPage() {
@@ -30,16 +31,25 @@ export default function NewsPage() {
   const [active, setActive] = useState("all");
   const [page, setPage] = useState(1);
 
+  // Сервер отдаёт сохранённую ленту сразу, а фиды обходит в фоне (см.
+  // lib/news.ts). Когда он сообщает refreshing — один раз тихо перезапросим
+  // список чуть позже, чтобы свежие заголовки появились без перезагрузки.
+  const recheck = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const load = useCallback(
-    async (force = false) => {
+    async (force = false, silent = false) => {
       if (force) setRefreshing(true);
-      else setLoading(true);
+      else if (!silent) setLoading(true);
       try {
         const res = await fetch(`/api/news?lang=${locale}${force ? "&refresh=1" : ""}`);
         if (res.ok) {
           const data = await res.json();
           setItems(data.items ?? []);
           setSources(data.sources ?? []);
+          if (data.refreshing && !silent) {
+            if (recheck.current) clearTimeout(recheck.current);
+            recheck.current = setTimeout(() => load(false, true), BACKGROUND_RECHECK_MS);
+          }
         }
       } finally {
         setLoading(false);
@@ -48,6 +58,10 @@ export default function NewsPage() {
     },
     [locale],
   );
+
+  useEffect(() => () => {
+    if (recheck.current) clearTimeout(recheck.current);
+  }, []);
 
   useEffect(() => {
     load();

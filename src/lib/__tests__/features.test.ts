@@ -24,6 +24,7 @@ describe('features - FEATURE_DEFAULTS', () => {
       'divergenceScanner',
       'forex',
       'forexPublicAccess',
+      'newsFeed',
       'imbalanceIndicator',
     ]);
   });
