@@ -25,7 +25,6 @@ describe('features - FEATURE_DEFAULTS', () => {
       'forex',
       'forexPublicAccess',
       'newsFeed',
-      'econcalFeed',
       'imbalanceIndicator',
     ]);
   });

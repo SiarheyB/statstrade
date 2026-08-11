@@ -1,5 +1,4 @@
 import { prisma } from "./db";
-import { getFeatureConfig } from "./featureConfig";
 
 // Economic calendar from the free ForexFactory / faireconomy weekly JSON feeds
 // (no API key). We pull last/this/next week, normalize, and upsert so the
@@ -121,26 +120,31 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
 
 export type RefreshResult = { feed: string; upserted: number; error?: string };
 
-// Сколько дней хранить ПРОШЕДШИЕ события. Настраивается админом в
-// /admin/features («Экономический календарь» → retentionDays); 0 = не удалять.
-export async function getRetentionDays(): Promise<number> {
-  const cfg = await getFeatureConfig("econcalFeed");
-  const days = Number(cfg.retentionDays);
-  return Number.isFinite(days) && days > 0 ? days : 0;
+// Понедельник 00:00 UTC текущей недели.
+function startOfWeekUtc(now: Date = new Date()): Date {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const mondayOffset = (d.getUTCDay() + 6) % 7; // вс = 0 → 6 дней назад
+  d.setUTCDate(d.getUTCDate() - mondayOffset);
+  return d;
 }
 
-// Единственная чистка календаря в проекте: фид отдаёт только текущую неделю,
-// а таблица копила события всех прошлых обходов. Режем по времени события
-// (не по createdAt) — будущие события не трогаем никогда.
-export async function pruneOldEvents(retentionDays?: number): Promise<number> {
-  const days = retentionDays ?? (await getRetentionDays());
-  if (days <= 0) return 0;
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+// Единственная чистка календаря: фид отдаёт только текущую неделю, а таблица
+// копила события всех прошлых обходов. Прошлая неделя уходит сама собой, как
+// только начинается новая, — настраивать тут нечего.
+//
+// Режем по времени события (не по createdAt), с запасом в сутки от начала
+// недели: страница считает границы недели в ЧАСОВОМ ПОЯСЕ пользователя
+// (см. weekStart в dashboard/econcal), который может отставать от UTC на
+// половину суток — без запаса у части пользователей понедельник опустел бы.
+const WEEK_EDGE_SLACK_MS = 24 * 60 * 60 * 1000;
+
+export async function pruneOldEvents(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(startOfWeekUtc(now).getTime() - WEEK_EDGE_SLACK_MS);
   const { count } = await prisma.economicEvent.deleteMany({ where: { time: { lt: cutoff } } });
   return count;
 }
 
-export async function refreshCalendar(retentionDays?: number): Promise<RefreshResult[]> {
+export async function refreshCalendar(): Promise<RefreshResult[]> {
   const results = await Promise.all(
     FEEDS.map(async (url) => {
       const feed = url.split("/").pop() ?? url;
@@ -161,7 +165,7 @@ export async function refreshCalendar(retentionDays?: number): Promise<RefreshRe
       }
     }),
   );
-  await pruneOldEvents(retentionDays);
+  await pruneOldEvents();
   return results;
 }
 
@@ -177,26 +181,16 @@ export type CalendarFilters = {
 };
 
 export async function getCalendar(filters: CalendarFilters = {}) {
-  const [cfg, newest] = await Promise.all([
-    getFeatureConfig("econcalFeed"),
-    prisma.economicEvent.findFirst({
-      orderBy: { updatedAt: "desc" },
-      select: { updatedAt: true },
-    }),
-  ]);
-  const retentionDays =
-    Number.isFinite(Number(cfg.retentionDays)) && Number(cfg.retentionDays) > 0
-      ? Number(cfg.retentionDays)
-      : 0;
+  const newest = await prisma.economicEvent.findFirst({
+    orderBy: { updatedAt: "desc" },
+    select: { updatedAt: true },
+  });
   const stale = !newest || Date.now() - newest.updatedAt.getTime() > REFRESH_MS;
   const throttled = Date.now() - lastFetchAttempt < FETCH_THROTTLE_MS;
-
-  // Выключенная в /admin/features фича замораживает календарь: ни походов в
-  // фид, ни удаления прошедших событий (см. описание фичи econcalFeed).
   let refreshed: RefreshResult[] = [];
-  if (cfg.enabled && (filters.force || (!throttled && stale))) {
+  if (filters.force || (!throttled && stale)) {
     lastFetchAttempt = Date.now();
-    refreshed = await refreshCalendar(retentionDays);
+    refreshed = await refreshCalendar();
   }
 
   const where: {

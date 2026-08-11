@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, forbidden, serverError, sharedCacheHeaders } from "@/lib/api";
+import { getAuthUser, unauthorized, serverError, sharedCacheHeaders } from "@/lib/api";
 import { getCalendar } from "@/lib/econcal";
-import { getFeatureConfig } from "@/lib/featureConfig";
 
 // A cold refresh pulls three weekly JSON feeds and upserts them.
 export const maxDuration = 60;
@@ -12,12 +11,6 @@ const CACHE = sharedCacheHeaders(300, 1800);
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
-
-  // Выключатель «Экономический календарь» в /admin/features закрывает раздел
-  // и для прямых запросов к API в обход интерфейса.
-  if (!(await getFeatureConfig("econcalFeed")).enabled) {
-    return forbidden("Раздел «Экономический календарь» отключён администратором.");
-  }
 
   const url = new URL(req.url);
   const force = url.searchParams.get("refresh") === "1";

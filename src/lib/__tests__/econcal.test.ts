@@ -7,8 +7,6 @@ const mocks = vi.hoisted(() => ({
   findManyMock: vi.fn().mockResolvedValue([]),
   groupByMock: vi.fn().mockResolvedValue([]),
   deleteManyMock: vi.fn().mockResolvedValue({ count: 0 }),
-  // Нет строки в FeatureConfig = фича включена с дефолтами (см. featureConfig.ts).
-  featureFindUnique: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -20,7 +18,6 @@ vi.mock('@/lib/db', () => ({
       groupBy: mocks.groupByMock,
       deleteMany: mocks.deleteManyMock,
     },
-    featureConfig: { findUnique: mocks.featureFindUnique },
   },
 }));
 
@@ -57,7 +54,7 @@ vi.stubGlobal('fetch', vi.fn((url?: string) => {
 }));
 
 // Import functions AFTER mocks are set up
-import { countryFor, flagFor, refreshCalendar, getCalendar } from '@/lib/econcal';
+import { countryFor, flagFor, refreshCalendar, getCalendar, pruneOldEvents } from '@/lib/econcal';
 
 describe('econcal module', () => {
   beforeEach(() => {
@@ -67,7 +64,6 @@ describe('econcal module', () => {
     mocks.upsertMock.mockResolvedValue({ id: 'test-id' });
     mocks.groupByMock.mockResolvedValue([]);
     mocks.deleteManyMock.mockResolvedValue({ count: 0 });
-    mocks.featureFindUnique.mockResolvedValue(null);
   });
 
   describe('countryFor', () => {
@@ -141,14 +137,6 @@ describe('econcal module', () => {
       expect(mocks.findManyMock).toHaveBeenCalled();
     });
 
-    it('does not touch the feed when the feature is disabled', async () => {
-      mocks.featureFindUnique.mockResolvedValue({ key: 'econcalFeed', enabled: false, config: null });
-      const results = await getCalendar({ force: true });
-      expect(mocks.upsertMock).not.toHaveBeenCalled();
-      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
-      expect(results.refreshed).toEqual([]);
-    });
-
     it('builds facets without loading the whole table', async () => {
       mocks.groupByMock
         .mockResolvedValueOnce([{ currency: 'USD' }, { currency: 'EUR' }])
@@ -160,29 +148,36 @@ describe('econcal module', () => {
     });
   });
 
-  describe('retention', () => {
-    it('deletes past events older than retentionDays after a refresh', async () => {
-      mocks.featureFindUnique.mockResolvedValue({
-        key: 'econcalFeed',
-        enabled: true,
-        config: JSON.stringify({ retentionDays: 10 }),
-      });
-      await getCalendar({ force: true });
-      expect(mocks.deleteManyMock).toHaveBeenCalled();
-      const cutoff = mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
-      const days = (Date.now() - cutoff.getTime()) / 86_400_000;
-      expect(days).toBeGreaterThan(9.9);
-      expect(days).toBeLessThan(10.1);
+  // Чистка привязана к границе недели: как только начался понедельник,
+  // события прошлых недель уходят сами (плюс сутки запаса на часовые пояса).
+  describe('pruneOldEvents', () => {
+    const cutoffFor = async (now: Date) => {
+      mocks.deleteManyMock.mockClear();
+      await pruneOldEvents(now);
+      return mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
+    };
+
+    it('cuts at Monday 00:00 UTC of the current week minus a day of slack', async () => {
+      // Среда, 12 августа 2026 → понедельник недели = 10 августа.
+      const cutoff = await cutoffFor(new Date('2026-08-12T15:00:00Z'));
+      expect(cutoff.toISOString()).toBe('2026-08-09T00:00:00.000Z');
     });
 
-    it('deletes nothing when retentionDays is 0', async () => {
-      mocks.featureFindUnique.mockResolvedValue({
-        key: 'econcalFeed',
-        enabled: true,
-        config: JSON.stringify({ retentionDays: 0 }),
-      });
+    it('treats Sunday as the last day of the current week, not the first', async () => {
+      // Воскресенье 16 августа принадлежит неделе, начавшейся 10 августа —
+      // события этой недели удалять ещё рано.
+      const cutoff = await cutoffFor(new Date('2026-08-16T23:00:00Z'));
+      expect(cutoff.toISOString()).toBe('2026-08-09T00:00:00.000Z');
+    });
+
+    it('moves the cut forward once the new week starts on Monday', async () => {
+      const cutoff = await cutoffFor(new Date('2026-08-17T00:30:00Z'));
+      expect(cutoff.toISOString()).toBe('2026-08-16T00:00:00.000Z');
+    });
+
+    it('runs after every calendar refresh', async () => {
       await getCalendar({ force: true });
-      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
+      expect(mocks.deleteManyMock).toHaveBeenCalled();
     });
   });
 });

@@ -35,10 +35,6 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true, results: [...en, ...ru] });
     }
     if (body.feed === "econcal") {
-      const econ = await getFeatureConfig("econcalFeed");
-      if (!econ.enabled) {
-        return badRequest("Раздел «Экономический календарь» выключен в /admin/features — включите его, чтобы обновлять расписание.");
-      }
       const results = await refreshCalendar();
       const added = results.reduce((s, r) => s + (r.upserted ?? 0), 0);
       await recordAudit(session, "content.refresh", { targetType: "content", targetLabel: "econcal", detail: `+${added}` });

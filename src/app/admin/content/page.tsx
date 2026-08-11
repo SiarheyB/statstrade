@@ -38,9 +38,8 @@ export default async function AdminContentPage() {
   const { t, locale } = await getServerT();
   const nf = locale === "ru" ? "ru-RU" : "en-US";
 
-  const [newsFeature, econFeature, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
+  const [newsFeature, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
     getFeatureConfig("newsFeed"),
-    getFeatureConfig("econcalFeed"),
     prisma.newsItem.count(),
     prisma.newsItem.count({ where: { lang: "en" } }),
     prisma.newsItem.count({ where: { lang: "ru" } }),
@@ -56,13 +55,6 @@ export default async function AdminContentPage() {
     : Number.isFinite(retentionDays) && retentionDays > 0
       ? t("admin.content.newsRetention", { days: retentionDays })
       : t("admin.content.newsRetentionOff");
-
-  const econRetentionDays = Number(econFeature.retentionDays);
-  const econNote = !econFeature.enabled
-    ? t("admin.content.econDisabled")
-    : Number.isFinite(econRetentionDays) && econRetentionDays > 0
-      ? t("admin.content.econRetention", { days: econRetentionDays })
-      : t("admin.content.econRetentionOff");
 
   const lastUpdate = (d: Date | null) =>
     t("admin.content.lastUpdate", { date: d ? d.toLocaleString(nf) : t("admin.dash") });
@@ -90,7 +82,7 @@ export default async function AdminContentPage() {
               ? t("admin.content.nextEvent", { title: nextEvent.title, time: nextEvent.time.toLocaleString(nf) })
               : undefined
           }
-          note={econNote}
+          note={t("admin.content.econAutoClean")}
           feed="econcal"
         />
       </div>

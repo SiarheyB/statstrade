@@ -50,7 +50,7 @@ const LINKS = [
 
 const NEWS_CHILDREN = [
   { href: "/dashboard/news", key: "nav.news", icon: Newspaper, featureKey: "newsFeed" },
-  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock, featureKey: "econcalFeed" },
+  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock },
 ];
 
 function isNewsRoute(pathname: string): boolean {
