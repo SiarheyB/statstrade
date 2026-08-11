@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { getFeatureConfig } from "./featureConfig";
 
 // Economic calendar from the free ForexFactory / faireconomy weekly JSON feeds
 // (no API key). We pull last/this/next week, normalize, and upsert so the
@@ -120,8 +121,27 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
 
 export type RefreshResult = { feed: string; upserted: number; error?: string };
 
-export async function refreshCalendar(): Promise<RefreshResult[]> {
-  return Promise.all(
+// Сколько дней хранить ПРОШЕДШИЕ события. Настраивается админом в
+// /admin/features («Экономический календарь» → retentionDays); 0 = не удалять.
+export async function getRetentionDays(): Promise<number> {
+  const cfg = await getFeatureConfig("econcalFeed");
+  const days = Number(cfg.retentionDays);
+  return Number.isFinite(days) && days > 0 ? days : 0;
+}
+
+// Единственная чистка календаря в проекте: фид отдаёт только текущую неделю,
+// а таблица копила события всех прошлых обходов. Режем по времени события
+// (не по createdAt) — будущие события не трогаем никогда.
+export async function pruneOldEvents(retentionDays?: number): Promise<number> {
+  const days = retentionDays ?? (await getRetentionDays());
+  if (days <= 0) return 0;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.economicEvent.deleteMany({ where: { time: { lt: cutoff } } });
+  return count;
+}
+
+export async function refreshCalendar(retentionDays?: number): Promise<RefreshResult[]> {
+  const results = await Promise.all(
     FEEDS.map(async (url) => {
       const feed = url.split("/").pop() ?? url;
       try {
@@ -141,6 +161,8 @@ export async function refreshCalendar(): Promise<RefreshResult[]> {
       }
     }),
   );
+  await pruneOldEvents(retentionDays);
+  return results;
 }
 
 let lastFetchAttempt = 0;
@@ -155,16 +177,26 @@ export type CalendarFilters = {
 };
 
 export async function getCalendar(filters: CalendarFilters = {}) {
-  const newest = await prisma.economicEvent.findFirst({
-    orderBy: { updatedAt: "desc" },
-    select: { updatedAt: true },
-  });
+  const [cfg, newest] = await Promise.all([
+    getFeatureConfig("econcalFeed"),
+    prisma.economicEvent.findFirst({
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    }),
+  ]);
+  const retentionDays =
+    Number.isFinite(Number(cfg.retentionDays)) && Number(cfg.retentionDays) > 0
+      ? Number(cfg.retentionDays)
+      : 0;
   const stale = !newest || Date.now() - newest.updatedAt.getTime() > REFRESH_MS;
   const throttled = Date.now() - lastFetchAttempt < FETCH_THROTTLE_MS;
+
+  // Выключенная в /admin/features фича замораживает календарь: ни походов в
+  // фид, ни удаления прошедших событий (см. описание фичи econcalFeed).
   let refreshed: RefreshResult[] = [];
-  if (filters.force || (!throttled && stale)) {
+  if (cfg.enabled && (filters.force || (!throttled && stale))) {
     lastFetchAttempt = Date.now();
-    refreshed = await refreshCalendar();
+    refreshed = await refreshCalendar(retentionDays);
   }
 
   const where: {
@@ -185,9 +217,14 @@ export async function getCalendar(filters: CalendarFilters = {}) {
   const events = await prisma.economicEvent.findMany({ where, orderBy: { time: "asc" }, take: 500 });
 
   // Facets for the filter UI (distinct currencies / categories present).
-  const all = await prisma.economicEvent.findMany({ select: { currency: true, category: true } });
-  const currencies = Array.from(new Set(all.map((e) => e.currency))).sort();
-  const categories = Array.from(new Set(all.map((e) => e.category).filter(Boolean) as string[])).sort();
+  // groupBy, а не выгрузка всей таблицы в память: строк тут немного, но
+  // список фильтров не должен зависеть от размера календаря.
+  const [curRows, catRows] = await Promise.all([
+    prisma.economicEvent.groupBy({ by: ["currency"] }),
+    prisma.economicEvent.groupBy({ by: ["category"] }),
+  ]);
+  const currencies = curRows.map((r) => r.currency).sort();
+  const categories = (catRows.map((r) => r.category).filter(Boolean) as string[]).sort();
 
   return { events, currencies, categories, refreshed };
 }

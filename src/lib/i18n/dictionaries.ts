@@ -1074,6 +1074,11 @@ const en: Dict = {
   "admin.content.newsRetentionOff":
     "Auto-cleanup is off (retentionDays = 0) — the news table grows without limit. Set it in Features → «Новости».",
   "admin.content.newsDisabled": "Section is disabled in Features — the feed is not refreshed and old items are not deleted.",
+  "admin.content.econRetention":
+    "Auto-cleanup: past events older than {days} d are deleted on every calendar refresh; today and future events are kept. Change it in Features → «Экономический календарь» (retentionDays).",
+  "admin.content.econRetentionOff":
+    "Auto-cleanup is off (retentionDays = 0) — the events table grows without limit. Set it in Features → «Экономический календарь».",
+  "admin.content.econDisabled": "Section is disabled in Features — the calendar is not refreshed and past events are not deleted.",
   "admin.content.refresh": "refresh",
   "admin.content.error": "Error",
 
@@ -2209,6 +2214,11 @@ const ru: Dict = {
   "admin.content.newsRetentionOff":
     "Автоочистка выключена (retentionDays = 0) — таблица новостей растёт без ограничений. Задать срок — в разделе «Функции» → «Новости».",
   "admin.content.newsDisabled": "Раздел выключен в «Функциях» — лента не обновляется и старые новости не удаляются.",
+  "admin.content.econRetention":
+    "Автоочистка: прошедшие события старше {days} дн. удаляются при каждом обновлении расписания; сегодняшние и будущие сохраняются. Изменить — в разделе «Функции» → «Экономический календарь» (retentionDays).",
+  "admin.content.econRetentionOff":
+    "Автоочистка выключена (retentionDays = 0) — таблица событий растёт без ограничений. Задать срок — в разделе «Функции» → «Экономический календарь».",
+  "admin.content.econDisabled": "Раздел выключен в «Функциях» — расписание не обновляется и прошедшие события не удаляются.",
   "admin.content.refresh": "обновить",
   "admin.content.error": "Ошибка",
 

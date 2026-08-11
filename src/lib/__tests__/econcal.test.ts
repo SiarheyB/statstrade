@@ -5,6 +5,10 @@ const mocks = vi.hoisted(() => ({
   upsertMock: vi.fn().mockResolvedValue({ id: 'test-id' }),
   findFirstMock: vi.fn().mockResolvedValue(null),
   findManyMock: vi.fn().mockResolvedValue([]),
+  groupByMock: vi.fn().mockResolvedValue([]),
+  deleteManyMock: vi.fn().mockResolvedValue({ count: 0 }),
+  // Нет строки в FeatureConfig = фича включена с дефолтами (см. featureConfig.ts).
+  featureFindUnique: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -13,7 +17,10 @@ vi.mock('@/lib/db', () => ({
       upsert: mocks.upsertMock,
       findFirst: mocks.findFirstMock,
       findMany: mocks.findManyMock,
+      groupBy: mocks.groupByMock,
+      deleteMany: mocks.deleteManyMock,
     },
+    featureConfig: { findUnique: mocks.featureFindUnique },
   },
 }));
 
@@ -58,6 +65,9 @@ describe('econcal module', () => {
     mocks.findFirstMock.mockResolvedValue(null);
     mocks.findManyMock.mockResolvedValue([]);
     mocks.upsertMock.mockResolvedValue({ id: 'test-id' });
+    mocks.groupByMock.mockResolvedValue([]);
+    mocks.deleteManyMock.mockResolvedValue({ count: 0 });
+    mocks.featureFindUnique.mockResolvedValue(null);
   });
 
   describe('countryFor', () => {
@@ -129,6 +139,50 @@ describe('econcal module', () => {
       mocks.findManyMock.mockResolvedValue([]);
       await getCalendar({ currencies: ['USD'], category: 'Interest Rate' });
       expect(mocks.findManyMock).toHaveBeenCalled();
+    });
+
+    it('does not touch the feed when the feature is disabled', async () => {
+      mocks.featureFindUnique.mockResolvedValue({ key: 'econcalFeed', enabled: false, config: null });
+      const results = await getCalendar({ force: true });
+      expect(mocks.upsertMock).not.toHaveBeenCalled();
+      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
+      expect(results.refreshed).toEqual([]);
+    });
+
+    it('builds facets without loading the whole table', async () => {
+      mocks.groupByMock
+        .mockResolvedValueOnce([{ currency: 'USD' }, { currency: 'EUR' }])
+        .mockResolvedValueOnce([{ category: 'Inflation' }, { category: null }]);
+      const results = await getCalendar({});
+      expect(results.currencies).toEqual(['EUR', 'USD']);
+      expect(results.categories).toEqual(['Inflation']);
+      expect(mocks.groupByMock).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('retention', () => {
+    it('deletes past events older than retentionDays after a refresh', async () => {
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'econcalFeed',
+        enabled: true,
+        config: JSON.stringify({ retentionDays: 10 }),
+      });
+      await getCalendar({ force: true });
+      expect(mocks.deleteManyMock).toHaveBeenCalled();
+      const cutoff = mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
+      const days = (Date.now() - cutoff.getTime()) / 86_400_000;
+      expect(days).toBeGreaterThan(9.9);
+      expect(days).toBeLessThan(10.1);
+    });
+
+    it('deletes nothing when retentionDays is 0', async () => {
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'econcalFeed',
+        enabled: true,
+        config: JSON.stringify({ retentionDays: 0 }),
+      });
+      await getCalendar({ force: true });
+      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
     });
   });
 });
