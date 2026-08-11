@@ -147,6 +147,101 @@ describe('news module', () => {
 
   });
 
+  // RSS у трёх изданий размечен по-разному, поэтому парсер проверяем на
+  // реальных вариантах разметки, а не на одном «идеальном» фиде.
+  describe('parseFeed (через refresh)', () => {
+    const feed = (items: string) =>
+      vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve(`<rss><channel>${items}</channel></rss>`),
+      });
+
+    const rowsFromLastInsert = () => mocks.createMany.mock.calls.at(-1)![0].data;
+
+    it('strips CDATA, decodes entities and cuts tracking params off the URL', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed(`<item>
+            <title><![CDATA[Bitcoin &amp; Ethereum &#8212; up]]></title>
+            <link>https://x.com/a?utm_source=rss&amp;utm_medium=feed</link>
+            <description>&lt;p&gt;Текст с &quot;кавычками&quot;&lt;/p&gt;</description>
+          </item>`),
+      );
+      await getNews({ lang: 'en', force: true });
+      const [row] = rowsFromLastInsert();
+      expect(row.title).toBe('Bitcoin & Ethereum — up');
+      expect(row.url).toBe('https://x.com/a');
+      expect(row.summary).toBe('Текст с "кавычками"');
+    });
+
+    it('falls back to guid when there is no link', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed('<item><title>T</title><guid>https://x.com/from-guid</guid></item>'),
+      );
+      await getNews({ lang: 'en', force: true });
+      expect(rowsFromLastInsert()[0].url).toBe('https://x.com/from-guid');
+    });
+
+    it('skips items without a title or a usable link', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed(`<item><title></title><link>https://x.com/a</link></item>
+              <item><title>No link</title></item>
+              <item><title>Not a url</title><guid>tag:x.com,2026:1</guid></item>`),
+      );
+      await getNews({ lang: 'en', force: true });
+      expect(mocks.createMany).not.toHaveBeenCalled();
+    });
+
+    it('drops duplicate links inside one feed', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed(`<item><title>A</title><link>https://x.com/a</link></item>
+              <item><title>A again</title><link>https://x.com/a?ref=2</link></item>`),
+      );
+      await getNews({ lang: 'en', force: true });
+      expect(rowsFromLastInsert()).toHaveLength(1);
+    });
+
+    it('takes the image from media:content, media:thumbnail or enclosure', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed(`<item><title>A</title><link>https://x.com/a</link>
+                <media:thumbnail url="https://x.com/thumb.png" /></item>
+              <item><title>B</title><link>https://x.com/b</link>
+                <enclosure url="https://x.com/enc.png" type="image/png" /></item>
+              <item><title>C</title><link>https://x.com/c</link></item>`),
+      );
+      await getNews({ lang: 'en', force: true });
+      const rows = rowsFromLastInsert();
+      expect(rows[0].imageUrl).toBe('https://x.com/thumb.png');
+      expect(rows[1].imageUrl).toBe('https://x.com/enc.png');
+      expect(rows[2].imageUrl).toBeNull();
+    });
+
+    it('falls back to «now» when pubDate is missing or unparsable', async () => {
+      vi.stubGlobal(
+        'fetch',
+        feed(`<item><title>A</title><link>https://x.com/a</link>
+                <pubDate>не дата</pubDate></item>
+              <item><title>B</title><link>https://x.com/b</link></item>`),
+      );
+      const before = Date.now();
+      await getNews({ lang: 'en', force: true });
+      for (const row of rowsFromLastInsert()) {
+        expect(row.publishedAt.getTime()).toBeGreaterThanOrEqual(before);
+      }
+    });
+
+    it('reports an HTTP error per source instead of failing the whole refresh', async () => {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 503 }));
+      const res = await getNews({ lang: 'en', force: true });
+      expect(res.refreshed.every((r) => r.error === 'HTTP 503')).toBe(true);
+      expect(res.refreshed.every((r) => r.added === 0)).toBe(true);
+    });
+  });
+
   describe('getRetentionDays / setRetentionDays', () => {
     it('falls back to the default when nothing is saved', async () => {
       mocks.featureFindUnique.mockResolvedValue(null);

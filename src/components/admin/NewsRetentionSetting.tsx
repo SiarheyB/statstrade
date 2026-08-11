@@ -15,7 +15,9 @@ export default function NewsRetentionSetting({ value, max }: { value: number; ma
   const [error, setError] = useState(false);
 
   const days = Number(draft);
-  const valid = Number.isInteger(days) && days >= 0 && days <= max;
+  // Пустое поле — это НЕ ноль: иначе стёртое значение молча сохранилось бы как
+  // «не удалять никогда». Ноль админ должен ввести явно.
+  const valid = draft.trim() !== "" && Number.isInteger(days) && days >= 0 && days <= max;
   const dirty = draft !== String(value);
 
   async function save() {

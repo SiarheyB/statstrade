@@ -6,6 +6,8 @@ import {
   serializeRiskPerTrade,
   riskPerTradeAmount,
   computeAccountRisk,
+  tradeRR,
+  stopDistanceRR,
 } from "@/lib/risk";
 import type { HourBucket } from "@/lib/analytics/periods";
 
@@ -265,5 +267,68 @@ describe("computeAccountRisk", () => {
     const r = computeAccountRisk("a1", toHours(trades), 1000, profile, 0, NOW);
     // stops: 4 used / 5 → warning; month: 400/10000 → ok → aggregate = warning
     expect(r.state).toBe("warning");
+  });
+});
+
+// R-мультипликатор: сколько «рисков» принесла сделка. Считается либо от суммы
+// риска из риск-менеджера, либо от расстояния до стопа.
+describe("tradeRR / stopDistanceRR", () => {
+  const long = {
+    accountId: "acc-1",
+    side: "long" as const,
+    entryPrice: 100,
+    exitPrice: 110,
+    fees: 0,
+    qty: 1,
+    netPnl: 10,
+  };
+
+  it("has no R without a stop-loss and without a risk profile", () => {
+    expect(stopDistanceRR(long, null)).toBeNull();
+    expect(tradeRR(long, null, {}, 10000)).toBeNull();
+  });
+
+  it("has no R when the stop sits exactly at the entry", () => {
+    expect(stopDistanceRR(long, 100)).toBeNull();
+  });
+
+  it("measures the move in stop distances for a long", () => {
+    // Стоп в 5 пунктах, прошли 10 → 2R.
+    expect(stopDistanceRR(long, 95)).toBe(2);
+  });
+
+  it("measures the move in stop distances for a short", () => {
+    const short = { ...long, side: "short" as const, exitPrice: 90, netPnl: 10 };
+    expect(stopDistanceRR(short, 105)).toBe(2);
+  });
+
+  it("subtracts fees expressed in the same R units", () => {
+    // Комиссия 1 при 1R = 5 на единицу объёма → минус 0.2R.
+    expect(stopDistanceRR({ ...long, fees: 1 }, 95)).toBeCloseTo(1.8, 9);
+  });
+
+  it("prefers the risk-manager amount over the stop distance", () => {
+    const profile = {
+      ...defaultRiskProfile(),
+      enabled: true,
+      riskPerTrade: { on: true, value: 100, unit: "amount" as const },
+    };
+    // Риск 100 на сделку, заработали 10 → 0.1R, независимо от стопа.
+    expect(tradeRR(long, 95, { "acc-1": profile }, 10000)).toBeCloseTo(0.1, 9);
+  });
+
+  it("falls back to the default profile of the user", () => {
+    const profile = {
+      ...defaultRiskProfile(),
+      enabled: true,
+      riskPerTrade: { on: true, value: 1, unit: "pct" as const },
+    };
+    // 1% от 10000 = 100 → те же 0.1R для счёта без своего профиля.
+    expect(tradeRR(long, null, { "": profile }, 10000)).toBeCloseTo(0.1, 9);
+  });
+
+  it("falls back to the stop distance when the profile risk is unusable", () => {
+    const off = { ...defaultRiskProfile(), enabled: true };
+    expect(tradeRR(long, 95, { "acc-1": off }, 10000)).toBe(2);
   });
 });

@@ -336,3 +336,70 @@ describe("computeMetrics", () => {
     expect(m.roiPct).toBe(2);
   });
 });
+
+// «Последние 30 дней против предыдущих 30» — блок, который дашборд показывает
+// стрелками роста/падения. Считается только когда в ОБА окна попали сделки.
+describe("computeMetrics — тренд 30/30", () => {
+  const NOW = new Date("2026-03-01T00:00:00Z").getTime();
+  const daysAgo = (d: number) => new Date(NOW - d * 86_400_000);
+
+  const win = (daysBack: number, netPnl: number) =>
+    makeTrade({
+      id: `w${daysBack}`,
+      exitTime: daysAgo(daysBack),
+      netPnl,
+      result: "win" as TradeResult,
+    });
+  const loss = (daysBack: number, netPnl: number) =>
+    makeTrade({
+      id: `l${daysBack}`,
+      exitTime: daysAgo(daysBack),
+      netPnl,
+      result: "loss" as TradeResult,
+    });
+
+  it("is null when one of the two windows is empty", () => {
+    expect(computeMetrics([win(5, 100)], 10000, NOW).trend).toBeNull();
+    expect(computeMetrics([win(45, 100)], 10000, NOW).trend).toBeNull();
+    expect(computeMetrics([], 10000, NOW).trend).toBeNull();
+  });
+
+  it("compares the recent window against the previous one", () => {
+    const m = computeMetrics(
+      [win(5, 200), loss(10, -100), win(40, 100), loss(45, -100)],
+      10000,
+      NOW,
+    );
+    expect(m.trend).not.toBeNull();
+    // Свежие 30 дней: +100, предыдущие: 0 → рост на 1% капитала.
+    expect(m.trend!.netPnl).toBeCloseTo(1, 6);
+    // Доля прибыльных одинаковая (50/50) — изменения нет.
+    expect(m.trend!.winRate).toBe(0);
+    // Профит-фактор вырос вдвое: 2.0 против 1.0.
+    expect(m.trend!.profitFactor).toBeCloseTo(100, 6);
+  });
+
+  it("uses a fallback capital when the account balance is unknown", () => {
+    const withCapital = computeMetrics([win(5, 200), win(40, 100)], 0, NOW);
+    const withDefault = computeMetrics([win(5, 200), win(40, 100)], 10000, NOW);
+    expect(withCapital.trend!.netPnl).toBe(withDefault.trend!.netPnl);
+  });
+
+  it("does not report a relative change when the sign flips", () => {
+    // Ожидание было отрицательным, стало положительным: процент роста здесь
+    // бессмысленен, поэтому показываем «нет данных», а не −300%.
+    const m = computeMetrics([win(5, 100), loss(40, -100)], 10000, NOW);
+    expect(m.trend!.expectancy).toBeNull();
+  });
+
+  it("does not report a profit-factor change when the previous window had no losses", () => {
+    // Профит-фактор без убытков — бесконечность, сравнивать не с чем.
+    const m = computeMetrics([win(5, 100), loss(10, -50), win(40, 100)], 10000, NOW);
+    expect(m.trend!.profitFactor).toBeNull();
+  });
+
+  it("clamps an extreme relative change to ±300%", () => {
+    const m = computeMetrics([win(5, 10_000), win(40, 1)], 10000, NOW);
+    expect(m.trend!.expectancy).toBe(300);
+  });
+});

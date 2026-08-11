@@ -113,6 +113,89 @@ describe('econcal module', () => {
     });
   });
 
+  describe('нормализация фида', () => {
+    const feedOf = (items: unknown) =>
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(items) }),
+      );
+
+    const upserted = () => mocks.upsertMock.mock.calls.map((c) => c[0].create);
+
+    it('skips rows without a title, currency or a valid date', async () => {
+      feedOf([
+        { title: '', country: 'USD', date: '2026-01-15T14:00:00Z' },
+        { title: 'No currency', country: '', date: '2026-01-15T14:00:00Z' },
+        { title: 'No date', country: 'USD' },
+        { title: 'Bad date', country: 'USD', date: 'не дата' },
+      ]);
+      await refreshCalendar();
+      expect(mocks.upsertMock).not.toHaveBeenCalled();
+    });
+
+    it('survives a feed that is not an array', async () => {
+      feedOf({ error: 'rate limited' });
+      const results = await refreshCalendar();
+      expect(results[0].upserted).toBe(0);
+      expect(results[0].error).toBeUndefined();
+    });
+
+    it('normalizes impact wording, including holidays', async () => {
+      feedOf([
+        { title: 'A', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'High' },
+        { title: 'B', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Medium' },
+        { title: 'C', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Low' },
+        { title: 'D', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Bank Holiday' },
+        { title: 'E', country: 'USD', date: '2026-01-15T14:00:00Z' },
+      ]);
+      await refreshCalendar();
+      expect(upserted().map((e) => e.impact)).toEqual([
+        'high',
+        'medium',
+        'low',
+        'holiday',
+        'low',
+      ]);
+    });
+
+    it('derives a category from the title and falls back to Other', async () => {
+      feedOf([
+        { title: 'Core CPI m/m', country: 'USD', date: '2026-01-15T14:00:00Z' },
+        { title: 'Unemployment Claims', country: 'USD', date: '2026-01-15T14:00:00Z' },
+        { title: 'Cash Rate', country: 'AUD', date: '2026-01-15T14:00:00Z' },
+        { title: 'Flash GDP q/q', country: 'GBP', date: '2026-01-15T14:00:00Z' },
+        { title: 'Bank Holiday', country: 'JPY', date: '2026-01-15T14:00:00Z' },
+      ]);
+      await refreshCalendar();
+      expect(upserted().map((e) => e.category)).toEqual([
+        'Inflation',
+        'Employment',
+        'Interest Rate',
+        'GDP',
+        'Other',
+      ]);
+    });
+
+    it('turns blank forecast/previous/actual into null and maps the country', async () => {
+      feedOf([
+        {
+          title: 'CPI y/y',
+          country: 'eur',
+          date: '2026-01-15T14:00:00Z',
+          forecast: '  ',
+          previous: '0.1%',
+        },
+      ]);
+      await refreshCalendar();
+      const [e] = upserted();
+      expect(e.currency).toBe('EUR');
+      expect(e.country).toBe('Euro Area');
+      expect(e.forecast).toBeNull();
+      expect(e.previous).toBe('0.1%');
+      expect(e.actual).toBeNull();
+    });
+  });
+
   describe('getCalendar', () => {
     it('fetches events when stale', async () => {
       const results = await getCalendar({ force: true });
@@ -135,6 +218,41 @@ describe('econcal module', () => {
       mocks.findManyMock.mockResolvedValue([]);
       await getCalendar({ currencies: ['USD'], category: 'Interest Rate' });
       expect(mocks.findManyMock).toHaveBeenCalled();
+    });
+
+    it('builds the where clause from every filter it was given', async () => {
+      const from = new Date('2026-01-12T00:00:00Z');
+      const to = new Date('2026-01-19T00:00:00Z');
+      await getCalendar({
+        from,
+        to,
+        currencies: ['USD', 'EUR'],
+        impacts: ['high'],
+        category: 'Inflation',
+      });
+      const { where } = mocks.findManyMock.mock.calls[0][0];
+      expect(where).toEqual({
+        time: { gte: from, lte: to },
+        currency: { in: ['USD', 'EUR'] },
+        impact: { in: ['high'] },
+        category: 'Inflation',
+      });
+    });
+
+    it('leaves the where clause empty when no filters are set', async () => {
+      await getCalendar({});
+      expect(mocks.findManyMock.mock.calls[0][0].where).toEqual({});
+    });
+
+    it('accepts a one-sided date window', async () => {
+      const from = new Date('2026-01-12T00:00:00Z');
+      await getCalendar({ from });
+      expect(mocks.findManyMock.mock.calls[0][0].where.time).toEqual({ gte: from });
+    });
+
+    it('ignores empty filter arrays', async () => {
+      await getCalendar({ currencies: [], impacts: [] });
+      expect(mocks.findManyMock.mock.calls[0][0].where).toEqual({});
     });
 
     it('builds facets without loading the whole table', async () => {

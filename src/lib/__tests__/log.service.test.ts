@@ -106,6 +106,16 @@ describe('LogService', () => {
     });
   });
 
+  // Кнопка «Очистить журнал операций» на /admin/backup.
+  it('should clear the whole log and report how many rows went', async () => {
+    prisma.importLog.deleteMany.mockResolvedValue({ count: 42 });
+
+    const result = await LogService.deleteAll();
+
+    expect(result).toEqual({ count: 42 });
+    expect(prisma.importLog.deleteMany).toHaveBeenCalledWith({});
+  });
+
   it('should clean up old logs', async () => {
     // Arrange
     prisma.importLog.deleteMany.mockResolvedValue({ count: 5 });

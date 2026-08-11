@@ -130,4 +130,44 @@ describe('AdminNav', () => {
       expect(screen.getAllByText('admin.backToApp').length).toBeGreaterThan(0);
     });
   });
+
+  // Мобильное меню: открывается бургером, закрывается крестиком, кликом по
+  // подложке и переходом по ссылке.
+  describe('mobile drawer', () => {
+    it('opens on the burger and closes on the X', async () => {
+      render(<AdminNav email="admin@test.com" />);
+      expect(screen.queryByLabelText('close menu')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('menu'));
+      expect(screen.getByLabelText('close menu')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByLabelText('close menu'));
+      await waitFor(() =>
+        expect(screen.queryByLabelText('close menu')).not.toBeInTheDocument(),
+      );
+    });
+
+    it('closes when the backdrop is clicked', async () => {
+      const { container } = render(<AdminNav email="admin@test.com" />);
+      fireEvent.click(screen.getByLabelText('menu'));
+
+      const backdrop = container.querySelector('.bg-black\\/50') as HTMLElement;
+      expect(backdrop).toBeTruthy();
+      fireEvent.click(backdrop);
+      await waitFor(() =>
+        expect(screen.queryByLabelText('close menu')).not.toBeInTheDocument(),
+      );
+    });
+
+    it('closes after following a link', async () => {
+      render(<AdminNav email="admin@test.com" />);
+      fireEvent.click(screen.getByLabelText('menu'));
+
+      const drawer = screen.getByLabelText('close menu').closest('aside') as HTMLElement;
+      fireEvent.click(within(drawer).getAllByTestId('nav-link')[0]);
+      await waitFor(() =>
+        expect(screen.queryByLabelText('close menu')).not.toBeInTheDocument(),
+      );
+    });
+  });
 });

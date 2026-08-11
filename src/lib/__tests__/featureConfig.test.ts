@@ -52,4 +52,35 @@ describe("featureConfig", () => {
     expect(arg.where).toEqual({ key: "exitEfficiency" });
     expect(arg.create.config).toBe(JSON.stringify({ maxTrades: 10 }));
   });
+
+  it("lists every feature with its admin-facing meta", async () => {
+    mockFindUnique.mockResolvedValue(null);
+    const rows = await getAllFeatureConfigs();
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row.label).toBeTruthy();
+      expect(typeof row.description).toBe("string");
+      expect(row.fieldHelp).toBeTypeOf("object");
+      expect(row.value.enabled).toBe(true);
+      // Мета не должна протекать в значения, которые уходят в приложение.
+      expect(row.value).not.toHaveProperty("label");
+      expect(row.value).not.toHaveProperty("fieldHelp");
+    }
+  });
+
+  it("updates only the fields it was given", async () => {
+    mockUpsert.mockClear();
+    await setFeatureConfig("playbooks", { enabled: false });
+    let arg = mockUpsert.mock.calls[0][0];
+    expect(arg.update).toEqual({ enabled: false });
+    expect(arg.create.enabled).toBe(false);
+    expect(arg.create.config).toBeNull();
+
+    mockUpsert.mockClear();
+    await setFeatureConfig("playbooks", { config: { maxPerUser: 5 } });
+    arg = mockUpsert.mock.calls[0][0];
+    expect(arg.update).toEqual({ config: JSON.stringify({ maxPerUser: 5 }) });
+    // Новая строка создаётся включённой, если про enabled ничего не сказано.
+    expect(arg.create.enabled).toBe(true);
+  });
 });

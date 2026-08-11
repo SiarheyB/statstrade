@@ -9,7 +9,8 @@
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test": "vitest",
-    "test:lib": "vitest src/lib/__tests__/"
+    "test:lib": "vitest src/lib/__tests__/",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
