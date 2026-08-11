@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, forbidden, serverError, sharedCacheHeaders } from "@/lib/api";
+import { getAuthUser, unauthorized, serverError, sharedCacheHeaders } from "@/lib/api";
 import { getNews, asLang } from "@/lib/news";
-import { getFeatureConfig } from "@/lib/featureConfig";
 
 // Fetching three upstream RSS feeds can take a few seconds on a cold refresh.
 export const maxDuration = 60;
@@ -12,12 +11,6 @@ const CACHE = sharedCacheHeaders(120, 600);
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
-
-  // Выключатель «Новости» в /admin/features закрывает раздел и для прямых
-  // запросов к API в обход интерфейса (пункт меню прячет DashboardNav).
-  if (!(await getFeatureConfig("newsFeed")).enabled) {
-    return forbidden("Раздел «Новости» отключён администратором.");
-  }
 
   const url = new URL(req.url);
   const force = url.searchParams.get("refresh") === "1";

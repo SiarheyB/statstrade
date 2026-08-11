@@ -49,7 +49,7 @@ const LINKS = [
 ];
 
 const NEWS_CHILDREN = [
-  { href: "/dashboard/news", key: "nav.news", icon: Newspaper, featureKey: "newsFeed" },
+  { href: "/dashboard/news", key: "nav.news", icon: Newspaper },
   { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock },
 ];
 
@@ -122,7 +122,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
   const [hiddenForUsersOnly, setHiddenForUsersOnly] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const allItems = [...LINKS, ...NEWS_CHILDREN, ...SERVICE_CHILDREN];
+    const allItems = [...LINKS, ...SERVICE_CHILDREN];
     const keys = Array.from(new Set(
       allItems.map((l) => ("featureKey" in l ? l.featureKey : null)).filter((k): k is string => !!k),
     ));
@@ -230,9 +230,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
 
         {newsOpen && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {NEWS_CHILDREN.filter((c) =>
-              isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin),
-            ).map((c) => (
+            {NEWS_CHILDREN.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}

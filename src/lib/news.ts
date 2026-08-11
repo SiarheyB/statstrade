@@ -1,5 +1,4 @@
 import { prisma } from "./db";
-import { getFeatureConfig } from "./featureConfig";
 
 export type Lang = "en" | "ru";
 export type NewsSource = { id: string; name: string; url: string };
@@ -136,12 +135,36 @@ async function ingestSource(src: NewsSource, lang: Lang): Promise<number> {
 
 export type RefreshResult = { source: string; added: number; error?: string };
 
-// Сколько дней держать новости в БД. Настраивается админом в /admin/features
-// («Новости» → retentionDays); 0/отрицательное = не удалять ничего.
+// Настройки ленты правит админ в /admin/content (карточка «Новости»), а не в
+// /admin/features: это не переключатель фичи, а параметр конкретного фида.
+// Живут в таблице FeatureConfig под ключом, которого нет в FEATURE_DEFAULTS,
+// поэтому на странице «Функции» строка не появляется.
+const SETTINGS_KEY = "newsFeed";
+export const DEFAULT_RETENTION_DAYS = 2;
+export const MAX_RETENTION_DAYS = 365;
+
+// Сколько дней держать новости в БД; 0 = не удалять ничего.
 export async function getRetentionDays(): Promise<number> {
-  const cfg = await getFeatureConfig("newsFeed");
-  const days = Number(cfg.retentionDays);
-  return Number.isFinite(days) && days > 0 ? days : 0;
+  const row = await prisma.featureConfig.findUnique({ where: { key: SETTINGS_KEY } });
+  if (!row?.config) return DEFAULT_RETENTION_DAYS;
+  try {
+    const days = Number((JSON.parse(row.config) as { retentionDays?: unknown }).retentionDays);
+    if (!Number.isFinite(days) || days < 0) return DEFAULT_RETENTION_DAYS;
+    return Math.min(Math.floor(days), MAX_RETENTION_DAYS);
+  } catch {
+    return DEFAULT_RETENTION_DAYS;
+  }
+}
+
+export async function setRetentionDays(days: number): Promise<number> {
+  const safe = Math.min(Math.max(Math.floor(days), 0), MAX_RETENTION_DAYS);
+  const config = JSON.stringify({ retentionDays: safe });
+  await prisma.featureConfig.upsert({
+    where: { key: SETTINGS_KEY },
+    create: { key: SETTINGS_KEY, enabled: true, config },
+    update: { config },
+  });
+  return safe;
 }
 
 // Единственная чистка новостей в проекте: отдельного retention-джоба (как у
@@ -226,37 +249,29 @@ export async function getNews(opts: { lang?: Lang; force?: boolean; limit?: numb
       take: limit,
     });
 
-  const [cfg, lastRefresh, initial] = await Promise.all([
-    getFeatureConfig("newsFeed"),
+  const [retentionDays, lastRefresh, initial] = await Promise.all([
+    getRetentionDays(),
     readLastRefresh(),
     readItems(),
   ]);
-  const retentionDays =
-    Number.isFinite(Number(cfg.retentionDays)) && Number(cfg.retentionDays) > 0
-      ? Number(cfg.retentionDays)
-      : 0;
   const stale = Date.now() - lastRefresh[lang] > REFRESH_MS;
 
-  // Выключенная в /admin/features фича замораживает ленту: ни походов в RSS,
-  // ни удаления старых записей (см. описание фичи newsFeed).
   let items = initial;
   let refreshed: RefreshResult[] = [];
   let refreshing = false;
 
-  if (cfg.enabled) {
-    // Ждём обход фидов только там, где иначе показывать нечего: ручное
-    // «обновить» и первый заход на пустую ленту. В остальных случаях отдаём
-    // то, что уже в БД, а фиды обходим в фоне — страница не ждёт сеть.
-    if (opts.force || items.length === 0) {
-      const throttled = Date.now() - lastRefresh[lang] < FETCH_THROTTLE_MS;
-      if (opts.force || !throttled) {
-        refreshed = await refreshNews(lang, retentionDays);
-        items = await readItems();
-      }
-    } else if (stale) {
-      refreshInBackground(lang, retentionDays);
-      refreshing = true;
+  // Ждём обход фидов только там, где иначе показывать нечего: ручное
+  // «обновить» и первый заход на пустую ленту. В остальных случаях отдаём то,
+  // что уже в БД, а фиды обходим в фоне — страница не ждёт сеть.
+  if (opts.force || items.length === 0) {
+    const throttled = Date.now() - lastRefresh[lang] < FETCH_THROTTLE_MS;
+    if (opts.force || !throttled) {
+      refreshed = await refreshNews(lang, retentionDays);
+      items = await readItems();
     }
+  } else if (stale) {
+    refreshInBackground(lang, retentionDays);
+    refreshing = true;
   }
 
   return { items, lang, sources: NEWS_SOURCES[lang], refreshed, refreshing };

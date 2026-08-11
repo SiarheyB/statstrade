@@ -24,6 +24,10 @@ vi.mock("@/components/admin/ContentActions", () => ({
   default: ({ feed }: { feed: string }) => <div data-testid={`content-actions-${feed}`} />,
 }));
 
+vi.mock("@/components/admin/NewsRetentionSetting", () => ({
+  default: ({ value }: { value: number }) => <div data-testid="news-retention">{value}</div>,
+}));
+
 describe("AdminContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();

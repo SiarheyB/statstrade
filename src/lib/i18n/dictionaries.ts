@@ -1069,11 +1069,13 @@ const en: Dict = {
   "admin.content.lastUpdate": "Last update: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Next: {title} — {time}",
-  "admin.content.newsRetention":
-    "Auto-cleanup: news older than {days} d are deleted on every feed refresh. Change it in Features → «Новости» (retentionDays).",
-  "admin.content.newsRetentionOff":
-    "Auto-cleanup is off (retentionDays = 0) — the news table grows without limit. Set it in Features → «Новости».",
-  "admin.content.newsDisabled": "Section is disabled in Features — the feed is not refreshed and old items are not deleted.",
+  "admin.content.retentionLabel": "Keep news for, days",
+  "admin.content.retentionHint":
+    "News older than this are deleted permanently on every feed refresh (about every 15 minutes while someone is using the section). Smaller means a fresher feed and a smaller database; larger means a deeper archive but a bigger table and a slower page. 0 = never delete.",
+  "admin.content.retentionHintOff":
+    "0 — nothing is deleted: the news table will grow without limit (there is no other cleanup). Set 1–7 days.",
+  "admin.content.save": "Save",
+  "admin.content.saved": "Saved",
   "admin.content.econAutoClean":
     "Auto-cleanup: the calendar keeps the current week only — events from previous weeks are deleted automatically once a new week starts. No settings needed.",
   "admin.content.refresh": "refresh",
@@ -2206,11 +2208,13 @@ const ru: Dict = {
   "admin.content.lastUpdate": "Последнее обновление: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Ближайшее: {title} — {time}",
-  "admin.content.newsRetention":
-    "Автоочистка: новости старше {days} дн. удаляются при каждом обновлении ленты. Изменить — в разделе «Функции» → «Новости» (retentionDays).",
-  "admin.content.newsRetentionOff":
-    "Автоочистка выключена (retentionDays = 0) — таблица новостей растёт без ограничений. Задать срок — в разделе «Функции» → «Новости».",
-  "admin.content.newsDisabled": "Раздел выключен в «Функциях» — лента не обновляется и старые новости не удаляются.",
+  "admin.content.retentionLabel": "Хранить новости, дней",
+  "admin.content.retentionHint":
+    "Новости старше этого срока удаляются безвозвратно при каждом обновлении ленты (примерно раз в 15 минут, пока кто-то заходит в раздел). Меньше — лента свежее и база компактнее; больше — глубже архив, но таблица растёт и страница грузится медленнее. 0 — не удалять никогда.",
+  "admin.content.retentionHintOff":
+    "0 — ничего не удаляется: таблица новостей будет расти без ограничений, другой чистки нет. Поставьте 1–7 дней.",
+  "admin.content.save": "Сохранить",
+  "admin.content.saved": "Сохранено",
   "admin.content.econAutoClean":
     "Автоочистка: в календаре хранится только текущая неделя — события прошлых недель удаляются сами, как только начинается новая. Настраивать ничего не нужно.",
   "admin.content.refresh": "обновить",

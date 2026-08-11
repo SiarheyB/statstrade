@@ -26,7 +26,15 @@ vi.mock('@/lib/db', () => ({
 // Mock global fetch
 vi.stubGlobal('fetch', vi.fn());
 
-import { getNews, asLang, NEWS_SOURCES } from '@/lib/news';
+import {
+  getNews,
+  asLang,
+  NEWS_SOURCES,
+  getRetentionDays,
+  setRetentionDays,
+  DEFAULT_RETENTION_DAYS,
+  MAX_RETENTION_DAYS,
+} from '@/lib/news';
 
 describe('news module', () => {
   beforeEach(() => {
@@ -137,14 +145,32 @@ describe('news module', () => {
       expect(res.refreshing).toBe(false);
     });
 
-    it('does not touch the feeds when the feature is disabled', async () => {
-      mocks.featureFindUnique.mockResolvedValue({ key: 'newsFeed', enabled: false, config: null });
-      const fetchMock = vi.fn();
-      vi.stubGlobal('fetch', fetchMock);
-      const res = await getNews({ lang: 'en', force: true });
-      expect(fetchMock).not.toHaveBeenCalled();
-      expect(mocks.deleteMany).not.toHaveBeenCalled();
-      expect(res.refreshed).toEqual([]);
+  });
+
+  describe('getRetentionDays / setRetentionDays', () => {
+    it('falls back to the default when nothing is saved', async () => {
+      mocks.featureFindUnique.mockResolvedValue(null);
+      expect(await getRetentionDays()).toBe(DEFAULT_RETENTION_DAYS);
+    });
+
+    it('falls back to the default on a corrupt or negative value', async () => {
+      mocks.featureFindUnique.mockResolvedValue({ key: 'newsFeed', enabled: true, config: 'not json' });
+      expect(await getRetentionDays()).toBe(DEFAULT_RETENTION_DAYS);
+      mocks.featureFindUnique.mockResolvedValue({
+        key: 'newsFeed',
+        enabled: true,
+        config: JSON.stringify({ retentionDays: -5 }),
+      });
+      expect(await getRetentionDays()).toBe(DEFAULT_RETENTION_DAYS);
+    });
+
+    it('clamps what admin saves to 0..MAX and stores it', async () => {
+      expect(await setRetentionDays(9999)).toBe(MAX_RETENTION_DAYS);
+      expect(await setRetentionDays(-3)).toBe(0);
+      expect(await setRetentionDays(5.7)).toBe(5);
+      const lastCall = mocks.featureUpsert.mock.calls.at(-1)![0];
+      expect(lastCall.where).toEqual({ key: 'newsFeed' });
+      expect(JSON.parse(lastCall.update.config)).toEqual({ retentionDays: 5 });
     });
   });
 

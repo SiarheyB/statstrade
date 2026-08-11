@@ -1,7 +1,8 @@
 import { prisma } from "@/lib/db";
 import { getServerT } from "@/lib/i18n/server";
-import { getFeatureConfig } from "@/lib/featureConfig";
+import { getRetentionDays, MAX_RETENTION_DAYS } from "@/lib/news";
 import ContentActions from "@/components/admin/ContentActions";
+import NewsRetentionSetting from "@/components/admin/NewsRetentionSetting";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,7 @@ function Card({
   extra,
   note,
   feed,
+  children,
 }: {
   title: string;
   total: string;
@@ -19,6 +21,7 @@ function Card({
   extra?: string;
   note?: string;
   feed: "news" | "econcal";
+  children?: React.ReactNode;
 }) {
   return (
     <div className="card p-5">
@@ -30,6 +33,7 @@ function Card({
       <div className="mt-1 text-xs text-muted">{lastUpdateText}</div>
       {extra && <div className="mt-1 text-xs text-faint">{extra}</div>}
       {note && <div className="mt-2 text-[11px] text-faint leading-relaxed">{note}</div>}
+      {children}
     </div>
   );
 }
@@ -38,8 +42,8 @@ export default async function AdminContentPage() {
   const { t, locale } = await getServerT();
   const nf = locale === "ru" ? "ru-RU" : "en-US";
 
-  const [newsFeature, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
-    getFeatureConfig("newsFeed"),
+  const [retentionDays, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
+    getRetentionDays(),
     prisma.newsItem.count(),
     prisma.newsItem.count({ where: { lang: "en" } }),
     prisma.newsItem.count({ where: { lang: "ru" } }),
@@ -48,13 +52,6 @@ export default async function AdminContentPage() {
     prisma.economicEvent.findFirst({ orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
     prisma.economicEvent.findFirst({ where: { time: { gte: new Date() } }, orderBy: { time: "asc" }, select: { title: true, time: true } }),
   ]);
-
-  const retentionDays = Number(newsFeature.retentionDays);
-  const newsNote = !newsFeature.enabled
-    ? t("admin.content.newsDisabled")
-    : Number.isFinite(retentionDays) && retentionDays > 0
-      ? t("admin.content.newsRetention", { days: retentionDays })
-      : t("admin.content.newsRetentionOff");
 
   const lastUpdate = (d: Date | null) =>
     t("admin.content.lastUpdate", { date: d ? d.toLocaleString(nf) : t("admin.dash") });
@@ -70,9 +67,10 @@ export default async function AdminContentPage() {
           total={newsTotal.toLocaleString(nf)}
           lastUpdateText={lastUpdate(lastNews?.createdAt ?? null)}
           extra={t("admin.content.newsExtra", { en: newsEn, ru: newsRu })}
-          note={newsNote}
           feed="news"
-        />
+        >
+          <NewsRetentionSetting value={retentionDays} max={MAX_RETENTION_DAYS} />
+        </Card>
         <Card
           title={t("admin.content.econcal")}
           total={econTotal.toLocaleString(nf)}

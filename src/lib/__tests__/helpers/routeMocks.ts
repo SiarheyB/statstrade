@@ -253,6 +253,9 @@ vi.mock('@/lib/news', async () => {
     ...mod,
     getNews: vi.fn(),
     refreshNews: vi.fn(),
+    // Настройки ленты из карточки на /admin/content — ходят в prisma напрямую.
+    getRetentionDays: vi.fn(),
+    setRetentionDays: vi.fn(),
   };
 });
 
