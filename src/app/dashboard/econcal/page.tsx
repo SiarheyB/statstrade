@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { CalendarClock, RefreshCw } from "lucide-react";
+import { CalendarClock, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import type { Locale } from "@/lib/i18n/core";
+import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
 import { zonedParts, zonedDateToUtcMs, ianaFor } from "@/lib/timezone";
 
 type Ev = {
@@ -250,7 +252,8 @@ export default function EconCalPage() {
                     <span className="shrink-0" title={e.country}>{flag(e.currency)}</span>
                     <span className="text-xs text-faint w-9 shrink-0">{e.currency}</span>
                     <span className={clsx("h-2 w-2 rounded-full shrink-0", IMPACT_DOT[e.impact])} title={e.impact} />
-                    <span className="flex-1 min-w-0 truncate">{e.title}</span>
+                    <EventTitle title={e.title} locale={locale} />
+
                     <div className="hidden sm:flex items-center gap-3 text-xs tabular-nums shrink-0">
                       <Val label={t("econcal.forecast")} v={e.forecast} />
                       <Val label={t("econcal.previous")} v={e.previous} />
@@ -263,6 +266,27 @@ export default function EconCalPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// Название события: фид отдаёт его только по-английски и в виде шаблона
+// («Core CPI m/m»), поэтому переводим словарём терминов, а к знакомым
+// показателям показываем подсказку — что это и как читать (см. econcalTerms).
+function EventTitle({ title, locale }: { title: string; locale: Locale }) {
+  const translated = translateEventTitle(title, locale);
+  const explain = explainEvent(title, locale);
+  return (
+    <span className="flex-1 min-w-0 flex items-center gap-1">
+      {/* Оригинал в title: по нему событие ищется в других источниках. */}
+      <span className="truncate" title={title}>
+        {translated}
+      </span>
+      {explain && (
+        <span title={explain} className="inline-flex cursor-help shrink-0">
+          <HelpCircle size={12} className="text-faint" />
+        </span>
+      )}
+    </span>
   );
 }
 
