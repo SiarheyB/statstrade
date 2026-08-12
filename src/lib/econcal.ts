@@ -63,6 +63,16 @@ function normImpact(raw: unknown): string {
   return "low";
 }
 
+// The feed marks some genuinely market-moving releases (Final CPI reprints,
+// weekly Crude Oil Inventories) as "low" — bump those to "high" regardless
+// of the feed's own label.
+const HIGH_IMPACT_OVERRIDES: RegExp[] = [/\bcpi\b/i, /crude oil inventories/i];
+
+function applyImpactOverride(title: string, impact: string): string {
+  if (impact === "holiday") return impact;
+  return HIGH_IMPACT_OVERRIDES.some((re) => re.test(title)) ? "high" : impact;
+}
+
 type FeedItem = {
   title?: string;
   country?: string; // currency code
@@ -108,7 +118,7 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
       currency,
       country: countryFor(currency),
       title,
-      impact: normImpact(it.impact),
+      impact: applyImpactOverride(title, normImpact(it.impact)),
       category: categoryFor(title),
       forecast: clean(it.forecast),
       previous: clean(it.previous),

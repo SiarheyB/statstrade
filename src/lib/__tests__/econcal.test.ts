@@ -158,6 +158,17 @@ describe('econcal module', () => {
       ]);
     });
 
+    it('bumps CPI and Crude Oil Inventories to high impact regardless of feed label', async () => {
+      feedOf([
+        { title: 'German Final CPI m/m', country: 'EUR', date: '2026-01-15T14:00:00Z', impact: 'Low' },
+        { title: 'Crude Oil Inventories', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Low' },
+        { title: 'Core CPI y/y', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'High' },
+        { title: 'Bank Holiday', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Holiday' },
+      ]);
+      await refreshCalendar();
+      expect(upserted().map((e) => e.impact)).toEqual(['high', 'high', 'high', 'holiday']);
+    });
+
     it('derives a category from the title and falls back to Other', async () => {
       feedOf([
         { title: 'Core CPI m/m', country: 'USD', date: '2026-01-15T14:00:00Z' },
