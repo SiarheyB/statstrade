@@ -48,6 +48,8 @@ services:
       RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
       TRADE_RETENTION_DAYS: ${OB_TRADE_RETENTION_DAYS:-30}
       CANDLE_RETENTION_DAYS: ${OB_CANDLE_RETENTION_DAYS:-365}
+      # Полный скан дневных свечей по всем USDT-M фьючерсам (фича "Рекомендации").
+      SCAN_ALL_USDT_PAIRS: ${OB_SCAN_ALL_USDT_PAIRS:-true}
       PORT: 8080
       # Токен защиты /metrics — должен совпадать с COLLECTOR_METRICS_TOKEN в .env
       # приложения (раздел «Карта ордеров» в админке).

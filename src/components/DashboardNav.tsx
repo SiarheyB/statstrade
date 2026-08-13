@@ -16,6 +16,7 @@ import {
   Flame,
   Layers,
   TrendingUp,
+  Sparkles,
   Wrench,
   SlidersHorizontal,
   Tags,
@@ -60,6 +61,7 @@ function isNewsRoute(pathname: string): boolean {
 const SERVICE_CHILDREN = [
   { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
   { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
+  { href: "/dashboard/recommendations", key: "nav.recommendations", icon: Sparkles, featureKey: "tradeRecommendations" },
   // featureKey: скрыт для ВСЕХ (включая админа), когда общий выключатель
   // "forex" выключен. userOnlyFeatureKey: скрыт только для НЕ-админов, когда
   // "forexPublicAccess" выключен (админ видит раздел в любом случае).
@@ -72,6 +74,7 @@ function isServiceRoute(pathname: string): boolean {
     pathname.startsWith("/dashboard/liqmap") ||
     pathname.startsWith("/dashboard/forex") ||
     pathname.startsWith("/dashboard/orderflow") ||
+    pathname.startsWith("/dashboard/recommendations") ||
     pathname.startsWith("/dashboard/settings/risk")
   );
 }
