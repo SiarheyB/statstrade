@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { levelTypeLabel, signalLabel } from "../labels";
+import { directionLabel, levelTypeLabel, signalLabel } from "../labels";
 
 describe("levelTypeLabel", () => {
   it("translates known level types", () => {
@@ -9,6 +9,14 @@ describe("levelTypeLabel", () => {
 
   it("falls back to the raw key for unknown types", () => {
     expect(levelTypeLabel("unknown_type")).toBe("unknown_type");
+  });
+});
+
+describe("directionLabel", () => {
+  it("translates trade sides and tolerates a missing direction", () => {
+    expect(directionLabel("long")).toBe("лонг");
+    expect(directionLabel("short")).toBe("шорт");
+    expect(directionLabel(null)).toBe("");
   });
 });
 

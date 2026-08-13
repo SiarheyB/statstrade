@@ -24,16 +24,22 @@ export async function GET(req: Request, { params }: { params: Promise<{ symbol: 
   }
 
   try {
+    // Только по убыванию: `asc` + `take` отдал бы САМЫЕ СТАРЫЕ свечи, и на
+    // картинке в карточке был бы кусок истории годичной давности вместо
+    // подхода к уровню. Разворачиваем обратно в хронологический порядок —
+    // его ждёт отрисовка на клиенте.
     const candles = await prisma.obCandle.findMany({
       where: { symbol, exchange: EXCHANGE, interval: INTERVAL },
-      orderBy: { t: "asc" },
+      orderBy: { t: "desc" },
       take: 300,
     });
     return NextResponse.json({
       symbol,
       exchange: EXCHANGE,
       interval: INTERVAL,
-      candles: candles.map((c) => ({ t: c.t.getTime(), o: c.o, h: c.h, l: c.l, c: c.c })),
+      candles: candles
+        .reverse()
+        .map((c) => ({ t: c.t.getTime(), o: c.o, h: c.h, l: c.l, c: c.c })),
     });
   } catch (err) {
     return serverError((err as Error).message);

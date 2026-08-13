@@ -15,10 +15,27 @@ import type { DailyCandle } from "./levels";
 
 export type Bias = "breakout" | "false_breakout" | "neutral";
 
+/**
+ * Сторона сделки, которую подразумевает сетап. Выводится из положения уровня
+ * относительно текущей цены:
+ *  - уровень ВЫШЕ цены: пробой = вверх (long), ложный пробой = отбой вниз (short);
+ *  - уровень НИЖЕ цены: пробой = вниз (short), ложный пробой = отбой вверх (long).
+ * Для нейтрального bias направления нет.
+ */
+export type Direction = "long" | "short";
+
 export interface BreakoutSignals {
   for: string[];
   against: string[];
   bias: Bias;
+  direction: Direction | null;
+}
+
+export function biasDirection(bias: Bias, levelPrice: number, currentPrice: number): Direction | null {
+  if (bias === "neutral") return null;
+  const levelAbove = levelPrice >= currentPrice;
+  if (bias === "breakout") return levelAbove ? "long" : "short";
+  return levelAbove ? "short" : "long";
 }
 
 export interface FalseBreakoutEvent {
@@ -67,7 +84,7 @@ function priorTouchIndexes(candles: DailyCandle[], levelPrice: number, atr: numb
 export function computeBreakoutSignals(candles: DailyCandle[], levelPrice: number, atr: number): BreakoutSignals {
   const forFactors: string[] = [];
   const againstFactors: string[] = [];
-  if (candles.length < 6 || atr <= 0) return { for: [], against: [], bias: "neutral" };
+  if (candles.length < 6 || atr <= 0) return { for: [], against: [], bias: "neutral", direction: null };
 
   const last = candles[candles.length - 1];
   const history = candles.slice(0, -1); // без сегодняшнего бара — для поиска прошлых касаний/ЛП
@@ -129,5 +146,10 @@ export function computeBreakoutSignals(candles: DailyCandle[], levelPrice: numbe
         ? "false_breakout"
         : "neutral";
 
-  return { for: forFactors, against: againstFactors, bias };
+  return {
+    for: forFactors,
+    against: againstFactors,
+    bias,
+    direction: biasDirection(bias, levelPrice, last.c),
+  };
 }

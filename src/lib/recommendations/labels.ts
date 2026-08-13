@@ -16,6 +16,33 @@ export function levelTypeLabel(type: string): string {
   return LEVEL_TYPE_LABELS[type] ?? type;
 }
 
+export const DIRECTION_LABELS: Record<string, string> = {
+  long: "лонг",
+  short: "шорт",
+};
+
+export function directionLabel(direction: string | null | undefined): string {
+  if (!direction) return "";
+  return DIRECTION_LABELS[direction] ?? direction;
+}
+
+// Почему уровень не попал в выдачу — для статистики пересчёта в админке.
+export const REJECT_REASON_LABELS: Record<string, string> = {
+  close_far_from_level: "день закрылся далеко от уровня",
+  did_not_reach_level: "вчера до уровня не дошли",
+  level_chopped: "уровень распилен",
+  too_many_false_breakouts: "слишком много ложных пробоев",
+  deep_false_breakout: "был глубокий ложный пробой",
+  contaminated_zone: "за уровнем проторгованная зона",
+  no_runway: "нет запаса хода до следующего уровня",
+  no_breakout_preconditions: "нет предпосылок к пробою (подход не спокойный)",
+  no_false_breakout_preconditions: "нет предпосылок к ЛП (подход не быстрый)",
+};
+
+export function rejectReasonLabel(key: string): string {
+  return REJECT_REASON_LABELS[key] ?? key;
+}
+
 export const SIGNAL_LABELS: Record<string, string> = {
   small_bars_approach: "подход на малых барах",
   big_bars_approach: "подход на больших барах",

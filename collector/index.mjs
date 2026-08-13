@@ -266,34 +266,67 @@ async function backfillCandles() {
 // ощутимой нагрузки на Binance API за один проход.
 const ALL_PAIRS_EXCHANGE = "binance-futures";
 let allPairsScanRunning = false;
-let usdtPairsCache = { at: 0, symbols: [] };
-const USDT_PAIRS_CACHE_MS = 12 * 3600_000; // список пар меняется редко — кэш на полдня
 
+// Бессрочные контракты, которые нас интересуют:
+//  - PERPETUAL          — обычные крипто-бессрочные (BTCUSDT, ETHUSDT, ...);
+//  - TRADIFI_PERPETUAL  — бессрочные на традиционные активы (XAUUSDT — золото,
+//                         TSLAUSDT/AMZNUSDT/COINUSDT — акции). Методичка, по
+//                         которой ищем уровни, разбирает примеры как раз на
+//                         акциях и металлах (AMZN, XOM, NVDA, MSFT), так что
+//                         исключать их нет причин.
+// Квартальные/поставочные (CURRENT_QUARTER, NEXT_QUARTER) не берём — они
+// истекают. Статусы SETTLING (контракт доживает до расчёта) и PENDING_TRADING
+// (торги ещё не начались) тоже отсекаются — свечей "на сегодня" там нет.
+const WANTED_CONTRACT_TYPES = new Set(["PERPETUAL", "TRADIFI_PERPETUAL"]);
+
+/**
+ * Актуальный список пар с биржи. Кэша НЕТ намеренно: скан идёт раз в сутки
+ * (или по кнопке в админке), и один лишний запрос к exchangeInfo ничего не
+ * стоит, зато список всегда свежий — новые листинги попадают в выдачу сразу,
+ * а не через полсуток.
+ */
 async function fetchUsdtFuturesSymbols() {
-  if (Date.now() - usdtPairsCache.at < USDT_PAIRS_CACHE_MS && usdtPairsCache.symbols.length > 0) {
-    return usdtPairsCache.symbols;
-  }
   const res = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo");
   if (!res.ok) throw new Error(`exchangeInfo HTTP ${res.status}`);
   const data = await res.json();
-  // Только бессрочные (PERPETUAL) — квартальные/поставочные контракты
-  // (contractType CURRENT_QUARTER и т.п.) истекают и не нужны для дневных
-  // уровней "на сегодня".
-  const symbols = (data.symbols ?? [])
-    .filter((s) => s.status === "TRADING" && s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
-    .map((s) => s.symbol);
-  usdtPairsCache = { at: Date.now(), symbols };
-  return symbols;
+  const all = data.symbols ?? [];
+  const tradable = all.filter(
+    (s) => s.status === "TRADING" && s.quoteAsset === "USDT" && WANTED_CONTRACT_TYPES.has(s.contractType),
+  );
+  const crypto = tradable.filter((s) => s.contractType === "PERPETUAL").length;
+  console.log(
+    `[recommendations] exchangeInfo: ${all.length} символов, берём ${tradable.length} ` +
+      `(крипто ${crypto} + tradfi ${tradable.length - crypto})`,
+  );
+  return tradable.map((s) => s.symbol);
 }
 
 // Раз в сутки: список USDT-M пар + дневные свечи по каждой. Последовательно с
 // небольшой паузой между запросами — вежливо к rate-limit Binance, спешить
 // некуда (свечи дневные, чаще обновлять их бессмысленно).
+// Прогресс скана — его читает приложение через GET /scan-daily, чтобы
+// показать в админке этап «Загружаем свечи с Binance» до пересчёта уровней.
+const allPairsScanState = {
+  running: false,
+  done: 0,
+  total: 0,
+  startedAt: null,
+  finishedAt: null,
+  error: null,
+};
+
 async function scanAllUsdtPairsDaily() {
   if (allPairsScanRunning) return;
   allPairsScanRunning = true;
+  allPairsScanState.running = true;
+  allPairsScanState.done = 0;
+  allPairsScanState.total = 0;
+  allPairsScanState.startedAt = new Date().toISOString();
+  allPairsScanState.finishedAt = null;
+  allPairsScanState.error = null;
   try {
     const symbols = await fetchUsdtFuturesSymbols();
+    allPairsScanState.total = symbols.length;
     console.log(`[recommendations] скан дневных свечей: ${symbols.length} USDT-M фьючерсов`);
     let done = 0;
     for (const symbol of symbols) {
@@ -303,13 +336,17 @@ async function scanAllUsdtPairsDaily() {
         console.error(`[recommendations] ${symbol} 1d: ${err.message}`);
       }
       done++;
+      allPairsScanState.done = done;
       await new Promise((r) => setTimeout(r, 150));
     }
     console.log(`[recommendations] скан завершён: ${done}/${symbols.length} пар`);
   } catch (err) {
+    allPairsScanState.error = err.message;
     console.error(`[recommendations] скан ошибка: ${err.message}`);
   } finally {
     allPairsScanRunning = false;
+    allPairsScanState.running = false;
+    allPairsScanState.finishedAt = new Date().toISOString();
   }
 }
 
@@ -815,6 +852,27 @@ const server = http.createServer(async (req, res) => {
     const healthy = feeds.some((f) => f.book.synced);
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ healthy, feeds: status }));
+  } else if (url === "/scan-daily") {
+    // Загрузка свежих дневных свечей с Binance по запросу приложения: кнопка
+    // «Пересчитать сейчас» и ночной плановый прогон сначала дёргают этот
+    // эндпоинт, чтобы уровни считались по только что закрытому бару, а не по
+    // тому, что осталось от прошлого прохода суточного таймера.
+    // Защита — тот же bearer-токен, что у /metrics.
+    const auth = req.headers["authorization"] ?? "";
+    if (!cfg.metricsToken || auth !== `Bearer ${cfg.metricsToken}`) {
+      res.writeHead(cfg.metricsToken ? 401 : 404);
+      res.end();
+      return;
+    }
+    // POST запускает скан (если он уже идёт — просто отдаём его прогресс),
+    // GET только отдаёт статус для поллинга.
+    let started = false;
+    if (req.method === "POST" && !allPairsScanRunning) {
+      started = true;
+      scanAllUsdtPairsDaily(); // намеренно без await: клиент опрашивает статус
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ started, ...allPairsScanState }));
   } else if (url === "/metrics") {
     // Защищённый эндпоинт для админ-панели Next.js (раздел «Карта ордеров»).
     // Bearer-токен COLLECTOR_METRICS_TOKEN. Если токен не задан — 404 (закрыто).

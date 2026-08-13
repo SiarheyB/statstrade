@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { recomputeRecommendations } from "@/lib/recommendations/recompute";
+import { startRecompute } from "@/lib/recommendations/progress";
 
 export const maxDuration = 60;
 
@@ -18,8 +18,11 @@ async function handle(req: Request) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
-  const result = await recomputeRecommendations();
-  return NextResponse.json({ ok: true, ...result });
+  // Через тот же job-раннер, что и админская кнопка: ночной прогон виден в
+  // прогресс-баре админки, а параллельный запуск двух пересчётов исключён.
+  const { started, done } = startRecompute();
+  const result = await done;
+  return NextResponse.json({ ok: true, started, ...result });
 }
 
 export async function GET(req: Request) {

@@ -108,6 +108,34 @@ export function fmtDate(iso: string | number | Date): string {
 // (e.g. "RIF/USDT:USDT"). Show just the base/quote pair: "RIF/USDT".
 // Display form: drop the settle suffix (":USDT") and the slash so crypto
 // ("BTC/USDT") and forex/MT ("BTCUSDT") share one look.
+// Дата + время в выбранном часовом поясе. Для "auto" timeZone не задаётся —
+// берётся зона устройства, и переход на летнее/зимнее время учитывается
+// самим Intl; фиксированные "UTC±N" по своей природе не переводятся (см.
+// комментарий в lib/timezone.ts).
+export function fmtDateTime(iso: string | number | Date): string {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  const timeZone = ianaFor(TZ);
+  return d.toLocaleString(numLocale(), {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
+// Только время (ЧЧ:ММ) в выбранном часовом поясе — для подписей расписаний.
+export function fmtTime(iso: string | number | Date): string {
+  const d = iso instanceof Date ? iso : new Date(iso);
+  const timeZone = ianaFor(TZ);
+  return d.toLocaleTimeString(numLocale(), {
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  });
+}
+
 export function fmtSymbol(symbol: string): string {
   return symbol.split(":")[0].replace(/\//g, "");
 }

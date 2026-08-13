@@ -1,5 +1,7 @@
 -- UserDrawing model: инструменты рисования на графике orderflow
-CREATE TABLE "UserDrawing" (
+-- Таблица могла быть создана раньше миграцией 20260720073840_stattrade,
+-- поэтому все операции идемпотентны.
+CREATE TABLE IF NOT EXISTS "UserDrawing" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "symbol" TEXT NOT NULL,
@@ -18,7 +20,9 @@ CREATE TABLE "UserDrawing" (
 );
 
 -- Index for querying drawings by user + symbol + exchange
-CREATE INDEX "UserDrawing_userId_symbol_exchange_idx" ON "UserDrawing"("userId", "symbol", "exchange");
+CREATE INDEX IF NOT EXISTS "UserDrawing_userId_symbol_exchange_idx" ON "UserDrawing"("userId", "symbol", "exchange");
 
--- Foreign key to User (cascade delete)
+-- Foreign key to User (cascade delete).
+-- В 20260720073840_stattrade FK создавался без ON DELETE CASCADE — пересоздаём.
+ALTER TABLE "UserDrawing" DROP CONSTRAINT IF EXISTS "UserDrawing_userId_fkey";
 ALTER TABLE "UserDrawing" ADD CONSTRAINT "UserDrawing_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

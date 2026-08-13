@@ -811,8 +811,12 @@ model LevelSetup {
   levelType    String // break_point | mirror | historical | parabar | gap | pullback_border | range_border | reworked
   strength     Int // число подтверждений/касаний уровня
   distanceAtr  Float // расстояние от текущей цены в долях ATR
-  bias         String // breakout | false_breakout | neutral
+  bias         String // breakout | false_breakout (нейтральные сетапы не сохраняются)
+  direction    String // long | short — сторона сделки, следующая из bias и положения уровня к цене
   signals      Json // { for: string[], against: string[] } — какие факторы сработали
+  bsuAt        DateTime // БСУ — бар, сформировавший уровень (док: «бар, сформировавший уровень»)
+  quality      Json // метрики чистоты уровня из quality.ts (запилы, заражённость, запас хода)
+  score        Float // ранг качества сетапа: по нему отбираются лучшие N инструментов
   atr          Float
   currentPrice Float
   candlesFrom  DateTime // диапазон дневных свечей, использованный для расчёта/картинки
