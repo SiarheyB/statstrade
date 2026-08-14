@@ -32,6 +32,58 @@ describe("liqmap buildHeatmap", () => {
   });
 });
 
+describe("liqmap: поиск первого касания уровня", () => {
+  // Поиск «когда уровень ликвидации будет сметён» переведён с линейного скана
+  // (O(n²·L)) на разреженные таблицы + бинарный поиск. Эти кейсы фиксируют
+  // именно поведение поиска: полоса обязана обрываться на первом касании.
+  const k = (close: number, high: number, low: number, quoteVol = 1000) => ({
+    time: 0, open: close, high, low, close, quoteVol,
+  });
+
+  it("полоса гаснет, когда цена доходит до уровня", () => {
+    // Одна свеча с объёмом, затем свечи, пробивающие уровень вниз.
+    const klines = [
+      k(100, 101, 99, 1000),
+      k(100, 101, 99, 0),
+      // Свеча, пробивающая уровни в ОБЕ стороны: long-уровни лежат ниже цены
+      // входа (3x → ~67), short-уровни — выше (3x → ~133).
+      k(100, 200, 50, 0),
+      k(60, 61, 59, 0),
+    ];
+    const hm = buildHeatmap(klines, { bins: 20, cols: 4 })!;
+    const colSum = (c: number) => hm.grid[c].reduce((a, b) => a + b, 0);
+    // До касания полосы горят, после — гаснут.
+    expect(colSum(0)).toBeGreaterThan(0);
+    expect(colSum(3)).toBe(0);
+  });
+
+  it("нетронутый уровень горит до конца окна", () => {
+    // Диапазон последующих свечей УЖЕ самой близкой ликвидации: у 100x она
+    // всего в 0.6% от входа (1/100 − mmr), поэтому high=101 её бы уже задел.
+    const klines = [
+      k(100, 100.01, 99.99, 1000),
+      k(100, 100.01, 99.99, 0),
+      k(100, 100.01, 99.99, 0),
+      k(100, 100.01, 99.99, 0),
+    ];
+    const hm = buildHeatmap(klines, { bins: 20, cols: 4 })!;
+    const colSum = (c: number) => hm.grid[c].reduce((a, b) => a + b, 0);
+    // Цена никуда не ушла — ни один уровень не сметён.
+    expect(colSum(3)).toBeGreaterThan(0);
+    expect(colSum(0)).toBeCloseTo(colSum(3), 9);
+  });
+
+  it("свечи с нулевым объёмом не создают полос", () => {
+    const hm = buildHeatmap([k(100, 101, 99, 0), k(100, 101, 99, 0)], { bins: 10, cols: 2 })!;
+    expect(hm.maxVal).toBe(0);
+  });
+
+  it("массив из одной свечи не ломает поиск", () => {
+    const hm = buildHeatmap([k(100, 101, 99, 1000)], { bins: 10, cols: 1 })!;
+    expect(hm.maxVal).toBeGreaterThan(0);
+  });
+});
+
 describe("liqmap fetchKlines / computeLiqMap", () => {
   const mockFetch = vi.fn();
   beforeEach(() => {

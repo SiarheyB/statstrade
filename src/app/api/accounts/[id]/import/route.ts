@@ -7,6 +7,7 @@ import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
 import type { MtFormat } from "@/lib/mt/types";
 import { logger } from "@/lib/logger";
+import { recomputeRRForAccount } from "@/lib/analytics/rr";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -163,6 +164,9 @@ export async function POST(
           : {}),
       },
     });
+    // Новые ImportedTrade ещё без rr (колонка nullable) — считаем сразу,
+    // иначе Сделки/Календарь показывали бы пусто до первой правки stopLoss.
+    await recomputeRRForAccount(account.id).catch(() => {});
     bumpStatsVersion(user.userId);
     logger.info("import", account.id, "DB upsert SUCCESS", {
       imported: res.count,

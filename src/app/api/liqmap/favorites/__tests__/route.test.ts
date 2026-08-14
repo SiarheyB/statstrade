@@ -139,4 +139,64 @@ describe("/api/liqmap/favorites", () => {
       expect(res.status).toBe(500);
     });
   });
+
+  // ─── Потолки на ввод (SECURITY_AUDIT.md) ──────────────────────────────────
+  describe("лимиты", () => {
+    it("не принимает биржу произвольной длины", async () => {
+      const res = await POST(
+        new Request(base, {
+          method: "POST",
+          body: JSON.stringify({ exchange: "b".repeat(5000), symbol: "BTCUSDT" }),
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockPrisma.favouriteTicker.upsert).not.toHaveBeenCalled();
+    });
+
+    it("не принимает символ произвольной длины", async () => {
+      const res = await POST(
+        new Request(base, {
+          method: "POST",
+          body: JSON.stringify({ exchange: "binance", symbol: "A".repeat(10000) }),
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockPrisma.favouriteTicker.upsert).not.toHaveBeenCalled();
+    });
+
+    it("упирается в потолок избранного", async () => {
+      mockPrisma.favouriteTicker.count.mockResolvedValue(200);
+      mockPrisma.favouriteTicker.findUnique.mockResolvedValue(null);
+      const res = await POST(
+        new Request(base, {
+          method: "POST",
+          body: JSON.stringify({ exchange: "binance", symbol: "BTCUSDT" }),
+        }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockPrisma.favouriteTicker.upsert).not.toHaveBeenCalled();
+    });
+
+    it("на потолке всё ещё можно поднять наверх уже избранное", async () => {
+      mockPrisma.favouriteTicker.count.mockResolvedValue(200);
+      mockPrisma.favouriteTicker.findUnique.mockResolvedValue({ symbol: "BTCUSDT" });
+      // Предыдущий тест оставил upsert отклоняющимся — clearAllMocks реализации не сбрасывает.
+      mockPrisma.favouriteTicker.upsert.mockResolvedValue({});
+      const res = await POST(
+        new Request(base, {
+          method: "POST",
+          body: JSON.stringify({ exchange: "binance", symbol: "BTCUSDT" }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(mockPrisma.favouriteTicker.upsert).toHaveBeenCalled();
+    });
+
+    it("GET с мусорной биржей отвечает 400, а не идёт в БД", async () => {
+      const res = await GET(new Request(`${base}?exchange=${"x".repeat(500)}`));
+      expect(res.status).toBe(400);
+      expect(mockPrisma.favouriteTicker.findMany).not.toHaveBeenCalled();
+    });
+  });
+
 });

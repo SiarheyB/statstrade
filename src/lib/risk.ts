@@ -1,9 +1,18 @@
 // Risk-manager domain: limit configuration, parsing, and status computation.
 // Monitoring/alerting only — it never blocks trades on the exchange.
 
+import {
+  PERIODS,
+  sumInPeriod,
+  type PeriodKey,
+  type HourBucket,
+} from "./analytics/periods";
+
+// Периодный календарь живёт в analytics/periods.ts (он же обслуживает
+// «Календарь» и агрегаты). Ре-экспорт — чтобы не переписывать импортёров.
+export { PERIODS, periodStart, periodEnd, type PeriodKey } from "./analytics/periods";
+
 export type LossUnit = "pct" | "amount";
-export type PeriodKey = "day" | "week" | "month" | "year";
-export const PERIODS: PeriodKey[] = ["day", "week", "month", "year"];
 
 export type PeriodLimit = { on: boolean; value: number; unit: LossUnit };
 export type LossLimits = Record<PeriodKey, PeriodLimit>;
@@ -91,9 +100,55 @@ export function riskPerTradeAmount(
   return (balance * r.value) / 100;
 }
 
+// --- R-multiple (RR) — shared by /dashboard/trades and /dashboard/calendar
+// so both show the same number for the same trade. ---
+
+export type RRTradeInput = {
+  accountId: string;
+  side: string;
+  entryPrice: number;
+  exitPrice: number;
+  fees: number;
+  qty: number;
+  netPnl: number;
+};
+
+// Stop-loss-distance model: 1R = |entry - stop| price move, fees expressed in
+// the same R units. Used when no risk-manager profile overrides it.
+export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): number | null {
+  if (stopLoss == null) return null;
+  const oneR = Math.abs(tr.entryPrice - stopLoss);
+  if (oneR <= 0) return null;
+  const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
+  const grossR = priceMove / oneR;
+  const feeR = tr.fees / (oneR * tr.qty);
+  return grossR - feeR;
+}
+
+// R-multiple for a trade: if the risk manager is enabled for this account with
+// a configured per-trade risk, R = netPnl / (that money amount) — otherwise
+// falls back to the stop-loss-distance model above.
+export function tradeRR(
+  tr: RRTradeInput,
+  stopLoss: number | null,
+  riskProfiles: Record<string, RiskProfileData>,
+  balance: number | null,
+): number | null {
+  const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
+  if (prof) {
+    const riskAmt = riskPerTradeAmount(prof, balance);
+    if (riskAmt && riskAmt > 0) return tr.netPnl / riskAmt;
+  }
+  return stopDistanceRR(tr, stopLoss);
+}
+
 // --- Status computation ---
 
-export type RiskTrade = { accountId: string; netPnl: number; exitTime: Date; result: string };
+// Статус риска считается из почасового агрегата (TradeHourly). Раньше сюда
+// приходил список ВСЕХ сделок за окно и складывался в Node; теперь суммирование
+// сделано один раз при изменении сделок (lib/analytics/hourly.ts), а границы
+// окон берутся в таймзоне пользователя (lib/analytics/periods.ts).
+export type { HourBucket } from "./analytics/periods";
 
 export type LimitState = "ok" | "warning" | "breached";
 export type LimitStatus = {
@@ -114,28 +169,17 @@ export type AccountRisk = {
 
 const WARN_RATIO = 0.8;
 
-function periodStart(key: PeriodKey, now: Date): number {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const d = now.getUTCDate();
-  if (key === "day") return Date.UTC(y, m, d);
-  if (key === "week") {
-    const diff = (now.getUTCDay() + 6) % 7; // days since Monday
-    return Date.UTC(y, m, d - diff);
-  }
-  if (key === "month") return Date.UTC(y, m, 1);
-  return Date.UTC(y, 0, 1);
-}
-
 // Net loss within a period: sum of ALL trades' P&L (wins offset losses).
 // Consistent with getNetStopsCount() and the "stops" day-counter — a +3R
 // take-profit offsets −3R of losses, showing the net drawdown.
-function lossInPeriod(trades: RiskTrade[], key: PeriodKey, now: Date): number {
-  const start = periodStart(key, now);
-  let net = 0;
-  for (const t of trades) {
-    if (t.exitTime.getTime() >= start) net += t.netPnl;
-  }
+// Суммирует почасовые агрегаты; границы периода — в таймзоне пользователя.
+function lossInPeriod(
+  hours: HourBucket[],
+  key: PeriodKey,
+  now: Date,
+  offsetMinutes: number,
+): number {
+  const net = sumInPeriod(hours, key, now, offsetMinutes).netPnl;
   return net < 0 ? -net : 0;
 }
 
@@ -153,9 +197,10 @@ const worse = (a: LimitState, b: LimitState): LimitState => {
 
 export function computeAccountRisk(
   accountId: string,
-  trades: RiskTrade[],
+  hours: HourBucket[],
   balance: number | null,
   profile: RiskProfileData,
+  offsetMinutes: number,
   now: Date = new Date(),
 ): AccountRisk {
   if (!profile.enabled) {
@@ -170,25 +215,22 @@ export function computeAccountRisk(
   // profit shows 0 stops used). Without a 1R setting we fall back to a 1:1 net
   // count (losses − wins). This is what the trader means by "учитывать стопы и
   // тейки": two stops then one take should not trip the limit.
+  //
+  // «Сегодня» — локальные сутки пользователя, а не UTC.
   if (profile.maxStopsPerDay && profile.maxStopsPerDay > 0) {
-    const dayStart = periodStart("day", now);
-    const today = trades.filter((t) => t.exitTime.getTime() >= dayStart);
+    const today = sumInPeriod(hours, "day", now, offsetMinutes);
     const rAmount = riskPerTradeAmount(profile, balance);
 
     let used: number;
     if (rAmount && rAmount > 0) {
       // Net drawdown in R: losses add, wins subtract (by their R-multiple).
-      let netR = 0;
-      for (const t of today) netR += t.netPnl / rAmount;
-      used = -netR;
+      // Σ(netPnl)/rAmount == Σ(netPnl/rAmount) — агрегат даёт то же число, что
+      // поштучный проход по сделкам.
+      used = -(today.netPnl / rAmount);
     } else {
       // No 1R configured → net count: each stop +1, each take −1.
-      let net = 0;
-      for (const t of today) {
-        if (t.result === "loss") net += 1;
-        else if (t.result === "win") net -= 1;
-      }
-      used = net;
+      // Безубыточные сделки не в счёт — их нет ни в wins, ни в losses.
+      used = today.losses - today.wins;
     }
     // Стопы — счётчик, показываем целыми и консервативно: частично «съеденный»
     // стоп (0.96R) считается использованным целиком. Эпсилон — чтобы ровные
@@ -217,7 +259,7 @@ export function computeAccountRisk(
     } else {
       limitAmount = cfg.value;
     }
-    const used = lossInPeriod(trades, p, now);
+    const used = lossInPeriod(hours, p, now, offsetMinutes);
     limits.push({
       key: p,
       unit: "amount",

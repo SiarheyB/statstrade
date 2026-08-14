@@ -15,11 +15,17 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     newsItem: { count: vi.fn(), findFirst: vi.fn() },
     economicEvent: { count: vi.fn(), findFirst: vi.fn() },
+    // Нет строки = фича «Новости» включена с дефолтным retentionDays.
+    featureConfig: { findUnique: vi.fn().mockResolvedValue(null) },
   },
 }));
 
 vi.mock("@/components/admin/ContentActions", () => ({
   default: ({ feed }: { feed: string }) => <div data-testid={`content-actions-${feed}`} />,
+}));
+
+vi.mock("@/components/admin/NewsRetentionSetting", () => ({
+  default: ({ value }: { value: number }) => <div data-testid="news-retention">{value}</div>,
 }));
 
 describe("AdminContentPage", () => {

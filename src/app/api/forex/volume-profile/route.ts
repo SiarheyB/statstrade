@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { prisma } from "@/lib/db";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 20;
 
@@ -21,8 +23,7 @@ const PERIOD_MS: Record<string, number> = {
 };
 
 const TTL_MS = 5000;
-const cache = new Map<string, { at: number; data: unknown }>();
-const inflight = new Map<string, Promise<unknown>>();
+const cache = createRouteCache(TTL_MS);
 
 type CandleRow = { t: Date; o: number; h: number; l: number; c: number; v: number };
 
@@ -33,7 +34,8 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol") ?? "EUR/USD";
+  const symbol = normalizeFxSymbol(url.searchParams.get("symbol"));
+  if (!symbol) return badRequest("Некорректная валютная пара");
   const period = url.searchParams.get("period") ?? "1d";
 
   if (!PERIODS.includes(period as typeof PERIODS[number])) {
@@ -42,12 +44,11 @@ export async function GET(req: Request) {
 
   const key = `${symbol}|${period}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
+  if (hit) return NextResponse.json(hit);
 
   try {
-    let p = inflight.get(key);
-    if (!p) {
-      p = (async () => {
+    // fetch = кэш + дедупликация «в полёте» (см. lib/routeCache.ts).
+    const data = await cache.fetch(key, async () => {
         const windowMs = PERIOD_MS[period];
         const toMs = Date.now();
         const fromMs = toMs - windowMs;
@@ -146,11 +147,7 @@ export async function GET(req: Request) {
           valueArea: { high: vaHigh, low: vaLow },
           levels,
         };
-      })().finally(() => inflight.delete(key));
-      inflight.set(key, p);
-    }
-    const data = await p;
-    cache.set(key, { at: Date.now(), data });
+    });
     return NextResponse.json(data);
   } catch (err) {
     return NextResponse.json(

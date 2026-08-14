@@ -161,7 +161,6 @@ export const testMatrix: MatrixEntry[] = [
   { path: 'src/lib/i18n/core.ts', loc: 35, priority: 'P0', category: 'lib', covered: false },
   { path: 'src/lib/i18n/server.ts', loc: 35, priority: 'P0', category: 'lib', covered: false },
   { path: 'src/app/api/accounts/[id]/demo/route.ts', loc: 34, priority: 'P1', category: 'api', covered: false },
-  { path: 'src/app/api/admin/backup/file-info/route.ts', loc: 34, priority: 'P1', category: 'api', covered: false },
   { path: 'src/app/api/cron/sync/route.ts', loc: 33, priority: 'P1', category: 'api', covered: false },
   { path: 'src/lib/mt/numbers.ts', loc: 32, priority: 'P0', category: 'lib', covered: false },
   { path: 'src/lib/turnstile.ts', loc: 32, priority: 'P0', category: 'lib', covered: false },

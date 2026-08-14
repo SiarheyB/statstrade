@@ -14,10 +14,33 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { createDrawing, getDrawings, updateDrawing, deleteDrawing } from "@/lib/drawings";
 import type { DrawingToolType, DrawingPoint } from "@/lib/drawings";
 
 export const maxDuration = 15;
+
+// Значения отсюда не считаются доверенными: всё проверяет zod в lib/drawings.
+type DrawingBody = {
+  symbol?: string;
+  exchange?: string;
+  toolType?: string;
+  points?: DrawingPoint[];
+  color?: string;
+  lineWidth?: number;
+  fillColor?: string;
+  label?: string;
+};
+
+/** null — тело нечитаемо (битый JSON или превышен лимит размера). */
+async function readJson(req: Request): Promise<DrawingBody | null> {
+  try {
+    const parsed = await req.json();
+    return parsed && typeof parsed === "object" ? (parsed as DrawingBody) : null;
+  } catch {
+    return null;
+  }
+}
 
 const EXCHANGE = "forex";
 
@@ -29,10 +52,12 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol")?.toUpperCase();
-
-  if (!symbol) return badRequest("symbol is required");
-  if (!/^[A-Z0-9/-]+$/.test(symbol)) return badRequest("invalid symbol");
+  // Тот же валидатор, что и в остальных форекс-роутах: раньше regex не
+  // ограничивал длину, и в запрос уходила строка любого размера.
+  const raw = url.searchParams.get("symbol");
+  if (!raw) return badRequest("symbol is required");
+  const symbol = normalizeFxSymbol(raw);
+  if (!symbol) return badRequest("invalid symbol");
 
   try {
     const drawings = await getDrawings({ userId: user.userId, symbol, exchange: EXCHANGE });
@@ -49,16 +74,20 @@ export async function POST(req: Request) {
   const denied = await forexAccessError(user);
   if (denied) return denied;
 
-  try {
-    const body = await req.json();
+  // Тело парсим отдельно: битый или слишком большой JSON — это ошибка клиента
+  // (400), а не сбой сервера. Раньше и то и другое улетало в 500.
+  const body = await readJson(req);
+  if (!body) return badRequest("Некорректный запрос");
 
-    if (!body.points || !body.toolType) {
-      return badRequest("points and toolType are required");
-    }
+  if (!body.points || !body.toolType) {
+    return badRequest("points and toolType are required");
+  }
+
+  try {
 
     const drawing = await createDrawing({
       userId: user.userId,
-      symbol: body.symbol,
+      symbol: body.symbol as string,
       exchange: EXCHANGE,
       toolType: body.toolType as DrawingToolType,
       points: body.points as DrawingPoint[],
@@ -88,8 +117,10 @@ export async function PUT(req: Request) {
   const id = url.searchParams.get("id");
   if (!id) return badRequest("id is required");
 
+  const body = await readJson(req);
+  if (!body) return badRequest("Некорректный запрос");
+
   try {
-    const body = await req.json();
     const updated = await updateDrawing(id, user.userId, {
       points: body.points as DrawingPoint[] | undefined,
       color: body.color,

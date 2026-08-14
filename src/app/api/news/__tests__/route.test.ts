@@ -39,4 +39,32 @@ describe('GET /api/news', () => {
     expect(body.items[0].id).toBe('1');
     expect(body.items[1].id).toBe('2');
   });
+
+  it('reads the language from the query and defaults to en', async () => {
+    asUser();
+    newsModule.getNews.mockResolvedValue({ items: [], sources: [], lang: 'ru', refreshed: [] });
+    await GET(new Request(`${base}?lang=ru`));
+    expect(newsModule.getNews).toHaveBeenCalledWith({ force: false, lang: 'ru' });
+
+    await GET(new Request(`${base}?lang=fr`));
+    expect(newsModule.getNews).toHaveBeenCalledWith({ force: false, lang: 'en' });
+  });
+
+  it('caches a normal response but not a manual refresh', async () => {
+    asUser();
+    newsModule.getNews.mockResolvedValue({ items: [], sources: [], lang: 'en', refreshed: [] });
+    const cached = await GET(new Request(base));
+    expect(cached.headers.get('Cache-Control')).toContain('s-maxage');
+
+    const fresh = await GET(new Request(`${base}?refresh=1`));
+    expect(fresh.headers.get('Cache-Control')).toBeNull();
+    expect(newsModule.getNews).toHaveBeenLastCalledWith({ force: true, lang: 'en' });
+  });
+
+  it('returns 500 when getNews throws', async () => {
+    asUser();
+    newsModule.getNews.mockRejectedValue(new Error('feed exploded'));
+    const res = await GET(new Request(base));
+    expect(res.status).toBe(500);
+  });
 });

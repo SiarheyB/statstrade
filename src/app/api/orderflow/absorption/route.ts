@@ -13,6 +13,7 @@
 import { NextResponse } from 'next/server';
 import { getAuthUser, unauthorized, badRequest, serverError } from '@/lib/api';
 import { computeAbsorption } from '@/lib/orderflow';
+import { createRouteCache } from '@/lib/routeCache';
 
 export const maxDuration = 30;
 
@@ -31,8 +32,9 @@ const PERIODS: Record<string, number> = {
   '30d': 2_592_000_000,
 };
 
-// 12s TTL cache
-const cache = new Map<string, { data: unknown; until: number }>();
+// 12s TTL, с ограничением размера: ключ здесь — вся query-строка,
+// то есть число комбинаций ничем не ограничено.
+const cache = createRouteCache(12_000);
 
 export async function GET(req: Request) {
   // 1. Auth
@@ -44,9 +46,7 @@ export async function GET(req: Request) {
   // 2. Cache check
   const cacheKey = url.searchParams.toString();
   const cached = cache.get(cacheKey);
-  if (cached && cached.until > Date.now()) {
-    return NextResponse.json(cached.data);
-  }
+  if (cached) return NextResponse.json(cached);
 
   // 3. Params
   const searchParams = url.searchParams;
@@ -87,7 +87,7 @@ export async function GET(req: Request) {
     };
 
     // 5. Cache
-    cache.set(cacheKey, { data, until: Date.now() + 12_000 });
+    cache.set(cacheKey, data);
 
     return NextResponse.json(data);
   } catch (error) {

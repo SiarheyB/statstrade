@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { prisma } from "@/lib/db";
 import { candleActivity } from "@/lib/forexActivity";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 20;
 
@@ -15,7 +17,7 @@ const PERIODS = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 // Отрицательный = больше активности на продажу (медвежий).
 
 const TTL_MS = 5000;
-const cache = new Map<string, { at: number; data: unknown }>();
+const cache = createRouteCache(TTL_MS);
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -24,7 +26,8 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol") ?? "EUR/USD";
+  const symbol = normalizeFxSymbol(url.searchParams.get("symbol"));
+  if (!symbol) return badRequest("Некорректная валютная пара");
   const period = url.searchParams.get("period") ?? "1h";
 
   if (!PERIODS.includes(period as typeof PERIODS[number])) {
@@ -33,7 +36,7 @@ export async function GET(req: Request) {
 
   const key = `${symbol}|${period}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
+  if (hit) return NextResponse.json(hit);
 
   try {
     // 12h не поддерживается Twelve Data — агрегируем из 1h

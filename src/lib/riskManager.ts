@@ -1,6 +1,7 @@
 import { prisma } from "./db";
 import { Cache } from "./cache";
 import { parseRiskProfile, riskPerTradeAmount, defaultRiskProfile } from "./risk";
+import { periodStart, periodEnd } from "./analytics/periods";
 
 type Limits = {
   dailyStops?: number;
@@ -18,7 +19,8 @@ type Period = "day" | "week" | "month" | "year";
 export async function checkRiskLimits(
   userId: string,
   exchangeId: string,
-  orderType: "stop" | "limit" | "market"
+  orderType: "stop" | "limit" | "market",
+  offsetMinutes = 0,
 ) {
   if (orderType !== "stop") return; // ограничения только на стоп‑ордера
 
@@ -71,10 +73,10 @@ export async function checkRiskLimits(
     month,
     year,
   ] = await Promise.all([
-    getNetStopsCount(userId, exchangeId, "day"),
-    getNetStopsCount(userId, exchangeId, "week"),
-    getNetStopsCount(userId, exchangeId, "month"),
-    getNetStopsCount(userId, exchangeId, "year"),
+    getNetStopsCount(userId, exchangeId, "day", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "week", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "month", offsetMinutes),
+    getNetStopsCount(userId, exchangeId, "year", offsetMinutes),
   ]);
 
   if (limits.dailyStops && day >= limits.dailyStops) {
@@ -100,25 +102,17 @@ export async function checkRiskLimits(
 export async function getNetStopsCount(
   userId: string,
   exchangeId: string,
-  period: Period
+  period: Period,
+  offsetMinutes = 0,
 ): Promise<number> {
-  const cacheKey = `netStops:${userId}:${exchangeId}:${period}`;
+  const cacheKey = `netStops:${userId}:${exchangeId}:${period}:${offsetMinutes}`;
   const cached = Cache.get<number>(cacheKey);
   if (cached !== undefined) return cached;
 
+  // Границы периода — одна реализация на весь риск-модуль
+  // (lib/analytics/periods.ts), в таймзоне пользователя.
   const now = new Date();
-  let from: Date;
-  if (period === "day") {
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  } else if (period === "week") {
-    const diff = (now.getUTCDay() + 6) % 7; // Monday = 0
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - diff));
-  } else if (period === "month") {
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  } else {
-    // year
-    from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  }
+  const from = new Date(periodStart(period, now, offsetMinutes));
 
   // Получаем **все** закрытые сделки за период, сначала находим аккаунт пользователя
   const tradeAccount = await prisma.exchangeAccount.findFirst({
@@ -131,16 +125,18 @@ export async function getNetStopsCount(
 
   if (!tradeAccount) return 0;
 
-  const trades = await prisma.trade.findMany({
+  // Суммарный P&L за период — одним агрегатом по почасовым сводкам
+  // (TradeHourly, см. lib/analytics/hourly.ts). Раньше сюда тянулись ВСЕ сделки
+  // за период и складывались в Node. Часовая гранулярность нужна, чтобы окно
+  // могло начинаться в полночь ЛОКАЛЬНЫХ суток пользователя, а не UTC.
+  const totals = await prisma.tradeHourly.aggregate({
     where: {
       accountId: tradeAccount.id,
-      exitTime: { gte: from },
+      hour: { gte: from },
     },
-    select: {
-      netPnl: true,
-      result: true, // "loss" | "win" | "breakeven"
-    },
+    _sum: { netPnl: true },
   });
+  const periodNetPnl = totals._sum.netPnl ?? 0;
 
   // Получаем профиль риска пользователя (из таблицы RiskProfile)
   const riskProfileRecord = await prisma.riskProfile.findFirst({
@@ -178,11 +174,10 @@ export async function getNetStopsCount(
     return 0;
   }
 
-  let netR = 0;
-  for (const t of trades) {
-    // netPnl уже в валюте; делим на стоимость 1R, получаем R‑мультипликатор
-    netR += t.netPnl / rAmount;
-  }
+  // netPnl уже в валюте; делим на стоимость 1R, получаем R‑мультипликатор.
+  // Σ(netPnl)/rAmount == Σ(netPnl/rAmount), поэтому деление одной суммы даёт
+  // ровно то же, что прежний поштучный проход по сделкам.
+  const netR = periodNetPnl / rAmount;
 
   // Чистое «затраченные» стопы (отрицательный netR → положительное количество)
   let used = 0;
@@ -190,21 +185,10 @@ export async function getNetStopsCount(
     used = Math.max(0, Math.ceil(-netR - 1e-9));
   }
 
-  // TTL: оставшееся время до конца периода
-  let ttlMs = 0;
-  if (period === "day") {
-    ttlMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1) - now.getTime();
-  } else if (period === "week") {
-    const nextMonday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + (8 - now.getUTCDay())));
-    ttlMs = nextMonday.getTime() - now.getTime();
-  } else if (period === "month") {
-    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-    ttlMs = nextMonth.getTime() - now.getTime();
-  } else {
-    // year
-    const nextYear = new Date(Date.UTC(now.getUTCFullYear() + 1, now.getUTCMonth(), 1));
-    ttlMs = nextYear.getTime() - now.getTime();
-  }
+  // TTL: оставшееся время до конца периода (тот же периодный календарь, что и
+  // в periodStart — прошлая копия для "week" в воскресенье уезжала на 8 дней
+  // вперёд, а для "year" держала значение почти год).
+  const ttlMs = periodEnd(period, now, offsetMinutes) - now.getTime();
 
   Cache.set(cacheKey, used, ttlMs);
   return used;

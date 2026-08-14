@@ -7,9 +7,9 @@ import {
   mockGetAuthUser,
   mockRecordAudit,
 } from "@/lib/__tests__/helpers/routeMocks";
-import { POST } from "@/app/api/admin/content/route";
+import { POST, PATCH } from "@/app/api/admin/content/route";
+import { setRetentionDays } from "@/lib/news";
 
-vi.mock("@/lib/news", () => ({ refreshNews: vi.fn().mockResolvedValue([]) }));
 vi.mock("@/lib/econcal", () => ({ refreshCalendar: vi.fn().mockResolvedValue([]) }));
 
 const base = "https://example.com/api/admin/content";
@@ -18,6 +18,7 @@ beforeEach(() => {
   mockGetAuthUser.mockReset();
   mockGetAdminSession.mockReset();
   mockRecordAudit.mockReset();
+  vi.mocked(setRetentionDays).mockImplementation(async (d: number) => d);
 });
 
 describe("POST /api/admin/content", () => {
@@ -56,5 +57,33 @@ describe("POST /api/admin/content", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
+  });
+});
+
+describe("PATCH /api/admin/content", () => {
+  it("returns 404 when no admin session", async () => {
+    asNonAdmin();
+    asGuest();
+    const res = await PATCH(new Request(base, { method: "PATCH", body: JSON.stringify({ feed: "news", retentionDays: 3 }) }));
+    expect(res.status).toBe(404);
+  });
+
+  it("saves the retention setting and writes an audit record", async () => {
+    asAdmin();
+    asGuest();
+    const res = await PATCH(new Request(base, { method: "PATCH", body: JSON.stringify({ feed: "news", retentionDays: 3 }) }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, retentionDays: 3 });
+    expect(vi.mocked(setRetentionDays)).toHaveBeenCalledWith(3);
+    expect(mockRecordAudit).toHaveBeenCalled();
+  });
+
+  it("rejects out-of-range and non-integer values", async () => {
+    asAdmin();
+    asGuest();
+    for (const retentionDays of [-1, 1000, 2.5, "3"]) {
+      const res = await PATCH(new Request(base, { method: "PATCH", body: JSON.stringify({ feed: "news", retentionDays }) }));
+      expect(res.status).toBe(400);
+    }
   });
 });

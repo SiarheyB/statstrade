@@ -58,13 +58,22 @@ const CANDLE_INTERVAL: Record<string, string> = {
 // синхронизацией свечей занимается collector.
 // Если в БД ещё нет данных (collector не успел) — возвращаем пустой массив;
 // live-обновление (3с) подтянет их при следующем опросе.
+// opts.live — нужна ли СВЕЖАЯ формирующаяся свеча.
+//
+// Ради неё функция ходит в Binance на каждый вызов, и это 366 из ~400 мс
+// (измерено). Графику это нужно: он опрашивает /api/orderflow раз в 3 с и
+// показывает текущую свечу в реальном времени. А детекторам дивергенций и
+// абсорбции — нет: они анализируют ЗАКРЫТЫЕ свечи, и живая последняя им
+// ничего не даёт. Раньше они платили за неё те же 366 мс на каждый опрос.
 export async function fetchOrderflowCandles(
   symbol: string,
   exchange: string,
   range: string,
   fromMs: number,
   toMs: number,
+  opts: { live?: boolean } = {},
 ): Promise<OfCandle[]> {
+  const live = opts.live !== false;
   const interval = CANDLE_INTERVAL[range] ?? "1m";
 
   // URL для запросов к Binance (используется и при fallback, и при live-обновлении)
@@ -114,7 +123,7 @@ export async function fetchOrderflowCandles(
     // 2 свечи с Binance, чтобы обновить h/l/c/v текущей свечи.
     // Это лёгкий запрос (2 свечи) — не перегружает ни Binance, ни БД.
     // ═══════════════════════════════════════════════════════════════════
-    if (result.length > 0 && urlBase) {
+    if (live && result.length > 0 && urlBase) {
       try {
         const latestUrl = `${urlBase}?symbol=${symbol}&interval=${interval}&limit=2`;
         const latestRes = await fetch(latestUrl);
@@ -222,14 +231,39 @@ export async function fetchOrderflowCandles(
   return [];
 }
 
-// Догрузка истории свечей "влево" (пагинация по курсору `before`), для
-// динамической подгрузки при скролле/зуме графика. В отличие от
-// fetchOrderflowCandles — читает строго из БД (ObCandle), без похода в
-// Binance: история не может появиться на бирже "задним числом", а поход в
-// Binance на каждый шаг скролла был бы слишком дорогим. Возвращает свечи
-// строго раньше `beforeMs`, отсортированные по возрастанию времени, плюс
-// признак того, что дальше в БД данных больше нет (реальный край истории,
-// ограниченный CANDLE_RETENTION_DAYS коллектора).
+// Длительность свечи по таймфрейму — нужна, чтобы посчитать окно добора с
+// биржи. Держим рядом с CANDLE_INTERVAL, чтобы наборы не разъезжались.
+const RANGE_MS: Record<string, number> = {
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
+
+function klinesUrlBase(exchange: string): string | null {
+  return exchange === "binance-futures"
+    ? "https://fapi.binance.com/fapi/v1/klines"
+    : exchange === "binance-spot"
+      ? "https://api.binance.com/api/v3/klines"
+      : null;
+}
+
+// Догрузка истории свечей "влево" (пагинация по курсору `before`) при
+// скролле/зуме графика. Возвращает свечи строго раньше `beforeMs`, по
+// возрастанию времени, плюс признак "дальше есть ещё".
+//
+// Раньше функция читала СТРОГО из ObCandle, сознательно не ходя в Binance
+// ("история не может появиться задним числом"). На практике это упиралось в
+// то, что в ObCandle истории просто нет: таблицу наполняет fetchOrderflowCandles
+// ровно на ширину окна (CANDLES_IN_WINDOW × ТФ), а старее туда никто не
+// пишет. На 5m это 400 свечей ≈ 33 часа — скролл влево сразу отвечал
+// "свечей 0, hasMore=false", график упирался в «начало истории», и вместе со
+// свечами обрывались карта лимиток и кластеры, хотя в ObSnapshotRollup лежали
+// ещё сутки данных. Поэтому: если БД не отдала полную страницу — добираем с
+// биржи и сохраняем в ObCandle, чтобы следующий скролл шёл уже из БД.
 export async function fetchOrderflowCandlesBefore(
   symbol: string,
   exchange: string,
@@ -248,14 +282,67 @@ export async function fetchOrderflowCandlesBefore(
       select: { t: true, o: true, h: true, l: true, c: true },
     });
   } catch {
-    return { candles: [], hasMore: false };
+    rows = [];
   }
-  const candles = rows
-    .map((r) => ({ t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c }))
-    .sort((a, b) => a.t - b.t);
-  // hasMore=true означает "получили полную страницу, дальше в БД скорее
-  // всего ещё есть данные"; false — упёрлись в реальный край истории.
-  return { candles, hasMore: rows.length === limit };
+
+  const byTime = new Map<number, OfCandle>();
+  for (const r of rows) {
+    byTime.set(r.t.getTime(), { t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c });
+  }
+
+  // Полная страница из БД — добор не нужен.
+  if (rows.length >= limit) {
+    const candles = [...byTime.values()].sort((a, b) => a.t - b.t);
+    return { candles, hasMore: true };
+  }
+
+  const urlBase = klinesUrlBase(exchange);
+  const tfMs = RANGE_MS[range];
+  if (urlBase && tfMs) {
+    const endTime = beforeMs - 1;
+    const startTime = beforeMs - limit * tfMs;
+    try {
+      const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
+        + `&startTime=${startTime}&endTime=${endTime}&limit=${Math.min(1500, limit)}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const raw = (await res.json()) as (string | number)[][];
+        for (const k of raw) {
+          const t = Number(k[0]);
+          if (t >= beforeMs) continue; // строго раньше курсора
+          byTime.set(t, { t, o: Number(k[1]), h: Number(k[2]), l: Number(k[3]), c: Number(k[4]) });
+        }
+        // Сохраняем, чтобы следующий скролл в этот же диапазон шёл из БД.
+        try {
+          for (let i = 0; i < raw.length; i += CANDLE_INSERT_BATCH) {
+            const batch = raw.slice(i, i + CANDLE_INSERT_BATCH);
+            const values = batch.map((k) => Prisma.sql`
+              (${symbol}, ${exchange}, ${interval}, ${new Date(Number(k[0]))},
+               ${Number(k[1])}, ${Number(k[2])}, ${Number(k[3])}, ${Number(k[4])}, ${Number(k[5])})
+            `);
+            if (!values.length) continue;
+            await prisma.$executeRaw(
+              Prisma.sql`INSERT INTO "ObCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+                         VALUES ${Prisma.join(values)}
+                         ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+                           "h" = EXCLUDED."h",
+                           "l" = EXCLUDED."l",
+                           "c" = EXCLUDED."c",
+                           "v" = EXCLUDED."v"`,
+            );
+          }
+        } catch (dbErr) {
+          console.error(`[fetchOrderflowCandlesBefore] DB save error: ${(dbErr as Error).message}`);
+        }
+      }
+    } catch (e) {
+      console.error(`[fetchOrderflowCandlesBefore] Binance fetch error: ${(e as Error).message}`);
+    }
+  }
+
+  const candles = [...byTime.values()].sort((a, b) => a.t - b.t);
+  // hasMore=true — набрали полную страницу, дальше почти наверняка ещё есть.
+  return { candles, hasMore: candles.length >= limit };
 }
 
 export type DeltaSeries = {
@@ -266,10 +353,14 @@ export type DeltaSeries = {
   cvd: number[]; // кумулятивная дельта
 };
 
-// Дельта/кумулятивная дельта из ленты сделок (ObTrade). Корзины времени
-// совпадают по сетке с heatmap (cols). Агрегация прямо в Postgres: раньше сюда
-// переносились все сырые строки за окно (сотни тысяч при широком таймфрейме),
-// хотя дальше они просто суммировались по корзинам.
+// Дельта/кумулятивная дельта из ленты сделок. Корзины времени совпадают по
+// сетке с heatmap (cols).
+//
+// Быстрый путь — минутный rollup (ObTradeRollup): одна строка на
+// symbol×exchange×минуту вместо сырых тиков. Ширина колонки здесь всегда
+// заметно больше минуты (самое узкое окно — 400 пятиминуток ≈ 8 мин на
+// колонку), так что минутная гранулярность ничего не огрубляет. Если rollup
+// ещё пуст (свежий деплой до бэкафилла) — падаем на сырой ObTrade.
 export async function computeDelta(
   symbol: string,
   exchange: string,
@@ -279,15 +370,26 @@ export async function computeDelta(
 ): Promise<DeltaSeries | null> {
   const xspan = toMs - fromMs || 1;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
-  const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
-  const rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
-    SELECT ${colExpr}::int AS col,
+  const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+  let rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+    SELECT ${colExprR}::int AS col,
            SUM("buyVol")::float8 AS buy,
            SUM("sellVol")::float8 AS sell
-    FROM "ObTrade"
-    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+    FROM "ObTradeRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
     GROUP BY col
   `;
+  if (rows.length === 0) {
+    const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
+    rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+      SELECT ${colExpr}::int AS col,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM "ObTrade"
+      WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY col
+    `;
+  }
   if (rows.length === 0) return null;
 
   const clampCol = (c: number) => Math.max(0, Math.min(cols - 1, c));
@@ -326,6 +428,12 @@ const CANDLE_MS: Record<string, number> = {
 
 // Footprint-кластеры: объём покупок/продаж по ценовым уровням внутри свечи.
 // Источник — лента сделок Binance (ObFootprint), поэтому всегда binance-futures.
+//
+// Быстрый путь — ObFootprintRollup (5-минутные бакеты × уровень). Пять минут это
+// младший таймфрейм графика, а остальные кратны ему, поэтому свеча любого ТФ
+// собирается из целых бакетов точно. Сырьё пишется на каждый тик коллектора на
+// каждый уровень, и сворачивать его заново на каждый опрос (раз в 3 с) — самая
+// дорогая часть orderflow. Fallback на сырьё, пока rollup не наполнен.
 export async function computeFootprint(
   symbol: string,
   exchange: string,
@@ -334,28 +442,47 @@ export async function computeFootprint(
   toMs: number,
 ): Promise<Footprint | null> {
   const interval = CANDLE_MS[range] ?? 60_000;
-  // Группировка по свече (время открытия) и цене — в Postgres, вместо переноса
-  // всех сырых строк за окно в Node (уровни × снапшоты — быстро растёт).
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
-  const rows = await prisma.$queryRaw<
-    { bucket: bigint; price: number; buy: number; sell: number }[]
+  // ВАЖНО: алиас НЕ должен называться "bucket". В Postgres GROUP BY сначала
+  // ищет колонку входной таблицы и только потом алиас SELECT, а в
+  // ObFootprintRollup колонка "bucket" есть — группировка молча шла по сырому
+  // 5-минутному бакету, уровни не схлопывались в свечу таймфрейма, и maxVol
+  // (яркость кластеров) считался по 5-минуткам вместо свечи.
+  let rows = await prisma.$queryRaw<
+    { candle: bigint; price: number; buy: number; sell: number }[]
   >`
-    SELECT (floor(extract(epoch from "t") * 1000 / ${interval}) * ${interval})::int8 AS bucket,
+    SELECT (floor(extract(epoch from "bucket") * 1000 / ${interval}) * ${interval})::int8 AS candle,
            "price" AS price,
            SUM("buyVol")::float8 AS buy,
            SUM("sellVol")::float8 AS sell
-    FROM "ObFootprint"
-    WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
-    GROUP BY bucket, "price"
-    ORDER BY bucket
+    FROM "ObFootprintRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
+    GROUP BY candle, "price"
+    ORDER BY candle
   `;
+  if (rows.length === 0) {
+    // Группировка по свече и цене — в Postgres, вместо переноса всех сырых строк
+    // за окно в Node (уровни × снапшоты — быстро растёт).
+    rows = await prisma.$queryRaw<
+      { candle: bigint; price: number; buy: number; sell: number }[]
+    >`
+      SELECT (floor(extract(epoch from "t") * 1000 / ${interval}) * ${interval})::int8 AS candle,
+             "price" AS price,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM "ObFootprint"
+      WHERE "symbol" = ${symbol} AND "t" >= ${new Date(fromMs)} AND "t" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY candle, "price"
+      ORDER BY candle
+    `;
+  }
   if (rows.length === 0) return null;
 
   let maxVol = 0;
   const byCandle = new Map<number, FootprintLevel[]>();
   for (const r of rows) {
     if (r.buy === 0 && r.sell === 0) continue;
-    const t = Number(r.bucket);
+    const t = Number(r.candle);
     let levels = byCandle.get(t);
     if (!levels) { levels = []; byCandle.set(t, levels); }
     levels.push({ price: r.price, buy: r.buy, sell: r.sell });
@@ -608,18 +735,49 @@ export async function computeOrderflow(
   for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
   const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
 
-  // Профиль текущего стакана: самый свежий снапшот каждой биржи (окно ~5с).
-  const lastRows = await prisma.$queryRaw<
-    { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[]
-  >`
-    SELECT "t", "exchange", "price", "bidVol", "askVol"
-    FROM "ObSnapshot"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
-      AND "t" >= (
-        SELECT MAX("t") FROM "ObSnapshot"
-        WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
-      ) - interval '5 seconds'
-  `;
+  // Профиль текущего стакана.
+  //
+  // Быстрый путь — таблица ObLatestBook (одна строка на symbol×exchange,
+  // коллектор перезаписывает её на каждом тике): чтение по первичному ключу
+  // вместо поиска MAX(t) коррелированным подзапросом по сырому ObSnapshot,
+  // который сканировал окно дважды на КАЖДЫЙ опрос orderflow.
+  //
+  // Он применим только когда окно заканчивается «сейчас» — а /api/orderflow
+  // всегда просит to = Date.now(). Для исторического окна (если такой вызов
+  // появится) и пока таблица не наполнена — прежний путь по сырью.
+  const isLive = Date.now() - toMs < 5 * 60_000;
+  type BookLevel = { price: number; bidVol: number; askVol: number };
+  let lastRows: { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[] = [];
+
+  if (isLive) {
+    const books = await prisma.obLatestBook.findMany({
+      where: { symbol, ...(exchange === "all" ? {} : { exchange }) },
+      select: { t: true, exchange: true, levels: true },
+    });
+    for (const b of books) {
+      // Прежняя выборка требовала, чтобы снапшот попадал в окно. Сохраняем это:
+      // если коллектор стоит, строка протухла и профиль показывать по ней нельзя.
+      if (b.t.getTime() < fromMs || b.t.getTime() > toMs) continue;
+      for (const lvl of b.levels as unknown as BookLevel[]) {
+        lastRows.push({ t: b.t, exchange: b.exchange, price: lvl.price, bidVol: lvl.bidVol, askVol: lvl.askVol });
+      }
+    }
+  }
+
+  if (lastRows.length === 0) {
+    lastRows = await prisma.$queryRaw<
+      { t: Date; exchange: string; price: number; bidVol: number; askVol: number }[]
+    >`
+      SELECT "t", "exchange", "price", "bidVol", "askVol"
+      FROM "ObSnapshot"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+        AND "t" >= (
+          SELECT MAX("t") FROM "ObSnapshot"
+          WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" <= ${to} ${exFilter}
+        ) - interval '5 seconds'
+    `;
+  }
+
   const profileBid = new Array(bins).fill(0);
   const profileAsk = new Array(bins).fill(0);
   let price: number;
@@ -865,7 +1023,9 @@ export async function computeDivergence(
   const maxBars = opts?.maxDivergenceBars ?? 30;
 
   // 1. Получаем свечи и дельту.
-  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  // live: false — дивергенции считаются по закрытым свечам, поход в Binance
+  // за формирующейся свечой здесь только тратил бы ~366 мс на каждый опрос.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs, { live: false });
   if (candles.length < minBars) return null;
 
   const deltaSeries = await computeDelta(symbol, exchange, fromMs, toMs);
@@ -1148,8 +1308,18 @@ export async function computeImbalance(
 }
 
 /**
- * Speed of Tape — количество сделок в минуту по данным ObTrade.
- * Читает ObTrade за период, группирует по минутным бакетам.
+ * Speed of Tape — количество сделок в минуту.
+ *
+ * БЫЛО: COUNT(*) по ObTrade. Коллектор пишет ОДНУ строку на свой тик, агрегируя
+ * все сделки интервала, поэтому счёт строк давал частоту опроса коллектора
+ * (≈60/snapshotMs), а не активность рынка — метрика показывала почти константу.
+ * СТАЛО: SUM("trades") — реальное число печатей, которое коллектор теперь
+ * считает (см. collector/trades.mjs).
+ *
+ * Источник — минутный ObTradeRollup, что совпадает с бакетом метрики один в
+ * один. Fallback на сырьё — пока rollup не наполнен; у строк ObTrade, записанных
+ * до появления счётчика, trades = 0, поэтому на старой истории метрика покажет
+ * ноль вместо прежней бессмысленной константы.
  */
 export async function computeSpeedOfTape(
   symbol: string,
@@ -1163,24 +1333,37 @@ export async function computeSpeedOfTape(
   const xspan = toMs - fromMs || 1;
   const cols = Math.max(1, Math.ceil(xspan / bucketMs));
 
-  // Считаем количество сделок в каждом бакете.
-  const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  const bucketExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${bucketMs})::int`;
 
-  const rows = await prisma.$queryRaw<{ bucket: number; cnt: number }[]>`
-    SELECT ${bucketExpr} AS bucket, COUNT(*)::int AS cnt
-    FROM "ObTrade"
-    WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
-    GROUP BY bucket
-    ORDER BY bucket
+  // Алиас не "bucket" — см. пояснение в computeFootprint: иначе GROUP BY
+  // связался бы с одноимённой колонкой ObTradeRollup. Здесь бакет метрики
+  // совпадает с минутой rollup, так что итог случайно сходился, но при другом
+  // bucketMs результат был бы неверным.
+  let rows = await prisma.$queryRaw<{ slot: number; cnt: number }[]>`
+    SELECT ${bucketExprR} AS slot, SUM("trades")::int AS cnt
+    FROM "ObTradeRollup"
+    WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" < ${to} ${exFilter}
+    GROUP BY slot
+    ORDER BY slot
   `;
+  if (rows.length === 0) {
+    const bucketExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${bucketMs})::int`;
+    rows = await prisma.$queryRaw<{ slot: number; cnt: number }[]>`
+      SELECT ${bucketExpr} AS slot, SUM("trades")::int AS cnt
+      FROM "ObTrade"
+      WHERE "symbol" = ${symbol} AND "t" >= ${from} AND "t" < ${to} ${exFilter}
+      GROUP BY slot
+      ORDER BY slot
+    `;
+  }
 
   if (rows.length === 0) return null;
 
   // Заполняем массив.
   const tradesPerMin = new Array(cols).fill(0);
   for (const r of rows) {
-    const c = Math.max(0, Math.min(cols - 1, r.bucket));
+    const c = Math.max(0, Math.min(cols - 1, r.slot));
     tradesPerMin[c] += r.cnt;
   }
 
@@ -1249,7 +1432,8 @@ export async function computeAbsorption(
   const lookback = opts?.lookback ?? 10;
 
   // 1. Получаем свечи.
-  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs);
+  // live: false — см. computeDivergence: абсорбция тоже про закрытые свечи.
+  const candles = await fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs, { live: false });
   if (candles.length < lookback + minCandles) return null;
 
   // 2. Получаем footprint (buyVol, sellVol) для каждой свечи.

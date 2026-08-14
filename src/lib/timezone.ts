@@ -80,6 +80,19 @@ export function offsetMinutes(tz: TimezoneId): number | null {
   return m ? parseInt(m[1], 10) * 60 : null;
 }
 
+// Сдвиг для ОТПРАВКИ НА СЕРВЕР (минуты, знак как в UTC+3 → +180).
+// Отличие от offsetMinutes(): "auto" здесь резолвится в реальный сдвиг
+// устройства, потому что сервер сам его узнать не может. У браузерного
+// getTimezoneOffset() знак противоположный — инвертируем.
+//
+// Используется всем, что нарезает данные по локальным суткам: риск-окна,
+// «Календарь», дневные разрезы (см. lib/tzParam.ts на стороне сервера).
+export function tzOffsetForServer(tz: TimezoneId): number {
+  const fixed = offsetMinutes(tz);
+  if (fixed !== null) return fixed;
+  return -new Date().getTimezoneOffset();
+}
+
 // IANA-ish zone name for Intl.DateTimeFormat/toLocaleString's `timeZone`
 // option. `Etc/GMT` signs are inverted from common usage (Etc/GMT-3 = UTC+3).
 export function ianaFor(tz: TimezoneId): string | undefined {

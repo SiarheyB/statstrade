@@ -16,6 +16,28 @@ import type { DrawingToolType, DrawingPoint } from "@/lib/drawings";
 
 export const maxDuration = 15;
 
+// Значения отсюда не считаются доверенными: всё проверяет zod в lib/drawings.
+type DrawingBody = {
+  symbol?: string;
+  exchange?: string;
+  toolType?: string;
+  points?: DrawingPoint[];
+  color?: string;
+  lineWidth?: number;
+  fillColor?: string;
+  label?: string;
+};
+
+/** null — тело нечитаемо (битый JSON или превышен лимит размера). */
+async function readJson(req: Request): Promise<DrawingBody | null> {
+  try {
+    const parsed = await req.json();
+    return parsed && typeof parsed === "object" ? (parsed as DrawingBody) : null;
+  } catch {
+    return null;
+  }
+}
+
 /** GET — список рисунков для symbol + exchange */
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -41,16 +63,20 @@ export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
 
-  try {
-    const body = await req.json();
+  // Тело парсим отдельно: битый или слишком большой JSON — это ошибка клиента
+  // (400), а не сбой сервера. Раньше и то и другое улетало в 500.
+  const body = await readJson(req);
+  if (!body) return badRequest("Некорректный запрос");
 
-    if (!body.points || !body.toolType) {
-      return badRequest("points and toolType are required");
-    }
+  if (!body.points || !body.toolType) {
+    return badRequest("points and toolType are required");
+  }
+
+  try {
 
     const drawing = await createDrawing({
       userId: user.userId,
-      symbol: body.symbol,
+      symbol: body.symbol as string,
       exchange: body.exchange ?? "binance",
       toolType: body.toolType as DrawingToolType,
       points: body.points as DrawingPoint[],
@@ -78,8 +104,10 @@ export async function PUT(req: Request) {
   const id = url.searchParams.get("id");
   if (!id) return badRequest("id is required");
 
+  const body = await readJson(req);
+  if (!body) return badRequest("Некорректный запрос");
+
   try {
-    const body = await req.json();
     const updated = await updateDrawing(id, user.userId, {
       points: body.points as DrawingPoint[] | undefined,
       color: body.color,

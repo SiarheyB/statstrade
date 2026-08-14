@@ -33,7 +33,11 @@ const mockAnnotation = {
 describe("PUT /api/annotations", () => {
   beforeEach(() => {
     mockGetAuthUser.mockReset();
+    // mockClear, а не только mockResolvedValue: иначе «не вызывался» видит
+    // вызовы из предыдущих тестов файла.
+    mockPrisma.tradeAnnotation.upsert.mockClear();
     mockPrisma.tradeAnnotation.upsert.mockResolvedValue(mockAnnotation as any);
+    mockPrisma.exchangeAccount.findUnique.mockReset();
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -82,5 +86,46 @@ describe("PUT /api/annotations", () => {
     expect(body.entryPoint).toBe("breakout");
     expect(body.pattern).toBe("double_top");
     expect(mockPrisma.tradeAnnotation.upsert).toHaveBeenCalledOnce();
+  });
+
+  // ─── Чужой tradeKey (SECURITY_AUDIT.md) ───────────────────────────────────
+  // Ключ принимался любой, и пересчёт RR уходил в чужой аккаунт: перезаписывал
+  // чужой Trade.rr и пересобирал чужие часовые агрегаты.
+  it("не даёт записать аннотацию на сделку чужого аккаунта", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findUnique.mockResolvedValue({ userId: "someone-else" } as never);
+    const res = await PUT(
+      new Request(base, {
+        method: "PUT",
+        body: JSON.stringify({ tradeKey: "acc-чужой:42", stopLoss: 100 }),
+      }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockPrisma.tradeAnnotation.upsert).not.toHaveBeenCalled();
+  });
+
+  it("свою сделку аннотировать по-прежнему можно", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findUnique.mockResolvedValue({ userId: "u1" } as never);
+    const res = await PUT(
+      new Request(base, {
+        method: "PUT",
+        body: JSON.stringify({ tradeKey: "acc-1:42", pattern: "double_top" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrisma.tradeAnnotation.upsert).toHaveBeenCalled();
+  });
+
+  it("несуществующий аккаунт не блокирует сохранение", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findUnique.mockResolvedValue(null as never);
+    const res = await PUT(
+      new Request(base, {
+        method: "PUT",
+        body: JSON.stringify({ tradeKey: "нет-такого", note: "x" }),
+      }),
+    );
+    expect(res.status).toBe(200);
   });
 });

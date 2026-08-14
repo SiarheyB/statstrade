@@ -314,6 +314,7 @@ const en: Dict = {
   "an.exitEfficiencyRunHint": "Analyzes up to {max} of your most recent trades (set by the admin). Nothing is sent anywhere except public price-history requests to the exchange.",
   "an.exitEfficiencyAnalyzed": "Analyzed {n} trades with real market data ({skipped} skipped — no matching candles).",
   "an.exitEfficiencySkippedHint": "\"Skipped\" usually means the trade's entry/exit prices didn't match real market history for that time (common for demo/test trades) — this is expected and not an error.",
+  "an.exitEfficiencyPending": "{n} trades are still being processed in the background — the numbers will fill in shortly.",
   "an.exitEfficiencyWorst": "Lowest capture rate",
   "an.exitEfficiencyWorstHint": "The trades where you gave back the most of the favorable move before exiting — worth a closer look if you want to improve your exits.",
   "an.leftOnTable": "Left on the table",
@@ -914,6 +915,11 @@ const en: Dict = {
   "admin.backup.unknown": "Unexpected error",
   "admin.backup.clearAll": "Clear all",
   "admin.backup.clearAllConfirm": "Clear all backup files? This action is irreversible.",
+  "admin.backup.clearLogs": "Clear the operations log",
+  "admin.backup.clearLogsConfirm": "Clear the operations log?",
+  "admin.backup.errorClearLogs": "Failed to clear the operations log: {error}",
+  "admin.backup.inProgress": "In progress",
+  "admin.backup.success": "Done",
   "admin.backup.loading": "Loading…",
   "admin.loading": "Loading…",
   "admin.dash": "—",
@@ -1072,6 +1078,15 @@ const en: Dict = {
   "admin.content.lastUpdate": "Last update: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Next: {title} — {time}",
+  "admin.content.retentionLabel": "Keep news for, days",
+  "admin.content.retentionHint":
+    "News older than this are deleted permanently on every feed refresh (about every 15 minutes while someone is using the section). Smaller means a fresher feed and a smaller database; larger means a deeper archive but a bigger table and a slower page. 0 = never delete.",
+  "admin.content.retentionHintOff":
+    "0 — nothing is deleted: the news table will grow without limit (there is no other cleanup). Set 1–7 days.",
+  "admin.content.save": "Save",
+  "admin.content.saved": "Saved",
+  "admin.content.econAutoClean":
+    "Auto-cleanup: the calendar keeps the current week only — events from previous weeks are deleted automatically once a new week starts. No settings needed.",
   "admin.content.refresh": "refresh",
   "admin.content.error": "Error",
 
@@ -1452,6 +1467,7 @@ const ru: Dict = {
   "an.exitEfficiencyRunHint": "Анализирует до {max} последних сделок (лимит задаёт администратор). Никакие данные никуда не отправляются, кроме публичных запросов истории цен к бирже.",
   "an.exitEfficiencyAnalyzed": "Проанализировано {n} сделок с реальными рыночными данными ({skipped} пропущено — нет подходящих свечей).",
   "an.exitEfficiencySkippedHint": "«Пропущено» обычно значит, что цены входа/выхода сделки не совпали с реальной рыночной историей за это время (частый случай для демо/тестовых сделок) — это ожидаемо, не ошибка.",
+  "an.exitEfficiencyPending": "Ещё {n} сделок считается в фоне — цифры дополнятся.",
   "an.exitEfficiencyWorst": "Худший захват движения",
   "an.exitEfficiencyWorstHint": "Сделки, где вы отдали обратно больше всего от выгодного движения перед выходом — стоит присмотреться, если хотите улучшить точку выхода.",
   "an.leftOnTable": "Недобрано",
@@ -2043,7 +2059,8 @@ const ru: Dict = {
   "admin.backup.clearLogs": "Очистить журнал операций",
   "admin.backup.clearLogsConfirm": "Вы уверены, что хотите очистить журнал операций?",
   "admin.backup.errorClearLogs": "Ошибка очистки журнала операций: {error}",
-  "admin.backup.operationsTitle": "Операции",
+  "admin.backup.unknown": "Неизвестная ошибка",
+  "admin.backup.loading": "Загрузка…",
   "admin.loading": "Загрузка…",
   "admin.dash": "—",
   "admin.lag.none": "нет данных",
@@ -2205,6 +2222,15 @@ const ru: Dict = {
   "admin.content.lastUpdate": "Последнее обновление: {date}",
   "admin.content.newsExtra": "EN: {en} · RU: {ru}",
   "admin.content.nextEvent": "Ближайшее: {title} — {time}",
+  "admin.content.retentionLabel": "Хранить новости, дней",
+  "admin.content.retentionHint":
+    "Новости старше этого срока удаляются безвозвратно при каждом обновлении ленты (примерно раз в 15 минут, пока кто-то заходит в раздел). Меньше — лента свежее и база компактнее; больше — глубже архив, но таблица растёт и страница грузится медленнее. 0 — не удалять никогда.",
+  "admin.content.retentionHintOff":
+    "0 — ничего не удаляется: таблица новостей будет расти без ограничений, другой чистки нет. Поставьте 1–7 дней.",
+  "admin.content.save": "Сохранить",
+  "admin.content.saved": "Сохранено",
+  "admin.content.econAutoClean":
+    "Автоочистка: в календаре хранится только текущая неделя — события прошлых недель удаляются сами, как только начинается новая. Настраивать ничего не нужно.",
   "admin.content.refresh": "обновить",
   "admin.content.error": "Ошибка",
 

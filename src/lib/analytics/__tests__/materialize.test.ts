@@ -16,6 +16,16 @@ vi.mock("@/lib/db", () => {
     },
     exchangeAccount: {
       update: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    riskProfile: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    importedTrade: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    tradeAnnotation: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
     $transaction: vi.fn(async (txs: any[]) => {
       // Execute all transactions

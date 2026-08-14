@@ -28,6 +28,9 @@ export type SerializedTrade = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  // R-multiple посчитан один раз на сервере (см. /api/stats) — учитывает
+  // риск-профиль аккаунта, если он включён; иначе по дистанции стопа.
+  rr: number | null;
   note: string | null;
   imageUrl: string | null;
   imageProvider: string | null;
@@ -50,7 +53,9 @@ export type AccountSummary = {
 
 export type StatsResponse = {
   metrics: Metrics;
-  trades: SerializedTrade[];
+  // Массива сделок здесь НЕТ намеренно: постраничный список отдаёт
+  // /api/trades, дневную сетку — /api/calendar, а всё, что раньше считалось
+  // на клиенте по всей истории (гистограммы, тренд 30д), считает сервер.
   fillCount: number;
   symbols: string[];
   accounts: AccountSummary[];

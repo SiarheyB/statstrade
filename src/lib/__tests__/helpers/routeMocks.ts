@@ -62,7 +62,14 @@ export const mockPrisma = {
     update: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
   },
-  trade: { findMany: vi.fn().mockResolvedValue([]) },
+  trade: {
+    findMany: vi.fn().mockResolvedValue([]),
+    count: vi.fn().mockResolvedValue(0),
+  },
+  tradeHourly: {
+    findMany: vi.fn().mockResolvedValue([]),
+    aggregate: vi.fn().mockResolvedValue({ _sum: { netPnl: null } }),
+  },
 
   fill: {
     count: vi.fn().mockResolvedValue(0),
@@ -129,6 +136,9 @@ export const mockPrisma = {
     create: vi.fn().mockResolvedValue({}),
     update: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    count: vi.fn().mockResolvedValue(0),
   },
 
   shareLink: {
@@ -163,6 +173,8 @@ export const mockPrisma = {
   },
   favouriteTicker: {
     findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn().mockResolvedValue(null),
+    count: vi.fn().mockResolvedValue(0),
     create: vi.fn().mockResolvedValue({}),
     upsert: vi.fn().mockResolvedValue({}),
     delete: vi.fn().mockResolvedValue({}),
@@ -249,6 +261,9 @@ vi.mock('@/lib/news', async () => {
     ...mod,
     getNews: vi.fn(),
     refreshNews: vi.fn(),
+    // Настройки ленты из карточки на /admin/content — ходят в prisma напрямую.
+    getRetentionDays: vi.fn(),
+    setRetentionDays: vi.fn(),
   };
 });
 

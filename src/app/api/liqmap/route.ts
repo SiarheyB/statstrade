@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError, sharedCacheHeaders } from "@/lib/api";
 import { computeLiqMap, type Exchange, type Timeframe } from "@/lib/liqmap";
+import { createRouteCache } from "@/lib/routeCache";
 
 // Liquidation map is the same for every user; cache 60s at the edge.
 const CACHE = sharedCacheHeaders(60, 120);
@@ -11,8 +12,8 @@ const EXCHANGES = new Set(["all", "binance", "bybit", "okx"]);
 const TFS = new Set(["1d", "2d", "7d", "1M", "3M"]);
 
 // Small in-memory cache so repeated views don't re-hit the exchanges.
-const cache = new Map<string, { at: number; data: unknown }>();
 const TTL_MS = 60_000;
+const cache = createRouteCache(TTL_MS);
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -29,13 +30,13 @@ export async function GET(req: Request) {
 
   const key = `${exchange}:${symbol}:${tf}`;
   const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data, { headers: CACHE });
+  if (hit) return NextResponse.json(hit, { headers: CACHE });
 
   try {
     const heatmap = await computeLiqMap(exchange as Exchange | "all", symbol, tf as Timeframe);
     if (!heatmap) return badRequest("Нет данных по этому символу/бирже");
     const data = { exchange, symbol, tf, heatmap };
-    cache.set(key, { at: Date.now(), data });
+    cache.set(key, data);
     return NextResponse.json(data, { headers: CACHE });
   } catch (err) {
     return serverError((err as Error).message);

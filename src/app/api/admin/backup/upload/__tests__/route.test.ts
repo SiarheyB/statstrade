@@ -1,10 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import {
+  asAdmin,
+  asNonAdmin,
+  mockGetAdminSession,
+  mockRecordAudit,
+} from "@/lib/__tests__/helpers/routeMocks";
 import { POST } from "@/app/api/admin/backup/upload/route";
 
-// NOTE: this route performs no auth check (admin gating is at the infra/proxy
-// layer), so the standard unauth=401 case does not apply. We cover the real
-// branches instead: no file (400), disallowed extension (400), successful
-// .sql/.jsonl upload (200).
+// Раньше здесь стояло «this route performs no auth check (admin gating is at
+// the infra/proxy layer)» — это было неверно: никакого гейта на уровне прокси
+// нет, и роут принимал файлы от анонима. Первый тест ниже это и стережёт.
 vi.mock("fs/promises", () => ({
   default: { mkdir: vi.fn(), writeFile: vi.fn() },
   mkdir: vi.fn(),
@@ -33,8 +38,18 @@ function buildForm(fields: Array<{ name: string; value: string; filename?: strin
 
 describe("POST /api/admin/backup/upload", () => {
   beforeEach(() => {
+    mockGetAdminSession.mockReset();
+    mockRecordAudit.mockReset();
     vi.mocked(fs.mkdir).mockReset().mockResolvedValue(undefined);
     vi.mocked(fs.writeFile).mockReset().mockResolvedValue(undefined);
+    asAdmin();
+  });
+
+  it("не даёт загрузить файл без прав админа и ничего не пишет на диск", async () => {
+    asNonAdmin();
+    const res = await POST(postForm(buildForm([{ name: "file", value: "x", filename: "evil.sql" }])));
+    expect(res.status).toBe(404);
+    expect(fs.writeFile).not.toHaveBeenCalled();
   });
 
   it("returns 400 when no file is provided", async () => {
@@ -45,6 +60,17 @@ describe("POST /api/admin/backup/upload", () => {
   it("returns 400 for a non-sql/non-jsonl file", async () => {
     const res = await POST(postForm(buildForm([{ name: "file", value: "x", filename: "dump.txt" }])));
     expect(res.status).toBe(400);
+  });
+
+  it("вычищает из имени файла всё, чем можно выйти из каталога", async () => {
+    const res = await POST(
+      postForm(buildForm([{ name: "file", value: "x", filename: "../../evil.sql" }])),
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.name).toBe("_evil.sql");
+    const written = vi.mocked(fs.writeFile).mock.calls[0][0] as string;
+    expect(written.endsWith("/backup/tmp/_evil.sql")).toBe(true);
   });
 
   it("uploads a .sql file successfully", async () => {

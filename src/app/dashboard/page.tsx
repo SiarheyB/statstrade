@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { RefreshCw, Plug, Database, CalendarRange } from "lucide-react";
-import type { StatsResponse, SerializedTrade } from "@/lib/types";
+import type { StatsResponse } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { EquityChart, DailyPnlChart, BreakdownChart, PnlHeatmap } from "@/components/charts.lazy";
 import SearchSelect from "@/components/SearchSelect";
@@ -52,53 +52,6 @@ function rangeFrom(range: string): number | null {
     default:
       return null;
   }
-}
-
-// Client-side "last 30 days vs prior 30 days" trend for headline cards.
-// Returns null when either window has no trades. Values are designed to stay
-// readable: Net P&L and Win Rate as percentage-point deltas; ratio metrics as a
-// relative %, guarded against sign flips / zero base and clamped.
-function computeTrend(trades: SerializedTrade[], capital: number) {
-  const now = Date.now();
-  const D30 = 30 * 86_400_000;
-  const ms = (t: SerializedTrade) => new Date(t.exitTime).getTime();
-  const recent = trades.filter((t) => ms(t) >= now - D30);
-  const prior = trades.filter((t) => ms(t) >= now - 2 * D30 && ms(t) < now - D30);
-  if (recent.length === 0 || prior.length === 0) return null;
-
-  const agg = (arr: SerializedTrade[]) => {
-    const net = arr.reduce((s, t) => s + t.netPnl, 0);
-    const wins = arr.filter((t) => t.result === "win");
-    const gp = wins.reduce((s, t) => s + t.netPnl, 0);
-    const gl = Math.abs(
-      arr.filter((t) => t.result === "loss").reduce((s, t) => s + t.netPnl, 0),
-    );
-    return {
-      net,
-      winRate: (wins.length / arr.length) * 100,
-      pf: gl > 0 ? gp / gl : gp > 0 ? Infinity : 0,
-      exp: net / arr.length,
-    };
-  };
-  const r = agg(recent);
-  const p = agg(prior);
-  const clamp = (x: number) => Math.max(-300, Math.min(300, x));
-  // Relative %, only meaningful when both periods share a sign and base ≠ 0.
-  const rel = (a: number, b: number) =>
-    b !== 0 && Number.isFinite(a) && Math.sign(a) === Math.sign(b)
-      ? clamp(((a - b) / Math.abs(b)) * 100)
-      : null;
-  const cap = capital > 0 ? capital : 10000;
-  return {
-    // Δ of period return on capital (percentage points) — bounded & always shown.
-    netPnl: ((r.net - p.net) / cap) * 100,
-    winRate: r.winRate - p.winRate,
-    profitFactor:
-      Number.isFinite(p.pf) && p.pf > 0 && Number.isFinite(r.pf)
-        ? clamp(((r.pf - p.pf) / p.pf) * 100)
-        : null,
-    expectancy: rel(r.exp, p.exp),
-  };
 }
 
 export default function DashboardPage() {
@@ -204,10 +157,10 @@ export default function DashboardPage() {
   const hasAccounts = (data?.accounts.length ?? 0) > 0;
   const hasTrades = (m?.tradeCount ?? 0) > 0;
   const entryMetricLabel = entryMetric === "netPnl" ? t("metric.pnl") : t("metric.winRateShort");
-  const trend = useMemo(
-    () => (data?.trades ? computeTrend(data.trades, capital) : null),
-    [data, capital],
-  );
+  // Тренд «30 дней против предыдущих 30» считает сервер (см. computeTrend в
+  // lib/analytics/metrics.ts). Раньше ради него в браузер уезжал весь массив
+  // сделок, хотя на экране из него получались четыре стрелки на карточках.
+  const trend = m?.trend ?? null;
 
   return (
     <div className="px-6 py-5 max-w-7xl mx-auto">

@@ -9,7 +9,8 @@
     "postinstall": "prisma generate",
     "lint": "eslint",
     "test": "vitest",
-    "test:lib": "vitest src/lib/__tests__/"
+    "test:lib": "vitest src/lib/__tests__/",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
@@ -21,13 +22,13 @@
     "jose": "^6.2.3",
     "jspdf": "^4.2.1",
     "lucide-react": "^1.18.0",
-    "next": "16.2.9",
+    "next": "^16.3.0",
     "node-html-parser": "^8.0.2",
+    "prisma": "^6.19.3",
     "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "recharts": "^3.8.1",
-    "vi": "^1.0.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -42,9 +43,8 @@
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^3.2.7",
     "eslint": "^9",
-    "eslint-config-next": "16.2.9",
+    "eslint-config-next": "^16.3.0",
     "jsdom": "^29.1.1",
-    "prisma": "^6.19.3",
     "tailwindcss": "^4",
     "tsx": "^4.22.4",
     "typescript": "^5",

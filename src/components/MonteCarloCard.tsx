@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Dices } from "lucide-react";
-import type { SerializedTrade, AccountSummary } from "@/lib/types";
+import type { AccountSummary } from "@/lib/types";
+import type { ScopeAccount } from "@/lib/analytics/metrics";
 import { useI18n } from "@/lib/i18n/provider";
 import { Term } from "@/components/Term";
 import { fmtPct } from "@/lib/format";
@@ -20,13 +21,17 @@ type FeatureValue = {
 // simulations × projectedTrades product is real CPU work, don't run it
 // silently on every page load. Hidden entirely if disabled in /admin/features.
 export function MonteCarloCard({
-  trades,
-  capital,
+  scope: scopeAccounts,
   accounts,
+  accountId,
+  capital,
+  tradeCount,
 }: {
-  trades: SerializedTrade[];
-  capital: number;
+  scope: ScopeAccount[];
   accounts: AccountSummary[];
+  accountId: string;
+  capital: number;
+  tradeCount: number;
 }) {
   const { t } = useI18n();
   const [feature, setFeature] = useState<FeatureValue | null>(null);
@@ -46,19 +51,22 @@ export function MonteCarloCard({
     };
   }, []);
 
-  const scope = useMemo(() => scopeLabel(trades, accounts), [trades, accounts]);
+  const scope = useMemo(() => scopeLabel(scopeAccounts, accounts), [scopeAccounts, accounts]);
 
-  if (!feature || !feature.enabled || trades.length < 5 || capital <= 0) return null;
+  if (!feature || !feature.enabled || tradeCount < 5 || capital <= 0) return null;
 
-  function run() {
+  // Симуляция считается на СЕРВЕРЕ (/api/monte-carlo): расчёт разовый, а
+  // держать ради него всю историю сделок в браузере незачем.
+  async function run() {
     setBusy(true);
     setResult(null);
-    // Дать React отрисовать "busy" до тяжёлого синхронного расчёта.
-    setTimeout(() => {
-      const returnsPct = trades.map((tr) => tr.netPnl / capital);
-      setResult(runMonteCarlo(returnsPct, feature!));
+    try {
+      const params = new URLSearchParams({ accountId, capital: String(capital) });
+      const res = await fetch(`/api/monte-carlo?${params}`);
+      if (res.ok) setResult((await res.json()).result ?? null);
+    } finally {
       setBusy(false);
-    }, 30);
+    }
   }
 
   return (

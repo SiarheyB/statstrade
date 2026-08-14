@@ -8,6 +8,7 @@ import {
   serializeRiskPerTrade,
   defaultRiskProfile,
 } from "@/lib/risk";
+import { recomputeRRForAccount } from "@/lib/analytics/rr";
 
 const limitSchema = z.object({
   on: z.boolean(),
@@ -59,7 +60,9 @@ export async function PUT(req: Request) {
   }
 
   try {
+    const changedAccountIds = new Set<string>();
     for (const [accountId, prof] of Object.entries(parsed.data.profiles)) {
+      changedAccountIds.add(accountId);
       if (prof === null) {
         await prisma.riskProfile.deleteMany({ where: { userId: user.userId, accountId } });
         continue;
@@ -79,6 +82,18 @@ export async function PUT(req: Request) {
         update: data,
       });
     }
+
+    // Риск-профиль аккаунта меняет 1R сразу для всех его сделок — пересчитываем
+    // сохранённый rr. "" (профиль по умолчанию) действует на все аккаунты, у
+    // которых нет своего явного override — проще и надёжнее пересчитать RR
+    // для всех аккаунтов юзера, чем вычислять, у кого именно нет override.
+    if (changedAccountIds.size > 0) {
+      const targetAccountIds = changedAccountIds.has("")
+        ? (await prisma.exchangeAccount.findMany({ where: { userId: user.userId }, select: { id: true } })).map((a) => a.id)
+        : [...changedAccountIds];
+      await Promise.all(targetAccountIds.map((id) => recomputeRRForAccount(id).catch(() => {})));
+    }
+
     return NextResponse.json({ ok: true });
   } catch (err) {
     return serverError((err as Error).message);

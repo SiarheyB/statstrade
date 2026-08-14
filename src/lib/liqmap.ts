@@ -147,6 +147,64 @@ export type Heatmap = {
   candles: { t: number; o: number; h: number; l: number; c: number }[];
 };
 
+// --- Разреженные таблицы для «первого касания уровня» ---
+//
+// Таблица уровня k хранит агрегат на отрезках длиной 2^k, поэтому любой
+// диапазон покрывается двумя перекрывающимися отрезками — запрос за O(1).
+
+type Sparse = { table: number[][]; log: number[] };
+
+function buildSparse(arr: number[], pick: (a: number, b: number) => number): Sparse {
+  const n = arr.length;
+  const log = new Array(n + 1).fill(0);
+  for (let i = 2; i <= n; i++) log[i] = log[i >> 1] + 1;
+  const levels = (log[n] ?? 0) + 1;
+  const table: number[][] = [arr.slice()];
+  for (let k = 1; k < levels; k++) {
+    const prev = table[k - 1];
+    const len = n - (1 << k) + 1;
+    const cur = new Array(Math.max(0, len));
+    for (let i = 0; i < len; i++) cur[i] = pick(prev[i], prev[i + (1 << (k - 1))]);
+    table.push(cur);
+  }
+  return { table, log };
+}
+
+function query(sp: Sparse, l: number, r: number, pick: (a: number, b: number) => number): number {
+  const k = sp.log[r - l + 1];
+  return pick(sp.table[k][l], sp.table[k][r - (1 << k) + 1]);
+}
+
+// Наименьший индекс t >= from, где arr[t] <= level; иначе длина массива.
+function firstAtOrBelow(arr: number[], sp: Sparse, from: number, level: number): number {
+  const n = arr.length;
+  if (from >= n) return n;
+  if (query(sp, from, n - 1, Math.min) > level) return n;
+  let lo = from;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (query(sp, from, mid, Math.min) <= level) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
+// Наименьший индекс t >= from, где arr[t] >= level; иначе длина массива.
+function firstAtOrAbove(arr: number[], sp: Sparse, from: number, level: number): number {
+  const n = arr.length;
+  if (from >= n) return n;
+  if (query(sp, from, n - 1, Math.max) < level) return n;
+  let lo = from;
+  let hi = n - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (query(sp, from, mid, Math.max) >= level) hi = mid;
+    else lo = mid + 1;
+  }
+  return lo;
+}
+
 // Build the heatmap grid from klines. An optional fixed price range lets several
 // exchanges be summed onto the same axis (aggregate view).
 export function buildHeatmap(
@@ -175,12 +233,31 @@ export function buildHeatmap(
   const binOf = (p: number) => Math.floor(((p - pMin) / span) * bins);
   const colOf = (i: number) => Math.min(cols - 1, Math.floor((i / n) * cols));
 
+  // «Первое касание уровня» — самое дорогое место карты.
+  //
+  // Раньше для КАЖДОЙ свечи × плечо × сторону линейно искалось ближайшее
+  // будущее касание: O(n²·L). При limit=1000 это ~12 млн итераций на каждый
+  // промах кэша. Теперь разреженные таблицы минимумов/максимумов дают
+  // диапазонный запрос за O(1), а бинарный поиск по нему — первое касание за
+  // O(log n). Итог: O(n·L·log n), около 120 тыс. операций.
+  const lows = klines.map((k) => k.low);
+  const highs = klines.map((k) => k.high);
+  const minTable = buildSparse(lows, Math.min);
+  const maxTable = buildSparse(highs, Math.max);
+
+  // Накопление полосы оставлено ПРЯМЫМ циклом по колонкам, хотя разностный
+  // массив был бы асимптотически лучше. Причина: префиксная сумма разгоняется
+  // до больших значений и вычитается обратно, и на этом сокращении результат
+  // расходился со старой реализацией на ~1e-9 относительных. Выигрыш там
+  // копеечный (~1.7 млн дешёвых операций против 12 млн у поиска касания),
+  // а так пересчёт карты побитово совпадает с прежним.
   const grid: number[][] = Array.from({ length: cols }, () => new Array(bins).fill(0));
 
   for (let i = 0; i < n; i++) {
     const entry = klines[i].close;
     const size = klines[i].quoteVol;
     if (!size || !entry) continue;
+    const cStart = colOf(i);
     for (const { lev, weight } of LEVERAGES) {
       const dist = 1 / lev - MMR;
       if (dist <= 0) continue;
@@ -189,16 +266,12 @@ export function buildHeatmap(
         const bin = binOf(liq);
         if (bin < 0 || bin >= bins) continue;
         // First candle after i where price touches the level → it's swept.
-        let hit = n;
-        for (let t = i + 1; t < n; t++) {
-          if (side < 0 ? klines[t].low <= liq : klines[t].high >= liq) {
-            hit = t;
-            break;
-          }
-        }
+        const hit = side < 0
+          ? firstAtOrBelow(lows, minTable, i + 1, liq)
+          : firstAtOrAbove(highs, maxTable, i + 1, liq);
         const w = size * weight;
         const cEnd = colOf(Math.max(i, hit - 1));
-        for (let c = colOf(i); c <= cEnd; c++) grid[c][bin] += w;
+        for (let c = cStart; c <= cEnd; c++) grid[c][bin] += w;
       }
     }
   }

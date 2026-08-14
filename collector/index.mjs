@@ -524,10 +524,104 @@ function accumulateRollup(symbol, exchange, t, rows, mid) {
   }
 }
 
+// То же для ленты сделок (ObTradeRollup): дельта/CVD и «скорость ленты»
+// читают минутные суммы вместо сырого ObTrade.
+const tradeRollup = new Map(); // key -> { symbol, exchange, bucketMs, buyVol, sellVol, trades }
+
+function accumulateTradeRollup(symbol, exchange, t, buyVol, sellVol, count) {
+  const bucketMs = Math.floor(t.getTime() / 60_000) * 60_000;
+  const key = `${symbol}|${exchange}|${bucketMs}`;
+  let e = tradeRollup.get(key);
+  if (!e) {
+    e = { symbol, exchange, bucketMs, buyVol: 0, sellVol: 0, trades: 0 };
+    tradeRollup.set(key, e);
+  }
+  e.buyVol += buyVol;
+  e.sellVol += sellVol;
+  e.trades += count;
+}
+
+// Rollup футпринта: 5-минутные бакеты × ценовой уровень. Пять минут — младший
+// таймфрейм графика, остальные кратны ему, поэтому собираются точно.
+const FP_BUCKET_MS = 300_000;
+const fpRollup = new Map(); // key -> { symbol, exchange, bucketMs, prices: Map<price,{buy,sell}> }
+
+function accumulateFootprintRollup(symbol, exchange, t, levels) {
+  if (levels.length === 0) return;
+  const bucketMs = Math.floor(t.getTime() / FP_BUCKET_MS) * FP_BUCKET_MS;
+  const key = `${symbol}|${exchange}|${bucketMs}`;
+  let e = fpRollup.get(key);
+  if (!e) {
+    e = { symbol, exchange, bucketMs, prices: new Map() };
+    fpRollup.set(key, e);
+  }
+  for (const lvl of levels) {
+    if (lvl.buy === 0 && lvl.sell === 0) continue;
+    const cell = e.prices.get(lvl.price) ?? { buy: 0, sell: 0 };
+    cell.buy += lvl.buy;
+    cell.sell += lvl.sell;
+    e.prices.set(lvl.price, cell);
+  }
+}
+
+async function flushFootprintRollup(now) {
+  const curBucket = Math.floor(now.getTime() / FP_BUCKET_MS) * FP_BUCKET_MS;
+  for (const [key, e] of fpRollup) {
+    if (e.bucketMs >= curBucket) continue;
+    fpRollup.delete(key);
+    if (e.prices.size === 0) continue;
+    const bucket = new Date(e.bucketMs);
+    try {
+      const values = [];
+      const params = [];
+      let i = 0;
+      for (const [price, cell] of e.prices) {
+        const b = i * 6;
+        values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+        params.push(e.symbol, e.exchange, bucket, price, cell.buy, cell.sell);
+        i += 1;
+      }
+      await pool.query(
+        `INSERT INTO "ObFootprintRollup" ("symbol","exchange","bucket","price","buyVol","sellVol")
+         VALUES ${values.join(",")}
+         ON CONFLICT ("symbol","exchange","bucket","price")
+         DO UPDATE SET "buyVol" = "ObFootprintRollup"."buyVol" + EXCLUDED."buyVol",
+                       "sellVol" = "ObFootprintRollup"."sellVol" + EXCLUDED."sellVol"`,
+        params,
+      );
+    } catch (err) {
+      console.error(`[rollup] flush футпринта ошибка ${key}: ${err.message}`);
+    }
+  }
+}
+
+async function flushTradeRollup(curBucket) {
+  for (const [key, e] of tradeRollup) {
+    if (e.bucketMs >= curBucket) continue;
+    tradeRollup.delete(key);
+    if (e.buyVol === 0 && e.sellVol === 0 && e.trades === 0) continue;
+    try {
+      await pool.query(
+        `INSERT INTO "ObTradeRollup" ("symbol","exchange","bucket","buyVol","sellVol","trades")
+         VALUES ($1,$2,$3,$4,$5,$6)
+         ON CONFLICT ("symbol","exchange","bucket")
+         DO UPDATE SET "buyVol" = "ObTradeRollup"."buyVol" + EXCLUDED."buyVol",
+                       "sellVol" = "ObTradeRollup"."sellVol" + EXCLUDED."sellVol",
+                       "trades" = "ObTradeRollup"."trades" + EXCLUDED."trades"`,
+        [e.symbol, e.exchange, new Date(e.bucketMs), e.buyVol, e.sellVol, e.trades],
+      );
+    } catch (err) {
+      console.error(`[rollup] flush ленты ошибка ${key}: ${err.message}`);
+    }
+  }
+}
+
 // Сбрасываем в БД все бакеты, чья минута уже завершилась (bucketMs < текущей
 // минуты). Upsert (ON CONFLICT) — на случай рестарта коллектора посреди минуты.
 async function flushRollup(now) {
   const curBucket = Math.floor(now.getTime() / 60_000) * 60_000;
+  await flushTradeRollup(curBucket);
+  await flushFootprintRollup(now);
   for (const [key, e] of rollup) {
     if (e.bucketMs >= curBucket) continue;
     rollup.delete(key);
@@ -588,9 +682,32 @@ function startRollupFlushBeat() {
   return state;
 }
 
+// Последний снапшот стакана — одна строка на (symbol, exchange), перезаписывается
+// на каждом тике. Профиль текущего стакана читает её по PK вместо поиска MAX(t)
+// по сырому ObSnapshot на каждый опрос orderflow.
+async function writeLatestBooks(books) {
+  for (const [symbol, exchange, t, mid, rows] of books) {
+    if (mid == null || rows.length === 0) continue;
+    // Формат тот же, что уходит в ObSnapshot: [symbol, exchange, t, price, bid, ask].
+    const levels = rows.map((r) => ({ price: r[3], bidVol: r[4], askVol: r[5] }));
+    try {
+      await pool.query(
+        `INSERT INTO "ObLatestBook" ("symbol","exchange","t","mid","levels")
+         VALUES ($1,$2,$3,$4,$5::jsonb)
+         ON CONFLICT ("symbol","exchange")
+         DO UPDATE SET "t" = EXCLUDED."t", "mid" = EXCLUDED."mid", "levels" = EXCLUDED."levels"`,
+        [symbol, exchange, t, mid, JSON.stringify(levels)],
+      );
+    } catch (err) {
+      console.error(`[write] ObLatestBook ошибка ${symbol}|${exchange}: ${err.message}`);
+    }
+  }
+}
+
 async function writeSnapshot() {
   const t = new Date();
   const rows = [];
+  const latestBooks = [];
   for (const feed of feeds) {
     const { rows: r, mid } = rowsForFeed(feed, t);
     const m = metricFor(`${feed.exchange}:${feed.symbol}`);
@@ -599,7 +716,9 @@ async function writeSnapshot() {
     m.lastWriteAt = t.toISOString();
     rows.push(...r);
     accumulateRollup(feed.symbol, feed.exchange, t, r, mid);
+    latestBooks.push([feed.symbol, feed.exchange, t, mid, r]);
   }
+  await writeLatestBooks(latestBooks);
   // Сбрасываем завершённые минутные бакеты в rollup-таблицы (не блокирует запись
   // сырых снапшотов — flush идёт после основного INSERT ниже).
 
@@ -627,9 +746,14 @@ async function writeSnapshot() {
   const fpRows = [];
   const bigRows = [];
   for (const tf of tradeFeeds) {
-    const { buyVol, sellVol, footprint, big } = tf.trades.drain();
+    const { buyVol, sellVol, count, footprint, big } = tf.trades.drain();
     const m = metricFor(`${tf.exchange}:${tf.symbol}`);
-    if (buyVol !== 0 || sellVol !== 0) { tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol]); m.deltaRows += 1; }
+    if (buyVol !== 0 || sellVol !== 0) {
+      tRows.push([tf.symbol, tf.exchange, t, buyVol, sellVol, count]);
+      accumulateTradeRollup(tf.symbol, tf.exchange, t, buyVol, sellVol, count);
+      m.deltaRows += 1;
+    }
+    accumulateFootprintRollup(tf.symbol, tf.exchange, t, footprint);
     for (const lvl of footprint) {
       if (lvl.buy === 0 && lvl.sell === 0) continue;
       fpRows.push([tf.symbol, tf.exchange, t, lvl.price, lvl.buy, lvl.sell]);
@@ -644,13 +768,13 @@ async function writeSnapshot() {
     const values = [];
     const params = [];
     tRows.forEach((r, i) => {
-      const b = i * 5;
-      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5})`);
+      const b = i * 6;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
       params.push(...r);
     });
     try {
       await pool.query(
-        `INSERT INTO "ObTrade" ("symbol","exchange","t","buyVol","sellVol") VALUES ` + values.join(","),
+        `INSERT INTO "ObTrade" ("symbol","exchange","t","buyVol","sellVol","trades") VALUES ` + values.join(","),
         params,
       );
     } catch (err) {
@@ -820,6 +944,20 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObTradeRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
+    {
+      const r = await pool.query(
+        `DELETE FROM "ObFootprintRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
+        [String(cfg.rollupRetention)],
+      );
+      rollupDeleted += r.rowCount ?? 0;
+    }
     // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
     // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
     // ленивой подгрузки графика). Раньше здесь был DELETE по
@@ -965,6 +1103,54 @@ async function backfillRollup() {
     console.log("[rollup] бэкафилл завершён");
   } catch (err) {
     console.error(`[rollup] бэкафилл ошибка: ${err.message}`);
+  }
+}
+
+// Бэкафилл rollup ленты из сырого ObTrade. Нужен, чтобы дельта/CVD работали на
+// уже накопленной истории сразу после деплоя, а не только на новых данных.
+// Поле trades у старых строк = 0 (счётчик печатей появился вместе с этой
+// таблицей), поэтому «скорость ленты» на исторических окнах будет нулевой,
+// пока не наберутся свежие минуты — раньше она там показывала не ноль, а
+// бессмысленную константу (частоту опроса коллектора).
+async function backfillTradeRollup() {
+  try {
+    const { rows } = await pool.query(`SELECT 1 FROM "ObTradeRollup" LIMIT 1`);
+    if (rows.length > 0) return;
+    console.log("[rollup] бэкафилл ленты из ObTrade…");
+    await pool.query(
+      `INSERT INTO "ObTradeRollup" ("symbol","exchange","bucket","buyVol","sellVol","trades")
+       SELECT "symbol", "exchange", date_trunc('minute', "t"),
+              SUM("buyVol"), SUM("sellVol"), COALESCE(SUM("trades"), 0)::int
+       FROM "ObTrade"
+       GROUP BY "symbol", "exchange", date_trunc('minute', "t")
+       ON CONFLICT ("symbol","exchange","bucket") DO NOTHING`,
+    );
+    console.log("[rollup] бэкафилл ленты завершён");
+  } catch (err) {
+    console.error(`[rollup] бэкафилл ленты ошибка: ${err.message}`);
+  }
+}
+
+// Бэкафилл rollup футпринта из сырого ObFootprint — чтобы кластеры работали на
+// уже накопленной истории сразу после деплоя.
+async function backfillFootprintRollup() {
+  try {
+    const { rows } = await pool.query(`SELECT 1 FROM "ObFootprintRollup" LIMIT 1`);
+    if (rows.length > 0) return;
+    console.log("[rollup] бэкафилл футпринта из ObFootprint…");
+    await pool.query(
+      `INSERT INTO "ObFootprintRollup" ("symbol","exchange","bucket","price","buyVol","sellVol")
+       SELECT "symbol", "exchange",
+              to_timestamp(floor(extract(epoch from "t") / 300) * 300),
+              "price", SUM("buyVol"), SUM("sellVol")
+       FROM "ObFootprint"
+       GROUP BY "symbol", "exchange",
+                to_timestamp(floor(extract(epoch from "t") / 300) * 300), "price"
+       ON CONFLICT ("symbol","exchange","bucket","price") DO NOTHING`,
+    );
+    console.log("[rollup] бэкафилл футпринта завершён");
+  } catch (err) {
+    console.error(`[rollup] бэкафилл футпринта ошибка: ${err.message}`);
   }
 }
 

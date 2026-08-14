@@ -10,11 +10,17 @@ import { ctValFor } from "./okx.mjs";
 function makeAccumulator(binSize, bigNotional) {
   let buyVol = 0;
   let sellVol = 0;
+  // Число ПЕЧАТЕЙ (сделок) в интервале — не путать с числом строк ObTrade:
+  // строка пишется одна на тик коллектора и агрегирует все сделки этого тика.
+  // Без этого счётчика «скорость ленты» считала строки, т.е. частоту опроса
+  // коллектора, а не активность рынка.
+  let count = 0;
   let bins = new Map(); // priceBinCenter -> { buy, sell }
   let big = [];
 
   function ingest(price, qty, buy, ts) {
     if (!Number.isFinite(price) || !Number.isFinite(qty) || qty <= 0) return;
+    count += 1;
     if (buy) buyVol += qty;
     else sellVol += qty;
     const center = Math.round(price / binSize) * binSize;
@@ -29,9 +35,10 @@ function makeAccumulator(binSize, bigNotional) {
 
   function drain() {
     const footprint = [...bins.entries()].map(([price, c]) => ({ price, buy: c.buy, sell: c.sell }));
-    const out = { buyVol, sellVol, footprint, big };
+    const out = { buyVol, sellVol, count, footprint, big };
     buyVol = 0;
     sellVol = 0;
+    count = 0;
     bins = new Map();
     big = [];
     return out;

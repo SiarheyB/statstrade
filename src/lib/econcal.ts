@@ -63,6 +63,16 @@ function normImpact(raw: unknown): string {
   return "low";
 }
 
+// The feed marks some genuinely market-moving releases (Final CPI reprints,
+// weekly Crude Oil Inventories) as "low" — bump those to "high" regardless
+// of the feed's own label.
+const HIGH_IMPACT_OVERRIDES: RegExp[] = [/\bcpi\b/i, /crude oil inventories/i];
+
+function applyImpactOverride(title: string, impact: string): string {
+  if (impact === "holiday") return impact;
+  return HIGH_IMPACT_OVERRIDES.some((re) => re.test(title)) ? "high" : impact;
+}
+
 type FeedItem = {
   title?: string;
   country?: string; // currency code
@@ -108,7 +118,7 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
       currency,
       country: countryFor(currency),
       title,
-      impact: normImpact(it.impact),
+      impact: applyImpactOverride(title, normImpact(it.impact)),
       category: categoryFor(title),
       forecast: clean(it.forecast),
       previous: clean(it.previous),
@@ -120,8 +130,32 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
 
 export type RefreshResult = { feed: string; upserted: number; error?: string };
 
+// Понедельник 00:00 UTC текущей недели.
+function startOfWeekUtc(now: Date = new Date()): Date {
+  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const mondayOffset = (d.getUTCDay() + 6) % 7; // вс = 0 → 6 дней назад
+  d.setUTCDate(d.getUTCDate() - mondayOffset);
+  return d;
+}
+
+// Единственная чистка календаря: фид отдаёт только текущую неделю, а таблица
+// копила события всех прошлых обходов. Прошлая неделя уходит сама собой, как
+// только начинается новая, — настраивать тут нечего.
+//
+// Режем по времени события (не по createdAt), с запасом в сутки от начала
+// недели: страница считает границы недели в ЧАСОВОМ ПОЯСЕ пользователя
+// (см. weekStart в dashboard/econcal), который может отставать от UTC на
+// половину суток — без запаса у части пользователей понедельник опустел бы.
+const WEEK_EDGE_SLACK_MS = 24 * 60 * 60 * 1000;
+
+export async function pruneOldEvents(now: Date = new Date()): Promise<number> {
+  const cutoff = new Date(startOfWeekUtc(now).getTime() - WEEK_EDGE_SLACK_MS);
+  const { count } = await prisma.economicEvent.deleteMany({ where: { time: { lt: cutoff } } });
+  return count;
+}
+
 export async function refreshCalendar(): Promise<RefreshResult[]> {
-  return Promise.all(
+  const results = await Promise.all(
     FEEDS.map(async (url) => {
       const feed = url.split("/").pop() ?? url;
       try {
@@ -141,6 +175,8 @@ export async function refreshCalendar(): Promise<RefreshResult[]> {
       }
     }),
   );
+  await pruneOldEvents();
+  return results;
 }
 
 let lastFetchAttempt = 0;
@@ -185,9 +221,14 @@ export async function getCalendar(filters: CalendarFilters = {}) {
   const events = await prisma.economicEvent.findMany({ where, orderBy: { time: "asc" }, take: 500 });
 
   // Facets for the filter UI (distinct currencies / categories present).
-  const all = await prisma.economicEvent.findMany({ select: { currency: true, category: true } });
-  const currencies = Array.from(new Set(all.map((e) => e.currency))).sort();
-  const categories = Array.from(new Set(all.map((e) => e.category).filter(Boolean) as string[])).sort();
+  // groupBy, а не выгрузка всей таблицы в память: строк тут немного, но
+  // список фильтров не должен зависеть от размера календаря.
+  const [curRows, catRows] = await Promise.all([
+    prisma.economicEvent.groupBy({ by: ["currency"] }),
+    prisma.economicEvent.groupBy({ by: ["category"] }),
+  ]);
+  const currencies = curRows.map((r) => r.currency).sort();
+  const categories = (catRows.map((r) => r.category).filter(Boolean) as string[]).sort();
 
   return { events, currencies, categories, refreshed };
 }

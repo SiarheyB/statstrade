@@ -76,10 +76,58 @@ describe("fetchOrderflowCandles", () => {
   });
 });
 
+describe("fetchOrderflowCandles: живая свеча", () => {
+  // Ради формирующейся свечи функция ходит в Binance. Графику это нужно
+  // (опрос раз в 3 с), детекторам — нет: 366 из ~400 мс их времени уходило
+  // именно сюда.
+  // Ровно столько, сколько ждёт окно 1h (CANDLES_IN_WINDOW). При меньшем
+  // числе срабатывает ДРУГОЙ путь — дозагрузка истории с биржи, и она от
+  // live не зависит.
+  const rows = Array.from({ length: 800 }, (_, i) => ({
+    t: new Date(i * 3600_000), o: 1, h: 2, l: 0.5, c: 1.5,
+  }));
+
+  it("по умолчанию дозапрашивает свежую свечу", async () => {
+    mocks.obCandleFindMany.mockResolvedValue(rows);
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, json: async () => [],
+    } as unknown as Response);
+    await fetchOrderflowCandles("BTCUSDT", "binance-futures", "1h", 0, 1e12);
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("с live:false в сеть не ходит", async () => {
+    mocks.obCandleFindMany.mockResolvedValue(rows);
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true, json: async () => [],
+    } as unknown as Response);
+    const out = await fetchOrderflowCandles("BTCUSDT", "binance-futures", "1h", 0, 1e12, { live: false });
+    expect(spy).not.toHaveBeenCalled();
+    expect(out.length).toBe(rows.length);
+    spy.mockRestore();
+  });
+});
+
 describe("computeDelta", () => {
-  it("returns null on empty rows", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]);
+  it("returns null when both the rollup and the raw fallback are empty", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // ObTradeRollup
+    mocks.queryRaw.mockResolvedValueOnce([]); // fallback на сырой ObTrade
     expect(await computeDelta("BTCUSDT", "binance", 0, 1000, 4)).toBeNull();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+  });
+
+  it("не трогает сырьё, когда rollup ответил", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{ col: 0, buy: 1, sell: 1 }]);
+    await computeDelta("BTCUSDT", "binance", 0, 1000, 4);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("падает на сырой ObTrade, пока rollup не наполнен", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // rollup пуст
+    mocks.queryRaw.mockResolvedValueOnce([{ col: 1, buy: 7, sell: 2 }]);
+    const d = await computeDelta("BTCUSDT", "binance", 0, 1000, 4);
+    expect(d!.delta).toEqual([0, 5, 0, 0]);
   });
 
   it("builds buy/sell/delta/cvd arrays and clamps cols", async () => {
@@ -99,16 +147,24 @@ describe("computeDelta", () => {
 });
 
 describe("computeFootprint", () => {
-  it("returns null on empty rows", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]);
+  it("returns null when both the rollup and the raw fallback are empty", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([]); // ObFootprintRollup
+    mocks.queryRaw.mockResolvedValueOnce([]); // fallback на сырой ObFootprint
     expect(await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000)).toBeNull();
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
   });
 
-  it("groups levels by bucket, skips zero-volume rows, tracks maxVol", async () => {
+  it("не трогает сырьё, когда rollup ответил", async () => {
+    mocks.queryRaw.mockResolvedValueOnce([{ candle: BigInt(0), price: 1, buy: 1, sell: 1 }]);
+    await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it("groups levels by candle, skips zero-volume rows, tracks maxVol", async () => {
     mocks.queryRaw.mockResolvedValueOnce([
-      { bucket: BigInt(1000), price: 100, buy: 2, sell: 3 },
-      { bucket: BigInt(1000), price: 101, buy: 0, sell: 0 }, // пропускается
-      { bucket: BigInt(2000), price: 102, buy: 4, sell: 1 },
+      { candle: BigInt(1000), price: 100, buy: 2, sell: 3 },
+      { candle: BigInt(1000), price: 101, buy: 0, sell: 0 }, // пропускается
+      { candle: BigInt(2000), price: 102, buy: 4, sell: 1 },
     ]);
     const fp = await computeFootprint("BTCUSDT", "binance", "15m", 0, 1000);
     expect(fp).not.toBeNull();

@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Разовые CLI-утилиты на Node (CommonJS by design): проверять их правилами
+    // для приложения бессмысленно — они не собираются и не попадают в бандл.
+    "scripts/**",
   ]),
 ]);
 

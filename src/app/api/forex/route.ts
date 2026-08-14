@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { normalizeFxSymbol } from "@/lib/forexSymbol";
 import { prisma } from "@/lib/db";
 import { isTimezone, normalizeTimezone } from "@/lib/timezone";
 import { candleActivity } from "@/lib/forexActivity";
+import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 30;
 
@@ -44,8 +46,7 @@ const AGGREGATE_FROM: Record<string, string | undefined> = {
 };
 
 const TTL_MS = 3000;
-const cache = new Map<string, { at: number; data: unknown }>();
-const inflight = new Map<string, Promise<unknown>>();
+const cache = createRouteCache(TTL_MS);
 
 type CandleRow = { t: Date; o: number; h: number; l: number; c: number; v: number };
 type BaRow = { t: number; bidSum: number; askSum: number; volSum: number };
@@ -98,11 +99,16 @@ async function fetchCandles(symbol: string, range: string, fromMs: number, toMs:
 // Аппроксимируем B/A из OHLCV: bid = low, ask = high каждой свечи.
 // bidSum/askSum — это цена bid/ask, умноженная на 10000 для отображения.
 
-async function computeBA(symbol: string, fromMs: number, toMs: number) {
+async function computeBA(symbol: string, fromMs: number, toMs: number, interval: string) {
+  // ВАЖНО: фильтр по interval обязателен. Без него выборка захватывала свечи
+  // ВСЕХ таймфреймов сразу (5m + 15m + 1h + 4h + 1d + 1w) — ряд получался с
+  // дублирующимися таймстемпами и «пилой» на панели B/A, а на широких окнах
+  // (range=1w → год истории) в Node тянулись сотни тысяч лишних строк.
   const rows = await prisma.fxCandle.findMany({
     where: {
       symbol,
       exchange: "finnhub",
+      interval,
       t: { gte: new Date(fromMs), lte: new Date(toMs) },
     },
     orderBy: { t: "asc" },
@@ -173,7 +179,8 @@ export async function GET(req: Request) {
   if (denied) return denied;
 
   const url = new URL(req.url);
-  const symbol = url.searchParams.get("symbol") ?? "EUR/USD";
+  const symbol = normalizeFxSymbol(url.searchParams.get("symbol"));
+  if (!symbol) return badRequest("Некорректная валютная пара");
   const range = url.searchParams.get("range") ?? "1h";
   const tzParam = url.searchParams.get("tz");
 
@@ -188,37 +195,30 @@ export async function GET(req: Request) {
   }
 
   const key = `${symbol}|${range}|${timezone ?? "none"}`;
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < TTL_MS) return NextResponse.json(hit.data);
 
   try {
-    let p = inflight.get(key);
-    if (!p) {
-      p = (async () => {
-        const toMs = Date.now();
-        const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
-        const sourceInterval = AGGREGATE_FROM[range] ?? range;
-        const [candles, ba, deltaRes] = await Promise.all([
-          fetchCandles(symbol, range, fromMs, toMs),
-          computeBA(symbol, fromMs, toMs),
-          computeDelta(symbol, fromMs, toMs, sourceInterval),
-        ]);
-        return {
-          symbol,
-          range,
-          from: fromMs,
-          to: toMs,
-          candles,
-          ba,
-          delta: deltaRes?.delta ?? null,
-          cvd: deltaRes?.cvd ?? null,
-          timezone: timezone || "auto",
-        };
-      })().finally(() => inflight.delete(key));
-      inflight.set(key, p);
-    }
-    const data = await p;
-    cache.set(key, { at: Date.now(), data });
+    // fetch = кэш + дедупликация «в полёте» (см. lib/routeCache.ts).
+    const data = await cache.fetch(key, async () => {
+      const toMs = Date.now();
+      const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
+      const sourceInterval = AGGREGATE_FROM[range] ?? range;
+      const [candles, ba, deltaRes] = await Promise.all([
+        fetchCandles(symbol, range, fromMs, toMs),
+        computeBA(symbol, fromMs, toMs, sourceInterval),
+        computeDelta(symbol, fromMs, toMs, sourceInterval),
+      ]);
+      return {
+        symbol,
+        range,
+        from: fromMs,
+        to: toMs,
+        candles,
+        ba,
+        delta: deltaRes?.delta ?? null,
+        cvd: deltaRes?.cvd ?? null,
+        timezone: timezone || "auto",
+      };
+    });
     return NextResponse.json(data);
   } catch (err) {
     return serverError((err as Error).message);

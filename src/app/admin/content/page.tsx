@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/db";
 import { getServerT } from "@/lib/i18n/server";
+import { getRetentionDays, MAX_RETENTION_DAYS } from "@/lib/news";
 import ContentActions from "@/components/admin/ContentActions";
+import NewsRetentionSetting from "@/components/admin/NewsRetentionSetting";
 
 export const dynamic = "force-dynamic";
 
@@ -9,13 +11,17 @@ function Card({
   total,
   lastUpdateText,
   extra,
+  note,
   feed,
+  children,
 }: {
   title: string;
   total: string;
   lastUpdateText: string;
   extra?: string;
+  note?: string;
   feed: "news" | "econcal";
+  children?: React.ReactNode;
 }) {
   return (
     <div className="card p-5">
@@ -26,6 +32,8 @@ function Card({
       <div className="mt-3 text-3xl font-semibold tabular-nums tracking-tight">{total}</div>
       <div className="mt-1 text-xs text-muted">{lastUpdateText}</div>
       {extra && <div className="mt-1 text-xs text-faint">{extra}</div>}
+      {note && <div className="mt-2 text-[11px] text-faint leading-relaxed">{note}</div>}
+      {children}
     </div>
   );
 }
@@ -34,7 +42,8 @@ export default async function AdminContentPage() {
   const { t, locale } = await getServerT();
   const nf = locale === "ru" ? "ru-RU" : "en-US";
 
-  const [newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
+  const [retentionDays, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
+    getRetentionDays(),
     prisma.newsItem.count(),
     prisma.newsItem.count({ where: { lang: "en" } }),
     prisma.newsItem.count({ where: { lang: "ru" } }),
@@ -59,7 +68,9 @@ export default async function AdminContentPage() {
           lastUpdateText={lastUpdate(lastNews?.createdAt ?? null)}
           extra={t("admin.content.newsExtra", { en: newsEn, ru: newsRu })}
           feed="news"
-        />
+        >
+          <NewsRetentionSetting value={retentionDays} max={MAX_RETENTION_DAYS} />
+        </Card>
         <Card
           title={t("admin.content.econcal")}
           total={econTotal.toLocaleString(nf)}
@@ -69,6 +80,7 @@ export default async function AdminContentPage() {
               ? t("admin.content.nextEvent", { title: nextEvent.title, time: nextEvent.time.toLocaleString(nf) })
               : undefined
           }
+          note={t("admin.content.econAutoClean")}
           feed="econcal"
         />
       </div>

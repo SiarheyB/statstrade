@@ -69,4 +69,41 @@ describe("GET /api/orderflow", () => {
     expect(body.candles).toEqual([]);
     expect(body.timezone).toBe("auto");
   });
+
+  // Перенесено из src/lib/orderflow.test.ts — тот файл тестировал этот же роут,
+  // но лежал в lib и мокал buildPayload, которой в @/lib/orderflow нет (она
+  // приватная в самом роуте). Мок ничего не подменял, тесты проходили по
+  // другой причине, чем заявлено в их шапке.
+  it("возвращает переданную таймзону в ответе", async () => {
+    asUser();
+    const res = await GET(
+      new Request(`${base}?symbol=ETHUSDT&exchange=binance-futures&range=1h&tz=UTC%2B3`),
+    );
+    expect(res.status).toBe(200);
+    expect((await res.json()).timezone).toBe("UTC+3");
+  });
+
+  it("повторный запрос в пределах TTL берётся из кэша, а не считается заново", async () => {
+    asUser();
+    const { computeOrderflow } = await import("@/lib/orderflow");
+    const calls = () => (computeOrderflow as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    const url = `${base}?symbol=SOLUSDT&exchange=binance-futures&range=4h`;
+    await GET(new Request(url));
+    const after = calls();
+    await GET(new Request(url));
+    // Второй заход не должен запускать тяжёлую агрегацию повторно.
+    expect(calls()).toBe(after);
+  });
+
+  it("другой символ считается отдельно (кэш не путает ключи)", async () => {
+    asUser();
+    const { computeOrderflow } = await import("@/lib/orderflow");
+    const calls = () => (computeOrderflow as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    await GET(new Request(`${base}?symbol=ADAUSDT&exchange=binance-futures&range=1d`));
+    const after = calls();
+    await GET(new Request(`${base}?symbol=DOTUSDT&exchange=binance-futures&range=1d`));
+    expect(calls()).toBe(after + 1);
+  });
 });

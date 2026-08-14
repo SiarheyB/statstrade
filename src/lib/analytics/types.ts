@@ -48,6 +48,7 @@ export type RoundTripTrade = {
   mistake?: string | null; // ошибка
   pattern?: string | null; // паттерн
   stopLoss?: number | null; // цена стоп-лосса
+  rr?: number | null; // R-multiple, посчитан и сохранён (см. lib/analytics/rr.ts)
   note?: string | null; // комментарий к сделке
   imageUrl?: string | null; // ссылка на скриншот сделки (для показа внутри UI)
   imageProvider?: string | null; // "google_drive" | "yandex_disk"

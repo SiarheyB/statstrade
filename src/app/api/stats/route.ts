@@ -51,8 +51,10 @@ async function buildBase(
   }));
   const ownedIds = new Set(accounts.map((a) => a.id));
 
+  // Фильтруем по уже загруженным id аккаунтов вместо join через
+  // account: { userId } — запрос идёт прямо по индексу [accountId, exitTime].
   const where: Prisma.TradeWhereInput = {
-    account: { userId },
+    accountId: { in: [...ownedIds] },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) {
     where.accountId = accountId;
@@ -82,7 +84,7 @@ async function buildBase(
           id: true, symbol: true, base: true, quote: true, market: true, exchange: true,
           accountId: true, side: true, entryTime: true, exitTime: true, qty: true,
           entryPrice: true, exitPrice: true, grossPnl: true, fees: true, netPnl: true,
-          returnPct: true, fillCount: true, result: true,
+          returnPct: true, fillCount: true, result: true, rr: true,
         },
       })
     : [];
@@ -107,10 +109,17 @@ async function buildBase(
     returnPct: r.returnPct,
     fillCount: r.fillCount,
     result: r.result as TradeResult,
+    rr: r.rr,
   }));
 
-  // Счётчик филлов для шапки («N trades · M fills») — лёгкий COUNT по индексу.
-  const fillWhere: Prisma.FillWhereInput = { account: { userId } };
+  // Счётчик филлов для шапки («N trades · M fills»).
+  //
+  // Денормализовать его в колонку ExchangeAccount намеренно НЕ стали: счётчик
+  // питает одну строчку подзаголовка, а поддерживать его пришлось бы во всех
+  // путях записи филлов (синк, импорт, демо-данные, удаление аккаунта) — цена
+  // рассинхрона выше пользы. Вместо этого убран join: фильтруем по уже
+  // загруженным id аккаунтов, и COUNT идёт прямо по индексу [accountId].
+  const fillWhere: Prisma.FillWhereInput = { accountId: { in: [...ownedIds] } };
   if (accountId !== "all" && ownedIds.has(accountId)) fillWhere.accountId = accountId;
   if (market === "spot") fillWhere.market = "spot";
   else if (market === "futures") fillWhere.market = { in: ["swap", "future"] };
@@ -118,7 +127,7 @@ async function buildBase(
 
   // Imported (forex / MetaTrader) closed round-trips — money taken as-is.
   const importedWhere: Prisma.ImportedTradeWhereInput = {
-    account: { userId },
+    accountId: { in: [...ownedIds] },
   };
   if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
   if (fromMs != null || toMs != null) {
@@ -136,7 +145,7 @@ async function buildBase(
           market: true, source: true, side: true, entryTime: true, exitTime: true,
           qty: true, entryPrice: true, exitPrice: true, grossProfit: true, swap: true,
           netPnl: true, commission: true, lots: true, pips: true, currency: true,
-          stopLoss: true,
+          stopLoss: true, rr: true,
         },
       })
     : [];
@@ -168,6 +177,7 @@ async function buildBase(
     assetClass: "forex",
     accountCurrency: it.currency,
     stopLoss: it.stopLoss,
+    rr: it.rr,
   }));
 
   const trades = [...cryptoTrades, ...importedTrades].sort(
@@ -299,24 +309,19 @@ export async function GET(req: Request) {
       Number.isFinite(initialCapital) && initialCapital > 0 ? initialCapital : 10000,
     );
 
-    // Serialize trades (Dates -> ISO) for the client table.
-    const serializedTrades = filteredTrades.map((t) => ({
-      ...t,
-      entryPoint: t.entryPoint ?? null,
-      entryType: t.entryType ?? null,
-      mistake: t.mistake ?? null,
-      stopLoss: t.stopLoss ?? null,
-      note: t.note ?? null,
-      imageUrl: t.imageUrl ?? null,
-      imageProvider: t.imageProvider ?? null,
-      imagePublicUrl: t.imagePublicUrl ?? null,
-      entryTime: t.entryTime.toISOString(),
-      exitTime: t.exitTime.toISOString(),
-    }));
+    // RR уже посчитан и сохранён на самой сделке (Trade.rr / ImportedTrade.rr —
+    // см. lib/analytics/rr.ts, пересчитывается точечно при ребилде сделок,
+    // правке stopLoss и смене риск-профиля). Здесь просто читаем готовое
+    // значение — /dashboard/trades и /dashboard/calendar видят одно и то же
+    // число без повторного вычисления на клиенте.
 
+    // trades в ответе БОЛЬШЕ НЕТ. Раньше сюда уезжала вся история сделок
+    // пользователя (мегабайты при большом счёте) ради трёх гистограмм и
+    // четырёх стрелок на карточках — теперь и то, и другое считает сервер
+    // (см. pnlBins/rBins/holdBins/trend в lib/analytics/metrics.ts).
+    // Постраничный список живёт в /api/trades, дневная сетка — в /api/calendar.
     const payload = {
       metrics,
-      trades: serializedTrades,
       fillCount: base.fillCount,
       symbols: base.symbols,
       accounts: base.accounts,

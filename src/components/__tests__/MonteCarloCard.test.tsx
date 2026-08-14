@@ -24,52 +24,42 @@ vi.mock('@/lib/analytics/scopeLabel', () => ({
   scopeLabel: () => 'All trades',
 }));
 
-// Mock runMonteCarlo
-vi.mock('@/lib/analytics/monteCarlo', () => ({
-  runMonteCarlo: vi.fn().mockReturnValue({
-    riskOfRuinPct: 5.2,
-    p5: 0.85,
-    p50: 1.15,
-    p95: 1.45,
-    simulations: 200,
-    projectedTrades: 100,
-  }),
-}));
-
 // Mock feature fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
 
-const mockTrades = Array.from({ length: 10 }, (_, i) => ({
-  id: `t${i}`,
-  netPnl: (i % 2 === 0 ? 100 : -50) + Math.random() * 10,
-  entryTime: Date.now() + i * 86400000,
-  exitTime: Date.now() + (i + 1) * 86400000,
-  symbol: 'BTCUSDT',
-  side: 'long',
-  entryPrice: 50000,
-  exitPrice: 51000,
-  quantity: 0.1,
-  fees: 5,
-  accountId: 'acc1',
-}));
-
-const mockCapital = 10000;
-const mockAccounts = [{ id: 'acc1', name: 'Account 1', exchange: 'bybit' }];
+// Симуляция считается на сервере (/api/monte-carlo), поэтому карточке нужны
+// только область расчёта, капитал и число сделок — сам массив сделок больше
+// не передаётся.
+const mockResult = {
+  riskOfRuinPct: 5.2,
+  p5: 0.85,
+  p50: 1.15,
+  p95: 1.45,
+  simulations: 200,
+  projectedTrades: 100,
+};
 
 const defaultProps = {
-  trades: mockTrades,
-  capital: mockCapital,
-  accounts: mockAccounts,
+  scope: [{ accountId: 'acc1', exchange: 'bybit' }],
+  accounts: [{ id: 'acc1', label: 'Account 1', exchange: 'bybit', balance: null }],
+  accountId: 'all',
+  capital: 10000,
+  tradeCount: 10,
 };
 
 describe('MonteCarloCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    mockFetch.mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ value: { enabled: true, simulations: 200, projectedTrades: 100, ruinDrawdownPct: 20 } }),
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).startsWith('/api/monte-carlo')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ result: mockResult, trades: 10 }) });
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ value: { enabled: true, simulations: 200, projectedTrades: 100, ruinDrawdownPct: 20 } }),
+      });
     });
   });
 
@@ -78,10 +68,10 @@ describe('MonteCarloCard', () => {
   });
 
   it('renders nothing when feature is disabled', async () => {
-    mockFetch.mockResolvedValueOnce({
+    mockFetch.mockImplementation(() => Promise.resolve({
       ok: true,
       json: () => Promise.resolve({ value: { enabled: false, simulations: 200, projectedTrades: 100, ruinDrawdownPct: 20 } }),
-    });
+    }));
 
     render(<MonteCarloCard {...defaultProps} />);
 
@@ -91,7 +81,7 @@ describe('MonteCarloCard', () => {
   });
 
   it('renders nothing when not enough trades', async () => {
-    render(<MonteCarloCard {...defaultProps} trades={mockTrades.slice(0, 3)} />);
+    render(<MonteCarloCard {...defaultProps} tradeCount={3} />);
 
     await waitFor(() => {
       expect(screen.queryByText('an.monteCarlo')).not.toBeInTheDocument();
@@ -116,15 +106,27 @@ describe('MonteCarloCard', () => {
     expect(screen.getByRole('button', { name: /an\.monteCarloRun/ })).toBeInTheDocument();
   });
 
-  it('shows loading state when run button clicked', async () => {
-    render(<MonteCarloCard {...defaultProps} />);
-
-    await waitFor(() => {
-      const runButton = screen.getByRole('button', { name: /an\.monteCarloRun/ });
-      fireEvent.click(runButton);
+  it('shows loading state while the server is computing', async () => {
+    // Расчёт уехал на сервер, поэтому «загрузка» держится до ответа запроса —
+    // подвешиваем его, чтобы состояние вообще успело отрисоваться.
+    let release!: (v: unknown) => void;
+    const pending = new Promise((r) => { release = r; });
+    mockFetch.mockImplementation((url: string) => {
+      if (String(url).startsWith('/api/monte-carlo')) {
+        return pending.then(() => ({ ok: true, json: () => Promise.resolve({ result: mockResult, trades: 10 }) }));
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({ value: { enabled: true, simulations: 200, projectedTrades: 100, ruinDrawdownPct: 20 } }),
+      });
     });
 
-    expect(screen.getByText('common.loading')).toBeInTheDocument();
+    render(<MonteCarloCard {...defaultProps} />);
+    const runButton = await screen.findByRole('button', { name: /an\.monteCarloRun/ });
+    fireEvent.click(runButton);
+
+    await waitFor(() => expect(screen.getByText('common.loading')).toBeInTheDocument());
+    await act(async () => { release(null); });
   });
 
   it('displays results after run completes', async () => {

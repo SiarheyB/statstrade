@@ -271,25 +271,45 @@ describe("computeMetrics", () => {
     expect(m.totalCommission).toBe(8);
   });
 
-  it("computes avgRR from stop-loss trades", () => {
+  it("computes avgRR from the stored rr, not from the stop distance", () => {
     const trades = [
-      // Long, qty 1, entry 100, stop 90 (risk $10), exit 120 => netPnl $20, +2R
-      makeTrade({ id: "t1", side: "long", qty: 1, entryPrice: 100, exitPrice: 120, stopLoss: 90, fees: 0, netPnl: 20 }),
-      // Long, qty 1, entry 100, stop 90 (risk $10), exit 80 => netPnl $-20, -2R
-      makeTrade({ id: "t2", side: "long", qty: 1, entryPrice: 100, exitPrice: 80, stopLoss: 90, fees: 0, netPnl: -20 }),
-      // No stop-loss => ignored
-      makeTrade({ id: "t3", side: "long", entryPrice: 100, exitPrice: 110 }),
+      makeTrade({ id: "t1", rr: 2 }),
+      makeTrade({ id: "t2", rr: -2 }),
+      // Стоп есть, но rr не посчитан (нет ни профиля, ни валидной дистанции) =>
+      // сделка в среднее не входит.
+      makeTrade({ id: "t3", side: "long", qty: 1, entryPrice: 100, exitPrice: 110, stopLoss: 90 }),
     ];
     const m = computeMetrics(trades);
     expect(m.avgRR).toBeCloseTo(0, 5); // (+2 + -2) / 2 = 0
   });
 
-  it("handles stop-loss with zero risk (skipped)", () => {
+  it("ignores the stop-loss distance when rr disagrees with it", () => {
+    // Профиль риска задан: 1R = фиксированная сумма, поэтому rr в БД (+0.5)
+    // НЕ совпадает с «движением цены / дистанцией стопа» (было бы +1).
+    const trades = [
+      makeTrade({ id: "t1", side: "long", qty: 1, entryPrice: 100, exitPrice: 110, stopLoss: 90, fees: 0, netPnl: 10, rr: 0.5 }),
+    ];
+    const m = computeMetrics(trades);
+    expect(m.avgRR).toBe(0.5);
+  });
+
+  it("leaves avgRR at 0 when no trade has a stored rr", () => {
     const trades = [
       makeTrade({ id: "t1", side: "long", entryPrice: 100, exitPrice: 110, stopLoss: 100 }),
     ];
     const m = computeMetrics(trades);
-    expect(m.avgRR).toBe(0); // risk = 0 => skipped
+    expect(m.avgRR).toBe(0);
+  });
+
+  it("builds the daily R decomposition from the stored rr", () => {
+    const trades = [
+      makeTrade({ id: "t1", rr: 2, exitTime: new Date("2024-01-01T10:00:00Z") }),
+      makeTrade({ id: "t2", rr: -1, exitTime: new Date("2024-01-01T14:00:00Z") }),
+      makeTrade({ id: "t3", rr: null, exitTime: new Date("2024-01-01T16:00:00Z") }),
+    ];
+    const m = computeMetrics(trades);
+    expect(m.daily[0].winR).toBe(2);
+    expect(m.daily[0].lossR).toBe(-1);
   });
 
   it("computes daily series (cumulative P&L)", () => {
@@ -314,5 +334,72 @@ describe("computeMetrics", () => {
     expect(m.initialCapital).toBe(5000);
     expect(m.finalEquity).toBe(5100);
     expect(m.roiPct).toBe(2);
+  });
+});
+
+// «Последние 30 дней против предыдущих 30» — блок, который дашборд показывает
+// стрелками роста/падения. Считается только когда в ОБА окна попали сделки.
+describe("computeMetrics — тренд 30/30", () => {
+  const NOW = new Date("2026-03-01T00:00:00Z").getTime();
+  const daysAgo = (d: number) => new Date(NOW - d * 86_400_000);
+
+  const win = (daysBack: number, netPnl: number) =>
+    makeTrade({
+      id: `w${daysBack}`,
+      exitTime: daysAgo(daysBack),
+      netPnl,
+      result: "win" as TradeResult,
+    });
+  const loss = (daysBack: number, netPnl: number) =>
+    makeTrade({
+      id: `l${daysBack}`,
+      exitTime: daysAgo(daysBack),
+      netPnl,
+      result: "loss" as TradeResult,
+    });
+
+  it("is null when one of the two windows is empty", () => {
+    expect(computeMetrics([win(5, 100)], 10000, NOW).trend).toBeNull();
+    expect(computeMetrics([win(45, 100)], 10000, NOW).trend).toBeNull();
+    expect(computeMetrics([], 10000, NOW).trend).toBeNull();
+  });
+
+  it("compares the recent window against the previous one", () => {
+    const m = computeMetrics(
+      [win(5, 200), loss(10, -100), win(40, 100), loss(45, -100)],
+      10000,
+      NOW,
+    );
+    expect(m.trend).not.toBeNull();
+    // Свежие 30 дней: +100, предыдущие: 0 → рост на 1% капитала.
+    expect(m.trend!.netPnl).toBeCloseTo(1, 6);
+    // Доля прибыльных одинаковая (50/50) — изменения нет.
+    expect(m.trend!.winRate).toBe(0);
+    // Профит-фактор вырос вдвое: 2.0 против 1.0.
+    expect(m.trend!.profitFactor).toBeCloseTo(100, 6);
+  });
+
+  it("uses a fallback capital when the account balance is unknown", () => {
+    const withCapital = computeMetrics([win(5, 200), win(40, 100)], 0, NOW);
+    const withDefault = computeMetrics([win(5, 200), win(40, 100)], 10000, NOW);
+    expect(withCapital.trend!.netPnl).toBe(withDefault.trend!.netPnl);
+  });
+
+  it("does not report a relative change when the sign flips", () => {
+    // Ожидание было отрицательным, стало положительным: процент роста здесь
+    // бессмысленен, поэтому показываем «нет данных», а не −300%.
+    const m = computeMetrics([win(5, 100), loss(40, -100)], 10000, NOW);
+    expect(m.trend!.expectancy).toBeNull();
+  });
+
+  it("does not report a profit-factor change when the previous window had no losses", () => {
+    // Профит-фактор без убытков — бесконечность, сравнивать не с чем.
+    const m = computeMetrics([win(5, 100), loss(10, -50), win(40, 100)], 10000, NOW);
+    expect(m.trend!.profitFactor).toBeNull();
+  });
+
+  it("clamps an extreme relative change to ±300%", () => {
+    const m = computeMetrics([win(5, 10_000), win(40, 1)], 10000, NOW);
+    expect(m.trend!.expectancy).toBe(300);
   });
 });

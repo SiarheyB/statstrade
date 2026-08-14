@@ -7,6 +7,9 @@ import {
   fmtPrice,
   fmtDuration,
   fmtDate,
+  fmtUsd,
+  fmtNumSmart,
+  numLocale,
   fmtSymbol,
   canonSymbol,
   pnlColor,
@@ -109,6 +112,49 @@ describe("format helpers", () => {
   // -------------------------------------------------------------------------
   // 5. Date and symbol formatting
   // -------------------------------------------------------------------------
+  // Нечисловой вход приходит из БД (NULL, деление на ноль в производных
+  // метриках) — форматтеры не должны показывать NaN/Infinity пользователю.
+  describe("не-числа", () => {
+    it("shows a dash instead of NaN or Infinity", () => {
+      for (const bad of [NaN, Infinity, -Infinity]) {
+        expect(fmtMoney(bad)).toBe("—");
+        expect(fmtUsd(bad)).toBe("—");
+        expect(fmtPct(bad)).toBe("—");
+        expect(fmtNum(bad)).toBe("—");
+        expect(fmtNumSmart(bad)).toBe("—");
+        // fmtRatio — исключение: бесконечный профит-фактор (сделки без
+        // убытков) показывается знаком бесконечности, а не прочерком.
+        expect(fmtRatio(bad)).toBe("∞");
+      }
+      expect(fmtDuration(NaN)).toBe("—");
+      expect(fmtDuration(0)).toBe("—");
+      expect(fmtDuration(-100)).toBe("—");
+    });
+  });
+
+  describe("fmtUsd & fmtNumSmart", () => {
+    it("appends the currency sign and keeps the explicit plus", () => {
+      expect(fmtUsd(100)).toContain("$");
+      expect(fmtUsd(100, { sign: true })).toContain("+");
+      expect(fmtUsd(-100, { sign: true })).not.toContain("+");
+    });
+
+    it("strips trailing zeros but keeps significant decimals", () => {
+      expect(fmtNumSmart(1300)).toBe((1300).toLocaleString(numLocale(), { maximumFractionDigits: 4 }));
+      expect(fmtNumSmart(1300.0001)).toContain("0001");
+    });
+  });
+
+  describe("локаль чисел", () => {
+    it("switches the number locale together with the UI language", () => {
+      setFormatLocale("ru");
+      expect(numLocale()).toBe("ru-RU");
+      setFormatLocale("en");
+      expect(numLocale()).toBe("en-US");
+    });
+
+  });
+
   describe("fmtDate & symbol formatters", () => {
     it("formats dates according to locale/timezone (date only)", () => {
       const ts = new Date("2024-01-15T12:30:45.123Z").getTime();

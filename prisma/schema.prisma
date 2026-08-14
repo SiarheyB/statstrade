@@ -158,6 +158,7 @@ model ExchangeAccount {
   fills          Fill[]
   importedTrades ImportedTrade[]
   trades         Trade[]
+  tradeHourly    TradeHourly[]
 
   @@index([userId])
 }
@@ -190,9 +191,68 @@ model Trade {
   returnPct  Float
   fillCount  Int
   result     String // win | loss | breakeven
+  // MFE/MAE — «лучшая возможная цена» за время удержания и максимальная
+  // просадка, в % от цены входа. У ЗАКРЫТОЙ сделки они неизменны, поэтому
+  // считаются один раз и сохраняются (см. lib/analytics/mfe.ts). Раньше это
+  // считалось в БРАУЗЕРЕ: на каждый клик «Посчитать» страница «Аналитика»
+  // делала до maxTrades запросов к публичному API биржи за свечами и ничего
+  // не сохраняла — следующий клик повторял всё заново.
+  mfePct      Float? // максимальный ход в пользу сделки, % от входа
+  maePct      Float? // максимальная просадка, % от входа
+  capturedPct Float? // сколько из благоприятного хода забрал реальный выход
+  bestPrice   Float? // цена «идеального» выхода
+  mfeAt       DateTime? // когда посчитано; NULL = ещё нет данных
+  // Счётчик неудачных попыток (биржа недоступна, свечи не совпали с ценами
+  // сделки). Нужен, чтобы не долбить биржу бесконечно из-за делистнутой пары:
+  // после MFE_MAX_ATTEMPTS сделка перестаёт попадать в очередь.
+  mfeAttempts Int @default(0)
+  // R-multiple — посчитан и сохранён один раз (см. lib/analytics/rr.ts),
+  // а не при каждом запросе /api/stats. Пересчитывается точечно при: ребилде
+  // сделок аккаунта, правке stopLoss в TradeAnnotation, смене риск-профиля.
+  rr Float?
 
   @@index([accountId, exitTime])
   @@index([accountId, symbol, market])
+}
+
+// Почасовой агрегат по закрытым сделкам аккаунта — одна строка на
+// (аккаунт, час). Считается ОДИН РАЗ при изменении сделок (см.
+// lib/analytics/hourly.ts), а не на каждый запрос: раньше риск-менеджер и
+// дашборд тянули все сделки за период и складывали их в Node.
+//
+// Почему час, а не день. Все экраны показывают время в таймзоне пользователя
+// (настройка ts_timezone, фиксированный сдвиг вида UTC+3). Дневной агрегат в
+// UTC для этого не годится: один UTC-день попадает на два локальных, и
+// пересобрать его сложением готовых строк нельзя. Часовые бакеты складываются
+// в локальный день при чтении для любого сдвига, кратного часу — а список
+// таймзон в приложении состоит ровно из таких (см. lib/timezone.ts).
+//
+// Час = начало часа exitTime в UTC. День сделки везде определяется по ВЫХОДУ
+// (P&L фиксируется при закрытии) — так же считают риск-лимиты, Metrics.daily,
+// кривая капитала и «Календарь».
+//
+// Агрегат покрывает и crypto (Trade), и импортированные форекс/MT-сделки
+// (ImportedTrade) — обе таблицы сворачиваются в одни и те же строки.
+model TradeHourly {
+  accountId String
+  account   ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  hour      DateTime        @db.Timestamp(3) // начало часа exitTime в UTC
+  trades    Int             @default(0)
+  wins      Int             @default(0)
+  losses    Int             @default(0)
+  netPnl    Float           @default(0)
+  grossProfit Float         @default(0) // Σ netPnl прибыльных сделок
+  grossLoss   Float         @default(0) // Σ |netPnl| убыточных (положительное число)
+  fees      Float           @default(0)
+  // R-мультипликаторы: суммы уже сохранённого Trade.rr / ImportedTrade.rr —
+  // не пересчитываются (см. lib/analytics/rr.ts). netR = winR + lossR.
+  winR      Float           @default(0) // Σ положительных rr
+  lossR     Float           @default(0) // Σ отрицательных rr (отрицательное число)
+  rTrades   Int             @default(0) // сколько сделок часа имеют посчитанный rr
+  updatedAt DateTime        @updatedAt
+
+  @@id([accountId, hour])
+  @@index([hour])
 }
 
 // A closed round-trip imported from a MetaTrader 4/5 report (or entered
@@ -228,6 +288,8 @@ model ImportedTrade {
   comment      String?
   importedAt   DateTime @default(now())
   importBatch  String? // id of the upload batch (for rollback)
+  // R-multiple — та же схема, что у Trade.rr (см. lib/analytics/rr.ts).
+  rr Float?
 
   @@unique([accountId, externalId])
   @@index([accountId])
@@ -278,6 +340,10 @@ model ObTrade {
   t        DateTime @db.Timestamptz(3)
   buyVol   Float    @default(0)
   sellVol  Float    @default(0)
+  // Сколько ПЕЧАТЕЙ попало в этот тик. Строка агрегирует все сделки интервала,
+  // поэтому COUNT(*) по таблице даёт частоту опроса коллектора, а не активность
+  // рынка — «скорость ленты» должна суммировать именно это поле.
+  trades   Int      @default(0)
 
   @@index([symbol, exchange, t]) // выборка exchange="all" идёт по префиксу symbol
 }
@@ -446,6 +512,64 @@ model ObSnapshotRollup {
   @@index([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
   @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval, без symbol
+}
+
+// Минутный rollup ленты сделок — то же, что ObSnapshotRollup для стакана.
+// Дельта/CVD и «скорость ленты» читают его вместо сырого ObTrade: сырьё
+// партиционировано по дням и на широком окне (до 800 свечей таймфрейма) даёт
+// агрегацию по сотням тысяч строк на КАЖДЫЙ опрос, а фронт опрашивает
+// orderflow каждые 3 секунды.
+model ObTradeRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало минутного бакета (UTC)
+  buyVol   Float    @default(0) // Σ агрессивных покупок за минуту
+  sellVol  Float    @default(0) // Σ агрессивных продаж
+  trades   Int      @default(0) // Σ печатей (для скорости ленты)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+  @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval
+}
+
+// Rollup футпринта: объём покупок/продаж по ценовым уровням в ПЯТИМИНУТНОМ
+// бакете. Пять минут — наименьший таймфрейм графика, а все остальные (15m, 1h,
+// 4h, 12h, 1d, 1w) кратны ему, поэтому любой из них собирается из этих строк
+// точно, без огрубления.
+//
+// Сырой ObFootprint пишется на каждый тик коллектора (≈1/с) на каждый ценовой
+// уровень — на окне в 400–800 свечей это сотни тысяч строк, и раньше они
+// сворачивались заново на КАЖДЫЙ опрос (фронт дёргает orderflow раз в 3 с).
+model ObFootprintRollup {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало 5-минутного бакета (UTC)
+  price    Float
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+  @@index([bucket]) // pruneOld()
+}
+
+// Последний снапшот стакана — одна строка на (symbol, exchange). Профиль
+// текущего стакана (столбик bid/ask справа от heatmap) читается по PK вместо
+// поиска MAX(t) по сырому ObSnapshot: тот запрос выполнялся на КАЖДЫЙ опрос
+// orderflow (раз в 3 с) и дважды сканировал окно — коррелированный подзапрос
+// плюс внешняя выборка.
+//
+// levels — JSON [{ price, bidVol, askVol }] того же снапшота, что писался в
+// ObSnapshot: уровни уже отфильтрованы порогом minCoins.
+model ObLatestBook {
+  symbol   String
+  exchange String
+  t        DateTime @db.Timestamptz(3) // время снапшота
+  mid      Float
+  levels   Json
+
+  @@id([symbol, exchange])
 }
 
 // Метаданные минутного бакета: сколько снапшотов в него попало (делитель для

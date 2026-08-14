@@ -43,7 +43,10 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm install
+        # npm ci, а не npm install: ставит РОВНО то, что в lockfile, и падает
+        # при рассинхроне вместо того, чтобы молча его править — иначе CI и
+        # прод-образ могли собираться на разных версиях.
+        run: npm ci
 
       - name: Generate Prisma client
         run: npx prisma generate
