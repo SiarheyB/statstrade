@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { startRecompute } from "@/lib/recommendations/progress";
+import { recordCronRun } from "@/lib/cronHeartbeat";
 
 export const maxDuration = 60;
 
@@ -21,6 +22,10 @@ async function handle(req: Request) {
   // Через тот же job-раннер, что и админская кнопка: ночной прогон виден в
   // прогресс-баре админки, а параллельный запуск двух пересчётов исключён.
   const { started, done } = startRecompute();
+  // Отметку ставим сразу по факту вызова, а не после завершения: прогон идёт
+  // дольше, чем крон готов ждать (curl обычно рвёт соединение по --max-time),
+  // и админка должна видеть «автоматика приходила» даже в этом случае.
+  await recordCronRun("recommendations.recompute", "cron");
   const result = await done;
   return NextResponse.json({ ok: true, started, ...result });
 }

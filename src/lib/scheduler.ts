@@ -27,7 +27,11 @@ export async function runDueRecommendationsRecompute(now: Date = new Date()): Pr
   if (!isRecomputeDue(now, latest?.createdAt ?? null)) return false;
 
   const { started: didStart } = startRecompute();
-  if (didStart) console.log("[scheduler] recommendations: плановый пересчёт запущен");
+  if (didStart) {
+    const { recordCronRun } = await import("./cronHeartbeat");
+    await recordCronRun("recommendations.recompute", "scheduler");
+    console.log("[scheduler] recommendations: плановый пересчёт запущен");
+  }
   return didStart;
 }
 

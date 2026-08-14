@@ -9,12 +9,13 @@ import {
   RECOMPUTE_DELAY_MINUTES,
   nextScheduledRun,
 } from "@/lib/recommendations/schedule";
+import { getCronHeartbeat } from "@/lib/cronHeartbeat";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 async function loadStatus() {
-  const [total, bySymbol, byBias, byDirection, latest, collectorScan] = await Promise.all([
+  const [total, bySymbol, byBias, byDirection, latest, collectorScan, heartbeat] = await Promise.all([
     prisma.levelSetup.count(),
     prisma.levelSetup.findMany({ distinct: ["symbol"], select: { symbol: true } }),
     prisma.levelSetup.groupBy({ by: ["bias"], _count: { _all: true } }),
@@ -23,6 +24,7 @@ async function loadStatus() {
     // Живое состояние скана свечей на коллекторе — чтобы закачка была видна и
     // тогда, когда её начали не отсюда (суточный таймер самого коллектора).
     getCandleScanStatus(),
+    getCronHeartbeat("recommendations.recompute"),
   ]);
   return {
     total,
@@ -40,8 +42,16 @@ async function loadStatus() {
       dailyCloseUtcHour: BINANCE_DAILY_CLOSE_UTC_HOUR,
       delayMinutes: RECOMPUTE_DELAY_MINUTES,
       nextRunAt: nextScheduledRun(new Date()).toISOString(),
-      // Плановый пересчёт выполняет внутренний планировщик процесса app.
-      autoEnabled: process.env.ENABLE_SCHEDULER !== "false",
+      // Крутится ли внутренний планировщик процесса app. На самохостинге он
+      // выключен НАМЕРЕННО (ENABLE_SCHEDULER=false), и это не поломка: пересчёт
+      // там дёргает системный крон хоста. Поэтому сам по себе этот флаг ничего
+      // не говорит о том, работает ли автоматика, — судим по heartbeat ниже.
+      schedulerInProcess: process.env.ENABLE_SCHEDULER !== "false",
+      // Факт прогонов: кто и когда последний раз запускал пересчёт.
+      lastAutoRunAt: heartbeat.lastRunAt,
+      lastAutoRunSource: heartbeat.source,
+      // Тревожно только это: автоматики не видно вообще либо она отвалилась.
+      autoStale: heartbeat.lastRunAt === null || heartbeat.stale,
     },
   };
 }

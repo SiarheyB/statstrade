@@ -18,7 +18,12 @@ function status(progress: Progress, overrides: Record<string, unknown> = {}) {
       dailyCloseUtcHour: 0,
       delayMinutes: 5,
       nextRunAt: "2026-08-14T00:05:00.000Z",
-      autoEnabled: true,
+      schedulerInProcess: false,
+      // Прод-расклад: планировщик в процессе выключен, но крон хоста приходил —
+      // автоматика живая, красной плашки быть не должно.
+      lastAutoRunAt: new Date(Date.now() - 3600_000).toISOString(),
+      lastAutoRunSource: "cron",
+      autoStale: false,
     },
     ...overrides,
   };
@@ -126,7 +131,7 @@ describe("AdminRecommendations", () => {
     render(<AdminRecommendations />);
 
     // 00:05 UTC следующих суток = 03:05 при UTC+3.
-    expect(await screen.findByText(/Автопересчёт ежедневно в/)).toBeInTheDocument();
+    expect(await screen.findByText(/Автопересчёт работает/)).toBeInTheDocument();
     expect(screen.getByText("03:05")).toBeInTheDocument();
     expect(screen.getByText(/после закрытия дневной свечи Binance \(00:00 UTC\)/)).toBeInTheDocument();
   });
@@ -139,18 +144,61 @@ describe("AdminRecommendations", () => {
     expect(await screen.findByText("19:05")).toBeInTheDocument();
   });
 
-  it("warns when the in-process scheduler is disabled", async () => {
+  // ENABLE_SCHEDULER=false сам по себе НЕ повод для тревоги: на самохостинге он
+  // выключен намеренно, а пересчёт дёргает крон хоста. Красное — только когда
+  // прогонов реально нет.
+  it("не ругается на выключенный внутренний планировщик, если крон приходит", async () => {
+    render(<AdminRecommendations />);
+
+    expect(await screen.findByText(/Автопересчёт работает/)).toBeInTheDocument();
+    expect(screen.getByText(/системный крон хоста/)).toBeInTheDocument();
+    expect(screen.queryByText(/ENABLE_SCHEDULER/)).not.toBeInTheDocument();
+  });
+
+  it("предупреждает, когда автопересчёт ни разу не запускался", async () => {
     vi.stubGlobal(
       "fetch",
       mockFetch(
         status(idleProgress, {
-          schedule: { dailyCloseUtcHour: 0, delayMinutes: 5, nextRunAt: "2026-08-14T00:05:00.000Z", autoEnabled: false },
+          schedule: {
+            dailyCloseUtcHour: 0,
+            delayMinutes: 5,
+            nextRunAt: "2026-08-14T00:05:00.000Z",
+            schedulerInProcess: false,
+            lastAutoRunAt: null,
+            lastAutoRunSource: null,
+            autoStale: true,
+          },
         }),
       ),
     );
 
     render(<AdminRecommendations />);
-    expect(await screen.findByText(/Автопересчёт выключен/)).toBeInTheDocument();
+    expect(await screen.findByText(/ни разу не запускался/)).toBeInTheDocument();
+    // Подсказка ведёт к настоящей причине — задаче в crontab, а не к env-переменной.
+    expect(screen.getByText(/crontab -l \| grep recommendations/)).toBeInTheDocument();
+  });
+
+  it("предупреждает, когда прогоны прекратились", async () => {
+    vi.stubGlobal(
+      "fetch",
+      mockFetch(
+        status(idleProgress, {
+          schedule: {
+            dailyCloseUtcHour: 0,
+            delayMinutes: 5,
+            nextRunAt: "2026-08-14T00:05:00.000Z",
+            schedulerInProcess: false,
+            lastAutoRunAt: new Date(Date.now() - 3 * 24 * 3600_000).toISOString(),
+            lastAutoRunSource: "cron",
+            autoStale: true,
+          },
+        }),
+      ),
+    );
+
+    render(<AdminRecommendations />);
+    expect(await screen.findByText(/не приходил больше суток/)).toBeInTheDocument();
   });
 
   it("shows a candle download that the collector started on its own", async () => {

@@ -32,7 +32,10 @@ type Schedule = {
   dailyCloseUtcHour: number;
   delayMinutes: number;
   nextRunAt: string;
-  autoEnabled: boolean;
+  schedulerInProcess: boolean;
+  lastAutoRunAt: string | null;
+  lastAutoRunSource: "scheduler" | "cron" | null;
+  autoStale: boolean;
 };
 
 // Состояние скана дневных свечей на самом коллекторе. Показывается, даже если
@@ -73,25 +76,45 @@ function untilLabel(iso: string): string {
  * Binance закрывается в 00:00 UTC круглый год), а показываем его по часовому
  * поясу из настроек: fmtTime/fmtDateTime уважают выбранную зону, и для
  * "auto" перевод часов учитывается автоматически.
+ *
+ * Про статус автоматики: судим по ФАКТУ прогонов (CronHeartbeat), а не по
+ * ENABLE_SCHEDULER. На самохостинге внутренний планировщик выключен намеренно,
+ * а пересчёт дёргает системный крон хоста — раньше админка в этом штатном
+ * раскладе пугала красным «Автопересчёт выключен», хотя всё работало.
  */
 function ScheduleCard({ schedule }: { schedule: Schedule }) {
   const closeUtc = `${String(schedule.dailyCloseUtcHour).padStart(2, "0")}:00 UTC`;
+  const sourceLabel =
+    schedule.lastAutoRunSource === "cron" ? "системный крон хоста" : "встроенный планировщик";
   return (
     <div className="border-t border-border pt-3 space-y-1">
       <div className="flex items-center gap-2 text-sm">
-        <Clock size={14} className="text-muted shrink-0" />
-        {schedule.autoEnabled ? (
+        <Clock size={14} className={clsx("shrink-0", schedule.autoStale ? "text-loss" : "text-muted")} />
+        {schedule.lastAutoRunAt && !schedule.autoStale ? (
           <span>
-            Автопересчёт ежедневно в{" "}
-            <span className="font-medium">{fmtTime(schedule.nextRunAt)}</span> по вашему времени
+            Автопересчёт работает: последний прогон{" "}
+            <span className="font-medium">{agoLabel(schedule.lastAutoRunAt)}</span> ({sourceLabel}),
+            следующий в <span className="font-medium">{fmtTime(schedule.nextRunAt)}</span> по вашему
+            времени
+          </span>
+        ) : schedule.lastAutoRunAt ? (
+          <span className="text-loss">
+            Автопересчёт не приходил больше суток (последний раз {agoLabel(schedule.lastAutoRunAt)},{" "}
+            {sourceLabel}) — похоже, отвалился
           </span>
         ) : (
           <span className="text-loss">
-            Автопересчёт выключен (ENABLE_SCHEDULER=false) — только вручную кнопкой выше
+            Автопересчёт ни разу не запускался — пока только вручную кнопкой выше
           </span>
         )}
       </div>
-      {schedule.autoEnabled && (
+      {schedule.autoStale ? (
+        <p className="text-[11px] text-faint leading-relaxed">
+          {schedule.schedulerInProcess
+            ? "Встроенный планировщик включён — если прогонов нет, смотрите логи контейнера app на ошибки пересчёта."
+            : "Встроенный планировщик выключен (ENABLE_SCHEDULER=false) — это штатно для самохостинга: пересчёт должен дёргать системный крон хоста, задача /api/cron/recommendations (см. docs/SELF_HOSTING.md, §9.2). Проверьте на сервере: crontab -l | grep recommendations."}
+        </p>
+      ) : (
         <p className="text-[11px] text-faint leading-relaxed">
           Через {schedule.delayMinutes} мин после закрытия дневной свечи Binance ({closeUtc}) — чтобы
           коллектор успел забрать уже закрытый бар. Биржа работает по UTC и на летнее/зимнее время не

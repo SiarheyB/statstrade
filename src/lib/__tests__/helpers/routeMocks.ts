@@ -224,6 +224,11 @@ export const mockPrisma = {
     groupBy: vi.fn().mockResolvedValue([]),
     findFirst: vi.fn().mockResolvedValue(null),
   },
+
+  cronHeartbeat: {
+    findUnique: vi.fn().mockResolvedValue(null),
+    upsert: vi.fn().mockResolvedValue({}),
+  },
 };
 
 /* --- Core module mocks (auth / admin / db) --- */

@@ -5,6 +5,12 @@ vi.mock("@/lib/recommendations/recompute", () => ({
   recomputeRecommendations: vi.fn().mockResolvedValue({ symbolsScanned: 3, levelsWritten: 5 }),
 }));
 
+// Отметка «крон приходил» пишется в БД; здесь проверяем только сам эндпоинт,
+// поэтому запись мокаем (иначе тест полез бы в реальный Postgres).
+vi.mock("@/lib/cronHeartbeat", () => ({ recordCronRun: vi.fn().mockResolvedValue(undefined) }));
+
+import { recordCronRun } from "@/lib/cronHeartbeat";
+
 const base = "https://example.com/api/cron/recommendations";
 
 describe("GET/POST /api/cron/recommendations", () => {
@@ -36,5 +42,13 @@ describe("GET/POST /api/cron/recommendations", () => {
     expect(body.ok).toBe(true);
     expect(body.symbolsScanned).toBe(3);
     expect(body.levelsWritten).toBe(5);
+    // Прогон отмечен как внешний крон — на этом админка строит статус
+    // «автопересчёт работает» вместо старого «ENABLE_SCHEDULER=false».
+    expect(recordCronRun).toHaveBeenCalledWith("recommendations.recompute", "cron");
+  });
+
+  it("не отмечает прогон, если запрос не авторизован", async () => {
+    await GET(new Request(base));
+    expect(recordCronRun).not.toHaveBeenCalled();
   });
 });
