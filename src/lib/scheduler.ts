@@ -5,6 +5,32 @@
 let started = false;
 const TICK_MS = 60_000; // check every minute; per-account interval gates work
 
+/**
+ * Плановый пересчёт «Рекомендаций» — через 5 минут после закрытия дневной
+ * свечи Binance (00:00 UTC), см. lib/recommendations/schedule.ts.
+ *
+ * «Уже посчитано или нет» определяем по времени последней записи в БД, а не
+ * по флагу в памяти: так рестарт контейнера не запускает лишний прогон, а
+ * пропущенный из-за простоя слот подхватывается на ближайшем тике.
+ */
+export async function runDueRecommendationsRecompute(now: Date = new Date()): Promise<boolean> {
+  const [{ prisma }, { isRecomputeDue }, { startRecompute }] = await Promise.all([
+    import("./db"),
+    import("./recommendations/schedule"),
+    import("./recommendations/progress"),
+  ]);
+
+  const latest = await prisma.levelSetup.findFirst({
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+  if (!isRecomputeDue(now, latest?.createdAt ?? null)) return false;
+
+  const { started: didStart } = startRecompute();
+  if (didStart) console.log("[scheduler] recommendations: плановый пересчёт запущен");
+  return didStart;
+}
+
 export function startScheduler(): void {
   if (started) return;
   started = true;
@@ -20,6 +46,14 @@ export function startScheduler(): void {
       }
     } catch (err) {
       console.error("[scheduler] tick error:", (err as Error).message);
+    }
+
+    // Отдельный try: падение пересчёта рекомендаций не должно ронять тик
+    // авто-синхронизации, и наоборот.
+    try {
+      await runDueRecommendationsRecompute();
+    } catch (err) {
+      console.error("[scheduler] recommendations tick error:", (err as Error).message);
     }
   };
 

@@ -28,6 +28,12 @@ const cfg = {
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
   rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
   candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
+  // Полный скан дневных свечей по всем USDT-парам Binance spot (фича
+  // "Рекомендации", см. TRADE_RECOMMENDATIONS_PLAN.md). Выключено по
+  // умолчанию — включается явно, чтобы не менять поведение существующих
+  // деплоев без ведома.
+  scanAllUsdtPairs: (process.env.SCAN_ALL_USDT_PAIRS ?? "false") === "true",
+  allPairsScanIntervalMs: Number(process.env.ALL_PAIRS_SCAN_INTERVAL_MS ?? 24 * 3600_000),
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8080),
   metricsToken: process.env.COLLECTOR_METRICS_TOKEN ?? "",
@@ -246,6 +252,101 @@ async function backfillCandles() {
     console.log("[candles] бэкафилл завершён");
   } catch (err) {
     console.error(`[candles] бэкафилл ошибка: ${err.message}`);
+  }
+}
+
+// === Полный скан дневных свечей по всем USDT-M бессрочным фьючерсам Binance ===
+// Отдельный, гораздо более широкий скан, чем cfg.symbols/CANDLE_INTERVALS
+// выше — нужен для фичи "Рекомендации" (поиск дневных уровней/сетапов
+// пробой/ложный пробой по всем инструментам, см. TRADE_RECOMMENDATIONS_PLAN.md),
+// а не только по паре-двум, для которых собирается стакан. Именно фьючерсы,
+// не спот — торгуем и в лонг, и в шорт, спот для этого не нужен. Тянет ТОЛЬКО
+// "1d" (свечи для уровней, не для интерактивного графика) — вес запроса
+// минимальный (limit<=1500 → ~2 веса), поэтому даже 300+ пар не создают
+// ощутимой нагрузки на Binance API за один проход.
+const ALL_PAIRS_EXCHANGE = "binance-futures";
+let allPairsScanRunning = false;
+
+// Бессрочные контракты, которые нас интересуют:
+//  - PERPETUAL          — обычные крипто-бессрочные (BTCUSDT, ETHUSDT, ...);
+//  - TRADIFI_PERPETUAL  — бессрочные на традиционные активы (XAUUSDT — золото,
+//                         TSLAUSDT/AMZNUSDT/COINUSDT — акции). Методичка, по
+//                         которой ищем уровни, разбирает примеры как раз на
+//                         акциях и металлах (AMZN, XOM, NVDA, MSFT), так что
+//                         исключать их нет причин.
+// Квартальные/поставочные (CURRENT_QUARTER, NEXT_QUARTER) не берём — они
+// истекают. Статусы SETTLING (контракт доживает до расчёта) и PENDING_TRADING
+// (торги ещё не начались) тоже отсекаются — свечей "на сегодня" там нет.
+const WANTED_CONTRACT_TYPES = new Set(["PERPETUAL", "TRADIFI_PERPETUAL"]);
+
+/**
+ * Актуальный список пар с биржи. Кэша НЕТ намеренно: скан идёт раз в сутки
+ * (или по кнопке в админке), и один лишний запрос к exchangeInfo ничего не
+ * стоит, зато список всегда свежий — новые листинги попадают в выдачу сразу,
+ * а не через полсуток.
+ */
+async function fetchUsdtFuturesSymbols() {
+  const res = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo");
+  if (!res.ok) throw new Error(`exchangeInfo HTTP ${res.status}`);
+  const data = await res.json();
+  const all = data.symbols ?? [];
+  const tradable = all.filter(
+    (s) => s.status === "TRADING" && s.quoteAsset === "USDT" && WANTED_CONTRACT_TYPES.has(s.contractType),
+  );
+  const crypto = tradable.filter((s) => s.contractType === "PERPETUAL").length;
+  console.log(
+    `[recommendations] exchangeInfo: ${all.length} символов, берём ${tradable.length} ` +
+      `(крипто ${crypto} + tradfi ${tradable.length - crypto})`,
+  );
+  return tradable.map((s) => s.symbol);
+}
+
+// Раз в сутки: список USDT-M пар + дневные свечи по каждой. Последовательно с
+// небольшой паузой между запросами — вежливо к rate-limit Binance, спешить
+// некуда (свечи дневные, чаще обновлять их бессмысленно).
+// Прогресс скана — его читает приложение через GET /scan-daily, чтобы
+// показать в админке этап «Загружаем свечи с Binance» до пересчёта уровней.
+const allPairsScanState = {
+  running: false,
+  done: 0,
+  total: 0,
+  startedAt: null,
+  finishedAt: null,
+  error: null,
+};
+
+async function scanAllUsdtPairsDaily() {
+  if (allPairsScanRunning) return;
+  allPairsScanRunning = true;
+  allPairsScanState.running = true;
+  allPairsScanState.done = 0;
+  allPairsScanState.total = 0;
+  allPairsScanState.startedAt = new Date().toISOString();
+  allPairsScanState.finishedAt = null;
+  allPairsScanState.error = null;
+  try {
+    const symbols = await fetchUsdtFuturesSymbols();
+    allPairsScanState.total = symbols.length;
+    console.log(`[recommendations] скан дневных свечей: ${symbols.length} USDT-M фьючерсов`);
+    let done = 0;
+    for (const symbol of symbols) {
+      try {
+        await fetchAndStoreCandlesFor(symbol, ALL_PAIRS_EXCHANGE, "1d");
+      } catch (err) {
+        console.error(`[recommendations] ${symbol} 1d: ${err.message}`);
+      }
+      done++;
+      allPairsScanState.done = done;
+      await new Promise((r) => setTimeout(r, 150));
+    }
+    console.log(`[recommendations] скан завершён: ${done}/${symbols.length} пар`);
+  } catch (err) {
+    allPairsScanState.error = err.message;
+    console.error(`[recommendations] скан ошибка: ${err.message}`);
+  } finally {
+    allPairsScanRunning = false;
+    allPairsScanState.running = false;
+    allPairsScanState.finishedAt = new Date().toISOString();
   }
 }
 
@@ -889,6 +990,27 @@ const server = http.createServer(async (req, res) => {
     const healthy = feeds.some((f) => f.book.synced);
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
     res.end(JSON.stringify({ healthy, feeds: status }));
+  } else if (url === "/scan-daily") {
+    // Загрузка свежих дневных свечей с Binance по запросу приложения: кнопка
+    // «Пересчитать сейчас» и ночной плановый прогон сначала дёргают этот
+    // эндпоинт, чтобы уровни считались по только что закрытому бару, а не по
+    // тому, что осталось от прошлого прохода суточного таймера.
+    // Защита — тот же bearer-токен, что у /metrics.
+    const auth = req.headers["authorization"] ?? "";
+    if (!cfg.metricsToken || auth !== `Bearer ${cfg.metricsToken}`) {
+      res.writeHead(cfg.metricsToken ? 401 : 404);
+      res.end();
+      return;
+    }
+    // POST запускает скан (если он уже идёт — просто отдаём его прогресс),
+    // GET только отдаёт статус для поллинга.
+    let started = false;
+    if (req.method === "POST" && !allPairsScanRunning) {
+      started = true;
+      scanAllUsdtPairsDaily(); // намеренно без await: клиент опрашивает статус
+    }
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ started, ...allPairsScanState }));
   } else if (url === "/metrics") {
     // Защищённый эндпоинт для админ-панели Next.js (раздел «Карта ордеров»).
     // Bearer-токен COLLECTOR_METRICS_TOKEN. Если токен не задан — 404 (закрыто).
@@ -1060,12 +1182,21 @@ const candleTimer = setInterval(fetchAndStoreCandles, 60_000);
 setTimeout(fetchAndStoreCandles, 15_000);
 setTimeout(backfillCandles, 30_000);
 
+// Полный скан USDT-пар (фича "Рекомендации") — раз в сутки, первый запуск
+// через 60с (даём стартовать обычному бэкафиллу первым).
+let allPairsScanTimer = null;
+if (cfg.scanAllUsdtPairs) {
+  allPairsScanTimer = setInterval(scanAllUsdtPairsDaily, cfg.allPairsScanIntervalMs);
+  setTimeout(scanAllUsdtPairsDaily, 60_000);
+}
+
 async function shutdown() {
   clearInterval(writeTimer);
   clearInterval(flushTimer.timer);
   clearInterval(pruneTimer);
   clearInterval(configTimer);
   clearInterval(candleTimer);
+  if (allPairsScanTimer) clearInterval(allPairsScanTimer);
   for (const f of feeds) f.book.close();
   for (const tf of tradeFeeds) tf.trades.close();
   server.close();
@@ -1081,3 +1212,4 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
 export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
+export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };

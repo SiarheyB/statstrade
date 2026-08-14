@@ -1,0 +1,43 @@
+import { NextResponse } from "next/server";
+import { prisma } from "@/lib/db";
+import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { recommendationsAccessError } from "@/lib/recommendationsAccess";
+
+const EXCHANGE = "binance-futures";
+const INTERVAL = "1d";
+
+export async function GET(req: Request, { params }: { params: Promise<{ symbol: string }> }) {
+  const user = await getAuthUser();
+  if (!user) return unauthorized();
+
+  const denied = await recommendationsAccessError(user);
+  if (denied) return denied;
+
+  const { symbol: rawSymbol } = await params;
+  const symbol = rawSymbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (symbol.length < 5) {
+    return badRequest("Некорректный символ: минимальная длина 5 символов");
+  }
+
+  try {
+    // Только по убыванию: `asc` + `take` отдал бы САМЫЕ СТАРЫЕ свечи, и на
+    // картинке в карточке был бы кусок истории годичной давности вместо
+    // подхода к уровню. Разворачиваем обратно в хронологический порядок —
+    // его ждёт отрисовка на клиенте.
+    const candles = await prisma.obCandle.findMany({
+      where: { symbol, exchange: EXCHANGE, interval: INTERVAL },
+      orderBy: { t: "desc" },
+      take: 300,
+    });
+    return NextResponse.json({
+      symbol,
+      exchange: EXCHANGE,
+      interval: INTERVAL,
+      candles: candles
+        .reverse()
+        .map((c) => ({ t: c.t.getTime(), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })),
+    });
+  } catch (err) {
+    return serverError((err as Error).message);
+  }
+}

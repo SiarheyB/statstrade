@@ -216,6 +216,14 @@ export const mockPrisma = {
   obCandle: {
     findMany: vi.fn().mockResolvedValue([]),
   },
+  levelSetup: {
+    findMany: vi.fn().mockResolvedValue([]),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    createMany: vi.fn().mockResolvedValue({ count: 0 }),
+    count: vi.fn().mockResolvedValue(0),
+    groupBy: vi.fn().mockResolvedValue([]),
+    findFirst: vi.fn().mockResolvedValue(null),
+  },
 };
 
 /* --- Core module mocks (auth / admin / db) --- */
