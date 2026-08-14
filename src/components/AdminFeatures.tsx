@@ -20,10 +20,15 @@ type FeatureRow = {
 // общей странице их не показываем — у них теперь свой дублирующий UI на
 // /admin/forex (AdminForexConfig.tsx), рядом с остальными настройками
 // форекса, чтобы не искать их среди несвязанных фич.
-// tradeRecommendations: свой дублирующий UI на /admin/recommendations
-// (AdminRecommendations.tsx), рядом со статусом пересчёта и кнопкой
-// «Пересчитать сейчас» — тот же принцип, что у forex выше.
-const HIDDEN_HERE = new Set(["forex", "forexPublicAccess", "tradeRecommendations"]);
+// tradeRecommendations/tradeRecommendationsPublicAccess: свой дублирующий UI
+// на /admin/recommendations (AdminRecommendations.tsx), рядом со статусом
+// пересчёта и кнопкой «Пересчитать сейчас» — тот же принцип, что у forex выше.
+const HIDDEN_HERE = new Set([
+  "forex",
+  "forexPublicAccess",
+  "tradeRecommendations",
+  "tradeRecommendationsPublicAccess",
+]);
 
 export default function AdminFeatures() {
   const [rows, setRows] = useState<FeatureRow[]>([]);

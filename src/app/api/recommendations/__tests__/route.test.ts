@@ -37,11 +37,11 @@ describe("GET /api/recommendations", () => {
     expect(res.status).toBe(401);
   });
 
-  it("returns 404 when the feature is disabled", async () => {
+  it("returns 403 when the feature is disabled", async () => {
     asUser();
     vi.mocked(featureConfig.getFeatureConfig).mockResolvedValue({ enabled: false } as any);
     const res = await GET(new Request(base));
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
   });
 
   it("returns setups on the happy path", async () => {

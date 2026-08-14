@@ -5,8 +5,8 @@ import type { DailyCandle } from "../levels";
 const DAY_MS = 86_400_000;
 const START = Date.UTC(2026, 0, 1);
 
-function candle(dayOffset: number, o: number, h: number, l: number, c: number): DailyCandle {
-  return { t: START + dayOffset * DAY_MS, o, h, l, c };
+function candle(dayOffset: number, o: number, h: number, l: number, c: number, v?: number): DailyCandle {
+  return { t: START + dayOffset * DAY_MS, o, h, l, c, v };
 }
 
 describe("computeBreakoutSignals", () => {
@@ -83,6 +83,69 @@ describe("computeBreakoutSignals", () => {
     expect(signals.bias).toBe("breakout");
     // Уровень ниже цены → пробой вниз = шорт.
     expect(signals.direction).toBe("short");
+  });
+});
+
+describe("computeBreakoutSignals — volume", () => {
+  const LEVEL = 120;
+  const ATR = 4;
+
+  it("tags volume_supports_impulse when recent bars trade well above prior volume", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 100, 102, 98, 100, 1000));
+    // Последние 3 бара — накопление под уровнем на объёме заметно выше фона.
+    for (let i = 10; i < 15; i++) candles.push(candle(i, 118.5, 119.5, 118, 119, 1000));
+    candles[12] = candle(12, 118.5, 119.5, 118, 119, 2000);
+    candles[13] = candle(13, 118.5, 119.5, 118, 119, 2200);
+    candles[14] = candle(14, 118.5, 119.5, 118, 119, 2100);
+
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(signals.for).toContain("volume_supports_impulse");
+  });
+
+  it("tags volume_spike_on_pierce when today's bar pierces the level on a volume spike", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 100, 102, 98, 100, 1000));
+    // Сегодняшний бар: хай проколол уровень 120, но закрылись обратно ниже — с всплеском объёма.
+    candles.push(candle(10, 118, 121, 117, 119, 5000));
+
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(signals.against).toContain("volume_spike_on_pierce");
+  });
+
+  it("does not tag volume signals when no source provides volume", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 100, 102, 98, 100));
+    candles.push(candle(10, 118, 121, 117, 119));
+
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(signals.for).not.toContain("volume_supports_impulse");
+    expect(signals.against).not.toContain("volume_spike_on_pierce");
+  });
+});
+
+describe("computeBreakoutSignals — paranormal_no_pullback", () => {
+  const LEVEL = 120;
+  const ATR = 4;
+
+  it("tags paranormal_no_pullback when a huge bar approaches the level and closes at its own high with no pullback", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 9; i++) candles.push(candle(i, 100, 102, 98, 100));
+    // Диапазон 10 (>= 2*ATR=8), закрытие в самом хае — без внутрибарного отката.
+    candles.push(candle(9, 106, 116, 106, 115.8));
+
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(signals.for).toContain("paranormal_no_pullback");
+  });
+
+  it("does not tag paranormal_no_pullback when the bar pulled back from its extreme", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 9; i++) candles.push(candle(i, 100, 102, 98, 100));
+    // Тот же диапазон, но закрытие в середине бара — был откат внутри дня.
+    candles.push(candle(9, 106, 116, 106, 111));
+
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(signals.for).not.toContain("paranormal_no_pullback");
   });
 });
 

@@ -6,13 +6,15 @@
 
 import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { detectLevels, filterLevelsNearPrice, computeAtr, type DailyCandle } from "./levels";
+import { detectLevels, filterLevelsNearPrice, computeAtr, detectTrend, type DailyCandle } from "./levels";
 import { computeBreakoutSignals } from "./breakoutSignals";
 import {
   assessLevelQuality,
   passesQualityGate,
   qualityScore,
   serializeQuality,
+  DEFAULT_THRESHOLDS,
+  LOCAL_THRESHOLDS,
   type LevelQuality,
 } from "./quality";
 
@@ -82,7 +84,7 @@ async function loadCandles(symbol: string, now = Date.now()): Promise<DailyCandl
     take: CANDLE_DEPTH,
   });
   return dropUnclosedBar(
-    rows.reverse().map((r) => ({ t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c })),
+    rows.reverse().map((r) => ({ t: r.t.getTime(), o: r.o, h: r.h, l: r.l, c: r.c, v: r.v })),
     now,
   );
 }
@@ -148,6 +150,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
 
     const levels = detectLevels(candles);
     const nearby = filterLevelsNearPrice(levels, currentPrice, atr, maxDistanceAtr);
+    const trend = detectTrend(candles);
 
     // Запас хода считаем только до ЗНАЧИМЫХ уровней: детектор находит их
     // десятками на инструмент, и по всем подряд «следующий уровень» всегда
@@ -163,16 +166,46 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         continue;
       }
 
+      // ЛП торгуем только ПО тренду (конспект: "Ліпше працювати ЛП по
+      // тренду") — в нисходящем тренде это шорт от уровня сверху (более
+      // ранний откат слева), в восходящем — лонг от уровня снизу.
+      // Контр-трендовые ЛП (например "ЛП в лонг" посреди сильного падения)
+      // не доходят даже до фильтра качества. При "range" (тренд не читается)
+      // это правило не применяем вовсе — старое поведение как fallback.
+      if (signals.bias === "false_breakout" && trend !== "range") {
+        const trendDirection = trend === "down" ? "short" : "long";
+        if (signals.direction !== trendDirection) {
+          rejected.counter_trend = (rejected.counter_trend ?? 0) + 1;
+          continue;
+        }
+        // Источник уровня — только настоящий прошлый откат структуры
+        // ("слева ищем другие откаты"), а не любой близкий уровень.
+        if (level.type !== "retracement" && level.type !== "structure_break") {
+          rejected.not_retracement_source = (rejected.not_retracement_source ?? 0) + 1;
+          continue;
+        }
+        // Дальний ретест: последнее касание уровня — не раньше 10 дней назад.
+        const daysSinceTouch = (candlesTo.getTime() - level.lastTouchedAt) / DAY_MS;
+        if (daysSinceTouch < 10) {
+          rejected.retest_too_recent = (rejected.retest_too_recent ?? 0) + 1;
+          continue;
+        }
+      }
+
       // Фильтр качества: уровень без запилов, с пустотой за ним, к которому
-      // вчерашний день подошёл вплотную (см. quality.ts).
+      // вчерашний день подошёл вплотную (см. quality.ts). Для local_stop —
+      // облегчённые окна (LOCAL_THRESHOLDS): уровню несколько дней, а не
+      // месяцы, и полная история просто нерелевантна для него.
+      const thresholds = level.type === "local_stop" ? LOCAL_THRESHOLDS : DEFAULT_THRESHOLDS;
       const quality = assessLevelQuality(
         candles,
         level.price,
         atr,
         currentPrice,
         significantLevels.filter((p) => p !== level.price),
+        thresholds,
       );
-      const gate = passesQualityGate(quality, signals.bias, { for: signals.for, against: signals.against });
+      const gate = passesQualityGate(quality, signals.bias, { for: signals.for, against: signals.against }, thresholds);
       if (!gate.ok) {
         for (const reason of gate.rejectedBy) rejected[reason] = (rejected[reason] ?? 0) + 1;
         continue;
@@ -192,7 +225,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         // ставится стрелка и подпись с датой.
         bsuAt: new Date(level.formedAt),
         quality,
-        score: qualityScore(quality, level.strength),
+        score: qualityScore(quality, level.strength, signals.bias),
         atr,
         currentPrice,
         candlesFrom,

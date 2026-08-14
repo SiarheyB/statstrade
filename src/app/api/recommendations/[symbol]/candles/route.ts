@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { getFeatureConfig } from "@/lib/featureConfig";
-
-function featureDisabled() {
-  return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
-}
+import { recommendationsAccessError } from "@/lib/recommendationsAccess";
 
 const EXCHANGE = "binance-futures";
 const INTERVAL = "1d";
@@ -14,8 +10,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ symbol: 
   const user = await getAuthUser();
   if (!user) return unauthorized();
 
-  const feature = await getFeatureConfig("tradeRecommendations");
-  if (!feature.enabled) return featureDisabled();
+  const denied = await recommendationsAccessError(user);
+  if (denied) return denied;
 
   const { symbol: rawSymbol } = await params;
   const symbol = rawSymbol.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -39,7 +35,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ symbol: 
       interval: INTERVAL,
       candles: candles
         .reverse()
-        .map((c) => ({ t: c.t.getTime(), o: c.o, h: c.h, l: c.l, c: c.c })),
+        .map((c) => ({ t: c.t.getTime(), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })),
     });
   } catch (err) {
     return serverError((err as Error).message);

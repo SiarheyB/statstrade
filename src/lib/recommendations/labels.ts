@@ -6,10 +6,13 @@
 export const LEVEL_TYPE_LABELS: Record<string, string> = {
   break_point: "точка излома тренда",
   parabar: "от параБАРа",
+  structure_break: "подтверждённый слом структуры",
+  retracement: "откат",
   mirror: "зеркальный",
   historical: "исторический",
   gap: "GAP",
   range_border: "граница range",
+  local_stop: "локальная опорная точка",
 };
 
 export function levelTypeLabel(type: string): string {
@@ -30,6 +33,7 @@ export function directionLabel(direction: string | null | undefined): string {
 export const REJECT_REASON_LABELS: Record<string, string> = {
   close_far_from_level: "день закрылся далеко от уровня",
   did_not_reach_level: "вчера до уровня не дошли",
+  close_near_level: "вчера подошли слишком близко для ЛП (нет разгона на прокол)",
   level_chopped: "уровень распилен",
   too_many_false_breakouts: "слишком много ложных пробоев",
   deep_false_breakout: "был глубокий ложный пробой",
@@ -37,6 +41,9 @@ export const REJECT_REASON_LABELS: Record<string, string> = {
   no_runway: "нет запаса хода до следующего уровня",
   no_breakout_preconditions: "нет предпосылок к пробою (подход не спокойный)",
   no_false_breakout_preconditions: "нет предпосылок к ЛП (подход не быстрый)",
+  counter_trend: "ЛП против глобального тренда",
+  not_retracement_source: "уровень не от отката структуры",
+  retest_too_recent: "уровень касали меньше 10 дней назад",
 };
 
 export function rejectReasonLabel(key: string): string {
@@ -54,6 +61,9 @@ export const SIGNAL_LABELS: Record<string, string> = {
   near_retest: "недавний ретест уровня",
   far_retest: "дальний ретест (>30 дней)",
   no_reaction_to_false_breakout: "нет реакции на прошлый ложный пробой",
+  volume_supports_impulse: "объём подтверждает импульс",
+  volume_spike_on_pierce: "всплеск объёма на проколе уровня",
+  paranormal_no_pullback: "паранормальный бар без отката",
 };
 
 export function signalLabel(key: string): string {

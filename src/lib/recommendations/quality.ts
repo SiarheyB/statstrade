@@ -37,10 +37,29 @@ export interface LevelQuality {
   closeDistanceAtr: number;
   /** Дотянулся ли вчерашний бар до уровня (хай/лоу в пределах допуска). */
   touched: boolean;
+  /**
+   * Насколько хай/лоу вчерашнего бара НЕ дотянулся до уровня, в ATR (та же
+   * величина, что стоит за touched, но со знаком и не булева: отрицательная,
+   * если бар уже пробил уровень). Для ЛП это ключевая метрика подхода:
+   * конспект требует, чтобы вчера бар остановился ДАЛЕКО (обычно ~1×ATR) от
+   * уровня — тогда сегодняшний бар должен пройти весь этот путь, проколоть
+   * уровень и вернуться, а не просто чуть подрасти рядом с ним.
+   */
+  approachGapAtr: number;
   /** Размер последних баров подхода относительно ATR. */
   approachRatio: number;
   /** Был ли гэп в сторону уровня среди последних баров. */
   gapApproach: boolean;
+  /**
+   * Чистое смещение цены за последние fastApproachWindow баров, в ATR —
+   * "довгий безвідкатний рух" из конспекта. В отличие от approachRatio
+   * (средний размер только 3 последних баров, легко ложно срабатывает на
+   * шумном хвосте долгого пологого "закруглення" к уровню — плюс для
+   * ПРОБОЯ, а не предпосылка ЛП), это смотрит на весь путь: медленный
+   * многодневный подход даёт маленькое netMove, даже если пара последних
+   * баров случайно крупнее обычного.
+   */
+  approachNetMoveAtr: number;
 }
 
 export interface QualityThresholds {
@@ -63,10 +82,23 @@ export interface QualityThresholds {
   maxContamination: number;
   minRunwayAtr: number;
   maxCloseDistanceAtr: number;
+  /**
+   * Для ЛП: вчерашний хай/лоу должен НЕ дотягивать до уровня минимум на
+   * столько ATR — сегодняшний бар обязан пройти этот путь целиком, проколоть
+   * уровень и вернуться, а не просто закрыться рядом. Противоположность
+   * maxCloseDistanceAtr (который про пробой: там нужно закрытие ВПЛОТНУЮ).
+   */
+  minFalseBreakoutApproachGapAtr: number;
   /** Подход «на малых барах» — средний диапазон не больше этого × ATR. */
   smallBarsRatio: number;
   /** Подход «на больших барах» — средний диапазон не меньше этого × ATR. */
   bigBarsRatio: number;
+  /** Сколько баров смотрим для approachNetMoveAtr (см. LevelQuality). */
+  fastApproachWindow: number;
+  /** ЛП: минимальное чистое смещение за fastApproachWindow баров, в ATR —
+   *  порог "довгого безвідкатного руху", отделяющий настоящий быстрый заход
+   *  от многодневного пологого закругления к уровню. */
+  minFastApproachNetMoveAtr: number;
 }
 
 // Пороги откалиброваны на реальной выдаче Binance USDT-M (526 пар): из ~2000
@@ -77,7 +109,12 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // как уровень вёл себя на подходе, а не про всю историю инструмента.
   window: 60,
   contaminationWindow: 120,
-  minPierceAtr: 0.25,
+  // Конспект: "неглибокий ЛП це розмір стопа (до 10-15% АТР)" — порог шума
+  // должен быть НИЖЕ верхней границы "неглубокого" ЛП, иначе как раз
+  // неглубокие проколы (самые частые и самые говорящие) тонут в шуме и
+  // никогда не попадают в falseBreakouts. Раньше здесь стояло 0.25 — выше
+  // всего диапазона "неглубокого" ЛП по документу.
+  minPierceAtr: 0.08,
   deadbandAtr: 0.1,
   contaminationZoneAtr: 1,
   touchToleranceAtr: 0.25,
@@ -93,8 +130,33 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // Док: далёкое закрытие — 0.5+ ATR до уровня. Нам нужен день, который
   // закрылся ВПЛОТНУЮ, поэтому берём вдвое строже.
   maxCloseDistanceAtr: 0.25,
+  // Для ЛП — обратное требование: вчера бар должен был остановиться далеко
+  // ОТ уровня, целый ATR, чтобы сегодняшний бар делал весь путь + прокол +
+  // возврат за один день (а не просто чуть доставал до уровня).
+  minFalseBreakoutApproachGapAtr: 1,
   smallBarsRatio: 0.8,
   bigBarsRatio: 1.2,
+  // Разделяет реальный "довгий безвідкатний рух" от многодневного пологого
+  // закругления к уровню (плюс для ПРОБОЯ, не для ЛП). На реальной выдаче
+  // (10 инструментов, размеченных вручную) чистое разделение: у ложных
+  // срабатываний ("закругление") netMove за 10 баров не превышал ~1.1×ATR,
+  // у настоящих быстрых подходов — не ниже ~2.3×ATR. Порог 1.5 — с запасом
+  // посередине.
+  fastApproachWindow: 10,
+  minFastApproachNetMoveAtr: 1.5,
+};
+
+// Для local_stop (см. levels.ts): уровню всего 1-10 дней, а не месяцы. Гейт
+// на DEFAULT_THRESHOLDS.window/contaminationWindow (60/120 дней) смотрел бы на
+// историю, которая ЗАВЕДОМО старше самого уровня — включая, например, обвал,
+// после которого уровень и образовался, засчитывая его как "запил"/"грязную
+// зону", хотя тот вообще не имеет отношения к этой конкретной опорной точке.
+// Остальные пороги те же — сама методика оценки чистоты не меняется, меняется
+// только окно, в котором её применять.
+export const LOCAL_THRESHOLDS: QualityThresholds = {
+  ...DEFAULT_THRESHOLDS,
+  window: 10,
+  contaminationWindow: 15,
 };
 
 function mean(xs: number[]): number {
@@ -198,6 +260,16 @@ export function runwayAtr(levelPrice: number, significantLevels: number[], atr: 
   return Math.abs(nearest - levelPrice) / atr;
 }
 
+// Чистое смещение цены за последние `window` баров, в ATR — см. LevelQuality.
+// approachNetMoveAtr. Не привязано к направлению уровня: это просто модуль
+// пройденного пути, конспект говорит "довгий безвідкатний рух" безотносительно
+// к тому, куда именно он идёт.
+function netMoveAtr(candles: DailyCandle[], atr: number, window: number): number {
+  if (atr <= 0 || candles.length === 0) return 0;
+  const win = candles.slice(-window);
+  return Math.abs(win[win.length - 1].c - win[0].o) / atr;
+}
+
 // Гэп в сторону уровня среди последних баров: открытие оторвалось от
 // предыдущего закрытия и сдвинуло цену к уровню (для ЛП — быстрый подход).
 function hasGapApproach(candles: DailyCandle[], levelPrice: number, atr: number, minGapAtr = 0.3): boolean {
@@ -239,8 +311,10 @@ export function assessLevelQuality(
     runwayAtr: runwayAtr(levelPrice, significantLevels, atr, side),
     closeDistanceAtr: Math.abs(last.c - levelPrice) / atr,
     touched: touchDistance <= atr * th.touchToleranceAtr,
+    approachGapAtr: touchDistance / atr,
     approachRatio: mean(approach3.map((c) => c.h - c.l)) / atr,
     gapApproach: hasGapApproach(candles, levelPrice, atr),
+    approachNetMoveAtr: netMoveAtr(candles, atr, th.fastApproachWindow),
   };
 }
 
@@ -258,6 +332,7 @@ export function serializeQuality(q: LevelQuality): StoredQuality {
 export type RejectReason =
   | "close_far_from_level"
   | "did_not_reach_level"
+  | "close_near_level"
   | "level_chopped"
   | "too_many_false_breakouts"
   | "deep_false_breakout"
@@ -273,13 +348,18 @@ export interface GateResult {
 
 /**
  * Пропускает только «готовые сегодня» уровни. Проверки общие для обоих
- * сетапов (чистота уровня + вчерашний день вплотную), плюс требования,
- * специфичные для сетапа:
+ * сетапов (чистота уровня, запас хода), плюс требования, специфичные для
+ * сетапа:
  *
- *  - пробой: обязательна низкая волатильность подхода — малые бары и/или
- *    накопление/поджатие перед уровнем (твх.pdf, обязательные условия);
- *  - ложный пробой: наоборот, нужен быстрый подход — большие бары, гэп или
- *    длинное безоткатное движение (алгоритм.pdf, «предпосылки к отбою»).
+ *  - пробой: закрытие ВПЛОТНУЮ к уровню (maxCloseDistanceAtr) + обязательна
+ *    низкая волатильность подхода — малые бары и/или накопление/поджатие
+ *    перед уровнем (твх.pdf, обязательные условия);
+ *  - ложный пробой: наоборот, вчерашний бар должен был остановиться ДАЛЕКО
+ *    от уровня (minFalseBreakoutApproachGapAtr) — весь путь до уровня,
+ *    прокол и возврат должен сделать сегодняшний бар — плюс быстрый подход:
+ *    большие бары, гэп или длинное безоткатное движение (алгоритм.pdf,
+ *    «предпосылки к отбою»). Близкое вчерашнее закрытие для ЛП — не плюс, а
+ *    минус: разгона для прокола и возврата за один день уже не остаётся.
  */
 export function passesQualityGate(
   q: LevelQuality,
@@ -289,8 +369,6 @@ export function passesQualityGate(
 ): GateResult {
   const rejectedBy: RejectReason[] = [];
 
-  if (q.closeDistanceAtr > th.maxCloseDistanceAtr) rejectedBy.push("close_far_from_level");
-  if (!q.touched) rejectedBy.push("did_not_reach_level");
   if (q.crossings > th.maxCrossings) rejectedBy.push("level_chopped");
   if (q.falseBreakouts > th.maxFalseBreakouts) rejectedBy.push("too_many_false_breakouts");
   if (q.deepestFalseBreakoutAtr > th.deepFalseBreakoutAtr) rejectedBy.push("deep_false_breakout");
@@ -298,17 +376,21 @@ export function passesQualityGate(
   if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");
 
   if (bias === "breakout") {
+    if (q.closeDistanceAtr > th.maxCloseDistanceAtr) rejectedBy.push("close_far_from_level");
+    if (!q.touched) rejectedBy.push("did_not_reach_level");
     const calmApproach =
       q.approachRatio <= th.smallBarsRatio ||
       signals.for.includes("accumulation_before_level") ||
       signals.for.includes("small_bars_approach");
     if (!calmApproach || q.gapApproach) rejectedBy.push("no_breakout_preconditions");
   } else {
-    const fastApproach =
-      q.approachRatio >= th.bigBarsRatio ||
-      q.gapApproach ||
-      signals.against.includes("big_bars_approach") ||
-      signals.against.includes("long_move_no_accumulation");
+    if (q.approachGapAtr < th.minFalseBreakoutApproachGapAtr) rejectedBy.push("close_near_level");
+    // НЕ approachRatio/big_bars_approach (последние 3 бара) — многодневное
+    // пологое "закруглення" к уровню легко даёт пару случайно более крупных
+    // баров в конце и ложно проходит эту проверку, хотя реального "довгого
+    // безвідкатного руху" там не было (см. approachNetMoveAtr — чистое
+    // смещение за весь подход, а не шум последних баров).
+    const fastApproach = q.approachNetMoveAtr >= th.minFastApproachNetMoveAtr || q.gapApproach;
     if (!fastApproach) rejectedBy.push("no_false_breakout_preconditions");
   }
 
@@ -316,12 +398,18 @@ export function passesQualityGate(
 }
 
 /**
- * Ранжирование прошедших отбор: чем ближе вчерашнее закрытие к уровню, чище
- * история и больше запас хода — тем выше. Нужно, чтобы из прошедших гейт
- * оставить в выдаче только несколько лучших инструментов.
+ * Ранжирование прошедших отбор: чище история и больше запас хода — тем выше;
+ * а вот "подход" считается по-разному для двух сетапов (см. passesQualityGate)
+ * — для пробоя чем ближе вчерашнее закрытие к уровню, тем лучше, для ЛП
+ * наоборот: чем дальше вчера остановились от уровня, тем чище будет разгон
+ * сегодняшнего прокола и возврата. Нужно, чтобы из прошедших гейт оставить в
+ * выдаче только несколько лучших инструментов.
  */
-export function qualityScore(q: LevelQuality, strength: number): number {
-  const closeness = 1 - Math.min(1, q.closeDistanceAtr / DEFAULT_THRESHOLDS.maxCloseDistanceAtr);
+export function qualityScore(q: LevelQuality, strength: number, bias: "breakout" | "false_breakout" = "breakout"): number {
+  const closeness =
+    bias === "breakout"
+      ? 1 - Math.min(1, q.closeDistanceAtr / DEFAULT_THRESHOLDS.maxCloseDistanceAtr)
+      : Math.min(1, q.approachGapAtr / (DEFAULT_THRESHOLDS.minFalseBreakoutApproachGapAtr * 2));
   const clean = 1 - Math.min(1, q.crossings / (DEFAULT_THRESHOLDS.maxCrossings + 1));
   const empty = 1 - Math.min(1, q.contamination / DEFAULT_THRESHOLDS.maxContamination);
   const runway = Math.min(1, (Number.isFinite(q.runwayAtr) ? q.runwayAtr : 5) / 5);

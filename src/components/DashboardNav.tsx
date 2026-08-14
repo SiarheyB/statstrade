@@ -61,7 +61,13 @@ function isNewsRoute(pathname: string): boolean {
 const SERVICE_CHILDREN = [
   { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
   { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
-  { href: "/dashboard/recommendations", key: "nav.recommendations", icon: Sparkles, featureKey: "tradeRecommendations" },
+  {
+    href: "/dashboard/recommendations",
+    key: "nav.recommendations",
+    icon: Sparkles,
+    featureKey: "tradeRecommendations",
+    userOnlyFeatureKey: "tradeRecommendationsPublicAccess",
+  },
   // featureKey: скрыт для ВСЕХ (включая админа), когда общий выключатель
   // "forex" выключен. userOnlyFeatureKey: скрыт только для НЕ-админов, когда
   // "forexPublicAccess" выключен (админ видит раздел в любом случае).

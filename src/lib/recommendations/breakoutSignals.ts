@@ -139,6 +139,43 @@ export function computeBreakoutSignals(candles: DailyCandle[], levelPrice: numbe
     }
   }
 
+  // Объём — только если источник его вообще отдаёт (историческим свечам он
+  // может быть не проставлен, тогда все v будут 0/undefined).
+  const hasVolume = candles.some((c) => (c.v ?? 0) > 0);
+  if (hasVolume) {
+    // "Піддержується імпульсний хід" — последние бары идут объёмом заметно
+    // выше среднего фона, подтверждая, что за подходом стоит реальный интерес.
+    const recentVol = mean(approach3.map((c) => c.v ?? 0));
+    const priorVol = mean(candles.slice(-13, -3).map((c) => c.v ?? 0));
+    if (priorVol > 0 && recentVol >= priorVol * 1.2) forFactors.push("volume_supports_impulse");
+
+    // "Якщо у нас формується добрий ЛП ви завжди бачите всплеск об'ємів" —
+    // сегодняшний бар проколол уровень хаем/лоу, но закрылся обратно
+    // (классический прокол), и сделал это на объёме выше фона.
+    const levelAbove = levelPrice >= last.c;
+    const piercedToday = levelAbove ? last.h > levelPrice && last.c < levelPrice : last.l < levelPrice && last.c > levelPrice;
+    if (piercedToday) {
+      const priorVolForPierce = mean(history.slice(-10).map((c) => c.v ?? 0));
+      if (priorVolForPierce > 0 && (last.v ?? 0) >= priorVolForPierce * 1.3) {
+        againstFactors.push("volume_spike_on_pierce");
+      }
+    }
+  }
+
+  // Паранормальный бар подходит к уровню, но закрывается у самого своего
+  // хая/лоу (без внутрибарного отката) — конспект называет это исключением
+  // из "паранормальные бары = за ЛП": если отката внутри бара не было, это
+  // говорит за продолжение, а не разворот.
+  const lastRange = last.h - last.l;
+  if (lastRange >= atr * 2) {
+    const levelAbove = levelPrice >= last.c;
+    const closeNearHigh = last.h - last.c <= lastRange * 0.1;
+    const closeNearLow = last.c - last.l <= lastRange * 0.1;
+    const movingUpToLevel = levelAbove && closeNearHigh;
+    const movingDownToLevel = !levelAbove && closeNearLow;
+    if (movingUpToLevel || movingDownToLevel) forFactors.push("paranormal_no_pullback");
+  }
+
   const bias: Bias =
     forFactors.length > againstFactors.length
       ? "breakout"

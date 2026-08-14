@@ -26,14 +26,17 @@ describe('features - FEATURE_DEFAULTS', () => {
       'forexPublicAccess',
       'imbalanceIndicator',
       'tradeRecommendations',
+      'tradeRecommendationsPublicAccess',
     ]);
   });
 
   // forex/forexPublicAccess (админ-переключатели раздела «Форекс», см.
-  // /admin/forex) — единственные фичи без тюнинговых полей: только
-  // enabled/disabled, никаких числовых параметров. Поэтому "at least one
-  // numeric field" проверяем не для всех фич подряд, а с явным исключением.
-  const PURE_TOGGLE_KEYS = new Set<FeatureKey>(['forex', 'forexPublicAccess']);
+  // /admin/forex) и tradeRecommendationsPublicAccess (тот же приём для
+  // «Рекомендаций», см. /admin/recommendations) — единственные фичи без
+  // тюнинговых полей: только enabled/disabled, никаких числовых параметров.
+  // Поэтому "at least one numeric field" проверяем не для всех фич подряд,
+  // а с явным исключением.
+  const PURE_TOGGLE_KEYS = new Set<FeatureKey>(['forex', 'forexPublicAccess', 'tradeRecommendationsPublicAccess']);
 
   it('each feature has required fields: enabled, numeric params, meta', () => {
     for (const key of Object.keys(FEATURE_DEFAULTS) as FeatureKey[]) {
@@ -63,6 +66,11 @@ describe('features - FEATURE_DEFAULTS', () => {
     expect(FEATURE_DEFAULTS.forex.description).toBeTruthy();
     expect(FEATURE_DEFAULTS.forexPublicAccess.label).toBeTruthy();
     expect(FEATURE_DEFAULTS.forexPublicAccess.description).toBeTruthy();
+  });
+
+  it('tradeRecommendationsPublicAccess is a pure on/off toggle with no tunable params', () => {
+    expect(FEATURE_DEFAULTS.tradeRecommendationsPublicAccess.label).toBeTruthy();
+    expect(FEATURE_DEFAULTS.tradeRecommendationsPublicAccess.description).toBeTruthy();
   });
 
   it('exitEfficiency has correct defaults', () => {

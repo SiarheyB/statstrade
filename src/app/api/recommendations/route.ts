@@ -1,11 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
-import { getFeatureConfig } from "@/lib/featureConfig";
-
-function featureDisabled() {
-  return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
-}
+import { recommendationsAccessError } from "@/lib/recommendationsAccess";
 
 // Нейтральные сетапы не сохраняются при пересчёте (см. recompute.ts), поэтому
 // и в фильтре их нет.
@@ -16,8 +12,8 @@ export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
 
-  const feature = await getFeatureConfig("tradeRecommendations");
-  if (!feature.enabled) return featureDisabled();
+  const denied = await recommendationsAccessError(user);
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const bias = url.searchParams.get("bias");

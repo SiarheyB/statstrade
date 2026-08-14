@@ -220,6 +220,7 @@ type FeatureValue = { enabled: boolean; maxDistanceAtr: number };
 // Числовые настройки фичи, которые правятся прямо на этой странице.
 const NUMERIC_FIELDS = [{ key: "maxDistanceAtr" as const, step: "0.1", min: "0.1" }];
 type FeatureRow = { key: string; fieldHelp: Record<string, string>; value: FeatureValue };
+type AccessFeatureRow = { key: string; value: { enabled: boolean } };
 
 function Switch({ on, disabled, onClick }: { on: boolean; disabled?: boolean; onClick: () => void }) {
   return (
@@ -251,6 +252,7 @@ function agoLabel(iso: string | null): string {
 export default function AdminRecommendations() {
   const [status, setStatus] = useState<Status | null>(null);
   const [feature, setFeature] = useState<FeatureRow | null>(null);
+  const [publicAccess, setPublicAccess] = useState<AccessFeatureRow | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [savingConfig, setSavingConfig] = useState(false);
@@ -278,11 +280,14 @@ export default function AdminRecommendations() {
   const loadFeature = useCallback(async () => {
     const res = await fetch("/api/admin/features", { cache: "no-store" });
     if (res.ok) {
-      const row = ((await res.json()).features ?? []).find((r: FeatureRow) => r.key === "tradeRecommendations");
+      const rows = (await res.json()).features ?? [];
+      const row = rows.find((r: FeatureRow) => r.key === "tradeRecommendations");
       if (row) {
         setFeature(row);
         setDrafts(Object.fromEntries(NUMERIC_FIELDS.map((f) => [f.key, String(row.value[f.key])])));
       }
+      const publicAccessRow = rows.find((r: AccessFeatureRow) => r.key === "tradeRecommendationsPublicAccess");
+      if (publicAccessRow) setPublicAccess(publicAccessRow);
     }
   }, []);
 
@@ -324,6 +329,26 @@ export default function AdminRecommendations() {
       if (res.ok) {
         const row = ((await res.json()).features ?? []).find((r: FeatureRow) => r.key === "tradeRecommendations");
         if (row) setFeature(row);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function togglePublicAccess() {
+    if (!publicAccess) return;
+    setBusy(true);
+    try {
+      const res = await fetch("/api/admin/features", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: "tradeRecommendationsPublicAccess", enabled: !publicAccess.value.enabled }),
+      });
+      if (res.ok) {
+        const row = ((await res.json()).features ?? []).find(
+          (r: AccessFeatureRow) => r.key === "tradeRecommendationsPublicAccess",
+        );
+        if (row) setPublicAccess(row);
       }
     } finally {
       setBusy(false);
@@ -424,15 +449,29 @@ export default function AdminRecommendations() {
         <div className="card p-4 space-y-3">
           <div className="flex items-center justify-between gap-4">
             <div>
-              <div className="text-sm font-medium">Раздел «Рекомендации» пользователям</div>
+              <div className="text-sm font-medium">Раздел «Рекомендации» — общий выключатель</div>
               <p className="text-xs text-muted mt-1">
                 {feature.value.enabled
-                  ? "Включено — пункт меню и данные видны всем пользователям."
-                  : "Выключено — пункт меню и API скрыты у всех пользователей."}
+                  ? "Включено — пункт меню и API доступны (если ниже разрешён публичный доступ)."
+                  : "Выключено — пункт меню и API скрыты у ВСЕХ, включая админа."}
               </p>
             </div>
             <Switch on={feature.value.enabled} disabled={busy} onClick={toggleEnabled} />
           </div>
+
+          {publicAccess && (
+            <div className="border-t border-border pt-3 flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium">Доступ для обычных пользователей</div>
+                <p className="text-xs text-muted mt-1">
+                  {publicAccess.value.enabled
+                    ? "Включено — раздел виден всем пользователям."
+                    : "Выключено — пункт меню и данные скрыты у обычных пользователей; админ видит раздел как обычно."}
+                </p>
+              </div>
+              <Switch on={publicAccess.value.enabled} disabled={busy} onClick={togglePublicAccess} />
+            </div>
+          )}
 
           {NUMERIC_FIELDS.map((field) => (
             <div key={field.key} className="border-t border-border pt-3 flex items-start justify-between gap-4">

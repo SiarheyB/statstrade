@@ -101,6 +101,8 @@ describe("assessLevelQuality", () => {
     expect(q.contamination).toBe(0);
     expect(q.closeDistanceAtr).toBeCloseTo(0.15, 5);
     expect(q.touched).toBe(true);
+    expect(q.approachGapAtr).toBeCloseTo(0.125, 5); // (120 - 119.5) / 4
+    expect(q.approachNetMoveAtr).toBeCloseTo(4.85, 5); // |119.4 - 100| / 4, окно 10 баров
     expect(q.runwayAtr).toBeCloseTo(5, 5);
   });
 
@@ -122,14 +124,16 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     runwayAtr: Infinity,
     closeDistanceAtr: 0.1,
     touched: true,
+    approachGapAtr: 0.1,
     approachRatio: 0.5,
     gapApproach: false,
+    approachNetMoveAtr: 0.3,
     ...overrides,
   };
 }
 
 const CALM = { for: ["small_bars_approach"], against: [] };
-const FAST = { for: [], against: ["big_bars_approach"] };
+const NEUTRAL = { for: [], against: [] };
 
 describe("passesQualityGate", () => {
   it("passes a clean level with a calm approach as a breakout setup", () => {
@@ -160,12 +164,38 @@ describe("passesQualityGate", () => {
     expect(res.rejectedBy).toContain("no_breakout_preconditions");
   });
 
-  it("requires a fast approach — big bars or a gap — for a false breakout", () => {
-    const calm = passesQualityGate(quality(), "false_breakout", { for: [], against: [] });
+  it("requires a fast approach — sustained net move or a gap — for a false breakout", () => {
+    const calm = passesQualityGate(quality({ approachGapAtr: 1.5 }), "false_breakout", NEUTRAL);
     expect(calm.rejectedBy).toContain("no_false_breakout_preconditions");
 
-    expect(passesQualityGate(quality({ approachRatio: 1.5 }), "false_breakout", FAST).ok).toBe(true);
-    expect(passesQualityGate(quality({ gapApproach: true }), "false_breakout", { for: [], against: [] }).ok).toBe(true);
+    expect(passesQualityGate(quality({ approachGapAtr: 1.5, approachNetMoveAtr: 2 }), "false_breakout", NEUTRAL).ok).toBe(true);
+    expect(passesQualityGate(quality({ approachGapAtr: 1.5, gapApproach: true }), "false_breakout", NEUTRAL).ok).toBe(true);
+  });
+
+  it("does not count a noisy last few bars as a fast approach when the multi-day net move stayed small (закруглення — a breakout plus, not an LP precondition)", () => {
+    // AIXBTUSDT/TXNUSDT/BIRBUSDT/SCRUSDT-кейс: пара крупных баров в хвосте
+    // долгого пологого закругления к уровню — approachRatio может быть
+    // большим, но approachNetMoveAtr (весь путь подхода) остаётся маленьким.
+    const res = passesQualityGate(
+      quality({ approachGapAtr: 1.2, approachRatio: 1.8, approachNetMoveAtr: 0.6 }),
+      "false_breakout",
+      { for: [], against: ["big_bars_approach"] },
+    );
+    expect(res.ok).toBe(false);
+    expect(res.rejectedBy).toContain("no_false_breakout_preconditions");
+  });
+
+  it("rejects a false breakout when yesterday's bar already sat close to the level (no room left for today's pierce-and-return)", () => {
+    // Именно кейс из карточки SNXXUSDT: подход близкий (approachGapAtr мал),
+    // хотя быстрый подход формально есть — это не настоящая предпосылка ЛП.
+    const res = passesQualityGate(quality({ approachGapAtr: 0.2, approachNetMoveAtr: 2 }), "false_breakout", NEUTRAL);
+    expect(res.ok).toBe(false);
+    expect(res.rejectedBy).toContain("close_near_level");
+  });
+
+  it("passes a false breakout when yesterday's bar stopped a full ATR short of the level with a fast approach", () => {
+    const res = passesQualityGate(quality({ approachGapAtr: 1, approachNetMoveAtr: 2 }), "false_breakout", NEUTRAL);
+    expect(res.ok).toBe(true);
   });
 
   it("keeps the documented thresholds", () => {
@@ -173,5 +203,8 @@ describe("passesQualityGate", () => {
     expect(DEFAULT_THRESHOLDS.maxCrossings).toBe(1);
     expect(DEFAULT_THRESHOLDS.maxFalseBreakouts).toBe(1);
     expect(DEFAULT_THRESHOLDS.maxCloseDistanceAtr).toBe(0.25);
+    expect(DEFAULT_THRESHOLDS.minFalseBreakoutApproachGapAtr).toBe(1);
+    expect(DEFAULT_THRESHOLDS.fastApproachWindow).toBe(10);
+    expect(DEFAULT_THRESHOLDS.minFastApproachNetMoveAtr).toBe(1.5);
   });
 });
