@@ -166,6 +166,11 @@ GOOGLE_DRIVE_REDIRECT_URI=
 OB_SYMBOLS=BTCUSDT,ETHUSDT
 OB_EXCHANGES=binance-futures,binance-spot
 OB_RETENTION_DAYS=14
+# Фича "Рекомендации" (дневные уровни/сетапы пробой-ложный пробой) — без этого
+# collector не сканирует дневные свечи по всем USDT-M фьючерсам Binance, и
+# разделу /dashboard/recommendations банально не по чему считать. По умолчанию
+# выключено (нагрузка на сервер и на биржевой API), включайте осознанно.
+OB_SCAN_ALL_USDT_PAIRS=true
 EOF
 chmod 600 .env
 ```
@@ -389,6 +394,30 @@ curl -s -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cu
 > Интервал самого крона (раз в минуту) — это лишь частота опроса; реальная периодичность
 > синхронизации каждого аккаунта берётся из его настройки в разделе «Биржи».
 
+### 9.2 Авто-пересчёт «Рекомендаций» (системный крон)
+Раздел «Рекомендации» раз в сутки пересчитывает дневные уровни/сетапы по всем USDT-M
+фьючерсам Binance — момент фиксированный, 00:05 UTC (через 5 минут после закрытия дневной
+свечи биржи; см. `src/lib/recommendations/schedule.ts`). Как и с синхронизацией бирж выше,
+встроенный планировщик выключен (`ENABLE_SCHEDULER=false`), поэтому пересчёт дёргает **тот же
+системный крон хоста** — защищённый endpoint `/api/cron/recommendations`, тот же `CRON_SECRET`:
+```bash
+( crontab -l 2>/dev/null; \
+  echo '5 0 * * * curl -fsS --max-time 55 -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" http://127.0.0.1:3000/api/cron/recommendations >/dev/null 2>&1' \
+) | crontab -
+```
+Проверка вручную (должно вернуть `{"ok":true,...}`, может занять до пары минут — сначала
+дозагружаются свежие свечи с Binance по всем парам, потом считаются уровни):
+```bash
+curl -s -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" \
+  http://127.0.0.1:3000/api/cron/recommendations
+```
+> Без `OB_SCAN_ALL_USDT_PAIRS=true` в `.env` (см. §5) пересчёт отработает, но найдёт 0 уровней —
+> collector просто не собирает нужные свечи.
+>
+> Прогресс и статистику последнего пересчёта (сколько пар просканировано, сколько отсеяно
+> фильтром качества и почему) видно в `/admin/recommendations` — там же ручная кнопка
+> «Пересчитать сейчас», если не хотите ждать полночи UTC.
+
 ---
 
 ## 10. Бэкап базы данных
@@ -457,6 +486,8 @@ sudo tailscale funnel status
 - [ ] Tailscale Funnel включён, сайт открывается по `https://<имя>.ts.net` из интернета.
 - [ ] (опц.) Google origins добавлены, если нужен вход через Google.
 - [ ] `ENABLE_SCHEDULER=false` в `.env`, в crontab задача синхронизации бирж (`/api/cron/sync`).
+- [ ] (если нужна фича «Рекомендации») `OB_SCAN_ALL_USDT_PAIRS=true` в `.env`, в crontab задача
+      пересчёта уровней (`/api/cron/recommendations`, см. §9.2).
 - [ ] Авто-бэкап БД в cron.
 - [ ] Проверен авто-деплой: тестовый коммит в `main` → через пару минут изменения на сайте.
 ```

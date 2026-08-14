@@ -1,7 +1,5 @@
 -- UserLevel model: пользовательские ценовые уровни на графике orderflow
--- Таблица могла быть создана раньше миграцией 20260720073840_stattrade,
--- поэтому все операции идемпотентны.
-CREATE TABLE IF NOT EXISTS "UserLevel" (
+CREATE TABLE "UserLevel" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "symbol" TEXT NOT NULL,
@@ -20,12 +18,10 @@ CREATE TABLE IF NOT EXISTS "UserLevel" (
 );
 
 -- Index for querying levels by user + symbol + exchange
-CREATE INDEX IF NOT EXISTS "UserLevel_userId_symbol_exchange_idx" ON "UserLevel"("userId", "symbol", "exchange");
+CREATE INDEX "UserLevel_userId_symbol_exchange_idx" ON "UserLevel"("userId", "symbol", "exchange");
 
 -- Unique constraint: one level per user/symbol/exchange/price/type
-CREATE UNIQUE INDEX IF NOT EXISTS "UserLevel_userId_symbol_exchange_price_type_key" ON "UserLevel"("userId", "symbol", "exchange", "price", "type");
+CREATE UNIQUE INDEX "UserLevel_userId_symbol_exchange_price_type_key" ON "UserLevel"("userId", "symbol", "exchange", "price", "type");
 
--- Foreign key to User (cascade delete).
--- В 20260720073840_stattrade FK создавался без ON DELETE CASCADE — пересоздаём.
-ALTER TABLE "UserLevel" DROP CONSTRAINT IF EXISTS "UserLevel_userId_fkey";
+-- Foreign key to User (cascade delete)
 ALTER TABLE "UserLevel" ADD CONSTRAINT "UserLevel_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
