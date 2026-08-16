@@ -4,6 +4,7 @@ import {
   countCrossings,
   contaminationRatio,
   findPierces,
+  maxConsecutivePierces,
   passesQualityGate,
   runwayAtr,
   DEFAULT_THRESHOLDS,
@@ -68,6 +69,29 @@ describe("findPierces", () => {
   });
 });
 
+describe("maxConsecutivePierces", () => {
+  it("counts a single pierce as a streak of one", () => {
+    const candles = [...background(3), candle(3, 118, 123, 117, 118), ...background(2, 4)];
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(1);
+  });
+
+  it("detects two bars in a row piercing the level (уровень распилен)", () => {
+    // Как на GEV: бар от 14-го проколол уровень и вернулся, и бар от 15-го тоже.
+    const candles = [...background(3), candle(3, 118, 123, 117, 118), candle(4, 118, 124, 117, 119)];
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(2);
+  });
+
+  it("does not merge pierces separated by a normal bar", () => {
+    const candles = [
+      ...background(3),
+      candle(3, 118, 123, 117, 118),
+      candle(4, 118, 119, 117, 118), // до уровня не дошёл — серия оборвалась
+      candle(5, 118, 123, 117, 118),
+    ];
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(1);
+  });
+});
+
 describe("contaminationRatio", () => {
   it("is zero when nothing traded beyond the level", () => {
     expect(contaminationRatio(background(20), 120, ATR, "above", 1)).toBe(0);
@@ -112,6 +136,31 @@ describe("assessLevelQuality", () => {
     const candles = [...background(40), candle(40, 118, 124, 117, 118)];
     expect(assessLevelQuality(candles, 120, ATR, 118, []).falseBreakouts).toBe(0);
   });
+
+  it("counts shallow pierces as a streak (реальный кейс GEV)", () => {
+    // Второй прокол мельче minPierceAtr (0.08×ATR) и по отдельности сошёл бы за
+    // шум — ровно так GEV и проходил гейт. Два дня подряд за уровнем — распил.
+    const candles = [
+      ...background(40),
+      candle(40, 118, 120.37, 117, 118), // +0.094×ATR за уровень 120
+      candle(41, 118, 120.26, 117, 119), // +0.066×ATR
+    ];
+    const q = assessLevelQuality(candles, 120, ATR, 119, []);
+    expect(q.falseBreakouts).toBe(1); // по порогу шума виден только первый
+    expect(q.consecutiveFalseBreakouts).toBe(2);
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("consecutive_false_breakouts");
+  });
+
+  it("sees a pierce streak that ends on the last closed bar", () => {
+    // Кейс GEV: предпоследний и последний закрытые бары оба проткнули уровень и
+    // вернулись. falseBreakouts (без последнего бара) насчитает всего один —
+    // распил виден только через серию.
+    const candles = [...background(40), candle(40, 118, 123, 117, 118), candle(41, 118, 124, 117, 119)];
+    const q = assessLevelQuality(candles, 120, ATR, 119, []);
+    expect(q.falseBreakouts).toBe(1);
+    expect(q.consecutiveFalseBreakouts).toBe(2);
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("consecutive_false_breakouts");
+  });
 });
 
 function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
@@ -120,6 +169,7 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     crossings: 0,
     falseBreakouts: 0,
     deepestFalseBreakoutAtr: 0,
+    consecutiveFalseBreakouts: 0,
     contamination: 0,
     runwayAtr: Infinity,
     closeDistanceAtr: 0.1,
@@ -145,6 +195,7 @@ describe("passesQualityGate", () => {
     ["did_not_reach_level", { touched: false }],
     ["level_chopped", { crossings: 4 }],
     ["too_many_false_breakouts", { falseBreakouts: 3 }],
+    ["consecutive_false_breakouts", { consecutiveFalseBreakouts: 2 }],
     ["deep_false_breakout", { deepestFalseBreakoutAtr: 1.2 }],
     ["contaminated_zone", { contamination: 0.4 }],
     ["no_runway", { runwayAtr: 0.3 }],

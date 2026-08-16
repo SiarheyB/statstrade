@@ -189,6 +189,42 @@ describe("expanded setup card", () => {
   it("shows the previous closed day's volume", async () => {
     await openFirstCard();
     // candlesTo — 12.08 (i=11): v = 1000*12 = 12000, показывается компактно.
-    expect(await screen.findByText(/объём 12\.08\.2026 — 12\s*(тыс\.?|K)/i)).toBeInTheDocument();
+    const el = await screen.findByText(/объём 12\.08\.2026 — 12\s*(тыс\.?|K)/i);
+    expect(el).toBeInTheDocument();
+    // 12 тыс. < 10M — светофор ликвидности красный.
+    expect(el).toHaveClass("text-loss");
+  });
+
+  // Старые записи писались без части метрик качества — карточка обязана
+  // пропустить такой чип, а не падать на undefined.toFixed().
+  it("survives a setup whose quality lacks newer metrics", async () => {
+    const legacy = [
+      {
+        ...SETUPS[1],
+        id: "legacy",
+        symbol: "SQQQ",
+        quality: { crossings: 0, falseBreakouts: 0, runwayAtr: 3 },
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (typeof url === "string" && url.startsWith("/api/features")) {
+          return { ok: true, json: async () => ({ value: { enabled: true } }) } as unknown as Response;
+        }
+        if (typeof url === "string" && url.includes("/candles")) {
+          return { ok: true, json: async () => ({ candles: CANDLES }) } as unknown as Response;
+        }
+        return { ok: true, json: async () => ({ setups: legacy }) } as unknown as Response;
+      }),
+    );
+
+    render(<RecommendationsPage />);
+    await screen.findByText(/Ложный пробой · лонг/);
+    await userEvent.click(screen.getByText("SQQQ"));
+
+    expect(await screen.findByText("без запилов")).toBeInTheDocument();
+    expect(screen.queryByText(/вчера не дошли/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/за уровнем чисто/)).not.toBeInTheDocument();
   });
 });

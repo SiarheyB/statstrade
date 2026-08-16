@@ -29,6 +29,8 @@ export interface LevelQuality {
   falseBreakouts: number;
   /** Глубина самого глубокого прокола, в ATR. 0 — проколов не было. */
   deepestFalseBreakoutAtr: number;
+  /** Самая длинная серия проколов ПОДРЯД (см. maxConsecutivePierces). */
+  consecutiveFalseBreakouts: number;
   /** Доля баров окна, заходивших в зону сразу ЗА уровнем («заражённость»). */
   contamination: number;
   /** Запас хода: до следующего уровня за пробойной плоскостью, в ATR. */
@@ -77,6 +79,18 @@ export interface QualityThresholds {
   touchToleranceAtr: number;
   maxCrossings: number;
   maxFalseBreakouts: number;
+  /** Сколько проколов ПОДРЯД ещё допустимо (2 подряд — уровень распилен). */
+  maxConsecutiveFalseBreakouts: number;
+  /**
+   * Порог глубины для проколов В СЕРИИ — заметно мягче minPierceAtr. Одиночный
+   * прокол в истории имеет смысл считать только если он глубже шума, но для
+   * распила важен сам факт: уровень пройден и брошен два дня подряд. Реальный
+   * пример (GEV, ATR 36.5): хай 14.08 ушёл за уровень на 0.094×ATR, хай 15.08 —
+   * на 0.066×ATR; при общем пороге 0.08 второй бар считался «шумом», и распил
+   * проходил гейт. Конспект относит к «неглубокому ЛП» проколы до 0.10-0.15×ATR
+   * — то есть оба этих бара полноценные ЛП, а не шум.
+   */
+  consecutivePierceAtr: number;
   /** Прокол глубже этого (в ATR) — «глубокий ЛП», стопы уже сняты. */
   deepFalseBreakoutAtr: number;
   maxContamination: number;
@@ -122,6 +136,12 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // две и больше — уже распил.
   maxCrossings: 1,
   maxFalseBreakouts: 1,
+  // Один прокол — снятые стопы, это даже плюс. Два ПОДРЯД (вчера проколол и
+  // сегодня снова) — уровень уже не держит, торговать его нельзя.
+  maxConsecutiveFalseBreakouts: 1,
+  // Почти любой выход за уровень с возвратом: важен факт, а не глубина.
+  // Ниже — уже дрожание цены на тик от уровня.
+  consecutivePierceAtr: 0.02,
   // «Глубокий ЛП» — стопы за уровнем уже сняты, энергии на пробой меньше.
   deepFalseBreakoutAtr: 0.75,
   // «Пустота в пробойной плоскости»: за уровнем почти не торговали.
@@ -223,6 +243,41 @@ export function findPierces(
 }
 
 /**
+ * Самая длинная серия ПОДРЯД идущих проколов уровня. Два соседних бара, каждый
+ * из которых вышел за уровень и вернулся, — это уже не «один аккуратный ЛП, на
+ * котором сняли стопы», а распил: уровень перестал держать, цена ходит сквозь
+ * него туда-сюда каждый день. Один такой бар допустим (и даже полезен —
+ * стопы сняты), два подряд — сетап уже не торгуем.
+ *
+ * В отличие от falseBreakouts, считается по окну ВМЕСТЕ с последним закрытым
+ * баром: именно свежая пара «вчера проколол — сегодня снова проколол» и есть
+ * признак распила, а он весь лежит в самом конце окна.
+ */
+export function maxConsecutivePierces(
+  candles: DailyCandle[],
+  levelPrice: number,
+  atr: number,
+  minPierceAtr: number,
+): number {
+  const minPierce = atr * minPierceAtr;
+  let best = 0;
+  let streak = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const c = candles[i];
+    const from = candles[i - 1].c;
+    const pierceUp = from < levelPrice && c.h > levelPrice + minPierce && c.c < levelPrice;
+    const pierceDown = from > levelPrice && c.l < levelPrice - minPierce && c.c > levelPrice;
+    if (pierceUp || pierceDown) {
+      streak += 1;
+      if (streak > best) best = streak;
+    } else {
+      streak = 0;
+    }
+  }
+  return best;
+}
+
+/**
  * Заражённость: доля баров окна, которые торговались в зоне сразу ЗА уровнем.
  * 0 — за уровнем «пустота» (док: чистая зона после прохождения уровня),
  * высокое значение — там уже была борьба, пробить с первого раза тяжело.
@@ -299,6 +354,10 @@ export function assessLevelQuality(
   const contaminationHistory = candles.slice(-th.contaminationWindow, -1);
 
   const pierces = findPierces(history, levelPrice, atr, th.minPierceAtr);
+  // Серию проколов считаем по окну ВМЕСТЕ с последним закрытым баром: пара
+  // «вчера проколол — сегодня снова проколол» целиком лежит в конце окна и в
+  // history (без последнего бара) была бы не видна.
+  const windowWithLast = candles.slice(-th.window);
   const approach3 = candles.slice(-3);
   const touchDistance = side === "above" ? levelPrice - last.h : last.l - levelPrice;
 
@@ -307,6 +366,7 @@ export function assessLevelQuality(
     crossings: countCrossings(history, levelPrice, atr, th.deadbandAtr),
     falseBreakouts: pierces.count,
     deepestFalseBreakoutAtr: pierces.deepestAtr,
+    consecutiveFalseBreakouts: maxConsecutivePierces(windowWithLast, levelPrice, atr, th.consecutivePierceAtr),
     contamination: contaminationRatio(contaminationHistory, levelPrice, atr, side, th.contaminationZoneAtr),
     runwayAtr: runwayAtr(levelPrice, significantLevels, atr, side),
     closeDistanceAtr: Math.abs(last.c - levelPrice) / atr,
@@ -335,6 +395,7 @@ export type RejectReason =
   | "close_near_level"
   | "level_chopped"
   | "too_many_false_breakouts"
+  | "consecutive_false_breakouts"
   | "deep_false_breakout"
   | "contaminated_zone"
   | "no_runway"
@@ -371,6 +432,9 @@ export function passesQualityGate(
 
   if (q.crossings > th.maxCrossings) rejectedBy.push("level_chopped");
   if (q.falseBreakouts > th.maxFalseBreakouts) rejectedBy.push("too_many_false_breakouts");
+  // Два прокола подряд — уровень распилен: он больше не держит цену, и ни
+  // пробой, ни ЛП от него отрабатывать нечего.
+  if (q.consecutiveFalseBreakouts > th.maxConsecutiveFalseBreakouts) rejectedBy.push("consecutive_false_breakouts");
   if (q.deepestFalseBreakoutAtr > th.deepFalseBreakoutAtr) rejectedBy.push("deep_false_breakout");
   if (q.contamination > th.maxContamination) rejectedBy.push("contaminated_zone");
   if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");

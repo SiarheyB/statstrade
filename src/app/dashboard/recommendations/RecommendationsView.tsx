@@ -14,18 +14,34 @@ function fmtVolume(v: number): string {
   return new Intl.NumberFormat(numLocale(), { notation: "compact", maximumFractionDigits: 2 }).format(v);
 }
 
+// Светофор ликвидности по дневному объёму: <10M — тонко (красный),
+// 10–20M — средне (жёлтый), >20M — комфортно для входа (зелёный).
+function volumeClass(v: number): string {
+  if (!Number.isFinite(v)) return "text-faint";
+  if (v < 10_000_000) return "text-loss";
+  if (v <= 20_000_000) return "text-warn";
+  return "text-profit";
+}
+
 type Bias = "breakout" | "false_breakout";
 type Direction = "long" | "short";
 
+// Метрики качества добавлялись в разное время, поэтому у старых записей часть
+// полей отсутствует — тип это отражает, чтобы карточка не падала на undefined.
 type Quality = {
-  crossings: number;
-  falseBreakouts: number;
-  deepestFalseBreakoutAtr: number;
-  contamination: number;
-  runwayAtr: number | null;
-  closeDistanceAtr: number;
-  approachGapAtr: number;
+  crossings?: number | null;
+  falseBreakouts?: number | null;
+  deepestFalseBreakoutAtr?: number | null;
+  contamination?: number | null;
+  runwayAtr?: number | null;
+  closeDistanceAtr?: number | null;
+  approachGapAtr?: number | null;
 };
+
+// Число или null — «поля нет / оно битое», чип с ним просто не рисуем.
+function num(v: number | null | undefined): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
 
 type LevelSetup = {
   id: string;
@@ -55,58 +71,77 @@ function QualityChips({ q, atr, bias }: { q: Quality | null | undefined; atr: nu
   // Строки, записанные до появления метрик качества, приходят без quality —
   // карточка должна просто обойтись без чипов, а не падать.
   if (!q) return null;
-  const runwayInfinite = q.runwayAtr === null || !Number.isFinite(q.runwayAtr);
-  const runway = runwayInfinite ? "∞" : q.runwayAtr!.toFixed(1);
+  const runwayAtr = num(q.runwayAtr);
+  const runwayInfinite = runwayAtr === null;
+  const runway = runwayInfinite ? "∞" : runwayAtr.toFixed(1);
+  const closeDistanceAtr = num(q.closeDistanceAtr);
+  const approachGapAtr = num(q.approachGapAtr);
+  const crossings = num(q.crossings);
+  const falseBreakouts = num(q.falseBreakouts);
+  const deepestAtr = num(q.deepestFalseBreakoutAtr);
+  const contamination = num(q.contamination);
 
   // Требование к подходу у пробоя и ЛП противоположное: пробою нужно
   // закрытие ВПЛОТНУЮ к уровню, а ЛП — наоборот, чтобы вчера цена остановилась
   // ДАЛЕКО (на целый ATR), и весь путь до уровня + прокол + возврат сделал
   // сегодняшний бар. Поэтому первый чип и его подсказка зависят от bias.
-  const approachChip: { text: string; tooltip: string } =
+  const approachChip: { text: string; tooltip: string } | null =
     bias === "breakout"
-      ? {
-          text: `закрытие в ${q.closeDistanceAtr.toFixed(2)}×ATR от уровня (${fmtPrice(q.closeDistanceAtr * atr)})`,
-          tooltip:
-            `ATR — средний дневной диапазон цены инструмента (здесь ${fmtPrice(atr)}), его «естественный шаг». ` +
-            `Последний закрытый день закрылся в ${q.closeDistanceAtr.toFixed(2)} такого шага от уровня — то есть ` +
-            `примерно на ${fmtPrice(q.closeDistanceAtr * atr)} по цене. Чем ближе к нулю, тем плотнее подошли к уровню. ` +
-            `В подборку попадают только уровни с закрытием не дальше 0.25×ATR.`,
-        }
-      : {
-          text: `вчера не дошли ${q.approachGapAtr.toFixed(2)}×ATR до уровня (${fmtPrice(q.approachGapAtr * atr)})`,
-          tooltip:
-            `ATR — средний дневной диапазон цены инструмента (здесь ${fmtPrice(atr)}), его «естественный шаг». ` +
-            `Для ложного пробоя нужно, чтобы вчера бар остановился ДАЛЕКО от уровня — тогда сегодняшнему бару ` +
-            `придётся пройти весь этот путь, проколоть уровень и вернуться обратно за один день. Сейчас разрыв — ` +
-            `${q.approachGapAtr.toFixed(2)}×ATR (≈${fmtPrice(q.approachGapAtr * atr)}). Чем больше, тем чище разгон. ` +
-            `В подборку попадают только уровни с разрывом не меньше 1×ATR.`,
-        };
+      ? closeDistanceAtr === null
+        ? null
+        : {
+            text: `закрытие в ${closeDistanceAtr.toFixed(2)}×ATR от уровня (${fmtPrice(closeDistanceAtr * atr)})`,
+            tooltip:
+              `ATR — средний дневной диапазон цены инструмента (здесь ${fmtPrice(atr)}), его «естественный шаг». ` +
+              `Последний закрытый день закрылся в ${closeDistanceAtr.toFixed(2)} такого шага от уровня — то есть ` +
+              `примерно на ${fmtPrice(closeDistanceAtr * atr)} по цене. Чем ближе к нулю, тем плотнее подошли к уровню. ` +
+              `В подборку попадают только уровни с закрытием не дальше 0.25×ATR.`,
+          }
+      : approachGapAtr === null
+        ? null
+        : {
+            text: `вчера не дошли ${approachGapAtr.toFixed(2)}×ATR до уровня (${fmtPrice(approachGapAtr * atr)})`,
+            tooltip:
+              `ATR — средний дневной диапазон цены инструмента (здесь ${fmtPrice(atr)}), его «естественный шаг». ` +
+              `Для ложного пробоя нужно, чтобы вчера бар остановился ДАЛЕКО от уровня — тогда сегодняшнему бару ` +
+              `придётся пройти весь этот путь, проколоть уровень и вернуться обратно за один день. Сейчас разрыв — ` +
+              `${approachGapAtr.toFixed(2)}×ATR (≈${fmtPrice(approachGapAtr * atr)}). Чем больше, тем чище разгон. ` +
+              `В подборку попадают только уровни с разрывом не меньше 1×ATR.`,
+          };
 
-  const chips: { text: string; tooltip: string }[] = [
+  const chips: ({ text: string; tooltip: string } | null)[] = [
     approachChip,
-    {
-      text: q.crossings === 0 ? "без запилов" : `запилов: ${q.crossings}`,
-      tooltip:
-        "Запил — сколько раз за последние ~60 дней закрытие цены перекладывалось то выше, то ниже уровня. " +
-        "Много перекладок значит рынок не уважает уровень, а пилит его туда-сюда. Допускается не больше одной.",
-    },
-    {
-      text:
-        q.falseBreakouts === 0
-          ? "ложных пробоев не было"
-          : `${q.falseBreakouts} ЛП, глубина ${q.deepestFalseBreakoutAtr.toFixed(2)}×ATR`,
-      tooltip:
-        "Ложный пробой (ЛП) — бар, чей хай/лоу проколол уровень, но закрытие вернулось обратно. Глубина — на " +
-        "сколько ATR цена успела уйти за уровень при проколе. Глубокий прокол значит, что стопы за уровнем уже " +
-        "сняты, и энергии для настоящего пробоя может не хватить.",
-    },
-    {
-      text: `за уровнем чисто (${Math.round(q.contamination * 100)}%)`,
-      tooltip:
-        `Заражённость — доля дней за последние ~120, когда цена уже торговалась в зоне сразу за уровнем (ширина ` +
-        `зоны — 1×ATR). Сейчас ${Math.round(q.contamination * 100)}% — там уже «топтались»; чем меньше, тем чище ` +
-        `пробойная плоскость впереди. Порог отбора — не больше 10%.`,
-    },
+    crossings === null
+      ? null
+      : {
+          text: crossings === 0 ? "без запилов" : `запилов: ${crossings}`,
+          tooltip:
+            "Запил — сколько раз за последние ~60 дней закрытие цены перекладывалось то выше, то ниже уровня. " +
+            "Много перекладок значит рынок не уважает уровень, а пилит его туда-сюда. Допускается не больше одной.",
+        },
+    falseBreakouts === null
+      ? null
+      : {
+          text:
+            falseBreakouts === 0
+              ? "ложных пробоев не было"
+              : deepestAtr === null
+                ? `${falseBreakouts} ЛП`
+                : `${falseBreakouts} ЛП, глубина ${deepestAtr.toFixed(2)}×ATR`,
+          tooltip:
+            "Ложный пробой (ЛП) — бар, чей хай/лоу проколол уровень, но закрытие вернулось обратно. Глубина — на " +
+            "сколько ATR цена успела уйти за уровень при проколе. Глубокий прокол значит, что стопы за уровнем уже " +
+            "сняты, и энергии для настоящего пробоя может не хватить.",
+        },
+    contamination === null
+      ? null
+      : {
+          text: `за уровнем чисто (${Math.round(contamination * 100)}%)`,
+          tooltip:
+            `Заражённость — доля дней за последние ~120, когда цена уже торговалась в зоне сразу за уровнем (ширина ` +
+            `зоны — 1×ATR). Сейчас ${Math.round(contamination * 100)}% — там уже «топтались»; чем меньше, тем чище ` +
+            `пробойная плоскость впереди. Порог отбора — не больше 10%.`,
+        },
     {
       text: `запас хода ${runway}×ATR`,
       tooltip: runwayInfinite
@@ -119,7 +154,7 @@ function QualityChips({ q, atr, bias }: { q: Quality | null | undefined; atr: nu
   ];
   return (
     <div className="flex flex-wrap gap-1.5">
-      {chips.map((c) => (
+      {chips.filter((c) => c !== null).map((c) => (
         <span key={c.text} className="relative group">
           <span className="cursor-help rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] text-muted underline decoration-dotted decoration-faint underline-offset-2">
             {c.text}
@@ -478,7 +513,7 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
               const lastClosed = candles?.find((c) => Math.abs(c.t - analysedTo) < DAY_MS / 2);
               if (!lastClosed || lastClosed.v === undefined) return null;
               return (
-                <span className="text-faint">
+                <span className={volumeClass(lastClosed.v)}>
                   объём {fmtDate(setup.candlesTo)} — {fmtVolume(lastClosed.v)} {setup.symbol.replace(/USDT$/, "")}
                 </span>
               );
