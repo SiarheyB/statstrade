@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { CalendarDays } from "lucide-react";
-import type { LandingEvent } from "@/lib/landing";
+import { CALENDAR_DAYS as DAYS_SHOWN, type LandingEvent } from "@/lib/landing";
 import type { Locale } from "@/lib/i18n/core";
 import type { TimezoneId } from "@/lib/timezone";
 import { ianaFor } from "@/lib/timezone";
@@ -31,6 +31,9 @@ function makeFormatters(locale: Locale, tz: TimezoneId) {
     time: new Intl.DateTimeFormat(l, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", ...(timeZone ? { timeZone } : {}) }),
     day: new Intl.DateTimeFormat(l, { weekday: "long", day: "numeric", month: "long", ...(timeZone ? { timeZone } : {}) }),
     dayKey: new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", ...(timeZone ? { timeZone } : {}) }),
+    // Только для проверки «суббота/воскресенье» — локаль здесь всегда en,
+    // чтобы сравнивать со стабильными значениями, а не с переводом.
+    weekday: new Intl.DateTimeFormat("en-US", { weekday: "short", ...(timeZone ? { timeZone } : {}) }),
   };
 }
 
@@ -67,12 +70,43 @@ export default function LandingCalendar({
   const todayKey = fmt.dayKey.format(new Date(now));
   const tomorrowKey = fmt.dayKey.format(new Date(now + 86_400_000));
 
-  const days: { key: string; label: string; events: LandingEvent[] }[] = [];
+  // Дни строим от сегодняшнего, а не из самих событий: в выходные публикаций
+  // нет вовсе, и без явного перебора суббота с воскресеньем просто исчезали бы
+  // из блока — читалось бы как «данные не подгрузились». Пустой будний день
+  // пропускаем: там нечего сказать, а вот «выходной» — это ответ.
+  const byKey = new Map<string, LandingEvent[]>();
   for (const e of events) {
     const key = fmt.dayKey.format(new Date(e.time));
-    const last = days[days.length - 1];
-    if (last && last.key === key) last.events.push(e);
-    else days.push({ key, label: fmt.day.format(new Date(e.time)), events: [e] });
+    const list = byKey.get(key);
+    if (list) list.push(e);
+    else byKey.set(key, [e]);
+  }
+
+  const isWeekend = (d: Date) => {
+    const w = fmt.weekday.format(d);
+    return w === "Sat" || w === "Sun";
+  };
+
+  // В выходные блок показывает ровно эти выходные — субботу и воскресенье, — и
+  // НЕ забегает в понедельник. Иначе главная обещала бы понедельничные релизы,
+  // которых на странице календаря ещё нет: та живёт текущей неделей пн–вс, и в
+  // воскресенье будущий понедельник в неё не попадает.
+  const offsets = isWeekend(new Date(now))
+    ? fmt.weekday.format(new Date(now)) === "Sat"
+      ? [0, 1] // суббота: она сама и воскресенье
+      : [-1, 0] // воскресенье: вчерашняя суббота и оно само
+    : Array.from({ length: DAYS_SHOWN }, (_, i) => i);
+
+  const days: { key: string; label: string; weekend: boolean; events: LandingEvent[] }[] = [];
+  for (const offset of offsets) {
+    const d = new Date(now + offset * 86_400_000);
+    const key = fmt.dayKey.format(d);
+    const dayEvents = byKey.get(key) ?? [];
+    const weekend = isWeekend(d);
+    // Пустой будний день пропускаем: там нечего сказать. Пустой выходной —
+    // наоборот, ответ на вопрос «почему пусто».
+    if (dayEvents.length === 0 && !weekend) continue;
+    days.push({ key, label: fmt.day.format(d), weekend, events: dayEvents });
   }
 
   return (
@@ -99,6 +133,9 @@ export default function LandingCalendar({
                   ? `${t("landing.calendar.tomorrow")}, ${day.label}`
                   : day.label}
             </div>
+            {day.events.length === 0 ? (
+              <p className="px-4 py-3 text-[13px] text-faint">{t("landing.calendar.weekend")}</p>
+            ) : (
             <table className="w-full text-[13px]">
               <tbody>
                 {day.events.map((e) => {
@@ -136,6 +173,7 @@ export default function LandingCalendar({
                 })}
               </tbody>
             </table>
+            )}
           </div>
         ))
       )}

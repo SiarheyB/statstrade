@@ -75,13 +75,25 @@ describe("getLandingData", () => {
     expect(data.signal?.total).toBe(9);
   });
 
-  it("календарь запрашивается от полуночи текущих суток на три дня", async () => {
+  it("в будний день календарь запрашивается от полуночи текущих суток на три дня", async () => {
     setupMocks(FULL_SETUP);
     const getLandingData = await freshModule();
-    await getLandingData("en", NOW);
+    await getLandingData("en", Date.parse("2026-08-17T12:00:00Z")); // понедельник
 
     const args = getCalendar.mock.calls[0][0];
-    expect(args.from.toISOString()).toBe("2026-08-16T00:00:00.000Z");
+    expect(args.from.toISOString()).toBe("2026-08-17T00:00:00.000Z");
+    expect(args.to.toISOString()).toBe("2026-08-20T00:00:00.000Z");
+  });
+
+  // В воскресенье блок на главной показывает пару «суббота + воскресенье»
+  // целиком, поэтому вчерашние субботние события тоже должны быть загружены.
+  it("в воскресенье окно начинается с субботы", async () => {
+    setupMocks(FULL_SETUP);
+    const getLandingData = await freshModule();
+    await getLandingData("en", NOW); // 16.08.2026 — воскресенье
+
+    const args = getCalendar.mock.calls[0][0];
+    expect(args.from.toISOString()).toBe("2026-08-15T00:00:00.000Z");
     expect(args.to.toISOString()).toBe("2026-08-19T00:00:00.000Z");
   });
 

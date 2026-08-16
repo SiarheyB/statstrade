@@ -30,6 +30,9 @@ export default async function PublicShell({
           TradeStats
         </Link>
         <nav className="flex flex-nowrap items-center gap-2 sm:gap-3 text-sm whitespace-nowrap">
+          <Link href="/" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("landing.nav.home")}
+          </Link>
           <Link href="/news" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.news")}
           </Link>

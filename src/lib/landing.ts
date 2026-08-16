@@ -139,6 +139,16 @@ function startOfToday(now: number): Date {
   return new Date(Math.floor(now / DAY_MS) * DAY_MS);
 }
 
+/**
+ * Левая граница окна календаря. В воскресенье сдвигаем её на субботу: блок на
+ * главной в выходные показывает пару «суббота + воскресенье» целиком (см.
+ * LandingCalendar), и события субботы для этого должны быть загружены.
+ */
+function calendarFrom(now: number): Date {
+  const today = startOfToday(now);
+  return today.getUTCDay() === 0 ? new Date(today.getTime() - DAY_MS) : today;
+}
+
 async function loadStats(from: Date, now: number): Promise<LandingStats> {
   const [setups, symbols, events, news] = await Promise.all([
     prisma.levelSetup.count(),
@@ -196,11 +206,11 @@ async function loadSignal(): Promise<LandingSignal | null> {
 export async function getLandingData(lang: Lang | string | null = null, now = Date.now()): Promise<LandingData> {
   const locale = asLang(typeof lang === "string" ? lang : null);
   return cache.fetch(`landing:${locale}`, async () => {
-    const from = startOfToday(now);
-    const to = new Date(from.getTime() + CALENDAR_DAYS * DAY_MS);
+    const from = calendarFrom(now);
+    const to = new Date(startOfToday(now).getTime() + CALENDAR_DAYS * DAY_MS);
 
     const [stats, calendar, signal, news] = await Promise.all([
-      loadStats(from, now),
+      loadStats(startOfToday(now), now),
       getCalendar({ from, to }),
       loadSignal(),
       getNews({ lang: locale, limit: NEWS_LIMIT }),

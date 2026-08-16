@@ -42,6 +42,8 @@ vi.mock("@/lib/i18n/server", () => ({
 // Рыночный блок (календарь + сигнал дня + новости) ходит в БД и фиды — здесь
 // проверяется каркас лендинга, поэтому данные подменяем пустым срезом.
 vi.mock("@/lib/landing", () => ({
+  // CALENDAR_DAYS читает LandingCalendar — без него мок падает на импорте.
+  CALENDAR_DAYS: 3,
   getLandingData: vi.fn(async () => ({
     generatedAt: Date.parse("2026-08-16T12:00:00Z"),
     stats: { setups: 9, symbols: 689, events: 5, news: 4 },

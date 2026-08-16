@@ -353,6 +353,7 @@ const en: Dict = {
   "landing.ctaHave": "I have an account",
   "landing.demoHint": "No real keys? You can load demo data in one click.",
   // landing: market blocks (calendar + signal of the day + news)
+  "landing.nav.home": "Home",
   "landing.nav.news": "News",
   "landing.nav.demo": "Demo",
   "landing.nav.calendar": "Calendar",
@@ -367,6 +368,7 @@ const en: Dict = {
   "landing.calendar.inMinutes": "in {m} min",
   "landing.calendar.now": "now",
   "landing.calendar.empty": "No events for the next few days.",
+  "landing.calendar.weekend": "Weekend — markets are closed",
   "landing.calendar.today": "Today",
   "landing.calendar.tomorrow": "Tomorrow",
   "landing.calendar.forecast": "forecast",
@@ -1543,6 +1545,7 @@ const ru: Dict = {
   "landing.ctaHave": "У меня есть аккаунт",
   "landing.demoHint": "Без реальных ключей? Можно загрузить демо-данные одним кликом.",
   // landing: market blocks (calendar + signal of the day + news)
+  "landing.nav.home": "Главная",
   "landing.nav.news": "Новости",
   "landing.nav.demo": "Демо",
   "landing.nav.calendar": "Календарь",
@@ -1557,6 +1560,7 @@ const ru: Dict = {
   "landing.calendar.inMinutes": "через {m} мин",
   "landing.calendar.now": "сейчас",
   "landing.calendar.empty": "На ближайшие дни событий нет.",
+  "landing.calendar.weekend": "Выходной — рынки закрыты",
   "landing.calendar.today": "Сегодня",
   "landing.calendar.tomorrow": "Завтра",
   "landing.calendar.forecast": "прогноз",
