@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState } from 'react';
 
 interface LogRow {
   id: string;
@@ -6,7 +6,7 @@ interface LogRow {
   accountId: string | null;
   eventType: string;
   message: string;
-  details: any;
+  details: unknown;
   level: 'info' | 'warn' | 'error';
   timestamp: Date | string;
   createdAt?: Date | string;
@@ -18,6 +18,9 @@ export const LogTable: React.FC<{
   onDelete?: (ids: string[]) => void;
 }> = ({ logs, loading, onDelete }) => {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Какая строка раскрыта. Сообщение в таблице обрезано по ширине колонки, а
+  // самое важное у ошибок синка — как раз хвост: URL, код и ответ биржи.
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -113,12 +116,18 @@ export const LogTable: React.FC<{
           </thead>
           <tbody className="divide-y divide-border">
             {logs.map((log) => (
-              <tr key={log.id} className="hover:bg-surface-2/50">
+              <React.Fragment key={log.id}>
+              <tr
+                className="hover:bg-surface-2/50 cursor-pointer"
+                onClick={() => setExpandedId((cur) => (cur === log.id ? null : log.id))}
+                aria-expanded={expandedId === log.id}
+              >
                 <td className="px-4 py-3">
                   <input
                     type="checkbox"
                     checked={selectedIds.has(log.id)}
                     onChange={() => toggleSelect(log.id)}
+                    onClick={(e) => e.stopPropagation()}
                     className="rounded"
                   />
                 </td>
@@ -131,7 +140,7 @@ export const LogTable: React.FC<{
                       log.level === 'error'
                         ? 'bg-loss/15 text-loss'
                         : log.level === 'warn'
-                        ? 'bg-warning/15 text-warning'
+                        ? 'bg-warn/15 text-warn'
                         : 'bg-profit/15 text-profit'
                     }`}
                   >
@@ -151,6 +160,25 @@ export const LogTable: React.FC<{
                   {log.message}
                 </td>
               </tr>
+              {expandedId === log.id && (
+                <tr className="bg-surface-2/40">
+                  <td colSpan={7} className="px-4 pb-4 pt-0">
+                    <div className="rounded-lg border border-border bg-bg p-3">
+                      <div className="text-[11px] uppercase tracking-wide text-faint">Полный текст</div>
+                      <p className="mt-1 whitespace-pre-wrap break-all font-mono text-xs text-fg">{log.message}</p>
+                      {log.details != null && (
+                        <>
+                          <div className="mt-3 text-[11px] uppercase tracking-wide text-faint">Детали</div>
+                          <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs text-muted">
+                            {typeof log.details === 'string' ? log.details : JSON.stringify(log.details, null, 2)}
+                          </pre>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
+              </React.Fragment>
             ))}
           </tbody>
         </table>

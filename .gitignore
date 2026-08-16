@@ -53,6 +53,8 @@ docs/local/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-logs/
+# Только корневая папка с логами: без ведущего слэша правило ловило и
+# src/app/admin/logs — новые файлы страницы логов молча не попадали в индекс.
+/logs/
 log.txt
 PERFORMANCE_AUDIT.md
