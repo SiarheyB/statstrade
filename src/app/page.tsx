@@ -129,7 +129,6 @@ export default async function Home() {
               />
               <LandingSignal
                 signal={landing.signal}
-                symbolsScanned={landing.stats.symbols}
                 locale={locale}
                 timezone={timezone}
                 t={t}

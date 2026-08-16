@@ -1,4 +1,3 @@
-import Link from "next/link";
 import type { LandingSignal as Signal } from "@/lib/landing";
 import type { Locale } from "@/lib/i18n/core";
 import type { TimezoneId } from "@/lib/timezone";
@@ -7,8 +6,8 @@ import SignalSparkline from "./SignalSparkline";
 
 /**
  * «Сигнал дня» — сильнейший сетап последнего отбора. Гостю показываем ФАКТ
- * сигнала: инструмент, сторону, цену, уровень и чистоту. Точка входа, стоп и
- * разбор «за/против» остаются за регистрацией — иначе рекомендация раздаётся
+ * сигнала: инструмент, сторону, цену, уровень и чистоту. Разбор «за/против» и
+ * история сетапа остаются в личном кабинете — иначе рекомендация раздаётся
  * целиком и заходить в сервис незачем.
  *
  * Единственное цветное пятно лендинга: рамка, подложка и бейдж в цвет стороны
@@ -16,13 +15,11 @@ import SignalSparkline from "./SignalSparkline";
  */
 export default function LandingSignal({
   signal,
-  symbolsScanned,
   locale,
   timezone,
   t,
 }: {
   signal: Signal | null;
-  symbolsScanned: number;
   locale: Locale;
   timezone: TimezoneId;
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -116,16 +113,9 @@ export default function LandingSignal({
           )}
         </div>
 
-        <Link
-          href="/register"
-          className="self-start rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent/90"
-        >
-          {t("landing.signal.cta")}
-        </Link>
-
         {signal.total > 1 && (
           <p className="text-xs text-faint">
-            {t("landing.signal.rest", { n: signal.total - 1, total: symbolsScanned })}
+            {t("landing.signal.rest", { n: signal.total - 1 })}
           </p>
         )}
       </div>
