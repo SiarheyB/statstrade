@@ -11,17 +11,8 @@ import LandingStats from "@/components/landing/LandingStats";
 import LandingCalendar from "@/components/landing/LandingCalendar";
 import LandingSignal from "@/components/landing/LandingSignal";
 import LandingNews from "@/components/landing/LandingNews";
-import {
-  BarChart3,
-  ShieldCheck,
-  Plug,
-  TrendingUp,
-  LineChart,
-  Wallet,
-  ShieldAlert,
-  Flame,
-  Layers,
-} from "lucide-react";
+import LandingFeatures from "@/components/landing/LandingFeatures";
+import { BarChart3 } from "lucide-react";
 
 // Год запуска проекта — левая граница в «© 2026–20XX» футера. Когда текущий год
 // совпадает с годом запуска, диапазон схлопывается до одного года.
@@ -49,21 +40,6 @@ export default async function Home() {
   const badge =
     badgeRest > 0 ? t("landing.badge", { top: badgeTop, n: badgeRest }) : badgeTop;
 
-  const features = [
-    {
-      icon: Plug,
-      title: t("landing.f1.title"),
-      text: t("landing.f1.text", { list: exchangeNames.join(", ") }),
-    },
-    { icon: BarChart3, title: t("landing.f2.title", { count: TOTAL_METRICS }), text: t("landing.f2.text") },
-    { icon: LineChart, title: t("landing.f3.title"), text: t("landing.f3.text") },
-    { icon: TrendingUp, title: t("landing.f4.title"), text: t("landing.f4.text") },
-    { icon: ShieldCheck, title: t("landing.f5.title"), text: t("landing.f5.text") },
-    { icon: Wallet, title: t("landing.f6.title"), text: t("landing.f6.text") },
-    { icon: ShieldAlert, title: t("landing.f7.title"), text: t("landing.f7.text") },
-    { icon: Flame, title: t("landing.f8.title"), text: t("landing.f8.text") },
-    { icon: Layers, title: t("landing.f9.title"), text: t("landing.f9.text") },
-  ];
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -153,7 +129,7 @@ export default async function Home() {
             <section className="max-w-6xl mx-auto px-6 pt-8">
               <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
             </section>
-            <section className="max-w-6xl mx-auto px-6 pt-6 pb-8 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+            <section className="max-w-6xl mx-auto px-6 pt-6 pb-2 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
               <LandingCalendar
                 events={landing.events}
                 locale={locale}
@@ -172,17 +148,14 @@ export default async function Home() {
           </>
         )}
 
-        <section className="max-w-6xl mx-auto px-6 pb-24 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {features.map((f) => (
-            <div key={f.title} className="card p-5">
-              <div className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent/15 text-accent mb-3">
-                <f.icon size={20} />
-              </div>
-              <h3 className="font-medium mb-1">{f.title}</h3>
-              <p className="text-sm text-muted leading-relaxed">{f.text}</p>
-            </div>
-          ))}
-        </section>
+        <LandingFeatures
+          metricsCount={TOTAL_METRICS}
+          symbolsScanned={landing?.stats.symbols ?? 0}
+          setupsFound={landing?.stats.setups ?? 0}
+          exchanges={exchangeNames}
+          t={t}
+        />
+
       </main>
 
       <footer className="border-t border-border px-6 py-5 text-center text-xs text-faint">

@@ -84,8 +84,14 @@ describe("Home (landing page)", () => {
     expect(screen.getByTestId("locale-menu")).toBeInTheDocument();
     expect(screen.getByText("landing.signIn")).toBeInTheDocument();
     expect(screen.getByText("landing.start")).toBeInTheDocument();
-    // Nine feature cards are rendered from t()-produced titles.
-    expect(screen.getAllByText(/landing\.f\d\.title/).length).toBe(9);
+    // Блок «как это работает»: три колонки по циклу работы трейдера вместо
+    // прежней сетки из девяти одинаковых плиток.
+    expect(screen.getByText("features.title")).toBeInTheDocument();
+    expect(screen.getByText("features.before.title")).toBeInTheDocument();
+    expect(screen.getByText("features.after.title")).toBeInTheDocument();
+    expect(screen.getByText("features.always.title")).toBeInTheDocument();
+    // Биржи перечислены строкой подключения, а не карточкой-фичей.
+    expect(screen.getByText("Binance")).toBeInTheDocument();
   });
 
   it("falls back to the static exchange list when getEnabledExchangeMetas rejects", async () => {
