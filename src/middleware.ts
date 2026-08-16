@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
+import { isDemoBlocked } from "@/lib/demoAccess";
 
 const COOKIE_NAME = "ts_session";
 
@@ -84,6 +85,18 @@ export async function middleware(req: NextRequest) {
   // строго только чтение. Гард стоит здесь, а не в семи десятках роутов: один
   // общий демо-аккаунт иначе испортил бы любой гость первым же POST. Выход из
   // демо — единственное исключение, иначе из него было бы не выйти.
+  // Разделы, закрытые в демо (см. lib/demoAccess.ts). Гард здесь, а не только
+  // в меню: спрятанный пункт всё равно открывался бы по прямому адресу.
+  if (claims?.demo && isDemoBlocked(pathname)) {
+    if (pathname.startsWith("/api/")) {
+      return NextResponse.json({ error: "Раздел недоступен в демо-режиме" }, { status: 403 });
+    }
+    const url = req.nextUrl.clone();
+    url.pathname = "/dashboard";
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
   if (claims?.demo && !SAFE_METHODS.has(req.method) && pathname !== DEMO_EXIT_PATH) {
     return NextResponse.json(
       { error: "Демо-режим: изменения недоступны. Создайте аккаунт, чтобы работать со своими данными." },

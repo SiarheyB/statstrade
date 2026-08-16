@@ -18,7 +18,7 @@ export default async function DashboardLayout({
     <SyncProvider>
       <SidebarProvider>
         <div className="md:flex min-h-screen">
-          <DashboardNav email={session.email} isAdmin={isAdminSession(session)} />
+          <DashboardNav email={session.email} isAdmin={isAdminSession(session)} demo={session.demo === true} />
           <main className="flex-1 min-w-0 overflow-x-hidden">
             {session.demo && <DemoBanner />}
             {children}

@@ -33,6 +33,7 @@ import {
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
+import { isDemoBlocked } from "@/lib/demoAccess";
 import SupportButton from "@/components/SupportButton";
 import DonateButton from "@/components/DonateButton";
 import NotificationBell from "@/components/NotificationBell";
@@ -112,7 +113,16 @@ function isSettingsRoute(pathname: string): boolean {
   return pathname.startsWith("/dashboard/settings") || pathname.startsWith("/dashboard/accounts");
 }
 
-export default function DashboardNav({ email, isAdmin = false }: { email: string; isAdmin?: boolean }) {
+export default function DashboardNav({
+  email,
+  isAdmin = false,
+  demo = false,
+}: {
+  email: string;
+  isAdmin?: boolean;
+  /** Демо-сессия: закрытые разделы прячем (доступ к ним рубит middleware). */
+  demo?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
@@ -184,6 +194,14 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
     router.refresh();
   }
 
+  // Пункты групп после всех фильтров: если в демо от группы ничего не
+  // осталось, прячем и её заголовок — пустой раскрывающийся «Сервис» выглядит
+  // как поломка.
+  const visibleService = SERVICE_CHILDREN.filter(
+    (c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(c.href)),
+  );
+  const visibleSettings = SETTINGS_CHILDREN.filter((c) => !(demo && isDemoBlocked(c.href)));
+
   const childActive = (href: string) =>
     href === "/dashboard/settings" ? pathname === "/dashboard/settings" : pathname.startsWith(href);
 
@@ -199,7 +217,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
             >
               <PanelLeftOpen size={18} />
             </button>
-            <NotificationBell collapsed />
+            {!demo && <NotificationBell collapsed />}
           </>
         ) : (
           <>
@@ -208,7 +226,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
             </span>
             <span className="font-semibold">TradeStats</span>
             <div className="flex-1" />
-            <NotificationBell />
+            {!demo && <NotificationBell />}
             <button
               onClick={toggle}
               className="p-1.5 text-muted hover:text-fg transition shrink-0"
@@ -260,7 +278,9 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           </div>
         )}
 
-        {LINKS.filter((l) => isNavItemVisible(l, hiddenFeatures, hiddenForUsersOnly, isAdmin)).map((l) => {
+        {LINKS.filter(
+          (l) => isNavItemVisible(l, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(l.href)),
+        ).map((l) => {
           const active =
             l.href === "/dashboard" ? pathname === "/dashboard" : pathname.startsWith(l.href);
           return (
@@ -281,6 +301,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           );
         })}
 
+        {visibleService.length > 0 && (
         <button
           onClick={() => setServiceOpen((o) => !o)}
           className={clsx(
@@ -296,10 +317,11 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.service")}</span>
           <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", serviceOpen && "rotate-180")} />
         </button>
+        )}
 
-        {serviceOpen && (
+        {serviceOpen && visibleService.length > 0 && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {SERVICE_CHILDREN.filter((c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin)).map((c) => (
+            {visibleService.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
@@ -320,6 +342,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           </div>
         )}
 
+        {visibleSettings.length > 0 && (
         <button
           onClick={() => setOpen((o) => !o)}
           className={clsx(
@@ -335,10 +358,11 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
           <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.settings")}</span>
           <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", open && "rotate-180")} />
         </button>
+        )}
 
-        {open && (
+        {open && visibleSettings.length > 0 && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {SETTINGS_CHILDREN.map((c) => (
+            {visibleSettings.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
@@ -364,7 +388,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
         <div className={clsx("text-xs text-faint truncate", collapsed ? "px-1.5 py-1" : "px-3 py-2")}>
           <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{email}</span>
         </div>
-        {isAdmin && (
+        {isAdmin && !demo && (
           <Link
             href="/admin"
             onClick={onNavigate}
@@ -382,7 +406,7 @@ export default function DashboardNav({ email, isAdmin = false }: { email: string
             <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{t("nav.admin")}</span>
           </Link>
         )}
-        <SupportButton onOpen={onNavigate} collapsed={collapsed} />
+        {!demo && <SupportButton onOpen={onNavigate} collapsed={collapsed} />}
         <DonateButton onOpen={onNavigate} collapsed={collapsed} />
         <button
           onClick={() => {

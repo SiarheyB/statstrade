@@ -60,3 +60,49 @@ describe("middleware: демо-режим только для чтения", () 
     expect(res.status).toBe(200);
   });
 });
+
+// Спрятать пункт в меню недостаточно: адрес всё равно можно ввести руками, а
+// через настройки демо-гость менял бы общий аккаунт (и таймзону в собственной
+// cookie, которая переживала бы выход из демо).
+describe("middleware: разделы, закрытые в демо", () => {
+  beforeAll(() => {
+    process.env.JWT_SECRET = SECRET;
+  });
+
+  it.each([
+    "/dashboard/settings",
+    "/dashboard/settings/risk",
+    "/dashboard/accounts",
+    "/dashboard/playbooks",
+    "/dashboard/orderflow",
+    "/dashboard/liqmap",
+    "/dashboard/recommendations",
+    "/dashboard/forex",
+    "/admin",
+  ])("уводит демо-сессию с %s на обзор", async (path) => {
+    const res = await middleware(request(path, "GET", await token(demoClaims)));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/dashboard");
+  });
+
+  it.each(["/api/admin/users", "/api/notifications", "/api/playbooks", "/api/orderflow/meta", "/api/recommendations"])(
+    "закрывает и чтение %s — иначе раздел доступен в обход интерфейса",
+    async (path) => {
+      const res = await middleware(request(path, "GET", await token(demoClaims)));
+      expect(res.status).toBe(403);
+    },
+  );
+
+  it.each(["/dashboard", "/dashboard/analytics", "/dashboard/trades", "/dashboard/news", "/api/stats"])(
+    "оставляет открытым %s",
+    async (path) => {
+      const res = await middleware(request(path, "GET", await token(demoClaims)));
+      expect(res.status).toBe(200);
+    },
+  );
+
+  it("обычному пользователю закрытые в демо разделы доступны", async () => {
+    const res = await middleware(request("/dashboard/settings", "GET", await token(userClaims)));
+    expect(res.status).toBe(200);
+  });
+});
