@@ -17,7 +17,10 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 5; // 5 hours
 
 // Методы, не меняющие состояние: их демо-сессии разрешены.
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const DEMO_EXIT_PATH = "/api/demo/exit";
+// Изменяющие запросы, которые демо-сессии всё же разрешены: оба про ВЫХОД из
+// неё. Без /api/auth/logout кнопка «Выйти» в меню молча получала 403 —
+// cookie оставалась, и гость не мог выйти из демо штатным способом.
+const DEMO_ALLOWED_MUTATIONS = new Set(["/api/demo/exit", "/api/auth/logout"]);
 
 type SessionClaims = { userId: string; email: string; v?: number; demo?: boolean };
 
@@ -97,7 +100,7 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (claims?.demo && !SAFE_METHODS.has(req.method) && pathname !== DEMO_EXIT_PATH) {
+  if (claims?.demo && !SAFE_METHODS.has(req.method) && !DEMO_ALLOWED_MUTATIONS.has(pathname)) {
     return NextResponse.json(
       { error: "Демо-режим: изменения недоступны. Создайте аккаунт, чтобы работать со своими данными." },
       { status: 403 },

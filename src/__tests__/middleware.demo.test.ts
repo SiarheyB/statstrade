@@ -50,10 +50,15 @@ describe("middleware: демо-режим только для чтения", () 
     expect(res.status).toBe(403);
   });
 
-  it("пропускает выход из демо — иначе из него было бы не выйти", async () => {
-    const res = await middleware(request("/api/demo/exit", "POST", await token(demoClaims)));
-    expect(res.status).toBe(200);
-  });
+  it.each(["/api/demo/exit", "/api/auth/logout"])(
+    "пропускает %s — иначе из демо было бы не выйти",
+    async (path) => {
+      // Кнопка «Выйти» в меню шлёт именно POST /api/auth/logout: под общий
+      // запрет она попадать не должна, иначе cookie демо остаётся навсегда.
+      const res = await middleware(request(path, "POST", await token(demoClaims)));
+      expect(res.status).toBe(200);
+    },
+  );
 
   it("не трогает POST обычного пользователя", async () => {
     const res = await middleware(request("/api/accounts", "POST", await token(userClaims)));
