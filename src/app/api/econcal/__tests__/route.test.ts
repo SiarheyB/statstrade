@@ -13,10 +13,11 @@ describe("GET /api/econcal", () => {
     mockGetAuthUser.mockReset();
   });
 
-  it("returns 401 when not authenticated", async () => {
+  // Календарь публичный: его читают лендинг и страница /calendar без входа.
+  it("serves the calendar to guests", async () => {
     asGuest();
     const res = await GET(new Request(base));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
   });
 
   it("returns 200 with calendar data", async () => {

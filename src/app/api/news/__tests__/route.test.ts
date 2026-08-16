@@ -15,10 +15,20 @@ describe('GET /api/news', () => {
     newsModule.getNews.mockReset();
   });
 
-  it('returns 401 when not authenticated', async () => {
+  // Лента публичная: её читают лендинг и страница /news без регистрации.
+  it('serves the feed to guests', async () => {
     asGuest();
+    newsModule.getNews.mockResolvedValue({ items: [], lang: 'en', sources: [], refreshed: [] });
     const res = await GET(new Request(base));
-    expect(res.status).toBe(401);
+    expect(res.status).toBe(200);
+  });
+
+  // Обход фидов — единственная тяжёлая операция роута, гостю она недоступна.
+  it('ignores ?refresh=1 from a guest', async () => {
+    asGuest();
+    newsModule.getNews.mockResolvedValue({ items: [], lang: 'en', sources: [], refreshed: [] });
+    await GET(new Request(`${base}?refresh=1`));
+    expect(newsModule.getNews).toHaveBeenCalledWith(expect.objectContaining({ force: false }));
   });
 
   it('returns news items for authenticated user', async () => {

@@ -35,6 +35,20 @@ vi.mock("@/lib/i18n/server", () => ({
       vars ? `${k}:${JSON.stringify(vars)}` : k,
     locale: "ru",
   }),
+  getLocale: async () => "ru",
+  getTimezone: async () => "auto",
+}));
+
+// Рыночный блок (календарь + сигнал дня + новости) ходит в БД и фиды — здесь
+// проверяется каркас лендинга, поэтому данные подменяем пустым срезом.
+vi.mock("@/lib/landing", () => ({
+  getLandingData: vi.fn(async () => ({
+    generatedAt: Date.parse("2026-08-16T12:00:00Z"),
+    stats: { setups: 9, symbols: 689, events: 5, news: 4 },
+    events: [],
+    signal: null,
+    news: [],
+  })),
 }));
 
 vi.mock("@/components/LocaleMenu", () => ({

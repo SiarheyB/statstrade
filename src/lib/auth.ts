@@ -22,6 +22,12 @@ const PENDING_MAX_AGE = 60 * 10; // 10 minutes to enter the 2FA code
 export type SessionPayload = {
   userId: string;
   email: string;
+  /**
+   * Демо-сессия «посмотреть без регистрации» (см. lib/demoSession.ts). Это
+   * обычная сессия обычного пользователя в БД — отличается только тем, что
+   * middleware запрещает ей любые изменяющие запросы, а UI показывает баннер.
+   */
+  demo?: boolean;
 };
 
 function getSecret(): Uint8Array {
@@ -82,7 +88,7 @@ export async function signSession(
   payload: SessionPayload,
   tokenVersion = 0,
 ): Promise<string> {
-  return new SignJWT({ ...payload, v: tokenVersion })
+  return new SignJWT({ ...payload, demo: payload.demo === true, v: tokenVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${MAX_AGE_SECONDS}s`)
@@ -97,7 +103,7 @@ export async function verifySession(
     if (typeof payload.userId === "string" && typeof payload.email === "string") {
       const v = typeof payload.v === "number" ? payload.v : 0;
       if (v !== (await currentTokenVersion(payload.userId))) return null;
-      return { userId: payload.userId, email: payload.email };
+      return { userId: payload.userId, email: payload.email, demo: payload.demo === true };
     }
     return null;
   } catch {

@@ -14,7 +14,11 @@ const COOKIE_NAME = "ts_session";
 // аддон, несовместим с edge-рантаймом middleware).
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 5; // 5 hours
 
-type SessionClaims = { userId: string; email: string; v?: number };
+// Методы, не меняющие состояние: их демо-сессии разрешены.
+const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
+const DEMO_EXIT_PATH = "/api/demo/exit";
+
+type SessionClaims = { userId: string; email: string; v?: number; demo?: boolean };
 
 async function verifySessionClaims(
   token: string | undefined,
@@ -24,7 +28,12 @@ async function verifySessionClaims(
   try {
     const { payload } = await jwtVerify(token, secret);
     if (typeof payload.userId === "string" && typeof payload.email === "string") {
-      return { userId: payload.userId, email: payload.email, v: typeof payload.v === "number" ? payload.v : 0 };
+      return {
+        userId: payload.userId,
+        email: payload.email,
+        v: typeof payload.v === "number" ? payload.v : 0,
+        demo: payload.demo === true,
+      };
     }
     return null;
   } catch {
@@ -71,6 +80,17 @@ export async function middleware(req: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  // Демо-сессия («посмотреть без регистрации», см. lib/demoSession.ts) —
+  // строго только чтение. Гард стоит здесь, а не в семи десятках роутов: один
+  // общий демо-аккаунт иначе испортил бы любой гость первым же POST. Выход из
+  // демо — единственное исключение, иначе из него было бы не выйти.
+  if (claims?.demo && !SAFE_METHODS.has(req.method) && pathname !== DEMO_EXIT_PATH) {
+    return NextResponse.json(
+      { error: "Демо-режим: изменения недоступны. Создайте аккаунт, чтобы работать со своими данными." },
+      { status: 403 },
+    );
+  }
+
   const res = NextResponse.next();
 
   // Скользящее продление: любой запрос с валидным токеном сбрасывает счётчик
@@ -80,7 +100,12 @@ export async function middleware(req: NextRequest) {
   // каждой странице /dashboard и /admin, так что продление истёкшего по
   // tokenVersion токена никого не пускает дальше него.
   if (valid && claims && secret) {
-    const fresh = await new SignJWT({ userId: claims.userId, email: claims.email, v: claims.v })
+    const fresh = await new SignJWT({
+      userId: claims.userId,
+      email: claims.email,
+      demo: claims.demo === true,
+      v: claims.v,
+    })
       .setProtectedHeader({ alg: "HS256" })
       .setIssuedAt()
       .setExpirationTime(`${SESSION_MAX_AGE_SECONDS}s`)

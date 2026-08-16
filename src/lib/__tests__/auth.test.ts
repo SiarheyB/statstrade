@@ -102,8 +102,15 @@ describe('auth', () => {
       const token = await signSession({ userId: 'rt-1', email: 'a@b.com' });
       expect(token.split('.')).toHaveLength(3);
       const payload = await verifySession(token);
-      expect(payload).toEqual({ userId: 'rt-1', email: 'a@b.com' });
+      // demo:false — обычная (не демо) сессия, см. lib/demoSession.ts
+      expect(payload).toEqual({ userId: 'rt-1', email: 'a@b.com', demo: false });
     });
+    it('демо-сессия сохраняет claim demo при round-trip', async () => {
+      findUnique.mockResolvedValue({ tokenVersion: 0 });
+      const token = await signSession({ userId: 'demo-1', email: 'demo@x', demo: true });
+      expect(await verifySession(token)).toEqual({ userId: 'demo-1', email: 'demo@x', demo: true });
+    });
+
     it('verifySession возвращает null для битого токена', async () => {
       expect(await verifySession('not.a.jwt')).toBeNull();
     });
@@ -162,7 +169,7 @@ describe('auth', () => {
       await createSessionCookie({ userId: 'u1', email: 'a@b.com' });
       expect(cookieStore.has(COOKIE_NAME)).toBe(true);
       const session = await getSession();
-      expect(session).toEqual({ userId: 'u1', email: 'a@b.com' });
+      expect(session).toEqual({ userId: 'u1', email: 'a@b.com', demo: false });
     });
 
     it('clearSessionCookie удаляет куку', async () => {
@@ -186,7 +193,7 @@ describe('auth', () => {
     it('verifySession проходит при совпадении версий', async () => {
       findUnique.mockResolvedValue({ tokenVersion: 3 });
       const token = await signSession({ userId: 'tv-b', email: 'a@b.com' }, 3);
-      expect(await verifySession(token)).toEqual({ userId: 'tv-b', email: 'a@b.com' });
+      expect(await verifySession(token)).toEqual({ userId: 'tv-b', email: 'a@b.com', demo: false });
     });
 
     it('verifySession возвращает null для удалённого пользователя, даже если v токена = 0 (регрессия)', async () => {

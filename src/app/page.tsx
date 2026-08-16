@@ -4,8 +4,13 @@ import { getSession } from "@/lib/auth";
 import { SUPPORTED_EXCHANGES } from "@/lib/exchanges";
 import { getEnabledExchangeMetas } from "@/lib/exchangeToggle";
 import { TOTAL_METRICS } from "@/lib/analytics/metric-defs";
-import { getServerT } from "@/lib/i18n/server";
+import { getServerT, getLocale, getTimezone } from "@/lib/i18n/server";
+import { getLandingData } from "@/lib/landing";
 import LocaleMenu from "@/components/LocaleMenu";
+import LandingStats from "@/components/landing/LandingStats";
+import LandingCalendar from "@/components/landing/LandingCalendar";
+import LandingSignal from "@/components/landing/LandingSignal";
+import LandingNews from "@/components/landing/LandingNews";
 import {
   BarChart3,
   ShieldCheck,
@@ -27,6 +32,11 @@ export default async function Home() {
   if (session) redirect("/dashboard");
 
   const { t } = await getServerT();
+  const [locale, timezone] = await Promise.all([getLocale(), getTimezone()]);
+
+  // Рыночный блок не должен ронять лендинг: если БД или фиды недоступны,
+  // страница просто рисуется без него.
+  const landing = await getLandingData(locale).catch(() => null);
 
   // Список бирж — из единого источника (SUPPORTED_EXCHANGES) с учётом
   // админ-тумблеров: новые/выключенные биржи попадают на лендинг сами, без
@@ -65,6 +75,12 @@ export default async function Home() {
           TradeStats
         </div>
         <nav className="flex items-center gap-3 text-sm">
+          <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("landing.nav.calendar")}
+          </Link>
+          <Link href="/news" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("landing.nav.news")}
+          </Link>
           <LocaleMenu />
           <Link href="/login" className="px-3 py-1.5 text-muted hover:text-fg transition">
             {t("landing.signIn")}
@@ -79,7 +95,7 @@ export default async function Home() {
       </header>
 
       <main className="flex-1">
-        <section className="max-w-4xl mx-auto px-6 pt-20 pb-16 text-center">
+        <section className="max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
           <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted mb-6">
             <span className="h-1.5 w-1.5 rounded-full bg-profit" />
             {badge}
@@ -104,9 +120,38 @@ export default async function Home() {
             >
               {t("landing.ctaHave")}
             </Link>
+            {/* Демо — POST-форма, а не ссылка: заход выдаёт cookie, и префетч
+                браузера не должен его запускать. Работает без JS. */}
+            <form action="/api/demo" method="post">
+              <button
+                type="submit"
+                className="px-6 py-3 rounded-lg border border-accent/40 bg-accent/10 text-accent hover:bg-accent/15 transition"
+              >
+                {t("landing.demoCta")}
+              </button>
+            </form>
           </div>
           <p className="mt-4 text-xs text-faint">{t("landing.demoHint")}</p>
         </section>
+
+        {landing && (
+          <>
+            <LandingStats stats={landing.stats} locale={locale} t={t} />
+            <section className="max-w-6xl mx-auto px-6 pt-8 pb-4 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+              <LandingCalendar
+                events={landing.events}
+                locale={locale}
+                timezone={timezone}
+                now={landing.generatedAt}
+                t={t}
+              />
+              <LandingSignal signal={landing.signal} symbolsScanned={landing.stats.symbols} t={t} />
+            </section>
+            <section className="max-w-6xl mx-auto px-6 pb-8">
+              <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
+            </section>
+          </>
+        )}
 
         <section className="max-w-6xl mx-auto px-6 pb-24 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {features.map((f) => (
