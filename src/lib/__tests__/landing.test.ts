@@ -35,7 +35,12 @@ const NOW = Date.parse("2026-08-16T12:00:00Z");
 function setupMocks(signal: Record<string, unknown> | null) {
   levelSetupFindFirst.mockResolvedValue(signal);
   levelSetupCount.mockResolvedValue(signal ? 9 : 0);
-  obCandleFindMany.mockResolvedValue([{ symbol: "BTCUSDT" }, { symbol: "ETHUSDT" }]);
+  // findMany вызывается дважды: список символов для счётчика и свечи сигнала.
+  obCandleFindMany.mockImplementation(async (args: { select?: Record<string, unknown> }) =>
+    args?.select && "o" in args.select
+      ? [{ o: 1, h: 2, l: 0.5, c: 1.5 }, { o: 1.5, h: 2.5, l: 1, c: 2 }]
+      : [{ symbol: "BTCUSDT" }, { symbol: "ETHUSDT" }],
+  );
   economicEventCount.mockResolvedValue(5);
   newsItemCount.mockResolvedValue(4);
   getCalendar.mockResolvedValue({ events: [], currencies: [], categories: [], refreshed: [] });
@@ -88,6 +93,37 @@ describe("getLandingData", () => {
 
     expect(data.signal?.runwayAtr).toBeNull();
     expect(data.signal?.contamination).toBeNull();
+  });
+
+  it("оставляет только важные события и не больше трёх на день", async () => {
+    setupMocks(FULL_SETUP);
+    const day = (h: number, d = 16) => new Date(Date.UTC(2026, 7, d, h));
+    getCalendar.mockResolvedValue({
+      events: [
+        { id: "low", time: day(7), impact: "low", currency: "USD", country: "US", title: "Мелочь", forecast: null, previous: null, actual: null },
+        { id: "m1", time: day(8), impact: "medium", currency: "EUR", country: "EU", title: "M1", forecast: null, previous: null, actual: null },
+        { id: "h1", time: day(9), impact: "high", currency: "USD", country: "US", title: "H1", forecast: null, previous: null, actual: null },
+        { id: "h2", time: day(10), impact: "high", currency: "USD", country: "US", title: "H2", forecast: null, previous: null, actual: null },
+        { id: "m2", time: day(11), impact: "medium", currency: "GBP", country: "UK", title: "M2", forecast: null, previous: null, actual: null },
+        { id: "next-day", time: day(9, 17), impact: "high", currency: "JPY", country: "JP", title: "Завтра", forecast: null, previous: null, actual: null },
+      ],
+      currencies: [],
+      categories: [],
+      refreshed: [],
+    });
+
+    const getLandingData = await freshModule();
+    const data = await getLandingData("ru", NOW);
+    const ids = data.events.map((e) => e.id);
+
+    expect(ids).not.toContain("low"); // impact=low не показываем вовсе
+    expect(ids.filter((id) => id !== "next-day")).toHaveLength(3); // лимит на сутки
+    expect(ids).toContain("h1"); // high приоритетнее medium
+    expect(ids).toContain("h2");
+    expect(ids).toContain("next-day"); // лимит считается по каждому дню отдельно
+    // Внутри блока порядок хронологический, а не по важности.
+    const times = data.events.map((e) => Date.parse(e.time));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
   });
 
   it("отдаёт signal: null, когда отбор не дал ни одного сетапа", async () => {

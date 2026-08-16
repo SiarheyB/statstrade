@@ -16,6 +16,16 @@ import { getNews, asLang, type Lang } from "./news";
 
 /** Сколько дней календаря показываем на главной (сегодня + следующие). */
 export const CALENDAR_DAYS = 3;
+/**
+ * Сколько событий оставляем на день. Календарь на главной — не полный
+ * календарь, а «что сегодня двинет рынок»: в сутках бывает под три десятка
+ * релизов, и без отбора блок вытягивается на несколько экранов, ломая пару с
+ * карточкой сигнала. Малозначимые (impact=low) не показываем вовсе.
+ */
+export const EVENTS_PER_DAY = 3;
+const IMPORTANT_IMPACTS = new Set(["high", "medium"]);
+/** Сколько дневных свечей рисуем фоном карточки сигнала. */
+export const SIGNAL_CANDLES = 20;
 /** Сколько новостей показываем карточками. */
 export const NEWS_LIMIT = 3;
 
@@ -50,6 +60,8 @@ export type LandingNewsItem = {
  * факт сигнала (что найдено и насколько чистый уровень), а уровень входа,
  * сигналы «за/против» и график — уже в личном кабинете.
  */
+export type SignalCandle = { o: number; h: number; l: number; c: number };
+
 export type LandingSignal = {
   symbol: string;
   bias: string;
@@ -57,6 +69,10 @@ export type LandingSignal = {
   levelType: string;
   strength: number;
   distanceAtr: number;
+  levelPrice: number;
+  currentPrice: number;
+  /** Последние дневные бары — фоновый график карточки. */
+  candles: SignalCandle[];
   runwayAtr: number | null;
   contamination: number | null;
   crossings: number | null;
@@ -90,6 +106,34 @@ export type LandingData = {
   news: LandingNewsItem[];
 };
 
+/**
+ * Оставляет только значимые события и не больше EVENTS_PER_DAY на сутки —
+ * иначе блок на главной превращается в простыню (см. EVENTS_PER_DAY).
+ * Внутри суток приоритет у high над medium, при равной важности — у более
+ * раннего события.
+ */
+function pickImportant<T extends { time: Date; impact: string }>(events: T[]): T[] {
+  const byDay = new Map<string, T[]>();
+  for (const e of events) {
+    if (!IMPORTANT_IMPACTS.has(e.impact)) continue;
+    const key = e.time.toISOString().slice(0, 10);
+    const list = byDay.get(key);
+    if (list) list.push(e);
+    else byDay.set(key, [e]);
+  }
+
+  const out: T[] = [];
+  for (const list of byDay.values()) {
+    const ranked = [...list].sort((a, b) => {
+      if (a.impact !== b.impact) return a.impact === "high" ? -1 : 1;
+      return a.time.getTime() - b.time.getTime();
+    });
+    out.push(...ranked.slice(0, EVENTS_PER_DAY));
+  }
+  // Порядок внутри блока — хронологический, отбор был только про «что важно».
+  return out.sort((a, b) => a.time.getTime() - b.time.getTime());
+}
+
 /** Полночь UTC текущих суток — левая граница «сегодня» для календаря. */
 function startOfToday(now: number): Date {
   return new Date(Math.floor(now / DAY_MS) * DAY_MS);
@@ -120,6 +164,13 @@ async function loadSignal(): Promise<LandingSignal | null> {
   const q = (best.quality ?? {}) as Record<string, unknown>;
   const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
+  const bars = await prisma.obCandle.findMany({
+    where: { symbol: best.symbol, exchange: best.exchange, interval: "1d" },
+    orderBy: { t: "desc" },
+    take: SIGNAL_CANDLES,
+    select: { o: true, h: true, l: true, c: true },
+  });
+
   return {
     symbol: best.symbol,
     bias: best.bias,
@@ -127,6 +178,9 @@ async function loadSignal(): Promise<LandingSignal | null> {
     levelType: best.levelType,
     strength: best.strength,
     distanceAtr: best.distanceAtr,
+    levelPrice: best.levelPrice,
+    currentPrice: best.currentPrice,
+    candles: bars.reverse(),
     runwayAtr: num(q.runwayAtr),
     contamination: num(q.contamination),
     crossings: num(q.crossings),
@@ -155,7 +209,7 @@ export async function getLandingData(lang: Lang | string | null = null, now = Da
     return {
       generatedAt: now,
       stats,
-      events: calendar.events.map((e) => ({
+      events: pickImportant(calendar.events).map((e) => ({
         id: e.id,
         time: e.time.toISOString(),
         currency: e.currency,

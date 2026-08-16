@@ -55,6 +55,15 @@ export default function LandingCalendar({
   // «Сегодня»/«Завтра» — по календарным суткам В ЗОНЕ ПОСЕТИТЕЛЯ, а не по
   // порядку групп: срез собирается от полуночи UTC, и у зоны с большим
   // сдвигом первая группа вполне может быть уже завтрашним днём.
+  // Ближайшее событие показывает не прогноз, а сколько до него осталось — это
+  // то, ради чего на календарь смотрят утром.
+  const countdown = (ts: number): string => {
+    const mins = Math.max(0, Math.round((ts - now) / 60_000));
+    if (mins === 0) return t("landing.calendar.now");
+    if (mins < 60) return t("landing.calendar.inMinutes", { m: mins });
+    return t("landing.calendar.inHours", { h: Math.floor(mins / 60), m: mins % 60 });
+  };
+
   const todayKey = fmt.dayKey.format(new Date(now));
   const tomorrowKey = fmt.dayKey.format(new Date(now + 86_400_000));
 
@@ -113,8 +122,14 @@ export default function LandingCalendar({
                         <span className="mr-1">{flagFor(e.currency)}</span>
                         {e.title}
                       </td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap tabular-nums text-muted">
-                        {e.actual ?? (e.forecast ? `${t("landing.calendar.forecast")} ${e.forecast}` : "—")}
+                      <td
+                        className={`px-4 py-2 text-right whitespace-nowrap tabular-nums ${
+                          isNext ? "text-accent" : e.actual ? "text-profit" : "text-muted"
+                        }`}
+                      >
+                        {isNext
+                          ? countdown(ts)
+                          : (e.actual ?? (e.forecast ? `${t("landing.calendar.forecast")} ${e.forecast}` : "—"))}
                       </td>
                     </tr>
                   );

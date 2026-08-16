@@ -1,23 +1,30 @@
 import Link from "next/link";
-import { TrendingDown, TrendingUp } from "lucide-react";
 import type { LandingSignal as Signal } from "@/lib/landing";
-import { fmtSymbol } from "@/lib/format";
+import type { Locale } from "@/lib/i18n/core";
+import type { TimezoneId } from "@/lib/timezone";
+import { ianaFor } from "@/lib/timezone";
+import SignalSparkline from "./SignalSparkline";
 
 /**
  * «Сигнал дня» — сильнейший сетап последнего отбора. Гостю показываем ФАКТ
- * сигнала: инструмент, сторону, силу уровня и чистоту. Точка входа, уровень и
+ * сигнала: инструмент, сторону, цену, уровень и чистоту. Точка входа, стоп и
  * разбор «за/против» остаются за регистрацией — иначе рекомендация раздаётся
  * целиком и заходить в сервис незачем.
  *
- * Единственное цветное пятно лендинга: рамка и подложка в цвет стороны сделки.
+ * Единственное цветное пятно лендинга: рамка, подложка и бейдж в цвет стороны
+ * сделки, а дневной график уходит в фон полупрозрачной подложкой.
  */
 export default function LandingSignal({
   signal,
   symbolsScanned,
+  locale,
+  timezone,
   t,
 }: {
   signal: Signal | null;
   symbolsScanned: number;
+  locale: Locale;
+  timezone: TimezoneId;
   t: (key: string, vars?: Record<string, string | number>) => string;
 }) {
   if (!signal) {
@@ -30,7 +37,6 @@ export default function LandingSignal({
   }
 
   const isShort = signal.direction === "short";
-  const Icon = isShort ? TrendingDown : TrendingUp;
   // Классы Tailwind обязаны быть литералами: динамический `text-${tone}` не
   // попадает в сборку и молча теряет цвет.
   const toneText = isShort ? "text-loss" : "text-profit";
@@ -40,6 +46,20 @@ export default function LandingSignal({
   const biasLabel = t(`landing.signal.bias.${signal.bias}`);
   const sideLabel = t(`landing.signal.side.${signal.direction}`);
 
+  const timeZone = ianaFor(timezone);
+  const l = locale === "ru" ? "ru-RU" : "en-US";
+  const day = new Intl.DateTimeFormat(l, {
+    day: "2-digit",
+    month: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
+  }).format(new Date(signal.candlesTo));
+
+  // Цены инструментов различаются на порядки (0,12 против 1066), поэтому число
+  // знаков берём от величины, а не фиксируем.
+  const digits = signal.levelPrice < 1 ? 5 : 2;
+  const price = new Intl.NumberFormat(l, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  const levelAbove = signal.levelPrice > signal.currentPrice;
+
   return (
     <div
       className="relative overflow-hidden rounded-xl border p-5 flex flex-col gap-3"
@@ -48,46 +68,67 @@ export default function LandingSignal({
         background: `linear-gradient(180deg, color-mix(in srgb, ${toneVar} 10%, transparent), transparent 55%), var(--color-surface)`,
       }}
     >
-      <span className={`text-[10px] uppercase tracking-[0.16em] font-mono ${toneText}`}>
-        {t("landing.signal.title")}
-      </span>
+      <SignalSparkline
+        candles={signal.candles}
+        levelPrice={signal.levelPrice}
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-28 w-full opacity-30"
+      />
 
-      <div>
-        <div className="text-2xl font-bold tracking-tight">{fmtSymbol(signal.symbol)}</div>
-        <div className={`mt-1 inline-flex items-center gap-1.5 text-sm ${toneText}`}>
-          <Icon size={15} />
-          {biasLabel} · {sideLabel}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap gap-1.5 text-[11px]">
-        <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-muted">
-          {t("landing.signal.strength", { n: signal.strength })}
+      <div className="relative flex flex-col gap-3">
+        <span className={`font-mono text-[10px] uppercase tracking-[0.16em] ${toneText}`}>
+          {t("landing.signal.title")} · {day}
         </span>
-        {signal.runwayAtr !== null && (
+
+        <div>
+          <div className="text-2xl font-bold tracking-tight">{signal.symbol}</div>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1 tabular-nums">
+            <span className={toneText}>{isShort ? "↘" : "↗"}</span>
+            <span className="text-[15px] font-semibold">{price.format(signal.currentPrice)}</span>
+            <span className="text-xs text-faint">
+              {t("landing.signal.level")} {price.format(signal.levelPrice)} ·{" "}
+              {t(levelAbove ? "landing.signal.above" : "landing.signal.below", {
+                n: signal.distanceAtr.toFixed(2),
+              })}
+            </span>
+          </div>
+        </div>
+
+        <span
+          className={`self-start rounded-full px-3 py-1 text-[13px] font-semibold ${toneText}`}
+          style={{ background: `color-mix(in srgb, ${toneVar} 16%, transparent)` }}
+        >
+          {biasLabel} · {sideLabel}
+        </span>
+
+        <div className="flex flex-wrap gap-1.5 text-[11px]">
           <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-muted">
-            {t("landing.signal.runway", { n: signal.runwayAtr.toFixed(1) })}
+            {t("landing.signal.strength", { n: signal.strength })}
           </span>
-        )}
-        {signal.contamination !== null && signal.contamination <= 0.1 && (
-          <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-muted">
-            {t("landing.signal.clean")}
-          </span>
+          {signal.runwayAtr !== null && (
+            <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-muted">
+              {t("landing.signal.runway", { n: signal.runwayAtr.toFixed(1) })}
+            </span>
+          )}
+          {signal.contamination !== null && signal.contamination <= 0.1 && (
+            <span className="rounded-md border border-border bg-surface-2 px-2 py-0.5 text-muted">
+              {t("landing.signal.clean")}
+            </span>
+          )}
+        </div>
+
+        <Link
+          href="/register"
+          className="self-start rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent/90"
+        >
+          {t("landing.signal.cta")}
+        </Link>
+
+        {signal.total > 1 && (
+          <p className="text-xs text-faint">
+            {t("landing.signal.rest", { n: signal.total - 1, total: symbolsScanned })}
+          </p>
         )}
       </div>
-
-      <Link
-        href="/register"
-        className="self-start rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition hover:bg-accent/90"
-      >
-        {t("landing.signal.cta")}
-      </Link>
-
-      {signal.total > 1 && (
-        <p className="text-xs text-faint">
-          {t("landing.signal.rest", { n: signal.total - 1, total: symbolsScanned })}
-        </p>
-      )}
     </div>
   );
 }

@@ -145,7 +145,13 @@ export default async function Home() {
                 now={landing.generatedAt}
                 t={t}
               />
-              <LandingSignal signal={landing.signal} symbolsScanned={landing.stats.symbols} t={t} />
+              <LandingSignal
+                signal={landing.signal}
+                symbolsScanned={landing.stats.symbols}
+                locale={locale}
+                timezone={timezone}
+                t={t}
+              />
             </section>
             <section className="max-w-6xl mx-auto px-6 pb-8">
               <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
