@@ -139,3 +139,37 @@ describe("EconCalPage", () => {
     expect(await screen.findByText("econcal.empty")).toBeInTheDocument();
   });
 });
+
+describe("EconCalPage: пустой сегодняшний день", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  // Релизов «сегодня» может не быть вовсе (выходные, поздний вечер). Стартовая
+  // вкладка тогда показывала бы «нет событий», хотя дальше в окне их десятки —
+  // именно так календарь и выглядел пустым по воскресеньям.
+  it("автоматически открывает ближайшие 7 дней, когда на сегодня событий нет", async () => {
+    const later = new Date(Date.now() + 3 * 86_400_000);
+    mockFetch({
+      events: [{ ...events[0], id: "later", time: later.toISOString() }],
+      currencies: ["USD"],
+      categories: ["Inflation"],
+    });
+
+    render(<EconCalPage />);
+    expect(await screen.findByText("Базовый ИПЦ (м/м)")).toBeInTheDocument();
+  });
+
+  it("не подменяет вкладку, если её выбрал пользователь", async () => {
+    const later = new Date(Date.now() + 3 * 86_400_000);
+    mockFetch({
+      events: [{ ...events[0], id: "later", time: later.toISOString() }],
+      currencies: ["USD"],
+      categories: ["Inflation"],
+    });
+
+    render(<EconCalPage />);
+    await screen.findByText("Базовый ИПЦ (м/м)");
+
+    fireEvent.click(screen.getByText("econcal.today", { selector: "button" }));
+    await waitFor(() => expect(screen.queryByText("Базовый ИПЦ (м/м)")).not.toBeInTheDocument());
+  });
+});
