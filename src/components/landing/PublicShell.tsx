@@ -22,31 +22,31 @@ export default async function PublicShell({
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 border-b border-border glass-panel">
-        <Link href="/" className="flex items-center gap-2 font-semibold text-lg">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-2 px-4 sm:px-6 py-4 border-b border-border glass-panel">
+        <Link href="/" className="flex items-center gap-2 font-semibold text-base sm:text-lg">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
             <BarChart3 size={18} />
           </span>
           TradeStats
         </Link>
-        <nav className="flex items-center gap-3 text-sm">
-          <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
-            {t("landing.nav.calendar")}
-          </Link>
+        <nav className="flex flex-nowrap items-center gap-2 sm:gap-3 text-sm whitespace-nowrap">
           <Link href="/news" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.news")}
           </Link>
+          <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("landing.nav.calendar")}
+          </Link>
           <LocaleMenu />
           {session ? (
-            <Link href="/dashboard" className="px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">
+            <Link href="/dashboard" className="px-3 sm:px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">
               {t("nav.overview")}
             </Link>
           ) : (
             <>
-              <Link href="/login" className="px-3 py-1.5 text-muted hover:text-fg transition">
+              <Link href="/login" className="hidden sm:block px-3 py-1.5 text-muted hover:text-fg transition">
                 {t("landing.signIn")}
               </Link>
-              <Link href="/register" className="px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">
+              <Link href="/register" className="px-3 sm:px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">
                 {t("landing.start")}
               </Link>
             </>

@@ -67,27 +67,38 @@ export default async function Home() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <header className="sticky top-0 z-30 flex items-center justify-between px-6 py-4 border-b border-border glass-panel">
-        <div className="flex items-center gap-2 font-semibold text-lg">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-2 px-4 sm:px-6 py-4 border-b border-border glass-panel">
+        <div className="flex items-center gap-2 font-semibold text-base sm:text-lg">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
             <BarChart3 size={18} />
           </span>
           TradeStats
         </div>
-        <nav className="flex items-center gap-3 text-sm">
-          <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
-            {t("landing.nav.calendar")}
-          </Link>
+        {/* nowrap: на 375px шапка иначе переполняется и «Начать» уезжает за
+            край экрана. Всё, что не помещается, прячется до sm — вход есть на
+            самой странице регистрации, а демо — кнопкой в hero. */}
+        <nav className="flex flex-nowrap items-center gap-2 sm:gap-3 text-sm whitespace-nowrap">
           <Link href="/news" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.news")}
           </Link>
+          <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("landing.nav.calendar")}
+          </Link>
           <LocaleMenu />
-          <Link href="/login" className="px-3 py-1.5 text-muted hover:text-fg transition">
+          <form action="/api/demo" method="post" className="hidden sm:block">
+            <button
+              type="submit"
+              className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-accent transition hover:bg-accent/15"
+            >
+              {t("landing.nav.demo")}
+            </button>
+          </form>
+          <Link href="/login" className="hidden sm:block px-3 py-1.5 text-muted hover:text-fg transition">
             {t("landing.signIn")}
           </Link>
           <Link
             href="/register"
-            className="px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition"
+            className="px-3 sm:px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition"
           >
             {t("landing.start")}
           </Link>
@@ -107,25 +118,27 @@ export default async function Home() {
           <p className="mt-5 text-lg text-muted max-w-2xl mx-auto">
             {t("landing.heroDesc")}
           </p>
-          <div className="mt-8 flex items-center justify-center gap-3">
+          <div className="mt-8 flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-3">
             <Link
               href="/register"
-              className="px-6 py-3 rounded-lg bg-accent text-white font-medium hover:bg-accent/90 transition"
+              className="px-6 py-3 rounded-lg bg-accent text-white font-medium text-center whitespace-nowrap hover:bg-accent/90 transition"
             >
               {t("landing.ctaCreate")}
             </Link>
             <Link
               href="/login"
-              className="px-6 py-3 rounded-lg border border-border bg-surface hover:border-border-strong transition"
+              className="px-6 py-3 rounded-lg border border-border bg-surface text-center whitespace-nowrap hover:border-border-strong transition"
             >
               {t("landing.ctaHave")}
             </Link>
             {/* Демо — POST-форма, а не ссылка: заход выдаёт cookie, и префетч
                 браузера не должен его запускать. Работает без JS. */}
-            <form action="/api/demo" method="post">
+            {/* contents — чтобы кнопка была прямым элементом flex-строки CTA и
+                тянулась вровень с соседями, а не жила в своей коробке. */}
+            <form action="/api/demo" method="post" className="contents">
               <button
                 type="submit"
-                className="px-6 py-3 rounded-lg border border-accent/40 bg-accent/10 text-accent hover:bg-accent/15 transition"
+                className="px-6 py-3 rounded-lg border border-accent/40 bg-accent/10 text-accent text-center whitespace-nowrap hover:bg-accent/15 transition"
               >
                 {t("landing.demoCta")}
               </button>
@@ -137,7 +150,10 @@ export default async function Home() {
         {landing && (
           <>
             <LandingStats stats={landing.stats} locale={locale} t={t} />
-            <section className="max-w-6xl mx-auto px-6 pt-8 pb-4 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
+            <section className="max-w-6xl mx-auto px-6 pt-8">
+              <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
+            </section>
+            <section className="max-w-6xl mx-auto px-6 pt-6 pb-8 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
               <LandingCalendar
                 events={landing.events}
                 locale={locale}
@@ -152,9 +168,6 @@ export default async function Home() {
                 timezone={timezone}
                 t={t}
               />
-            </section>
-            <section className="max-w-6xl mx-auto px-6 pb-8">
-              <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
             </section>
           </>
         )}

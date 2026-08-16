@@ -21,9 +21,12 @@ export default function LandingNews({
   t: (key: string) => string;
 }) {
   const timeZone = ianaFor(timezone);
+  // hourCycle h23 — как в календаре рядом: два соседних блока с разным
+  // форматом времени ("07:00 PM" и "19:00") читаются как ошибка.
   const time = new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", {
     hour: "2-digit",
     minute: "2-digit",
+    hourCycle: "h23",
     ...(timeZone ? { timeZone } : {}),
   });
 

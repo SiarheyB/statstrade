@@ -1,9 +1,14 @@
 import type { LandingStats as Stats } from "@/lib/landing";
 
 /**
- * Полоса живых чисел под hero. Значения настоящие (см. lib/landing.ts) — это
- * состояние сервиса прямо сейчас, а не витрина: пустой день так и покажет ноль
- * сетапов.
+ * Строка состояния сервиса под hero. Значения настоящие (см. lib/landing.ts) —
+ * это то, что происходит прямо сейчас, а не витрина: пустой день так и покажет
+ * ноль сетапов.
+ *
+ * Сознательно НЕ карточки и не сетка с рамками: четыре крупных числа в
+ * коробках спорят с hero за внимание и разрывают страницу на две несвязанные
+ * половины. Здесь это одна тихая строка — подпись под заголовком, а акцент
+ * остаётся на кнопках и на карточке сигнала ниже.
  */
 export default function LandingStats({
   stats,
@@ -23,21 +28,17 @@ export default function LandingStats({
   ];
 
   return (
-    <div className="border-y border-border bg-surface">
-      <div className="max-w-6xl mx-auto grid grid-cols-2 sm:grid-cols-4">
+    <div className="max-w-6xl mx-auto px-6">
+      <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[13px] text-faint">
+        <span className="mr-1 inline-flex items-center gap-1.5">
+          <span className="h-1.5 w-1.5 rounded-full bg-profit" aria-hidden="true" />
+        </span>
         {cells.map((c, i) => (
-          <div
-            key={c.label}
-            className={[
-              "px-4 py-3 text-center border-border",
-              i < cells.length - 1 ? "sm:border-r" : "",
-              i % 2 === 0 ? "border-r sm:border-r" : "",
-              i < 2 ? "border-b sm:border-b-0" : "",
-            ].join(" ")}
-          >
-            <div className="text-lg font-semibold tabular-nums tracking-tight">{nf.format(c.value)}</div>
-            <div className="mt-0.5 text-[10px] uppercase tracking-wider text-faint">{c.label}</div>
-          </div>
+          <span key={c.label} className="inline-flex items-center gap-1.5">
+            {i > 0 && <span className="mr-1 text-border-strong">·</span>}
+            <span className="font-semibold tabular-nums text-fg">{nf.format(c.value)}</span>
+            {c.label}
+          </span>
         ))}
       </div>
     </div>

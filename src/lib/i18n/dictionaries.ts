@@ -354,6 +354,7 @@ const en: Dict = {
   "landing.demoHint": "No real keys? You can load demo data in one click.",
   // landing: market blocks (calendar + signal of the day + news)
   "landing.nav.news": "News",
+  "landing.nav.demo": "Demo",
   "landing.nav.calendar": "Calendar",
   "landing.demoCta": "Live demo, no sign-up",
   "landing.stats.setups": "setups today",
@@ -1543,6 +1544,7 @@ const ru: Dict = {
   "landing.demoHint": "Без реальных ключей? Можно загрузить демо-данные одним кликом.",
   // landing: market blocks (calendar + signal of the day + news)
   "landing.nav.news": "Новости",
+  "landing.nav.demo": "Демо",
   "landing.nav.calendar": "Календарь",
   "landing.demoCta": "Демо без регистрации",
   "landing.stats.setups": "сетапов сегодня",
