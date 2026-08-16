@@ -48,10 +48,12 @@ const CATEGORY_RU: Record<string, string> = {
   Other: "Прочее",
 };
 
-// Начало суток (00:00 в выбранной таймзоне), сдвинутое на `offsetDays`.
-function dayStart(offsetDays: number, tz: import("@/lib/timezone").TimezoneId): Date {
+// Monday 00:00 (in the given display timezone) of the week containing `base`,
+// shifted by `offsetWeeks`.
+function weekStart(offsetWeeks: number, tz: import("@/lib/timezone").TimezoneId): Date {
   const zp = zonedParts(Date.now(), tz);
-  return new Date(zonedDateToUtcMs(zp.y, zp.mo, zp.d + offsetDays, tz));
+  const dow = (zp.day + 6) % 7; // 0 = Monday
+  return new Date(zonedDateToUtcMs(zp.y, zp.mo, zp.d - dow + offsetWeeks * 7, tz));
 }
 
 export default function EconCalPage() {
@@ -64,18 +66,12 @@ export default function EconCalPage() {
   const [curFilter, setCurFilter] = useState<Set<string>>(new Set());
   const [impFilter, setImpFilter] = useState<Set<string>>(new Set());
   const [category, setCategory] = useState("all");
-  // Day scope: today (default), tomorrow, or the whole fetched window.
+  // Day scope: today (default), tomorrow, or the whole fetched week.
   const [scope, setScope] = useState<"today" | "tomorrow" | "week">("today");
-  // Пользователь сам выбрал вкладку — больше не подставляем её автоматически
-  // (см. эффект ниже): его выбор важнее нашей догадки, даже если он пустой.
-  const [scopePinned, setScopePinned] = useState(false);
 
-  // Скользящее окно «сегодня + 7 дней», а НЕ календарная неделя пн–вс.
-  // С календарной неделей в воскресенье календарь оказывался пустым во всех
-  // трёх вкладках: события этого дня уже прошли, а «завтра» — это уже
-  // следующая неделя, которая в диапазон не попадала и просто не грузилась.
+  // Current week only (the free feed serves just this week).
   const range = useMemo(() => {
-    const from = dayStart(0, timezone);
+    const from = weekStart(0, timezone);
     const to = new Date(from.getTime() + 7 * 86400000);
     return { from, to };
   }, [timezone]);
@@ -127,25 +123,13 @@ export default function EconCalPage() {
     return { todayId: localDayId(new Date(now)), tomorrowId: localDayId(new Date(now + 86400000)) };
   }, [localDayId]);
 
-  // На «сегодня» событий может не быть вовсе: релизов в сутках бывает ноль, а
-  // ближе к ночи всё сегодняшнее уже позади. Тогда стартовая вкладка молча
-  // показывала бы «нет событий», хотя дальше в окне их десятки. Подставляем
-  // ближайшие 7 дней — но именно ВЫЧИСЛЯЕМ, а не переписываем состояние из
-  // эффекта: как только пользователь сам выбрал вкладку, его выбор главнее,
-  // даже если она пустая.
-  const effectiveScope = useMemo(() => {
-    if (scopePinned || scope !== "today" || events.length === 0) return scope;
-    const hasToday = events.some((e) => localDayId(new Date(e.time)) === todayId);
-    return hasToday ? scope : "week";
-  }, [scopePinned, scope, events, localDayId, todayId]);
-
   const shown = events.filter(
     (e) =>
       (curFilter.size === 0 || curFilter.has(e.currency)) &&
       (impFilter.size === 0 || impFilter.has(e.impact)) &&
       (category === "all" || e.category === category) &&
-      (effectiveScope === "week" ||
-        localDayId(new Date(e.time)) === (effectiveScope === "today" ? todayId : tomorrowId)),
+      (scope === "week" ||
+        localDayId(new Date(e.time)) === (scope === "today" ? todayId : tomorrowId)),
   );
 
   const tzName = ianaFor(timezone);
@@ -170,7 +154,7 @@ export default function EconCalPage() {
     });
 
   const loc = locale === "ru" ? "ru-RU" : "en-US";
-  const rangeLabel = `${range.from.toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })} – ${new Date(range.to.getTime() - 1).toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })}`;
+  const weekLabel = `${range.from.toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })} – ${new Date(range.to.getTime() - 1).toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })}`;
 
   return (
     <div className="px-6 py-5 max-w-4xl mx-auto">
@@ -191,7 +175,7 @@ export default function EconCalPage() {
       <p className="text-sm text-muted mt-1">{t("econcal.subtitle")}</p>
       <div className="inline-flex items-center gap-2 mt-2 mb-4 text-sm">
         <span className="text-faint">{t("econcal.thisWeek")}:</span>
-        <span className="font-medium tabular-nums">{rangeLabel}</span>
+        <span className="font-medium tabular-nums">{weekLabel}</span>
       </div>
 
       {/* Day scope: today (default) / tomorrow / whole week */}
@@ -199,13 +183,10 @@ export default function EconCalPage() {
         {(["today", "tomorrow", "week"] as const).map((s) => (
           <button
             key={s}
-            onClick={() => {
-              setScope(s);
-              setScopePinned(true);
-            }}
+            onClick={() => setScope(s)}
             className={clsx(
               "px-3 py-1.5 rounded-lg text-sm transition",
-              effectiveScope === s ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
+              scope === s ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
             )}
           >
             {t(s === "week" ? "econcal.thisWeek" : `econcal.${s}`)}
