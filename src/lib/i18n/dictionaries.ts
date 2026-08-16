@@ -984,8 +984,8 @@ const en: Dict = {
 
   "admin.overview.title": "Overview",
   "admin.overview.subtitle": "TradeStats system summary.",
-  "admin.overview.deployUpToDate": "Deployed version is up to date (commit {sha})",
-  "admin.overview.deployPending": "Newer commit on GitHub: running {running}, latest is {latest} — deploy hasn't landed on the server yet",
+  "admin.overview.deployUpToDate": "Deployed version is up to date (commit {sha} from {date})",
+  "admin.overview.deployPending": "Newer commit on GitHub: running {running} from {runningDate}, latest is {latest} from {latestDate} — deploy hasn't landed on the server yet",
   "admin.overview.newUsersHint": "+{week} in 7d · +{month} in 30d",
   "admin.overview.stat.users": "Users",
   "admin.overview.stat.accounts": "Exchange accounts",
@@ -2174,8 +2174,8 @@ const ru: Dict = {
 
   "admin.overview.title": "Обзор",
   "admin.overview.subtitle": "Сводка по системе TradeStats.",
-  "admin.overview.deployUpToDate": "Развёрнута актуальная версия (коммит {sha})",
-  "admin.overview.deployPending": "На GitHub есть более новый коммит: сейчас запущен {running}, актуальный — {latest} — деплой ещё не докатился до сервера",
+  "admin.overview.deployUpToDate": "Развёрнута актуальная версия (коммит {sha} от {date})",
+  "admin.overview.deployPending": "На GitHub есть более новый коммит: сейчас запущен {running} от {runningDate}, актуальный — {latest} от {latestDate} — деплой ещё не докатился до сервера",
   "admin.overview.newUsersHint": "+{week} за 7 дн · +{month} за 30 дн",
   "admin.overview.stat.users": "Пользователи",
   "admin.overview.stat.accounts": "Аккаунты бирж",

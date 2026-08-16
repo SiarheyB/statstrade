@@ -13,34 +13,58 @@ export type DeployStatus =
       available: true;
       runningSha: string;
       runningShaShort: string;
+      /** Когда сделан запущенный коммит (ISO) — null, если GitHub не ответил. */
+      runningDate: string | null;
       latestSha: string;
       latestShaShort: string;
+      /** Когда сделан последний коммит main (ISO). */
+      latestDate: string | null;
       upToDate: boolean;
     };
 
-let cache: { at: number; latestSha: string | null; error?: string } | null = null;
+type Commit = { sha: string | null; date: string | null };
 
-async function fetchLatestMainSha(): Promise<{ latestSha: string | null; error?: string }> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache;
+let cache: { at: number; commit: Commit; error?: string } | null = null;
+// Даты по конкретным SHA не меняются никогда, поэтому кэш без TTL — он нужен
+// только чтобы не тратить лимит публичного API на повторные заходы в админку.
+const dateBySha = new Map<string, string | null>();
+
+/** Дата коммита из ответа GitHub: committer точнее author при rebase/cherry-pick. */
+function commitDate(data: unknown): string | null {
+  const c = (data as { commit?: { committer?: { date?: unknown }; author?: { date?: unknown } } })?.commit;
+  const raw = c?.committer?.date ?? c?.author?.date;
+  return typeof raw === "string" ? raw : null;
+}
+
+async function fetchCommit(ref: string): Promise<{ commit: Commit; error?: string }> {
   try {
-    const res = await fetch(`https://api.github.com/repos/${REPO}/commits/main`, {
+    const res = await fetch(`https://api.github.com/repos/${REPO}/commits/${ref}`, {
       headers: { Accept: "application/vnd.github+json" },
       cache: "no-store",
     });
-    if (!res.ok) {
-      const result = { at: Date.now(), latestSha: null, error: `GitHub API ${res.status}` };
-      cache = result;
-      return result;
-    }
+    if (!res.ok) return { commit: { sha: null, date: null }, error: `GitHub API ${res.status}` };
     const data = await res.json();
-    const result = { at: Date.now(), latestSha: typeof data.sha === "string" ? data.sha : null };
-    cache = result;
-    return result;
+    return { commit: { sha: typeof data.sha === "string" ? data.sha : null, date: commitDate(data) } };
   } catch (err) {
-    const result = { at: Date.now(), latestSha: null, error: (err as Error).message };
-    cache = result;
-    return result;
+    return { commit: { sha: null, date: null }, error: (err as Error).message };
   }
+}
+
+async function fetchLatestMain(): Promise<{ commit: Commit; error?: string }> {
+  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache;
+  const { commit, error } = await fetchCommit("main");
+  cache = { at: Date.now(), commit, error };
+  if (commit.sha) dateBySha.set(commit.sha, commit.date);
+  return cache;
+}
+
+/** Дата запущенного коммита. Отдельный запрос нужен, только когда он не main. */
+async function dateOf(sha: string): Promise<string | null> {
+  const hit = dateBySha.get(sha);
+  if (hit !== undefined) return hit;
+  const { commit } = await fetchCommit(sha);
+  dateBySha.set(sha, commit.date);
+  return commit.date;
 }
 
 export async function getDeployStatus(): Promise<DeployStatus> {
@@ -48,16 +72,19 @@ export async function getDeployStatus(): Promise<DeployStatus> {
   if (!runningSha) {
     return { available: false, reason: "GIT_SHA не задан в этом окружении (обычно — локальная разработка)" };
   }
-  const { latestSha, error } = await fetchLatestMainSha();
-  if (!latestSha) {
+  const { commit: latest, error } = await fetchLatestMain();
+  if (!latest.sha) {
     return { available: false, reason: error ?? "Не удалось получить последний коммит с GitHub" };
   }
+  const upToDate = runningSha === latest.sha;
   return {
     available: true,
     runningSha,
     runningShaShort: runningSha.slice(0, 7),
-    latestSha,
-    latestShaShort: latestSha.slice(0, 7),
-    upToDate: runningSha === latestSha,
+    runningDate: upToDate ? latest.date : await dateOf(runningSha),
+    latestSha: latest.sha,
+    latestShaShort: latest.sha.slice(0, 7),
+    latestDate: latest.date,
+    upToDate,
   };
 }

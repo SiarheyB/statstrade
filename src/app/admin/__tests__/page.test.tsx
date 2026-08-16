@@ -10,6 +10,8 @@ vi.mock("@/lib/i18n/server", () => ({
       vars ? `${k}:${JSON.stringify(vars)}` : k,
     locale: "ru",
   }),
+  // Даты коммитов в баннере деплоя форматируются в таймзоне админа.
+  getTimezone: async () => "UTC",
 }));
 
 vi.mock("@/lib/db", () => ({

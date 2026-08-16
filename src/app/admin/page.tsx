@@ -2,7 +2,8 @@ import Link from "next/link";
 import { prisma } from "@/lib/db";
 import { getFeedFreshness, ONLINE_THRESHOLD_MS } from "@/lib/admin";
 import { getDeployStatus } from "@/lib/deployStatus";
-import { getServerT } from "@/lib/i18n/server";
+import { getServerT, getTimezone } from "@/lib/i18n/server";
+import { ianaFor } from "@/lib/timezone";
 import { Users, Plug, AlertTriangle, Layers, Activity, RefreshCw, CheckCircle2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,21 @@ export default async function AdminOverviewPage() {
   const staleFeeds = freshness.filter((f) => f.stale);
   const deploy = await getDeployStatus();
 
+  // Даты коммитов — в таймзоне админа. Через Intl напрямую, а не fmtDateTime:
+  // тот держит зону в модульной переменной, а серверный рендер общий на все
+  // запросы (см. LandingCalendar) — чужая зона протекла бы между админами.
+  const tzName = ianaFor(await getTimezone());
+  const commitTime = new Intl.DateTimeFormat(locale === "ru" ? "ru-RU" : "en-US", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    ...(tzName ? { timeZone: tzName } : {}),
+  });
+  const commitDate = (iso: string | null) => (iso ? commitTime.format(new Date(iso)) : "—");
+
   return (
     <div className="p-6 md:p-8 max-w-6xl">
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.overview.title")}</h1>
@@ -84,8 +100,16 @@ export default async function AdminOverviewPage() {
           )}
           <span>
             {deploy.upToDate
-              ? t("admin.overview.deployUpToDate", { sha: deploy.runningShaShort })
-              : t("admin.overview.deployPending", { running: deploy.runningShaShort, latest: deploy.latestShaShort })}
+              ? t("admin.overview.deployUpToDate", {
+                  sha: deploy.runningShaShort,
+                  date: commitDate(deploy.runningDate),
+                })
+              : t("admin.overview.deployPending", {
+                  running: deploy.runningShaShort,
+                  runningDate: commitDate(deploy.runningDate),
+                  latest: deploy.latestShaShort,
+                  latestDate: commitDate(deploy.latestDate),
+                })}
           </span>
         </div>
       )}
