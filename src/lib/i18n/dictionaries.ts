@@ -344,7 +344,6 @@ const en: Dict = {
   // landing
   "landing.signIn": "Sign in",
   "landing.start": "Get started",
-  "landing.badge": "{top} + {n} more exchanges",
   "landing.heroPre": "Trader statistics",
   "landing.heroAccent": "you can see at a glance",
   "landing.heroDesc":
@@ -391,10 +390,6 @@ const en: Dict = {
   "landing.nav.demo": "Demo",
   "landing.nav.calendar": "Calendar",
   "landing.demoCta": "Live demo, no sign-up",
-  "landing.stats.setups": "setups today",
-  "landing.stats.symbols": "pairs scanned",
-  "landing.stats.events": "calendar events",
-  "landing.stats.news": "news in 24h",
   "landing.calendar.title": "Economic calendar",
   "landing.calendar.more": "full month",
   "landing.calendar.inHours": "in {h}h {m}m",
@@ -1551,7 +1546,6 @@ const ru: Dict = {
 
   "landing.signIn": "Войти",
   "landing.start": "Начать",
-  "landing.badge": "{top} и ещё {n} бирж",
   "landing.heroPre": "Статистика трейдера,",
   "landing.heroAccent": "которая видна сразу",
   "landing.heroDesc":
@@ -1598,10 +1592,6 @@ const ru: Dict = {
   "landing.nav.demo": "Демо",
   "landing.nav.calendar": "Календарь",
   "landing.demoCta": "Демо без регистрации",
-  "landing.stats.setups": "сетапов сегодня",
-  "landing.stats.symbols": "пар в скане",
-  "landing.stats.events": "событий календаря",
-  "landing.stats.news": "новостей за сутки",
   "landing.calendar.title": "Экономический календарь",
   "landing.calendar.more": "весь месяц",
   "landing.calendar.inHours": "через {h} ч {m} мин",

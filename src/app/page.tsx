@@ -7,7 +7,6 @@ import { TOTAL_METRICS } from "@/lib/analytics/metric-defs";
 import { getServerT, getLocale, getTimezone } from "@/lib/i18n/server";
 import { getLandingData } from "@/lib/landing";
 import LocaleMenu from "@/components/LocaleMenu";
-import LandingStats from "@/components/landing/LandingStats";
 import LandingCalendar from "@/components/landing/LandingCalendar";
 import LandingSignal from "@/components/landing/LandingSignal";
 import LandingNews from "@/components/landing/LandingNews";
@@ -35,10 +34,6 @@ export default async function Home() {
   const exchangeNames = await getEnabledExchangeMetas()
     .then((metas) => metas.map((m) => m.name))
     .catch(() => Object.values(SUPPORTED_EXCHANGES).map((m) => m.name));
-  const badgeTop = exchangeNames.slice(0, 3).join(" · ");
-  const badgeRest = exchangeNames.length - 3;
-  const badge =
-    badgeRest > 0 ? t("landing.badge", { top: badgeTop, n: badgeRest }) : badgeTop;
 
 
   return (
@@ -83,10 +78,6 @@ export default async function Home() {
 
       <main className="flex-1">
         <section className="max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
-          <div className="inline-flex items-center gap-2 rounded-full border border-border bg-surface px-3 py-1 text-xs text-muted mb-6">
-            <span className="h-1.5 w-1.5 rounded-full bg-profit" />
-            {badge}
-          </div>
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             {t("landing.heroPre")}{" "}
             <span className="text-accent">{t("landing.heroAccent")}</span>
@@ -125,8 +116,7 @@ export default async function Home() {
 
         {landing && (
           <>
-            <LandingStats stats={landing.stats} locale={locale} t={t} />
-            <section className="max-w-6xl mx-auto px-6 pt-8">
+            <section className="max-w-6xl mx-auto px-6 pt-4">
               <LandingNews items={landing.news} locale={locale} timezone={timezone} t={t} />
             </section>
             <section className="max-w-6xl mx-auto px-6 pt-6 pb-2 grid gap-4 lg:grid-cols-[1.3fr_1fr]">
