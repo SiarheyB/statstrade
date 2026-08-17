@@ -152,7 +152,16 @@ services:
       DEPTH_PCT: ${OB_DEPTH_PCT:-0.02}
       NOISE_MIN_NOTIONAL: ${OB_NOISE_MIN_NOTIONAL:-50000}
       BIG_NOTIONAL: ${OB_BIG_NOTIONAL:-100000}
-      RETENTION_DAYS: ${OB_RETENTION_DAYS:-14}
+      # Сырые снапшоты. Их не читает ни один живой запрос — карта, B/A и профиль
+      # стакана берут данные из rollup и ObLatestBook, а ObSnapshot остаётся
+      # только путём отката и материалом для диагностики. При этом он самый
+      # тяжёлый в базе (~3 ГБ в сутки), поэтому держим 3 дня.
+      RETENTION_DAYS: ${OB_RETENTION_DAYS:-3}
+      # Минутный слой rollup: нужен окнам шириной в несколько дней, всё, что
+      # шире, читается из часового и дневного уровней каскада. Часовой и дневной
+      # хранятся вечно — история лимиток не теряется, на глубине лет она просто
+      # менее подробная. 0 = не чистить и минутный слой.
+      ROLLUP_MINUTE_RETENTION_DAYS: ${OB_ROLLUP_MINUTE_RETENTION_DAYS:-30}
       TRADE_RETENTION_DAYS: ${OB_TRADE_RETENTION_DAYS:-30}
       CANDLE_RETENTION_DAYS: ${OB_CANDLE_RETENTION_DAYS:-365}
       # Фича "Рекомендации" (дневные уровни/сетапы пробой-ложный пробой по

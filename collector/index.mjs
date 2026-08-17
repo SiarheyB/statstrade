@@ -31,6 +31,14 @@ const cfg = {
   // умолчанию не чистим их вовсе (0 = хранить вечно). Прежний дефолт 365
   // молча удалял бы историю по достижении года.
   rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 0), // 0 = хранить вечно
+  // Минутный слой (ObSnapshotRollup / ObRollupBucket / ObFootprintRollup) нужен
+  // только окнам шириной в несколько дней: всё, что шире, читается из часового и
+  // дневного уровней каскада (см. rollupLevelFor в lib/orderflow.ts). Он же —
+  // самая тяжёлая таблица базы (~0.22 ГБ в сутки), поэтому держим ограниченное
+  // время, а часовой и дневной уровни — вечно. История при этом не теряется:
+  // на глубине лет карта рисуется с часовым разрешением.
+  // 0 = не чистить и минутный слой тоже.
+  rollupMinuteRetention: Number(process.env.ROLLUP_MINUTE_RETENTION_DAYS ?? 30),
   candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
   // Полный скан дневных свечей по всем USDT-парам Binance spot (фича
   // "Рекомендации", см. TRADE_RECOMMENDATIONS_PLAN.md). Выключено по
@@ -1014,6 +1022,44 @@ async function pruneOld() {
       rollupDeleted += r.rowCount ?? 0;
     }
     }
+    // Минутный слой rollup — свой, более короткий ретеншн (см. cfg).
+    //
+    // Удаляем только то, что каскад УЖЕ свернул в часовой уровень: иначе
+    // минутные бакеты исчезли бы, не попав никуда, и в истории образовалась бы
+    // дыра. Поэтому граница — минимум из «сегодня минус N дней» и последнего
+    // свёрнутого часа.
+    let minuteDeleted = 0;
+    if (cfg.rollupMinuteRetention > 0) {
+      const { rows: c } = await pool.query(
+        `SELECT LEAST(
+                  NOW() - ($1 || ' days')::interval,
+                  COALESCE((SELECT MAX("bucket") FROM "ObSnapshotRollupH"), 'epoch'::timestamptz)
+                ) AS cutoff`,
+        [String(cfg.rollupMinuteRetention)],
+      );
+      const cutoff = c[0]?.cutoff;
+      for (const tbl of ["ObSnapshotRollup", "ObRollupBucket"]) {
+        const r = await pool.query(`DELETE FROM "${tbl}" WHERE bucket < $1`, [cutoff]);
+        minuteDeleted += r.rowCount ?? 0;
+      }
+      // Пятиминутный футпринт — по той же границе, но по своему каскаду.
+      const { rows: fc } = await pool.query(
+        `SELECT LEAST(
+                  NOW() - ($1 || ' days')::interval,
+                  COALESCE((SELECT MAX("bucket") FROM "ObFootprintRollupH"), 'epoch'::timestamptz)
+                ) AS cutoff`,
+        [String(cfg.rollupMinuteRetention)],
+      );
+      const r = await pool.query(`DELETE FROM "ObFootprintRollup" WHERE bucket < $1`, [fc[0]?.cutoff]);
+      minuteDeleted += r.rowCount ?? 0;
+    }
+    if (minuteDeleted) {
+      console.log(
+        `[prune] минутный слой rollup: удалено ${minuteDeleted} строк ` +
+        `(хранение ${cfg.rollupMinuteRetention}д, часовой и дневной уровни не тронуты)`,
+      );
+    }
+
     // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
     // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
     // ленивой подгрузки графика). Раньше здесь был DELETE по

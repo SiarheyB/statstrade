@@ -165,7 +165,15 @@ GOOGLE_DRIVE_REDIRECT_URI=
 # Параметры сбора стаканов (можно не менять)
 OB_SYMBOLS=BTCUSDT,ETHUSDT
 OB_EXCHANGES=binance-futures,binance-spot
-OB_RETENTION_DAYS=14
+# Сырые снапшоты стакана. Их не читает ни один живой запрос (карта, B/A и
+# профиль стакана идут в rollup и ObLatestBook) — это путь отката и материал
+# для диагностики. Самая тяжёлая таблица базы: ~3 ГБ в сутки.
+OB_RETENTION_DAYS=3
+# Минутный слой rollup. Нужен окнам шириной в несколько дней; всё, что шире,
+# читается из часового и дневного уровней каскада, а они хранятся ВЕЧНО —
+# история лимиток не теряется, на глубине лет она просто менее подробная.
+# 0 = не чистить и минутный слой (тогда планируйте ~80 ГБ в год).
+OB_ROLLUP_MINUTE_RETENTION_DAYS=30
 # Фича "Рекомендации" (дневные уровни/сетапы пробой-ложный пробой) — без этого
 # collector не сканирует дневные свечи по всем USDT-M фьючерсам Binance, и
 # разделу /dashboard/recommendations банально не по чему считать. По умолчанию
@@ -445,8 +453,10 @@ docker system df                        # место под Docker
 docker exec tradestats-db psql -U tradestats -d tradestats -c \
   "SELECT relname, pg_size_pretty(pg_total_relation_size(relid)) FROM pg_catalog.pg_statio_user_tables ORDER BY pg_total_relation_size(relid) DESC LIMIT 6;"
 ```
-Если места мало — уменьшите `OB_RETENTION_DAYS` в `.env` и перезапустите collector, либо
-поднимите `OB_NOISE_MIN_NOTIONAL` (меньше «мелочи» в базе). Очистка старых образов:
+Если места мало — уменьшите `OB_RETENTION_DAYS` (сырьё, самое тяжёлое) или
+`OB_ROLLUP_MINUTE_RETENTION_DAYS` в `.env` и перезапустите collector, либо
+поднимите `OB_NOISE_MIN_NOTIONAL` (меньше «мелочи» в базе). Часовой и дневной
+уровни каскада чистке не подлежат — в них живёт вся история лимиток. Очистка старых образов:
 ```bash
 docker image prune -f
 ```

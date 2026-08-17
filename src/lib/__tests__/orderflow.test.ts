@@ -228,8 +228,8 @@ describe("computeBigTrades", () => {
 
 describe("computeOrderflow", () => {
   it("returns null when both rollup and legacy cells are empty", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]); // rollup cells
-    mocks.queryRaw.mockResolvedValueOnce([]); // legacy cells
+    // Три уровня каскада (минутный → часовой → дневной), затем сырьё.
+    mocks.queryRaw.mockResolvedValue([]);
     expect(await computeOrderflow("BTCUSDT", "binance", 0, 1000)).toBeNull();
   });
 
@@ -391,6 +391,23 @@ describe("computeOrderflow: выбор уровня каскада", () => {
     // Счётчики берутся из таблицы ТОГО ЖЕ уровня, что и цены, иначе нормировка
     // (число бирж / число снапшотов) исказит яркость карты.
     expect(tablesOf(3)).toContain('"ObRollupBucket"');
+  });
+
+  it("узкое окно в глубоком прошлом поднимается на часовой уровень", async () => {
+    // Минутный слой хранится ограниченное время (ROLLUP_MINUTE_RETENTION_DAYS),
+    // поэтому на старом отрезке он пуст — карта должна прийти с часового, а не
+    // пропасть совсем.
+    mocks.queryRaw
+      .mockResolvedValueOnce([]) // минутный слой обрезан по ретеншну
+      .mockResolvedValueOnce([{ col: 0, price: 100, vol: 40 }]) // часовой
+      .mockResolvedValueOnce([{ col: 0, n: 2, ex: 1 }])
+      .mockResolvedValueOnce([]);
+    const to = Date.now() - 200 * 86_400_000;
+    const hm = await computeOrderflow("BTCUSDT", "binance-futures", to - 3600_000, to);
+    expect(hm).not.toBeNull();
+    expect(tablesOf(0)).toContain('"ObSnapshotRollup"');
+    expect(tablesOf(1)).toContain("ObSnapshotRollupH");
+    expect(tablesOf(2)).toContain("ObRollupBucketH");
   });
 
   it("level в опциях перекрывает автоматический выбор", async () => {
