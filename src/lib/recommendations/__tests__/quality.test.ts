@@ -72,13 +72,13 @@ describe("findPierces", () => {
 describe("maxConsecutivePierces", () => {
   it("counts a single pierce as a streak of one", () => {
     const candles = [...background(3), candle(3, 118, 123, 117, 118), ...background(2, 4)];
-    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(1);
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08, 0.1)).toBe(1);
   });
 
   it("detects two bars in a row piercing the level (уровень распилен)", () => {
     // Как на GEV: бар от 14-го проколол уровень и вернулся, и бар от 15-го тоже.
     const candles = [...background(3), candle(3, 118, 123, 117, 118), candle(4, 118, 124, 117, 119)];
-    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(2);
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08, 0.1)).toBe(2);
   });
 
   it("does not merge pierces separated by a normal bar", () => {
@@ -88,7 +88,12 @@ describe("maxConsecutivePierces", () => {
       candle(4, 118, 119, 117, 118), // до уровня не дошёл — серия оборвалась
       candle(5, 118, 123, 117, 118),
     ];
-    expect(maxConsecutivePierces(candles, 120, ATR, 0.08)).toBe(1);
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08, 0.1)).toBe(1);
+  });
+
+  it("counts a bar that pierced and closed exactly on the level, not strictly beyond it (TZAUSDT: level formed at a recent extreme, price returns to it exactly)", () => {
+    const candles = [...background(3), candle(3, 118, 123, 117, 120), candle(4, 120, 124, 116, 121)];
+    expect(maxConsecutivePierces(candles, 120, ATR, 0.08, 0.1)).toBe(2);
   });
 });
 

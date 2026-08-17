@@ -81,7 +81,12 @@ function priorTouchIndexes(candles: DailyCandle[], levelPrice: number, atr: numb
   return touches;
 }
 
-export function computeBreakoutSignals(candles: DailyCandle[], levelPrice: number, atr: number): BreakoutSignals {
+export function computeBreakoutSignals(
+  candles: DailyCandle[],
+  levelPrice: number,
+  atr: number,
+  levelType?: string,
+): BreakoutSignals {
   const forFactors: string[] = [];
   const againstFactors: string[] = [];
   if (candles.length < 6 || atr <= 0) return { for: [], against: [], bias: "neutral", direction: null };
@@ -183,8 +188,18 @@ export function computeBreakoutSignals(candles: DailyCandle[], levelPrice: numbe
         ? "false_breakout"
         : "neutral";
 
+  // "Локальна ситуація" (local_stop) уже прошла собственную проверку
+  // подтверждения в детекторе — checkLocalStop (levels.ts) не отдаёт уровень
+  // дальше, если после опорного бара не набралось нужных дней, которые не
+  // ушли далеко за неё. Раз level.type === "local_stop" вообще попал сюда,
+  // подтверждение уже случилось, и это стоит показать пользователю как факт.
+  // Добавляется ПОСЛЕ подсчёта bias — сама по себе достоверность уровня не
+  // довод именно ЗА пробой против ЛП (для ЛП уровень нужно так же
+  // подтверждён), поэтому голосование bias эту метку не учитывает.
+  const displayFor = levelType === "local_stop" && bias === "breakout" ? [...forFactors, "level_confirmed"] : forFactors;
+
   return {
-    for: forFactors,
+    for: displayFor,
     against: againstFactors,
     bias,
     direction: biasDirection(bias, levelPrice, last.c),

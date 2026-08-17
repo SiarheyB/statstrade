@@ -129,6 +129,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     currentPrice: number;
     candlesFrom: Date;
     candlesTo: Date;
+    lastVolume: number | null;
   }[] = [];
 
   for (const [index, symbol] of symbols.entries()) {
@@ -158,7 +159,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     const significantLevels = levels.filter((l) => l.strength >= SIGNIFICANT_LEVEL_STRENGTH).map((l) => l.price);
 
     for (const level of nearby) {
-      const signals = computeBreakoutSignals(candles, level.price, atr);
+      const signals = computeBreakoutSignals(candles, level.price, atr, level.type);
       // Нейтральные сетапы (факторов "за" и "против" поровну) не сохраняем:
       // торговать по ним нечего, а в списке они только шумят.
       if (signals.bias === "neutral" || !signals.direction) {
@@ -230,6 +231,11 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         currentPrice,
         candlesFrom,
         candlesTo,
+        // В долларах (объём в базовом активе × цена закрытия), а не в штуках
+        // токена — так число хоть в общем порядке сопоставимо с $-объёмом,
+        // который показывают биржевые виджеты (хотя те агрегируют несколько
+        // бирж, а здесь только Binance USDT-M).
+        lastVolume: candles[candles.length - 1].v != null ? candles[candles.length - 1].v! * currentPrice : null,
       });
     }
     cb.onSymbolDone?.(symbol, index, rows.length);

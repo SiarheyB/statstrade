@@ -64,6 +64,7 @@ export const SIGNAL_LABELS: Record<string, string> = {
   volume_supports_impulse: "объём подтверждает импульс",
   volume_spike_on_pierce: "всплеск объёма на проколе уровня",
   paranormal_no_pullback: "паранормальный бар без отката",
+  level_confirmed: "уровень подтверждён после БСУ",
 };
 
 export function signalLabel(key: string): string {

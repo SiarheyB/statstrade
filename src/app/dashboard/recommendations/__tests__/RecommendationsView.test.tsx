@@ -35,6 +35,7 @@ const SETUPS = [
     currentPrice: 118,
     bsuAt: new Date(D(5)).toISOString(),
     candlesTo: new Date(D(12)).toISOString(),
+    lastVolume: 12000,
   },
   {
     id: "2",
@@ -51,6 +52,7 @@ const SETUPS = [
     currentPrice: 84,
     bsuAt: new Date(D(3)).toISOString(),
     candlesTo: new Date(D(12)).toISOString(),
+    lastVolume: 25_000_000,
   },
 ];
 
@@ -186,11 +188,13 @@ describe("expanded setup card", () => {
     expect(chart.parentElement?.textContent).toContain("O 111.00 H 113.00 L 109.00 C 111.00");
   });
 
-  it("shows the previous closed day's volume", async () => {
-    await openFirstCard();
-    // candlesTo — 12.08 (i=11): v = 1000*12 = 12000, показывается компактно.
-    const el = await screen.findByText(/объём 12\.08\.2026 — 12\s*(тыс\.?|K)/i);
+  it("shows the setup's volume in the collapsed header, no date or ticker", async () => {
+    render(<RecommendationsPage />);
+    // Видно сразу, без раскрытия карточки — значение приходит с setup.lastVolume.
+    const el = await screen.findByText(/объём \$12\s*(тыс\.?|K)/i);
     expect(el).toBeInTheDocument();
+    expect(el.textContent).not.toMatch(/\d{2}\.\d{2}\.\d{4}/);
+    expect(el.textContent).not.toMatch(/BTC/);
     // 12 тыс. < 10M — светофор ликвидности красный.
     expect(el).toHaveClass("text-loss");
   });

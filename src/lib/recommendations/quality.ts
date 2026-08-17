@@ -228,12 +228,18 @@ export function findPierces(
   let deepestAtr = 0;
   // Сторону подхода берём по ПРЕДЫДУЩЕМУ закрытию: иначе бар, который пришёл
   // снизу и закрылся выше уровня (то есть пробил его), выглядел бы как прокол
-  // сверху — его лоу ведь остался под уровнем.
+  // сверху — его лоу ведь остался под уровнем. Сравнение НЕ строгое (>=/<=):
+  // предыдущее закрытие часто оказывается РОВНО на уровне — например, когда
+  // сам уровень сформирован по недавнему экстремуму, и цена туда же
+  // вернулась (реальный случай TZAUSDT: закрытие 14.08 легло точно на
+  // уровень 36.39, и строгое `>` делало следующий, более глубокий прокол
+  // 15.08 невидимым для гейта). Ровное закрытие на уровне — это ещё не
+  // прокол сам по себе, но однозначно НЕ смена стороны на противоположную.
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const from = candles[i - 1].c;
-    const pierceUp = from < levelPrice && c.h > levelPrice + minPierce && c.c < levelPrice;
-    const pierceDown = from > levelPrice && c.l < levelPrice - minPierce && c.c > levelPrice;
+    const pierceUp = from <= levelPrice && c.h > levelPrice + minPierce && c.c < levelPrice;
+    const pierceDown = from >= levelPrice && c.l < levelPrice - minPierce && c.c > levelPrice;
     if (!pierceUp && !pierceDown) continue;
     count += 1;
     const depth = (pierceUp ? c.h - levelPrice : levelPrice - c.l) / atr;
@@ -252,21 +258,33 @@ export function findPierces(
  * В отличие от falseBreakouts, считается по окну ВМЕСТЕ с последним закрытым
  * баром: именно свежая пара «вчера проколол — сегодня снова проколол» и есть
  * признак распила, а он весь лежит в самом конце окна.
+ *
+ * Закрытие бара для этой серии проверяем НЕ на полный реклейм уровня
+ * (строго на другой стороне), а лишь на то, что бар НЕ подтвердил пробой —
+ * закрылся не дальше деадбенда за уровнем. Реальный случай TZAUSDT: бар
+ * проколол уровень 36.39 (лоу 36.32) и закрылся РОВНО на нём (36.39, не
+ * выше) — по факту уровень удержал, следующий день пробил уже глубже
+ * (лоу 36.17). Требование строго `c.c > levelPrice` считало бы такой бар
+ * не проколом вовсе, и серия из двух дней подряд теряла бы первый день.
  */
 export function maxConsecutivePierces(
   candles: DailyCandle[],
   levelPrice: number,
   atr: number,
   minPierceAtr: number,
+  deadbandAtr: number,
 ): number {
   const minPierce = atr * minPierceAtr;
+  const deadband = atr * deadbandAtr;
   let best = 0;
   let streak = 0;
   for (let i = 1; i < candles.length; i++) {
     const c = candles[i];
     const from = candles[i - 1].c;
-    const pierceUp = from < levelPrice && c.h > levelPrice + minPierce && c.c < levelPrice;
-    const pierceDown = from > levelPrice && c.l < levelPrice - minPierce && c.c > levelPrice;
+    // Не строгое сравнение — см. комментарий в findPierces: закрытие ровно на
+    // уровне не должно "гасить" распознавание стороны подхода.
+    const pierceUp = from <= levelPrice && c.h > levelPrice + minPierce && c.c < levelPrice + deadband;
+    const pierceDown = from >= levelPrice && c.l < levelPrice - minPierce && c.c > levelPrice - deadband;
     if (pierceUp || pierceDown) {
       streak += 1;
       if (streak > best) best = streak;
@@ -366,7 +384,7 @@ export function assessLevelQuality(
     crossings: countCrossings(history, levelPrice, atr, th.deadbandAtr),
     falseBreakouts: pierces.count,
     deepestFalseBreakoutAtr: pierces.deepestAtr,
-    consecutiveFalseBreakouts: maxConsecutivePierces(windowWithLast, levelPrice, atr, th.consecutivePierceAtr),
+    consecutiveFalseBreakouts: maxConsecutivePierces(windowWithLast, levelPrice, atr, th.consecutivePierceAtr, th.deadbandAtr),
     contamination: contaminationRatio(contaminationHistory, levelPrice, atr, side, th.contaminationZoneAtr),
     runwayAtr: runwayAtr(levelPrice, significantLevels, atr, side),
     closeDistanceAtr: Math.abs(last.c - levelPrice) / atr,

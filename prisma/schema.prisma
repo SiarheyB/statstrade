@@ -956,6 +956,7 @@ model LevelSetup {
   score        Float // ранг качества сетапа: по нему отбираются лучшие N инструментов
   atr          Float
   currentPrice Float
+  lastVolume   Float? // $-объём (base asset × цена закрытия) последнего закрытого дневного бара
   candlesFrom  DateTime // диапазон дневных свечей, использованный для расчёта/картинки
   candlesTo    DateTime
   createdAt    DateTime @default(now())

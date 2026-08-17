@@ -7,11 +7,12 @@ import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
 import { fmtDate, fmtPrice, numLocale } from "@/lib/format";
 
-// Компактная запись объёма (1 234 567 → "1.23M") — своя, а не fmtNumSmart:
-// на оси и в шапке графика нужна короткая форма, не тысячи с разделителями.
+// Компактная запись $-объёма (1 234 567 → "$1.23M") — своя, а не fmtNumSmart:
+// нужна короткая форма, не тысячи с разделителями. Значение уже в долларах
+// (объём в базовом активе × цена закрытия, см. recompute.ts).
 function fmtVolume(v: number): string {
   if (!Number.isFinite(v)) return "—";
-  return new Intl.NumberFormat(numLocale(), { notation: "compact", maximumFractionDigits: 2 }).format(v);
+  return "$" + new Intl.NumberFormat(numLocale(), { notation: "compact", maximumFractionDigits: 2 }).format(v);
 }
 
 // Светофор ликвидности по дневному объёму: <10M — тонко (красный),
@@ -60,6 +61,8 @@ type LevelSetup = {
   bsuAt: string;
   /** Последний ЗАКРЫТЫЙ день, по который считался анализ. */
   candlesTo: string;
+  /** $-объём (объём в базовом активе × цена закрытия) последнего закрытого дневного бара. */
+  lastVolume: number | null;
 };
 
 // Короткая сводка «почему этот уровень чистый» — те самые условия, по которым
@@ -486,6 +489,12 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
           <div className="text-sm text-muted mt-1">
             Уровень {setup.levelPrice} · цена {setup.currentPrice} · {setup.distanceAtr.toFixed(2)}×ATR ·
             сила {setup.strength}
+            {setup.lastVolume != null && (
+              <>
+                {" · "}
+                <span className={volumeClass(setup.lastVolume)}>объём {fmtVolume(setup.lastVolume)}</span>
+              </>
+            )}
           </div>
         </div>
         {open ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
@@ -508,16 +517,6 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
               анализ по закрытию {fmtDate(setup.candlesTo)}; сегодняшний бар ещё формируется и показан
               приглушённым
             </span>
-            {(() => {
-              const analysedTo = Date.parse(setup.candlesTo);
-              const lastClosed = candles?.find((c) => Math.abs(c.t - analysedTo) < DAY_MS / 2);
-              if (!lastClosed || lastClosed.v === undefined) return null;
-              return (
-                <span className={volumeClass(lastClosed.v)}>
-                  объём {fmtDate(setup.candlesTo)} — {fmtVolume(lastClosed.v)} {setup.symbol.replace(/USDT$/, "")}
-                </span>
-              );
-            })()}
           </div>
 
           {loadingCandles && <div className="text-sm text-muted">Загрузка…</div>}
