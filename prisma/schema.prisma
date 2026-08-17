@@ -522,6 +522,69 @@ model ObSnapshotRollup {
 // партиционировано по дням и на широком окне (до 800 свечей таймфрейма) даёт
 // агрегацию по сотням тысяч строк на КАЖДЫЙ опрос, а фронт опрашивает
 // orderflow каждые 3 секунды.
+// Часовой и дневной уровни агрегации стакана — поверх минутного
+// ObSnapshotRollup, НЕ вместо него: минутные данные остаются полными навсегда.
+//
+// Зачем: окно карты ордеров на старших таймфреймах — это месяцы и годы
+// (1d = 365 дней), а колонок на графике всегда 240. На «1d» одна колонка
+// шириной 36 часов, и складывать в неё 2160 минутных строк бессмысленно — тот
+// же результат даёт одна дневная. Выбор уровня — по ширине колонки, см.
+// rollupLevelFor() в lib/orderflow.ts.
+//
+// Ценовой бин НЕ огрубляется: за сутки цена проходит проценты, и уникальных
+// бинов за день выходит сотни против сотен тысяч минутных строк — сжатие и так
+// ~400×, а одинаковая сетка цен на всех уровнях избавляет чтение от разной
+// логики биннинга.
+model ObSnapshotRollupH {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало ЧАСА (UTC)
+  price    Float
+  volSum   Float    @default(0)
+  bidSum   Float    @default(0)
+  askSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+}
+
+model ObSnapshotRollupD {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало СУТОК (UTC)
+  price    Float
+  volSum   Float    @default(0)
+  bidSum   Float    @default(0)
+  askSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, bucket])
+}
+
+// Счётчики снапшотов для тех же уровней: из них computeOrderflow берёт
+// нормировку (число бирж / число снапшотов в колонке).
+model ObRollupBucketH {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3)
+  snaps    Int      @default(0)
+  midSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+}
+
+model ObRollupBucketD {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3)
+  snaps    Int      @default(0)
+  midSum   Float    @default(0)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+}
+
 model ObTradeRollup {
   symbol   String
   exchange String

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  latestBookFindMany: vi.fn(),
   queryRaw: vi.fn(),
   findMany: vi.fn(),
   obCandleFindMany: vi.fn(),
@@ -15,6 +16,8 @@ vi.mock("@/lib/db", () => ({
     obCandle: {
       findMany: mocks.obCandleFindMany,
     },
+    // Профиль текущего стакана: живое окно читает его по первичному ключу.
+    obLatestBook: { findMany: mocks.latestBookFindMany },
   },
 }));
 
@@ -25,6 +28,9 @@ import {
   computeBA,
   computeBigTrades,
   computeOrderflow,
+  rollupLevelFor,
+  CANDLES_IN_WINDOW,
+  TF_MS,
 } from "@/lib/orderflow";
 
 beforeEach(() => {
@@ -32,6 +38,8 @@ beforeEach(() => {
   mocks.findMany.mockReset();
   mocks.obCandleFindMany.mockReset();
   mocks.executeRaw.mockReset();
+  mocks.latestBookFindMany.mockReset();
+  mocks.latestBookFindMany.mockResolvedValue([]);
 });
 
 describe("fetchOrderflowCandles", () => {
@@ -264,5 +272,95 @@ describe("computeOrderflow", () => {
     // без lastRows цена = середина диапазона
     expect(hm!.price).toBeGreaterThan(99);
     expect(hm!.profileMax).toBe(0);
+  });
+});
+
+// ─── Каскад агрегатов (ORDERFLOW_PERF_PLAN.md §4) ──────────────────────────
+
+describe("rollupLevelFor", () => {
+  // Уровень выбирает не таймфрейм, а ширина колонки: агрегат не должен быть
+  // грубее колонки, в которую он схлопывается.
+  const levelForRange = (range: string) => {
+    const to = Date.now();
+    const from = to - TF_MS[range] * CANDLES_IN_WINDOW[range];
+    return rollupLevelFor(from, to, 240);
+  };
+
+  it("мелкие таймфреймы читают минутный уровень", () => {
+    expect(levelForRange("5m")).toBe("minute");
+    expect(levelForRange("15m")).toBe("minute");
+  });
+
+  it("средние — часовой", () => {
+    expect(levelForRange("1h")).toBe("hour");
+    expect(levelForRange("4h")).toBe("hour");
+  });
+
+  it("старшие — дневной", () => {
+    expect(levelForRange("12h")).toBe("day");
+    expect(levelForRange("1d")).toBe("day");
+    expect(levelForRange("1w")).toBe("day");
+  });
+
+  it("выбранный бакет никогда не грубее колонки", () => {
+    const bucketMs = { minute: 60_000, hour: 3600_000, day: 86_400_000 };
+    for (const range of Object.keys(CANDLES_IN_WINDOW)) {
+      const to = Date.now();
+      const from = to - TF_MS[range] * CANDLES_IN_WINDOW[range];
+      const colMs = (to - from) / 240;
+      expect(bucketMs[levelForRange(range)]).toBeLessThanOrEqual(colMs);
+    }
+  });
+});
+
+describe("computeOrderflow: выбор уровня каскада", () => {
+  // Имя таблицы приходит в мок как Prisma.raw внутри значений запроса.
+  const tablesOf = (callIndex: number): string => {
+    const call = mocks.queryRaw.mock.calls[callIndex] ?? [];
+    return call
+      .slice(1)
+      .map((v: unknown) => (v as { strings?: string[] })?.strings?.join("") ?? "")
+      .join(" ");
+  };
+
+  it("широкое окно читает дневную таблицу, а не минутную", async () => {
+    mocks.queryRaw.mockResolvedValue([]);
+    const to = Date.now();
+    await computeOrderflow("BTCUSDT", "binance-futures", to - 365 * 86_400_000, to);
+    expect(tablesOf(0)).toContain("ObSnapshotRollupD");
+  });
+
+  it("узкое окно читает минутную таблицу", async () => {
+    mocks.queryRaw.mockResolvedValue([]);
+    const to = Date.now();
+    await computeOrderflow("BTCUSDT", "binance-futures", to - 3600_000, to);
+    expect(tablesOf(0)).toContain('"ObSnapshotRollup"');
+  });
+
+  it("спускается на мелкий уровень, пока каскад не наполнен", async () => {
+    // Дневная и часовая пусты (каскад не догнал историю после деплоя),
+    // минутная отвечает — картинка та же, просто дороже.
+    mocks.queryRaw
+      .mockResolvedValueOnce([]) // day
+      .mockResolvedValueOnce([]) // hour
+      .mockResolvedValueOnce([{ col: 0, price: 100, vol: 40 }]) // minute
+      .mockResolvedValueOnce([{ col: 0, n: 2, ex: 1 }]) // счётчики минутного уровня
+      .mockResolvedValueOnce([]); // профиль стакана
+    const to = Date.now();
+    const hm = await computeOrderflow("BTCUSDT", "binance-futures", to - 365 * 86_400_000, to);
+    expect(hm).not.toBeNull();
+    expect(tablesOf(0)).toContain("ObSnapshotRollupD");
+    expect(tablesOf(1)).toContain("ObSnapshotRollupH");
+    expect(tablesOf(2)).toContain('"ObSnapshotRollup"');
+    // Счётчики берутся из таблицы ТОГО ЖЕ уровня, что и цены, иначе нормировка
+    // (число бирж / число снапшотов) исказит яркость карты.
+    expect(tablesOf(3)).toContain('"ObRollupBucket"');
+  });
+
+  it("level в опциях перекрывает автоматический выбор", async () => {
+    mocks.queryRaw.mockResolvedValue([]);
+    const to = Date.now();
+    await computeOrderflow("BTCUSDT", "binance-futures", to - 3600_000, to, { level: "day" });
+    expect(tablesOf(0)).toContain("ObSnapshotRollupD");
   });
 });

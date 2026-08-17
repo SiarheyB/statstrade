@@ -686,12 +686,49 @@ export async function computeBigTrades(
   return rows.map((r) => ({ t: r.t.getTime(), price: r.price, qty: r.qty, side: r.side, exchange: r.exchange }));
 }
 
+/**
+ * Какой уровень каскада читать для окна такой ширины.
+ *
+ * Решает не таймфрейм, а ШИРИНА КОЛОНКИ (окно / число колонок): агрегат нельзя
+ * брать грубее колонки, в которую он схлопывается, — иначе картинка поедет; а
+ * брать мельче бессмысленно, это лишние сотни тысяч строк ради того же числа.
+ *
+ * Для нынешних таймфреймов раскладка выходит такая: 5m/15m — минутный уровень,
+ * 1h/4h — часовой, 12h/1d/1w — дневной.
+ */
+export type RollupLevel = "minute" | "hour" | "day";
+
+export function rollupLevelFor(fromMs: number, toMs: number, cols: number): RollupLevel {
+  const colMs = (toMs - fromMs) / Math.max(1, cols);
+  if (colMs >= 24 * 3600_000) return "day";
+  if (colMs >= 3600_000) return "hour";
+  return "minute";
+}
+
+// Таблицы уровня: цены и парные им счётчики снапшотов.
+const ROLLUP_TABLES: Record<RollupLevel, { prices: string; snaps: string }> = {
+  minute: { prices: "ObSnapshotRollup", snaps: "ObRollupBucket" },
+  hour: { prices: "ObSnapshotRollupH", snaps: "ObRollupBucketH" },
+  day: { prices: "ObSnapshotRollupD", snaps: "ObRollupBucketD" },
+};
+
+// Уровни от выбранного к более мелкому: если каскад ещё не догнал минутный
+// уровень (первые прогоны после деплоя), читаем то, что уже есть, — картинка
+// та же, просто дороже.
+const LEVEL_FALLBACK: Record<RollupLevel, RollupLevel[]> = {
+  day: ["day", "hour", "minute"],
+  hour: ["hour", "minute"],
+  minute: ["minute"],
+};
+
 export async function computeOrderflow(
   symbol: string,
   exchange: string,
   fromMs: number,
   toMs: number,
-  opts: { bins?: number; cols?: number } = {},
+  // level — форсировать уровень каскада вместо автоматического выбора. Нужен
+  // тестам (сравнить, что уровни дают одну и ту же картинку) и отладке.
+  opts: { bins?: number; cols?: number; level?: RollupLevel } = {},
 ): Promise<ObHeatmap | null> {
   // Агрегация прямо в Postgres: вместо переноса миллионов сырых строк снапшотов
   // в Node, БД сама сворачивает их в сетку (колонка времени × ценовой уровень).
@@ -704,21 +741,33 @@ export async function computeOrderflow(
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
   const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
 
-  // Быстрый путь — из rollup (минутные бакеты): сумма ликвидности по (колонка,
-  // уровень) + число снапшотов/бирж на колонку. Если rollup ещё пуст (свежий
-  // деплой), считаем по сырой таблице ObSnapshot (legacy-путь ниже).
+  // Быстрый путь — из каскада rollup. Уровень выбирается по ширине колонки:
+  // на окне в год колонка шириной 36 часов, и минутные бакеты в ней — это
+  // сотни тысяч строк ради одного числа (см. rollupLevelFor).
+  //
+  // Если выбранный уровень ещё пуст (каскад не догнал историю после деплоя),
+  // спускаемся на более мелкий — картинка та же, просто дороже.
   const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
-  let cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
-    SELECT ${colExprR}::int AS col, "price" AS price, SUM("volSum")::float8 AS vol
-    FROM "ObSnapshotRollup"
-    WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
-    GROUP BY col, "price"
-  `;
+  const level = opts.level ?? rollupLevelFor(fromMs, toMs, cols);
+  let cells: { col: number; price: number; vol: number }[] = [];
+  let usedLevel: RollupLevel | null = null;
+  for (const lvl of LEVEL_FALLBACK[level]) {
+    cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
+      SELECT ${colExprR}::int AS col, "price" AS price, SUM("volSum")::float8 AS vol
+      FROM ${Prisma.raw(`"${ROLLUP_TABLES[lvl].prices}"`)}
+      WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
+      GROUP BY col, "price"
+    `;
+    if (cells.length > 0) {
+      usedLevel = lvl;
+      break;
+    }
+  }
   let colStats: { col: number; n: number; ex: number }[];
-  if (cells.length > 0) {
+  if (usedLevel) {
     colStats = await prisma.$queryRaw<{ col: number; n: number; ex: number }[]>`
       SELECT ${colExprR}::int AS col, SUM("snaps")::int AS n, COUNT(DISTINCT "exchange")::int AS ex
-      FROM "ObRollupBucket"
+      FROM ${Prisma.raw(`"${ROLLUP_TABLES[usedLevel].snaps}"`)}
       WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
       GROUP BY col
     `;

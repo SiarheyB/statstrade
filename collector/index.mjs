@@ -1188,6 +1188,115 @@ async function backfillTradeRollup() {
   }
 }
 
+// ─── Каскад агрегатов стакана: час и сутки поверх минутного rollup ─────────
+//
+// Зачем (см. ORDERFLOW_PERF_PLAN.md §4): окно карты на старших таймфреймах —
+// месяцы и годы, а колонок на графике всегда 240. На "1d" колонка шириной 36
+// часов, и складывать в неё 2160 минутных строк незачем: результат тот же, что
+// у одной дневной. Минутный уровень при этом остаётся полным и вечным.
+//
+// Свёртка идемпотентна: повторный прогон того же периода ПЕРЕЗАПИСЫВАЕТ суммы
+// (DO UPDATE SET = EXCLUDED), а не прибавляет их. Поэтому её можно гонять по
+// расписанию, не отслеживая, что уже посчитано, и безопасно пересчитывать
+// период заново, если в минутный уровень задним числом доехали данные.
+//
+// Порция ограничена: первый прогон на годовой истории иначе стал бы одной
+// гигантской транзакцией на слабом сервере. Остаток догоняется следующими
+// прогонами (раз в 5 минут), пока каскад не поравняется с минутным уровнем.
+const CASCADE_CHUNK_HOURS = 24 * 14; // сколько периодов сворачиваем за прогон
+const CASCADE_CHUNK_DAYS = 90;
+
+/**
+ * Свернуть один уровень каскада.
+ *
+ * @param srcPrices  таблица цен-источник  (минутная для часового уровня, часовая для дневного)
+ * @param dstPrices  таблица цен-приёмник
+ * @param srcSnaps   таблица счётчиков-источник
+ * @param dstSnaps   таблица счётчиков-приёмник
+ * @param unit       'hour' | 'day' — шаг целевого бакета
+ * @param limit      сколько целевых периодов обработать за прогон
+ * @returns сколько строк цен записано
+ */
+async function rollupLevel(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, limit) {
+  // Откуда продолжать: последний уже свёрнутый период (его считаем заново — он
+  // почти наверняка был неполным), иначе — начало истории источника.
+  //
+  // Данные, доехавшие в источник ЗАДНИМ ЧИСЛОМ раньше этой границы, прогон не
+  // подхватит: чтобы пересобрать каскад целиком, целевые таблицы очищают, и
+  // ближайшие прогоны наполняют их заново порциями.
+  const { rows: state } = await pool.query(
+    `SELECT (SELECT MAX("bucket") FROM "${dstPrices}") AS done,
+            (SELECT MIN("bucket") FROM "${srcPrices}") AS first`,
+  );
+  const from = state[0]?.done ?? state[0]?.first;
+  if (!from) return 0; // источник пуст — сворачивать нечего
+
+  // Границы порции. Текущий, ещё не завершённый период ВКЛЮЧАЕМ: иначе правый
+  // край карты — самое интересное место — на дневном уровне был бы пустым до
+  // полуночи UTC. Свёртка идемпотентна (перезапись, не сложение), поэтому
+  // незавершённый период просто пересчитывается на каждом прогоне; он дешёвый —
+  // день собирается из двух десятков часовых строк, час из шестидесяти минутных.
+  const bounds = `
+    WITH b AS (
+      SELECT date_trunc($2, $1::timestamptz) AS lo,
+             LEAST(date_trunc($2, now()) + ('1 ${unit}')::interval,
+                   date_trunc($2, $1::timestamptz) + ($3 || ' ${unit}')::interval) AS hi
+    )`;
+
+  const { rowCount } = await pool.query(
+    `${bounds}
+     INSERT INTO "${dstPrices}" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
+     SELECT s."symbol", s."exchange", date_trunc($2, s."bucket") AS bkt, s."price",
+            SUM(s."volSum"), SUM(s."bidSum"), SUM(s."askSum")
+     FROM "${srcPrices}" s, b
+     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     GROUP BY s."symbol", s."exchange", bkt, s."price"
+     ON CONFLICT ("symbol","exchange","bucket","price")
+     DO UPDATE SET "volSum" = EXCLUDED."volSum",
+                   "bidSum" = EXCLUDED."bidSum",
+                   "askSum" = EXCLUDED."askSum"`,
+    [from, unit, String(limit)],
+  );
+
+  // Счётчики снапшотов — тем же окном: из них computeOrderflow берёт нормировку
+  // (число бирж / число снапшотов в колонке), и разъехавшись с ценами она
+  // исказила бы яркость карты.
+  await pool.query(
+    `${bounds}
+     INSERT INTO "${dstSnaps}" ("symbol","exchange","bucket","snaps","midSum")
+     SELECT s."symbol", s."exchange", date_trunc($2, s."bucket") AS bkt,
+            SUM(s."snaps")::int, SUM(s."midSum")
+     FROM "${srcSnaps}" s, b
+     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     GROUP BY s."symbol", s."exchange", bkt
+     ON CONFLICT ("symbol","exchange","bucket")
+     DO UPDATE SET "snaps" = EXCLUDED."snaps", "midSum" = EXCLUDED."midSum"`,
+    [from, unit, String(limit)],
+  );
+
+  return rowCount ?? 0;
+}
+
+async function rollupCascade() {
+  try {
+    const h = await rollupLevel(
+      "ObSnapshotRollup", "ObSnapshotRollupH",
+      "ObRollupBucket", "ObRollupBucketH",
+      "hour", CASCADE_CHUNK_HOURS,
+    );
+    // Дневной уровень строим из часового, а не из минутного: он уже в сотни раз
+    // меньше, и суммы совпадают — сложение ассоциативно.
+    const d = await rollupLevel(
+      "ObSnapshotRollupH", "ObSnapshotRollupD",
+      "ObRollupBucketH", "ObRollupBucketD",
+      "day", CASCADE_CHUNK_DAYS,
+    );
+    if (h || d) console.log(`[cascade] свёрнуто строк: час=${h} сутки=${d}`);
+  } catch (err) {
+    console.error(`[cascade] ошибка: ${err.message}`);
+  }
+}
+
 // Бэкафилл rollup футпринта из сырого ObFootprint — чтобы кластеры работали на
 // уже накопленной истории сразу после деплоя.
 async function backfillFootprintRollup() {
@@ -1229,6 +1338,11 @@ const configTimer = setInterval(loadCollectorConfig, 30_000);
 const writeTimer = setInterval(writeSnapshot, cfg.snapshotMs);
 const flushTimer = startRollupFlushBeat();
 const pruneTimer = setInterval(pruneOld, 3600_000);
+// Каскад агрегатов. Раз в 5 минут: свежий час подхватывается быстро, а на
+// исторической глубине прогоны идут порциями, пока каскад не догонит минутный
+// уровень (первый раз на годовой истории это несколько прогонов).
+const cascadeTimer = setInterval(rollupCascade, 5 * 60_000);
+setTimeout(rollupCascade, 45_000);
 setTimeout(async () => {
   await ensureRetentionEpochs();
   // Индексы — до первой чистки: BRIN по bucket нужен именно её DELETE-ам.
@@ -1253,6 +1367,7 @@ async function shutdown() {
   clearInterval(writeTimer);
   clearInterval(flushTimer.timer);
   clearInterval(pruneTimer);
+  clearInterval(cascadeTimer);
   clearInterval(configTimer);
   clearInterval(candleTimer);
   if (allPairsScanTimer) clearInterval(allPairsScanTimer);
@@ -1269,6 +1384,6 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 } // end isMain
 
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
-export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles };
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
 export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };
