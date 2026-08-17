@@ -34,8 +34,11 @@ export async function GET(req: Request) {
   const range = url.searchParams.get("range") ?? "1h";
   const beforeParam = url.searchParams.get("before");
   const limitParam = url.searchParams.get("limit");
-  // overlays=0 — старое поведение (только свечи). Оставлено для дешёвых
-  // запросов, которым карта не нужна.
+  // Основной путь — overlays=0: страница берёт здесь только свечи, а карту для
+  // того же отрезка догружает вторым запросом (/api/orderflow/segment), чтобы
+  // прокрутка не ждала самое тяжёлое из двух. Ветка с наложениями оставлена
+  // для совместимости: вкладка, открытая до деплоя, продолжает работать на
+  // старом коде до перезагрузки.
   const wantOverlays = url.searchParams.get("overlays") !== "0";
 
   if (!RANGES.has(range)) return badRequest("Неизвестный таймфрейм");

@@ -410,18 +410,18 @@ export default function OrderflowPage() {
     loadingHistoryRef.current = true;
     setLoadingHistory(true);
     try {
+      // Фаза 1 — только свечи (overlays=0). Наложения для этого же отрезка
+      // придут вторым запросом: при скролле влево, как и при первой загрузке,
+      // график должен появляться сразу, а карта — дорисовываться поверх.
       const res = await fetch(
-        `/api/orderflow/history?symbol=${symbol}&exchange=${exchange}&range=${range}&before=${before}&limit=500`,
+        `/api/orderflow/history?symbol=${symbol}&exchange=${exchange}&range=${range}&before=${before}&limit=500&overlays=0`,
       );
       if (!res.ok) {
         hasMoreHistoryRef.current = false;
         setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
         return;
       }
-      const d = await res.json() as {
-        candles: Candle[]; hasMore: boolean;
-        heatmap?: ObHeatmap | null; footprint?: Footprint | null;
-      };
+      const d = (await res.json()) as { candles: Candle[]; hasMore: boolean };
       if (!d.candles?.length) {
         hasMoreHistoryRef.current = false;
         setHistoryVersion((v) => v + 1); // перерисовать — показать "начало истории"
@@ -435,21 +435,32 @@ export default function OrderflowPage() {
         merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
       }
       historyRef.current = merged;
-      if (d.heatmap || d.footprint) {
-        const seg: HistorySegment = {
-          from: d.candles[0].t,
+      setHistoryVersion((v) => v + 1);
+
+      // Фаза 2 — наложения на тот же отрезок. Границы сервер выравнивает по
+      // сетке уровня агрегатов, поэтому повторный проход по этому же куску
+      // истории отдаётся из кэша, а не считается заново.
+      const segFrom = d.candles[0].t;
+      const segRes = await fetch(
+        `/api/orderflow/segment?symbol=${symbol}&exchange=${exchange}&range=${range}&from=${segFrom}&to=${before}`,
+      );
+      if (!segRes.ok) return; // свечи уже видны — прокрутка осталась рабочей
+      const seg = (await segRes.json()) as { heatmap?: ObHeatmap | null; footprint?: Footprint | null };
+      if (seg.heatmap || seg.footprint) {
+        const segment: HistorySegment = {
+          from: segFrom,
           to: before,
-          heatmap: d.heatmap ?? null,
-          footprint: d.footprint ?? null,
+          heatmap: seg.heatmap ?? null,
+          footprint: seg.footprint ?? null,
         };
-        const segs = [...historySegmentsRef.current, seg].sort((a, b) => a.from - b.from);
+        const segs = [...historySegmentsRef.current, segment].sort((a, b) => a.from - b.from);
         // Тот же принцип, что и с MAX_HISTORY_CANDLES: держим память конечной,
         // выбрасывая самые старые куски (при возврате туда они перезапросятся).
         historySegmentsRef.current = segs.length > MAX_HISTORY_SEGMENTS
           ? segs.slice(segs.length - MAX_HISTORY_SEGMENTS)
           : segs;
+        setHistoryVersion((v) => v + 1);
       }
-      setHistoryVersion((v) => v + 1);
     } catch {
       // тихая сетевая ошибка — следующий триггер (pan/zoom) попробует снова,
       // hasMoreHistoryRef не трогаем (не факт, что история кончилась)

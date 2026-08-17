@@ -123,6 +123,9 @@ function routerFetch(url: string) {
   if (url.includes('/api/orderflow/history')) {
     return Promise.resolve({ ok: true, json: () => Promise.resolve({ candles: makeCandles(20, 60000, 90), hasMore: true }) });
   }
+  if (url.includes('/api/orderflow/segment')) {
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ from: 0, to: 1, heatmap: makeHeatmap(), footprint: null }) });
+  }
   if (url.includes('/api/orderflow')) {
     return Promise.resolve({ ok: true, json: () => Promise.resolve(MAIN_DATA) });
   }
@@ -333,5 +336,32 @@ describe('OrderflowPage', () => {
     // candles=0 — иначе вторая фаза снова ходила бы в Binance за формирующейся
     // свечой (366 из ~400 мс) и дублировала бы работу первой.
     for (const u of overlayUrls) expect(u).toContain('candles=0');
+  });
+
+  it('догрузка истории идёт в две фазы: свечи, затем наложения', async () => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+
+    const canvas = document.querySelector('canvas');
+    expect(canvas).toBeTruthy();
+    stubCanvasRect(canvas!);
+    // Прокрутка к левому краю — триггер догрузки истории.
+    await act(async () => {
+      fireEvent.wheel(canvas!, { deltaY: -400, clientX: 10, clientY: 100 });
+      fireEvent.mouseDown(canvas!, { clientX: 20, clientY: 100 });
+      fireEvent.mouseMove(canvas!, { clientX: 880, clientY: 100 });
+      fireEvent.mouseUp(canvas!, { clientX: 880, clientY: 100 });
+    });
+
+    await waitFor(() => {
+      const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+      const hist = urls.find((u) => u.includes('/api/orderflow/history'));
+      expect(hist).toBeTruthy();
+      // Свечи запрашиваются без наложений — иначе прокрутка снова ждала бы
+      // самое тяжёлое из двух.
+      expect(hist).toContain('overlays=0');
+      expect(urls.some((u) => u.includes('/api/orderflow/segment'))).toBe(true);
+    });
   });
 });
