@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { CalendarClock, RefreshCw, HelpCircle } from "lucide-react";
+import { CalendarClock, RefreshCw, HelpCircle, Clock } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import type { Locale } from "@/lib/i18n/core";
 import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
@@ -123,6 +123,20 @@ export default function EconCalPage() {
     return { todayId: localDayId(new Date(now)), tomorrowId: localDayId(new Date(now + 86400000)) };
   }, [localDayId]);
 
+  // Текущее время тикает на клиенте: до первого эффекта now === 0, и часы с
+  // обратным отсчётом просто не рисуются — иначе серверный HTML разошёлся бы
+  // с клиентским на гидратации.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0); // не синхронно — иначе лишний каскад рендеров
+    const id = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, []);
+
   const shown = events.filter(
     (e) =>
       (curFilter.size === 0 || curFilter.has(e.currency)) &&
@@ -133,6 +147,25 @@ export default function EconCalPage() {
   );
 
   const tzName = ianaFor(timezone);
+
+  // Ближайшее ещё не наступившее событие из показанных — его строку
+  // подсвечиваем и показываем, сколько до него осталось (как на главной).
+  const next = useMemo(() => {
+    if (!now) return null;
+    return (
+      [...shown]
+        .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
+        .find((e) => Date.parse(e.time) >= now) ?? null
+    );
+    // shown пересобирается на каждый рендер, поэтому в зависимостях — сырьё.
+  }, [events, curFilter, impFilter, category, scope, now]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const countdown = (ts: number): string => {
+    const mins = Math.max(0, Math.round((ts - now) / 60_000));
+    if (mins === 0) return t("landing.calendar.now");
+    if (mins < 60) return t("landing.calendar.inMinutes", { m: mins });
+    return t("landing.calendar.inHours", { h: Math.floor(mins / 60), m: mins % 60 });
+  };
 
   // Group by calendar day (in the selected display timezone).
   const days = useMemo(() => {
@@ -177,6 +210,28 @@ export default function EconCalPage() {
         <span className="text-faint">{t("econcal.thisWeek")}:</span>
         <span className="font-medium tabular-nums">{weekLabel}</span>
       </div>
+
+      {/* Часы и обратный отсчёт: главный вопрос у календаря — «сколько
+          осталось до ближайшей публикации», а не «который час вообще». */}
+      {now > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-sm" data-testid="econcal-clock">
+          <span className="inline-flex items-center gap-1.5 text-muted">
+            <Clock size={14} className="text-faint" />
+            {t("econcal.nowIs")}{" "}
+            <span className="font-medium text-fg tabular-nums">{fmtTime(new Date(now).toISOString())}</span>
+          </span>
+          {next && (
+            <span className="inline-flex items-center gap-1.5 min-w-0">
+              <span className="text-faint">·</span>
+              <span className="text-faint">{t("econcal.next")}:</span>
+              <span className="truncate max-w-[22rem]">{translateEventTitle(next.title, locale)}</span>
+              <span className="text-accent font-medium tabular-nums shrink-0">
+                {countdown(Date.parse(next.time))}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* Day scope: today (default) / tomorrow / whole week */}
       <div className="flex items-center gap-1 mb-3">
@@ -241,25 +296,47 @@ export default function EconCalPage() {
       ) : days.length === 0 ? (
         <div className="card p-10 text-center text-muted">{t("econcal.empty")}</div>
       ) : (
-        <div className="space-y-5">
+        <div className="space-y-5" data-testid="econcal-list">
           {days.map(([day, evs]) => (
             <div key={day}>
               <div className="text-xs uppercase tracking-wide text-faint mb-2">{day}</div>
               <div className="card divide-y divide-border overflow-hidden">
-                {evs.map((e) => (
-                  <div key={e.id} className="flex items-center gap-3 px-3 py-2 text-sm">
+                {evs.map((e) => {
+                  // Прошедшие приглушаем, ближайшее — подсвечиваем и вместо
+                  // прогноза показываем, через сколько оно выйдет.
+                  const ts = Date.parse(e.time);
+                  const isPast = now > 0 && ts < now;
+                  const isNext = next?.id === e.id;
+                  return (
+                  <div
+                    key={e.id}
+                    className={clsx(
+                      "flex items-center gap-3 px-3 py-2 text-sm",
+                      isPast && "opacity-50",
+                      isNext && "bg-accent/10 shadow-[inset_2px_0_0_var(--color-accent)]",
+                    )}
+                  >
                     <span className="text-faint tabular-nums w-12 shrink-0">{fmtTime(e.time)}</span>
                     <span className="shrink-0" title={e.country}>{flag(e.currency)}</span>
                     <span className="text-xs text-faint w-9 shrink-0">{e.currency}</span>
                     <span className={clsx("h-2 w-2 rounded-full shrink-0", IMPACT_DOT[e.impact])} title={e.impact} />
                     <EventTitle title={e.title} locale={locale} />
 
-                    <div className="hidden sm:flex items-center gap-3 text-xs tabular-nums shrink-0">
-                      <Val label={t("econcal.forecast")} v={e.forecast} />
-                      <Val label={t("econcal.previous")} v={e.previous} />
-                    </div>
+                    {isNext ? (
+                      <span className="text-xs text-accent font-medium tabular-nums shrink-0">
+                        {countdown(ts)}
+                      </span>
+                    ) : (
+                      <div className="hidden sm:flex items-center gap-3 text-xs tabular-nums shrink-0">
+                        <Val label={t("econcal.forecast")} v={e.forecast} />
+                        <Val label={isPast && e.actual ? t("econcal.actual") : t("econcal.previous")}
+                             v={isPast && e.actual ? e.actual : e.previous}
+                             highlight={Boolean(isPast && e.actual)} />
+                      </div>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

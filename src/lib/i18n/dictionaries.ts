@@ -102,6 +102,9 @@ const en: Dict = {
   "econcal.forecast": "Forecast",
   "econcal.previous": "Previous",
   "econcal.empty": "No events for the selected filters.",
+  "econcal.nowIs": "Now",
+  "econcal.next": "Next",
+  "econcal.released": "released",
 
   // orderbook heatmap
   "of.title": "Order heatmap",
@@ -1305,6 +1308,9 @@ const ru: Dict = {
   "econcal.forecast": "Прогноз",
   "econcal.previous": "Пред.",
   "econcal.empty": "Нет событий по выбранным фильтрам.",
+  "econcal.nowIs": "Сейчас",
+  "econcal.next": "Ближайшее",
+  "econcal.released": "вышло",
 
   // orderbook heatmap
   "of.title": "Карта ордеров",

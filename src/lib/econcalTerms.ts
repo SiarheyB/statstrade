@@ -73,6 +73,46 @@ const TERMS: Term[] = [
     },
   },
   { en: "WPI", ru: "индекс оптовых цен" },
+  // Банк Канады считает три «очищенные» инфляции сразу; названия у них
+  // собственные (Common/Trim/Median), поэтому оставляем маркер латиницей —
+  // по-русски их всё равно называют так же.
+  {
+    en: "Common CPI",
+    ru: "базовая инфляция Common",
+    explain: {
+      ru: "Одна из трёх «очищенных» мер инфляции Банка Канады: берёт то, что дорожает во всех категориях сразу. Самая медленная и самая показательная для тренда.",
+      en: "One of the Bank of Canada's three core inflation measures: it keeps what is rising across all categories at once. The slowest and the most telling for the trend.",
+    },
+  },
+  {
+    en: "Trimmed CPI",
+    ru: "базовая инфляция Trim",
+    explain: {
+      ru: "Мера Банка Канады: отбрасывает по 20% самых сильно подорожавших и подешевевших позиций и считает середину.",
+      en: "A Bank of Canada measure: it drops the 20% biggest gainers and losers and averages what is left.",
+    },
+  },
+  {
+    en: "Median CPI",
+    ru: "базовая инфляция Median",
+    explain: {
+      ru: "Мера Банка Канады: медианный рост цен по корзине — половина товаров дорожала быстрее, половина медленнее.",
+      en: "A Bank of Canada measure: the median price change across the basket — half the items rose faster, half slower.",
+    },
+  },
+  {
+    en: "Core PCE Price Index",
+    ru: "базовый ценовой индекс PCE",
+    explain: {
+      ru: "Инфляция, по которой ФРС официально меряет свою цель в 2%. Считается по фактическим расходам людей, поэтому ФРС верит ему больше, чем ИПЦ.",
+      en: "The inflation gauge the Fed officially targets at 2%. Built from what people actually spend, which is why the Fed trusts it over CPI.",
+    },
+  },
+  { en: "PCE Price Index", ru: "ценовой индекс PCE" },
+  { en: "Import Prices", ru: "цены на импорт" },
+  { en: "Export Prices", ru: "цены на экспорт" },
+  { en: "GDP Price Index", ru: "дефлятор ВВП" },
+  { en: "Unit Labor Costs", ru: "удельные издержки на труд" },
   {
     en: "Inflation Expectations",
     ru: "инфляционные ожидания",
@@ -139,6 +179,9 @@ const TERMS: Term[] = [
   { en: "Average Earnings Index", ru: "индекс средних зарплат" },
   { en: "Claimant Count Change", ru: "число получателей пособий" },
   { en: "Job Openings", ru: "число открытых вакансий" },
+  { en: "Job Cuts", ru: "объявленные сокращения рабочих мест" },
+  { en: "Labor Cash Earnings", ru: "денежные доходы работников" },
+  { en: "Participation Rate", ru: "доля экономически активного населения" },
   { en: "Mortgage Delinquencies", ru: "просрочки по ипотеке" },
 
   // — Экономический рост —
@@ -158,6 +201,27 @@ const TERMS: Term[] = [
   { en: "Machine Tool Orders", ru: "заказы на станки" },
   { en: "Business Inventories", ru: "товарные запасы бизнеса" },
   { en: "Foreign Direct Investment", ru: "прямые иностранные инвестиции" },
+  {
+    en: "Fixed Asset Investment",
+    ru: "инвестиции в основной капитал",
+    explain: {
+      ru: "Сколько Китай вкладывает в стройки, заводы и инфраструктуру. Главный рычаг, которым Пекин разгоняет экономику, — важен для сырья и валют Австралии с Новой Зеландией.",
+      en: "How much China puts into construction, factories and infrastructure. Beijing's main lever for stimulating growth — it matters for commodities and the Aussie and Kiwi dollars.",
+    },
+  },
+  { en: "Capacity Utilization Rate", ru: "загрузка производственных мощностей" },
+  { en: "Core Durable Goods Orders", ru: "базовые заказы на товары длительного пользования" },
+  {
+    en: "Durable Goods Orders",
+    ru: "заказы на товары длительного пользования",
+    explain: {
+      ru: "Заказы на технику, машины и оборудование — то, что покупают на годы. Бизнес делает такие заказы, когда уверен в будущем, поэтому показатель опережает спад.",
+      en: "Orders for machinery, vehicles and equipment — things bought for years. Businesses order them when confident, so the number leads downturns.",
+    },
+  },
+  { en: "Factory Orders", ru: "промышленные заказы" },
+  { en: "Nonfarm Productivity", ru: "производительность вне сельского хозяйства" },
+  { en: "Wholesale Inventories", ru: "запасы на оптовых складах" },
 
   // — Потребитель и торговля —
   {
@@ -190,6 +254,19 @@ const TERMS: Term[] = [
   },
   { en: "Current Account", ru: "счёт текущих операций" },
   { en: "Visitor Arrivals", ru: "въездной туризм" },
+  { en: "Personal Spending", ru: "расходы населения" },
+  { en: "Personal Income", ru: "доходы населения" },
+  { en: "Consumer Credit", ru: "потребительское кредитование" },
+  { en: "Consumer Spending", ru: "потребительские расходы" },
+  { en: "Foreign Securities Purchases", ru: "покупки иностранных ценных бумаг" },
+  {
+    en: "TIC Long-Term Purchases",
+    ru: "покупки долгосрочных ценных бумаг США иностранцами (TIC)",
+    explain: {
+      ru: "На сколько иностранцы за месяц купили американских облигаций и акций. Показывает спрос на долларовые активы: приток поддерживает доллар, отток — давит.",
+      en: "How much US bonds and stocks foreigners bought over the month. A gauge of demand for dollar assets: inflows support the dollar, outflows weigh on it.",
+    },
+  },
 
   // — Жильё —
   { en: "Building Permits", ru: "разрешения на строительство" },
@@ -198,6 +275,17 @@ const TERMS: Term[] = [
   { en: "New Home Sales", ru: "продажи новых домов" },
   { en: "House Price Balance", ru: "баланс цен на жильё" },
   { en: "House Price Index", ru: "индекс цен на жильё" },
+  { en: "New Home Prices", ru: "цены на новое жильё" },
+  { en: "Pending Home Sales", ru: "незавершённые сделки по продаже жилья" },
+  { en: "Mortgage Applications", ru: "заявки на ипотеку" },
+  {
+    en: "NAHB Housing Market Index",
+    ru: "индекс рынка жилья NAHB",
+    explain: {
+      ru: "Опрос американских застройщиков: как они оценивают спрос на новые дома. Выше 50 — настроены оптимистично. Опережает статистику по закладкам домов на месяц-два.",
+      en: "A survey of US homebuilders on demand for new houses. Above 50 means optimism. It leads housing-starts data by a month or two.",
+    },
+  },
 
   // — Настроения и опросы —
   {
@@ -219,6 +307,16 @@ const TERMS: Term[] = [
   { en: "Composite PMI", ru: "сводный PMI" },
   { en: "Construction PMI", ru: "PMI в строительстве" },
   { en: "PMI", ru: "индекс деловой активности PMI" },
+  {
+    en: "Empire State Manufacturing Index",
+    ru: "индекс промышленной активности ФРБ Нью-Йорка (Empire State)",
+    explain: {
+      ru: "Опрос заводов штата Нью-Йорк. Выходит одним из первых в месяце, поэтому по нему угадывают, каким будет общенациональный ISM. Выше нуля — производство растёт.",
+      en: "A survey of New York State factories. One of the month's first releases, so markets read the national ISM from it. Above zero means manufacturing is expanding.",
+    },
+  },
+  { en: "Philly Fed Manufacturing Index", ru: "индекс промышленной активности ФРБ Филадельфии" },
+  { en: "Richmond Manufacturing Index", ru: "индекс промышленной активности ФРБ Ричмонда" },
   { en: "Manufacturing Index", ru: "индекс промышленной активности" },
   { en: "Consumer Sentiment", ru: "индекс потребительских настроений" },
   { en: "Consumer Confidence", ru: "индекс доверия потребителей" },
@@ -227,6 +325,10 @@ const TERMS: Term[] = [
   { en: "Economy Watchers Sentiment", ru: "индекс настроений наблюдателей за экономикой" },
   { en: "Small Business Index", ru: "индекс настроений малого бизнеса" },
   { en: "Leading Index", ru: "индекс опережающих индикаторов" },
+  { en: "Services Index", ru: "индекс активности в услугах" },
+  { en: "Tertiary Industry Activity", ru: "активность в сфере услуг" },
+  { en: "FPI", ru: "индекс цен на продукты питания" },
+  { en: "Rightmove HPI", ru: "индекс цен предложения на жильё Rightmove" },
 
   // — Деньги, бюджет, аукционы —
   { en: "M2 Money Stock", ru: "денежная масса M2" },
@@ -235,6 +337,8 @@ const TERMS: Term[] = [
   { en: "New Loans", ru: "объём новых кредитов" },
   { en: "Federal Budget Balance", ru: "баланс федерального бюджета" },
   { en: "Bond Auction", ru: "аукцион гособлигаций" },
+  { en: "Beige Book", ru: "«Бежевая книга» ФРС" },
+  { en: "Loan Prime Rate", ru: "базовая ставка по кредитам (LPR)" },
 
   // — Сырьё —
   {
@@ -307,6 +411,10 @@ const ORGS: Record<string, string> = {
   Sentix: "Sentix",
   BusinessNZ: "BusinessNZ",
   ISM: "ISM",
+  NBS: "Госстат КНР",
+  Caixin: "Caixin",
+  JOLTS: "JOLTS",
+  Challenger: "Challenger",
 };
 
 // Должности спикеров: «FOMC Member Barkin Speaks» → «выступление члена FOMC».

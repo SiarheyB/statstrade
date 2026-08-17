@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import EconCalPage from "../page";
 
 vi.mock("@/lib/i18n/provider", () => ({
@@ -47,6 +47,11 @@ function mockFetch(payload = { events, currencies: ["USD", "EUR"], categories: [
   global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(payload) });
 }
 
+// Название ближайшего события дублируется в строке часов над списком,
+// поэтому события ищем именно в списке.
+const list = () => within(screen.getByTestId("econcal-list"));
+const waitList = async () => within(await screen.findByTestId("econcal-list"));
+
 describe("EconCalPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -55,7 +60,7 @@ describe("EconCalPage", () => {
 
   it("renders today's events with the title translated into Russian", async () => {
     render(<EconCalPage />);
-    expect(await screen.findByText("Базовый ИПЦ (м/м)")).toBeInTheDocument();
+    expect(await (await waitList()).findByText("Базовый ИПЦ (м/м)")).toBeInTheDocument();
     // Оригинал остаётся доступен по наведению — по нему событие ищут в других
     // источниках.
     expect(screen.getByTitle("Core CPI m/m")).toBeInTheDocument();
@@ -63,63 +68,75 @@ describe("EconCalPage", () => {
 
   it("shows an explanation icon only for indicators that have one", async () => {
     render(<EconCalPage />);
-    await screen.findByText("Базовый ИПЦ (м/м)");
+    await (await waitList()).findByText("Базовый ИПЦ (м/м)");
     // У Core CPI пояснение есть, у WPI — нет.
     expect(screen.getByTitle(/еды и топлива/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("econcal.thisWeek", { selector: "button" }));
-    await screen.findByText("Индекс оптовых цен (Германия, м/м)");
+    await (await waitList()).findByText("Индекс оптовых цен (Германия, м/м)");
     expect(screen.queryAllByTitle(/еды и топлива/)).toHaveLength(1);
   });
 
   it("switches the day scope between today, tomorrow and the whole week", async () => {
     render(<EconCalPage />);
-    await screen.findByText("Базовый ИПЦ (м/м)");
+    await (await waitList()).findByText("Базовый ИПЦ (м/м)");
 
     fireEvent.click(screen.getByText("econcal.tomorrow"));
     await waitFor(() =>
-      expect(screen.queryByText("Базовый ИПЦ (м/м)")).not.toBeInTheDocument(),
+      expect(list().queryByText("Базовый ИПЦ (м/м)")).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Индекс оптовых цен (Германия, м/м)")).toBeInTheDocument();
+    expect(list().getByText("Индекс оптовых цен (Германия, м/м)")).toBeInTheDocument();
 
     fireEvent.click(screen.getByText("econcal.thisWeek", { selector: "button" }));
-    await waitFor(() => expect(screen.getByText("Базовый ИПЦ (м/м)")).toBeInTheDocument());
+    await waitFor(() => expect(list().getByText("Базовый ИПЦ (м/м)")).toBeInTheDocument());
   });
 
   it("filters by currency", async () => {
     render(<EconCalPage />);
     fireEvent.click(screen.getByText("econcal.thisWeek", { selector: "button" }));
-    await screen.findByText("Базовый ИПЦ (м/м)");
+    await (await waitList()).findByText("Базовый ИПЦ (м/м)");
 
     // Валюта встречается и в строке события — берём именно кнопку-фильтр.
     fireEvent.click(screen.getByRole("button", { name: /EUR/ }));
     await waitFor(() =>
-      expect(screen.queryByText("Базовый ИПЦ (м/м)")).not.toBeInTheDocument(),
+      expect(list().queryByText("Базовый ИПЦ (м/м)")).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Индекс оптовых цен (Германия, м/м)")).toBeInTheDocument();
+    expect(list().getByText("Индекс оптовых цен (Германия, м/м)")).toBeInTheDocument();
   });
 
   it("filters by impact", async () => {
     render(<EconCalPage />);
     fireEvent.click(screen.getByText("econcal.thisWeek", { selector: "button" }));
-    await screen.findByText("Индекс оптовых цен (Германия, м/м)");
+    await (await waitList()).findByText("Индекс оптовых цен (Германия, м/м)");
 
     fireEvent.click(screen.getByText("econcal.impact.high"));
     await waitFor(() =>
-      expect(screen.queryByText("Индекс оптовых цен (Германия, м/м)")).not.toBeInTheDocument(),
+      expect(list().queryByText("Индекс оптовых цен (Германия, м/м)")).not.toBeInTheDocument(),
     );
-    expect(screen.getByText("Базовый ИПЦ (м/м)")).toBeInTheDocument();
+    expect(list().getByText("Базовый ИПЦ (м/м)")).toBeInTheDocument();
+  });
+
+  it("shows the current time and the countdown to the next event", async () => {
+    render(<EconCalPage />);
+    fireEvent.click(screen.getByText("econcal.thisWeek", { selector: "button" }));
+    await (await waitList()).findByText("Индекс оптовых цен (Германия, м/м)");
+
+    const clock = within(screen.getByTestId("econcal-clock"));
+    expect(clock.getByText("econcal.nowIs")).toBeInTheDocument();
+    // Ближайшее — завтрашний WPI: сегодняшнее событие уже прошло.
+    expect(clock.getByText("Индекс оптовых цен (Германия, м/м)")).toBeInTheDocument();
+    expect(clock.getByText(/landing\.calendar\.inHours/)).toBeInTheDocument();
   });
 
   it("localizes category names in the filter dropdown", async () => {
     render(<EconCalPage />);
-    await screen.findByText("Базовый ИПЦ (м/м)");
+    await (await waitList()).findByText("Базовый ИПЦ (м/м)");
     expect(screen.getByRole("option", { name: "Инфляция" })).toBeInTheDocument();
   });
 
   it("requests a manual refresh with refresh=1", async () => {
     render(<EconCalPage />);
-    await screen.findByText("Базовый ИПЦ (м/м)");
+    await (await waitList()).findByText("Базовый ИПЦ (м/м)");
     fireEvent.click(screen.getByText("econcal.refresh"));
     await waitFor(() => {
       const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => String(c[0]));
