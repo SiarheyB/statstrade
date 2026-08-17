@@ -22,6 +22,8 @@ const PERIODS: Record<string, string> = {
   "d/d": "д/д",
   "ytd/y": "с начала года",
   "3m/3m": "3м/3м",
+  "3m/y": "3м/г",
+  "q/q ann.": "кв/кв год.",
   "q/y": "кв/г",
   mom: "м/м",
   yoy: "г/г",
@@ -352,6 +354,100 @@ const TERMS: Term[] = [
   { en: "Natural Gas Storage", ru: "запасы природного газа" },
   { en: "Weekly Statistical Bulletin", ru: "еженедельный статистический бюллетень" },
 
+
+  // — Добавлено по аудиту недельного среза фида: всё, что оставалось латиницей —
+  { en: "Statement", ru: "заявление по итогам заседания" },
+  { en: "Policy Rate", ru: "решение по ключевой ставке" },
+  {
+    en: "Federal Funds Rate",
+    ru: "решение ФРС по ставке",
+    explain: {
+      ru: "Ставка ФРС — самое сильное событие месяца для доллара. Важна не только цифра, но и то, сколько голосов было против и как изменился прогноз по будущим ставкам.",
+      en: "The Fed's policy rate — the strongest monthly event for the dollar. Not just the number: dissenting votes and the updated rate path matter as much.",
+    },
+  },
+  { en: "Official Cash Rate", ru: "решение по ключевой ставке" },
+  { en: "Deposit Facility Rate", ru: "ставка по депозитам ЕЦБ" },
+  { en: "1-y Loan Prime Rate", ru: "базовая ставка по кредитам LPR, 1 год" },
+  { en: "5-y Loan Prime Rate", ru: "базовая ставка по кредитам LPR, 5 лет — ориентир по ипотеке" },
+  { en: "Monetary Policy Report", ru: "отчёт по денежной политике" },
+  { en: "Economic Bulletin", ru: "экономический бюллетень" },
+  { en: "Monthly Report", ru: "ежемесячный отчёт" },
+  { en: "MPC Official Bank Rate Votes", ru: "распределение голосов MPC по ставке" },
+  { en: "Business Outlook Survey", ru: "обзор деловых перспектив" },
+  { en: "Bank Stress Test Results", ru: "результаты стресс-тестов банков" },
+
+  // — Инфляция и цены —
+  { en: "National Core CPI", ru: "базовый ИПЦ по стране" },
+  { en: "Tokyo Core CPI", ru: "базовый ИПЦ Токио" },
+  {
+    en: "Trimmed Mean CPI",
+    ru: "базовая инфляция, усечённое среднее",
+    explain: {
+      ru: "Инфляция, из которой выкинуты самые резкие подорожания и подешевения. Именно на неё смотрит Резервный банк Австралии, а не на общий ИПЦ.",
+      en: "Inflation with the sharpest moves in both directions stripped out. This is what the Reserve Bank of Australia watches, not headline CPI.",
+    },
+  },
+  { en: "RPI", ru: "индекс розничных цен" },
+  { en: "PPI Input", ru: "закупочные цены производителей" },
+  { en: "PPI Output", ru: "отпускные цены производителей" },
+  { en: "IPPI", ru: "индекс цен производителей промышленной продукции" },
+  { en: "RMPI", ru: "индекс цен на сырьё для промышленности" },
+  { en: "Manufacturing Prices", ru: "индекс цен в промышленности" },
+  { en: "Services Prices", ru: "индекс цен в услугах" },
+  { en: "Commodity Prices", ru: "цены на сырьевой экспорт" },
+  { en: "GDT Price Index", ru: "индекс цен на молочную продукцию, аукцион GDT" },
+  { en: "Global Dairy Trade Price Index", ru: "индекс цен на молочную продукцию, аукцион GDT" },
+
+  // — Занятость и зарплаты —
+  { en: "Continuing Jobless Claims", ru: "повторные заявки на пособие по безработице" },
+  { en: "Unemployment Change", ru: "изменение числа безработных" },
+  {
+    en: "Employment Cost Index",
+    ru: "индекс стоимости рабочей силы",
+    explain: {
+      ru: "Насколько дорожает труд с учётом зарплат и льгот. ФРС смотрит на него как на источник «зарплатной» инфляции: растут зарплаты — растут и цены.",
+      en: "How fast labour is getting more expensive, wages and benefits together. The Fed reads it as the source of wage-driven inflation.",
+    },
+  },
+  { en: "Wage Price Index", ru: "индекс зарплат" },
+  { en: "Household Spending", ru: "расходы домохозяйств" },
+  { en: "Credit Card Spending", ru: "траты по кредитным картам" },
+
+  // — Производство и капвложения —
+  { en: "Core Machinery Orders", ru: "базовые заказы на машины и оборудование" },
+  { en: "Private Capital Expenditure", ru: "частные капитальные вложения" },
+  { en: "Non-Manufacturing Index", ru: "индекс активности вне промышленности" },
+  { en: "Non-Manufacturing PMI", ru: "PMI вне промышленности" },
+  { en: "Chicago PMI", ru: "PMI Чикаго" },
+  { en: "Ivey PMI", ru: "PMI Ivey (Канада)" },
+  { en: "Industrial Order Expectations", ru: "ожидания промышленных заказов" },
+  { en: "Realized Sales", ru: "фактические продажи в рознице" },
+
+  // — Настроения —
+  { en: "Consumer Climate", ru: "индекс потребительского климата" },
+  { en: "Business Climate", ru: "индекс делового климата" },
+  {
+    en: "Economic Sentiment",
+    ru: "индекс экономических ожиданий",
+    explain: {
+      ru: "Опрос аналитиков и инвесторов: ждут они улучшения экономики через полгода или ухудшения. Выше нуля — оптимистов больше. Выходит раньше твёрдой статистики, поэтому рынок его слушает.",
+      en: "A survey of analysts and investors on whether they expect the economy to improve over six months. Above zero means optimists dominate. It lands before hard data, so markets listen.",
+    },
+  },
+  { en: "Economic Barometer", ru: "экономический барометр" },
+  { en: "Economic Optimism", ru: "индекс экономического оптимизма" },
+
+  // — Жильё, бюджет, прочее —
+  { en: "HPI", ru: "индекс цен на жильё" },
+  { en: "NHPI", ru: "индекс цен на новое жильё" },
+  { en: "S&P/CS Composite-20 HPI", ru: "индекс цен на жильё S&P/Case-Shiller по 20 городам" },
+  { en: "Building Approvals", ru: "одобренные заявки на строительство" },
+  { en: "Building Consents", ru: "разрешения на строительство" },
+  { en: "Public Sector Net Borrowing", ru: "чистые заимствования госсектора" },
+  { en: "Redbook", ru: "розничные продажи Redbook" },
+  { en: "Trade Balance USD", ru: "торговый баланс в долларах" },
+
   // — Прочее —
   { en: "Bank Holiday", ru: "выходной день, банки закрыты" },
   { en: "Weekly Employment Change", ru: "недельное изменение занятости" },
@@ -412,14 +508,41 @@ const ORGS: Record<string, string> = {
   BusinessNZ: "BusinessNZ",
   ISM: "ISM",
   NBS: "Госстат КНР",
+  ANZ: "ANZ",
+  MI: "Melbourne Institute",
+  GfK: "GfK",
+  Westpac: "Westpac",
+  Halifax: "Halifax",
+  Nationwide: "Nationwide",
+  Tankan: "Tankan",
+  AIG: "AIG",
+  CBI: "CBI",
+  Ifo: "Ifo",
+  ZEW: "ZEW",
+  KOF: "KOF",
+  Buba: "Бундесбанк",
+  "IBD/TIPP": "IBD/TIPP",
   Caixin: "Caixin",
   JOLTS: "JOLTS",
   Challenger: "Challenger",
 };
 
+// Названия органов в родительном падеже: «выступление главы Банка Англии», а
+// не «главы Банк Англии». Отдельная карта, потому что в остальных местах орган
+// стоит в скобках и склонять его не нужно.
+const ORGS_GENITIVE: Record<string, string> = {
+  BOE: "Банка Англии",
+  BOJ: "Банка Японии",
+  BOC: "Банка Канады",
+  SNB: "Нацбанка Швейцарии",
+  RBNZ: "Резервного банка Новой Зеландии",
+};
+
 // Должности спикеров: «FOMC Member Barkin Speaks» → «выступление члена FOMC».
 const ROLES: Record<string, string> = {
   "Assist Gov": "заместителя главы",
+  "Deputy Gov": "заместителя главы",
+  "Treasury Sec": "министра финансов",
   Member: "члена",
   Gov: "главы",
   Governor: "главы",
@@ -481,7 +604,7 @@ export function translateEventTitle(title: string, locale: Locale): string {
   }
 
   // 3. Выступления: «FOMC Member Barkin Speaks», «RBA Gov Bullock Speaks».
-  const speaks = rest.match(/^(.+?)\s+Speaks$/i);
+  const speaks = rest.match(/^(.+?)\s+(Speaks|Testifies)$/i);
   if (speaks) {
     let who = speaks[1];
     let org = "";
@@ -489,7 +612,7 @@ export function translateEventTitle(title: string, locale: Locale): string {
     for (const [en, ru] of Object.entries(ORGS)) {
       const re = new RegExp(`^${escapeRe(en)}\\s`, "");
       if (re.test(who)) {
-        org = ru;
+        org = ORGS_GENITIVE[en] ?? ru;
         who = who.replace(re, "");
         break;
       }
@@ -504,7 +627,11 @@ export function translateEventTitle(title: string, locale: Locale): string {
     }
     // Фамилию оставляем латиницей: транслитерация даёт больше вреда, чем
     // пользы («Bullock» → «Буллок»/«Баллок», и человека уже не найти).
-    const head = ["Выступление", role, org].filter(Boolean).join(" ");
+    // Testifies — это выступление перед парламентом (в США — перед Конгрессом);
+    // помечаем отдельно: такие слушания идут часами и двигают рынок иначе.
+    const head =
+      ["Выступление", role, org].filter(Boolean).join(" ") +
+      (/testifies/i.test(speaks[2]) ? " в парламенте" : "");
     return who.trim() ? `${head} (${who.trim()})` : head;
   }
 
