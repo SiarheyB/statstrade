@@ -27,6 +27,11 @@ const nextConfig: NextConfig = {
   // required from node_modules at runtime instead of being bundled.
   // bcrypt — нативный аддон (.node), его тоже нельзя бандлить.
   serverExternalPackages: ["ccxt", "bcrypt"],
+  // gzip на ответы Next. Ответы карты ордеров — это десятки тысяч чисел в JSON
+  // (сетка heatmap + кластеры футпринта), они жмутся в разы. На проде перед
+  // приложением стоит nginx (deploy/nginx), но он проксирует как есть и своего
+  // сжатия для проксируемых ответов не делает.
+  compress: true,
   // Базовые security-заголовки на все ответы. Полный CSP не включаем: Next
   // использует inline-скрипты, а на страницах живут виджеты Turnstile и Google
   // Sign-In — строгая политика требует nonce-инфраструктуры (отдельная задача).

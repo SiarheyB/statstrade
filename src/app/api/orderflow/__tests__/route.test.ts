@@ -143,15 +143,32 @@ describe("GET /api/orderflow", () => {
     expect((await res.json()).candles).toBeNull();
   });
 
-  it("принимает границу окна `to` от первой фазы", async () => {
+  it("принимает границу окна `to` и выравнивает её вниз до минуты", async () => {
     asUser();
     const to = Date.now() - 500;
+    const aligned = Math.floor(to / 60_000) * 60_000;
     const res = await GET(new Request(`${base}?symbol=LTCUSDT&range=1h&candles=0&to=${to}`));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.to).toBe(to);
-    // from обязан лежать на той же сетке: окно = 800 часов от переданного to.
-    expect(body.from).toBe(to - 800 * 60 * 60_000);
+    // Выравнивание — то, из-за чего окно внутри минуты одинаково для всех
+    // запросов и кэш вообще способен сработать.
+    expect(body.to).toBe(aligned);
+    expect(body.from).toBe(aligned - 800 * 60 * 60_000);
+  });
+
+  it("два запроса внутри одной минуты считаются один раз", async () => {
+    asUser();
+    const { computeOrderflow } = await import("@/lib/orderflow");
+    const calls = () => (computeOrderflow as unknown as ReturnType<typeof vi.fn>).mock.calls.length;
+    // Начало текущей минуты + 1 с: гарантирует, что now+3000 не перескочит в
+    // следующую минуту и тест не зависит от момента запуска.
+    const now = Math.floor(Date.now() / 60_000) * 60_000 + 1000;
+
+    await GET(new Request(`${base}?symbol=NEARUSDT&range=1h&candles=0&to=${now}`));
+    const after = calls();
+    // Через 3 секунды (тик LIVE) граница окна та же — пересчитывать нечего.
+    await GET(new Request(`${base}?symbol=NEARUSDT&range=1h&candles=0&to=${now + 3000}`));
+    expect(calls()).toBe(after);
   });
 
   it("отклоняет `to` вне окрестности «сейчас» — это был бы запрос по чужому диапазону", async () => {

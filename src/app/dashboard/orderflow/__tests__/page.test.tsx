@@ -287,4 +287,51 @@ describe('OrderflowPage', () => {
     await renderPage();
     expect(screen.getByText('of.bigTrades')).toBeInTheDocument();
   });
+
+  it('LIVE обновляет свечи часто, а карту лимиток — раз в минуту', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => {
+      render(<OrderflowPage />);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    const candleCalls = () =>
+      fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/orderflow/candles')).length;
+    const overlayCalls = () =>
+      fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/orderflow?')).length;
+    const c0 = candleCalls();
+    const o0 = overlayCalls();
+
+    // 30 секунд: цена должна успеть обновиться несколько раз (тик 5 с), а
+    // тяжёлые наложения — ни разу (тик 60 с). Раньше здесь было 10 полных
+    // пересчётов окна.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(candleCalls()).toBeGreaterThanOrEqual(c0 + 5);
+    expect(overlayCalls()).toBe(o0);
+
+    // На минуте наложения обновляются один раз.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000);
+    });
+    expect(overlayCalls()).toBe(o0 + 1);
+  });
+
+  it('вторая фаза загрузки не запрашивает свечи повторно', async () => {
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    const overlayUrls = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.startsWith('/api/orderflow?'));
+    expect(overlayUrls.length).toBeGreaterThan(0);
+    // candles=0 — иначе вторая фаза снова ходила бы в Binance за формирующейся
+    // свечой (366 из ~400 мс) и дублировала бы работу первой.
+    for (const u of overlayUrls) expect(u).toContain('candles=0');
+  });
 });

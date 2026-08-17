@@ -718,25 +718,57 @@ export default function OrderflowPage() {
     loadDrawings();
   }, [loadDrawings]);
 
+  // LIVE идёт двумя разными темпами, потому что данные живут по-разному.
+  //
+  // Цена и текущая свеча меняются каждую секунду — их тянем часто, и это
+  // дёшево (чтение ObCandle по первичному ключу).
+  //
+  // Карта лимиток за окно шириной до года за 5 секунд не меняется вообще:
+  // прибавляется один минутный бакет из сотен тысяч. Раньше её пересчитывали
+  // на каждом тике вместе со свечами — это и была основная нагрузка на сервер
+  // от одной открытой вкладки. Теперь наложения обновляются раз в минуту, ровно
+  // с тем шагом, с каким сервер выравнивает границу окна: чаще просто нечего
+  // показывать, тот же ответ вернётся из кэша.
+  const LIVE_CANDLES_MS = 5000;
+  const LIVE_OVERLAYS_MS = 60_000;
+
   useEffect(() => {
     if (!live) return;
     let cancelled = false;
-    const iv = setInterval(async () => {
-      // Не долбим бэкенд, пока вкладка свёрнута/не активна — незачем.
+    const q = `range=${range}&symbol=${symbol}&exchange=${exchange}`;
+
+    const tickCandles = async () => {
       if (document.hidden) return;
       try {
-        const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${timezone}`);
+        const res = await fetch(`/api/orderflow/candles?${q}`);
         if (!res.ok || cancelled) return;
         const d = await res.json();
         offRef.current = null;
-        setData(d);
+        // Наложения не трогаем — они живут своим циклом.
+        setData((prev) => (prev ? { ...prev, candles: d.candles, to: d.to } : d));
       } catch {
         // тихо
       }
-    }, 3000);
+    };
+
+    const tickOverlays = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch(`/api/orderflow?${q}&tz=${timezone}&candles=0`);
+        if (!res.ok || cancelled) return;
+        const d = await res.json();
+        setData((prev) => (prev ? { ...prev, ...d, candles: prev.candles, to: prev.to } : prev));
+      } catch {
+        // тихо
+      }
+    };
+
+    const ivC = setInterval(tickCandles, LIVE_CANDLES_MS);
+    const ivO = setInterval(tickOverlays, LIVE_OVERLAYS_MS);
     return () => {
       cancelled = true;
-      clearInterval(iv);
+      clearInterval(ivC);
+      clearInterval(ivO);
     };
   }, [live, range, symbol, exchange, timezone]);
 
