@@ -752,6 +752,64 @@ const LEVEL_FALLBACK: Record<RollupLevel, RollupLevel[]> = {
   minute: ["minute", "hour", "day"],
 };
 
+// Длительность бакета уровня — допуск при проверке покрытия.
+const LEVEL_MS: Record<RollupLevel, number> = {
+  minute: 60_000,
+  hour: 3600_000,
+  day: 86_400_000,
+};
+
+// Какой доли окна достаточно, чтобы считать уровень пригодным. Не 100%:
+// хвост уровня всегда отстаёт на минуту-другую (данные ещё пишутся), а
+// требование полного покрытия отбрасывало бы уровень из-за этих минут и
+// уводило чтение на более грубый.
+const COVERAGE_ENOUGH = 0.9;
+
+/**
+ * Уровень, с которого читать окно: первый из списка, покрывающий его почти
+ * целиком; если такого нет — покрывающий больше остальных.
+ *
+ * Оцениваем именно ДОЛЮ покрытия, а не факт «есть хоть что-то»: каскад
+ * догоняет историю от старого к новому, и уровень с одним старым куском данных
+ * иначе выигрывал бы у полного минутного слоя, оставляя свежую половину окна —
+ * ровно ту, ради которой смотрят на карту, — пустой.
+ *
+ * Покрытие спрашиваем у таблиц СЧЁТЧИКОВ: они на порядки меньше ценовых
+ * (одна строка на бакет против сотни), а наполняются с ними одним прогоном.
+ */
+async function pickCoveringLevel(
+  symbol: string,
+  exchange: string,
+  fromMs: number,
+  toMs: number,
+  candidates: RollupLevel[],
+): Promise<RollupLevel | null> {
+  let best: { level: RollupLevel; overlap: number } | null = null;
+
+  for (const lvl of candidates) {
+    const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+    const rows = await prisma.$queryRaw<{ lo: Date | null; hi: Date | null }[]>`
+      SELECT MIN("bucket") AS lo, MAX("bucket") AS hi
+      FROM ${Prisma.raw(`"${ROLLUP_TABLES[lvl].snaps}"`)}
+      WHERE "symbol" = ${symbol} ${exFilter}
+    `;
+    const lo = rows[0]?.lo?.getTime();
+    const hi = rows[0]?.hi?.getTime();
+    if (lo === undefined || hi === undefined) continue; // уровень пуст
+
+    // Текущий бакет ещё набирается — считаем его частью покрытия.
+    const slack = LEVEL_MS[lvl];
+    const overlap = Math.min(toMs, hi + slack) - Math.max(fromMs, lo);
+    if (overlap <= 0) continue;
+
+    const coverage = overlap / (toMs - fromMs);
+    if (coverage >= COVERAGE_ENOUGH) return lvl;
+    if (!best || overlap > best.overlap) best = { level: lvl, overlap };
+  }
+
+  return best?.level ?? null;
+}
+
 export async function computeOrderflow(
   symbol: string,
   exchange: string,
@@ -776,23 +834,23 @@ export async function computeOrderflow(
   // на окне в год колонка шириной 36 часов, и минутные бакеты в ней — это
   // сотни тысяч строк ради одного числа (см. rollupLevelFor).
   //
-  // Если выбранный уровень ещё пуст (каскад не догнал историю после деплоя),
-  // спускаемся на более мелкий — картинка та же, просто дороже.
+  // Но подходящий по ширине уровень может не ПОКРЫВАТЬ окно целиком: каскад
+  // догоняет историю порциями, а минутный слой обрезан ретеншном. Поэтому
+  // проверяем фактическое покрытие, а не «пусто/не пусто»: раньше уровень с
+  // одним старым куском данных считался годным, и свежая половина окна —
+  // ровно та, ради которой на карту и смотрят, — оставалась пустой.
   const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
   const level = opts.level ?? rollupLevelFor(fromMs, toMs, cols);
+  const candidates = opts.level ? [opts.level] : LEVEL_FALLBACK[level];
+  const usedLevel = await pickCoveringLevel(symbol, exchange, fromMs, toMs, candidates);
   let cells: { col: number; price: number; vol: number }[] = [];
-  let usedLevel: RollupLevel | null = null;
-  for (const lvl of LEVEL_FALLBACK[level]) {
+  if (usedLevel) {
     cells = await prisma.$queryRaw<{ col: number; price: number; vol: number }[]>`
       SELECT ${colExprR}::int AS col, "price" AS price, SUM("volSum")::float8 AS vol
-      FROM ${Prisma.raw(`"${ROLLUP_TABLES[lvl].prices}"`)}
+      FROM ${Prisma.raw(`"${ROLLUP_TABLES[usedLevel].prices}"`)}
       WHERE "symbol" = ${symbol} AND "bucket" >= ${from} AND "bucket" <= ${to} ${exFilter}
       GROUP BY col, "price"
     `;
-    if (cells.length > 0) {
-      usedLevel = lvl;
-      break;
-    }
   }
   let colStats: { col: number; n: number; ex: number }[];
   if (usedLevel) {

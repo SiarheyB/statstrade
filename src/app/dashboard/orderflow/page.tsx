@@ -174,6 +174,37 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasE
   return cv;
 }
 
+/**
+ * Спиннер загрузки графика: монета биткоина, вращающаяся вокруг вертикальной
+ * оси (сжимается по горизонтали и переворачивается), плюс подпись.
+ *
+ * Рисуем инлайновым SVG, а не картинкой: страница и так тянет тяжёлые данные,
+ * а тут нужен лёгкий индикатор, который переживает и тёмную, и светлую тему.
+ */
+function BtcSpinner({ label }: { label: string }) {
+  return (
+    <div className="card p-10 flex flex-col items-center justify-center gap-3">
+      <div className="btc-spin" aria-hidden>
+        <svg width="44" height="44" viewBox="0 0 32 32" role="img">
+          <circle cx="16" cy="16" r="15" fill="#f7931a" />
+          <path
+            d="M21.6 14.2c.25-1.7-1.04-2.6-2.8-3.2l.57-2.3-1.4-.35-.56 2.24c-.37-.09-.75-.18-1.13-.26l.56-2.25-1.4-.35-.57 2.3c-.3-.07-.6-.14-.89-.21v-.01l-1.93-.48-.37 1.5s1.04.24 1.02.25c.57.14.67.51.65.81l-.65 2.62c.04.01.09.02.15.05l-.15-.04-.91 3.67c-.07.17-.24.43-.63.33.01.02-1.02-.25-1.02-.25l-.7 1.6 1.82.46c.34.08.67.17 1 .25l-.58 2.33 1.4.35.57-2.3c.38.1.75.2 1.12.29l-.57 2.29 1.4.35.58-2.33c2.39.45 4.19.27 4.94-1.89.61-1.74-.03-2.75-1.29-3.4.92-.21 1.61-.82 1.79-2.06zm-3.2 4.5c-.43 1.74-3.36.8-4.31.56l.76-3.07c.95.24 4.01.71 3.55 2.51zm.43-4.53c-.39 1.58-2.83.78-3.62.58l.69-2.78c.79.2 3.34.56 2.93 2.2z"
+            fill="#fff"
+          />
+        </svg>
+      </div>
+      <span className="text-sm text-muted">{label}</span>
+      <style>{`
+        .btc-spin { animation: btc-flip 1.4s linear infinite; transform-style: preserve-3d; }
+        @keyframes btc-flip { from { transform: rotateY(0deg); } to { transform: rotateY(360deg); } }
+        @media (prefers-reduced-motion: reduce) {
+          .btc-spin { animation-duration: 4s; }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 export default function OrderflowPage() {
   const { t, timezone, locale } = useI18n();
   const [range, setRange] = useState<string>("1d");
@@ -227,7 +258,9 @@ export default function OrderflowPage() {
   // Кэш fYMin/fYMax/candleStep — иначе draw() проходил бы весь массив свечей
   // (до MAX_HISTORY_CANDLES) на каждый вызов, включая чисто hover-редрои.
   const rangeCacheRef = useRef<{
-    candles: Candle[]; priceMin: number; priceMax: number;
+    // priceMin/priceMax = null, пока карта лимиток ещё не пришла: шкалу в этот
+    // момент задают одни свечи.
+    candles: Candle[]; priceMin: number | null; priceMax: number | null;
     // segments = historyVersion: догрузка куска расширяет диапазон цен, поэтому
     // кэш границ должен по нему инвалидироваться.
     segments: number;
@@ -803,7 +836,11 @@ export default function OrderflowPage() {
 
   const draw = useCallback(() => {
     const cv = canvasRef.current;
-    if (!cv || !data?.heatmap) return;
+    // Карта лимиток приходит второй фазой загрузки, поэтому её может ещё не
+    // быть — свечи рисуем сразу, а heatmap ложится поверх, когда доедет.
+    // Раньше здесь стоял ранний возврат по !data.heatmap, и график молчал всё
+    // время, пока считалась тяжёлая агрегация.
+    if (!cv || !data) return;
     const hm = data.heatmap;
     const candles = getMergedCandles();
     const dpr = window.devicePixelRatio || 1;
@@ -829,14 +866,15 @@ export default function OrderflowPage() {
     const fullT1 = data.to;
     let fYMin: number, fYMax: number, candleStep: number;
     const rc = rangeCacheRef.current;
-    if (rc && rc.candles === candles && rc.priceMin === hm.priceMin && rc.priceMax === hm.priceMax
+    if (rc && rc.candles === candles && rc.priceMin === (hm?.priceMin ?? null) && rc.priceMax === (hm?.priceMax ?? null)
         && rc.segments === historyVersion) {
       fYMin = rc.fYMin;
       fYMax = rc.fYMax;
       candleStep = rc.candleStep;
     } else {
-      fYMin = hm.priceMin;
-      fYMax = hm.priceMax;
+      // Без карты шкалу цен задают сами свечи.
+      fYMin = hm ? hm.priceMin : Infinity;
+      fYMax = hm ? hm.priceMax : -Infinity;
       for (const k of candles) {
         if (k.l < fYMin) fYMin = k.l;
         if (k.h > fYMax) fYMax = k.h;
@@ -849,9 +887,13 @@ export default function OrderflowPage() {
         if (seg.heatmap.priceMin < fYMin) fYMin = seg.heatmap.priceMin;
         if (seg.heatmap.priceMax > fYMax) fYMax = seg.heatmap.priceMax;
       }
+      if (!Number.isFinite(fYMin) || !Number.isFinite(fYMax)) {
+        // Ни карты, ни свечей — рисовать нечего.
+        return;
+      }
       candleStep = candles.length > 1 ? candles[1].t - candles[0].t : (fullT1 - fullT0) / 40;
       rangeCacheRef.current = {
-        candles, priceMin: hm.priceMin, priceMax: hm.priceMax,
+        candles, priceMin: hm?.priceMin ?? null, priceMax: hm?.priceMax ?? null,
         segments: historyVersion, fYMin, fYMax, candleStep,
       };
     }
@@ -908,6 +950,7 @@ export default function OrderflowPage() {
       }
       ctx.imageSmoothingEnabled = true;
 
+      if (hm) {
       const key = `${data.from}:${data.to}:${minT}:${gamma}`;
       if (!offRef.current || offRef.current.key !== key) {
         offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma) };
@@ -953,10 +996,11 @@ export default function OrderflowPage() {
           ctx.textBaseline = "alphabetic";
         }
       }
+      } // if (hm)
     }
     ctx.restore();
 
-    if (hm.profileMax > 0) {
+    if (hm && hm.profileMax > 0) {
       const pb = hm.profileBid;
       const pa = hm.profileAsk;
       const hmSpan = hm.priceMax - hm.priceMin || 1;
@@ -1136,7 +1180,7 @@ export default function OrderflowPage() {
       drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, visibleDivergenceSignals);
     }
 
-    const last = candles.length ? candles[candles.length - 1].c : hm.price;
+    const last = candles.length ? candles[candles.length - 1].c : (hm?.price ?? 0);
     const yp = sy(last);
     drawLastPriceTag(ctx, last, yp, layout);
 
@@ -1167,15 +1211,15 @@ export default function OrderflowPage() {
       const ms = t0 + ((cx - plotX) / plotW) * xspan;
       const priceH = yMin + (1 - cy / plotH) * yspan;
 
-      const hmX0 = sx(hm.times[0] ?? t0);
-      const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
-      const insideHeatmap =
+      const hmX0 = hm ? sx(hm.times[0] ?? t0) : 0;
+      const hmX1 = hm ? sx(hm.times[hm.cols - 1] ?? t1) : 0;
+      const insideHeatmap = !!hm &&
         cx >= Math.min(hmX0, hmX1) && cx <= Math.max(hmX0, hmX1) &&
         priceH >= hm.priceMin && priceH <= hm.priceMax;
-      const colIdx = Math.max(0, Math.min(hm.cols - 1,
-        Math.floor(((cx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols)));
-      const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins)));
-      const vol = insideHeatmap ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
+      const colIdx = hm ? Math.max(0, Math.min(hm.cols - 1,
+        Math.floor(((cx - hmX0) / Math.max(1, hmX1 - hmX0)) * hm.cols))) : 0;
+      const binIdx = hm ? Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / (hm.priceMax - hm.priceMin || 1)) * hm.bins))) : 0;
+      const vol = insideHeatmap && hm ? (hm.grid[colIdx]?.[binIdx] ?? 0) : 0;
 
       drawPriceCrosshairTag(ctx, priceH, cy, layout);
 
@@ -1185,7 +1229,7 @@ export default function OrderflowPage() {
       drawTimeCrosshairTag(ctx, timeLabel, cx, layout);
 
       const base = baseAsset(data.symbol);
-      const hasWall = showLiq && insideHeatmap && hm.maxVal > 0 && vol / hm.maxVal >= minT;
+      const hasWall = showLiq && insideHeatmap && !!hm && hm.maxVal > 0 && vol / hm.maxVal >= minT;
       if (hasWall) {
         const lines = [
           t("of.tipLimitOrder"),
@@ -1403,9 +1447,13 @@ export default function OrderflowPage() {
 
       {error && <div className="card p-4 text-sm text-loss border-loss/30 mb-5">{error}</div>}
 
-      {loading && !data ? (
-        <div className="text-sm text-faint">{t("common.loading")}</div>
-      ) : !hm ? (
+      {/* Пока грузятся свечи — спиннер, а не текст: раньше на их место сразу
+          вставало «Данных пока нет», и первые секунды страница уверенно
+          сообщала, что данных нет, хотя они ехали. Надпись остаётся только для
+          случая, когда загрузка закончилась и рисовать действительно нечего. */}
+      {loading && !data?.candles?.length ? (
+        <BtcSpinner label={t("common.loading")} />
+      ) : !data?.candles?.length && !hm ? (
         <div className="card p-10 text-center text-muted">{t("of.empty")}</div>
       ) : (
         <>
@@ -1611,7 +1659,7 @@ export default function OrderflowPage() {
               <span className="inline-block h-2 w-2 rounded-sm bg-loss" />
               {t("of.legendCandles")}
             </span>
-            <span>{t("of.maxWall")}: {fmtVal(hm.maxVal)}</span>
+            <span>{t("of.maxWall")}: {fmtVal(hm?.maxVal ?? 0)}</span>
             <span className="text-faint/70">{t("of.zoomHint")}</span>
           </div>
 

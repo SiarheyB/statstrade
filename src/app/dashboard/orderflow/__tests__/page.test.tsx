@@ -364,4 +364,53 @@ describe('OrderflowPage', () => {
       expect(urls.some((u) => u.includes('/api/orderflow/segment'))).toBe(true);
     });
   });
+
+  it('пока свечи не пришли — крутится спиннер, а не «данных нет»', async () => {
+    // Первая фаза висит: именно так выглядят первые секунды на большом окне.
+    let release: (v: unknown) => void = () => {};
+    const pending = new Promise((r) => { release = r; });
+    const fetchMock = vi.fn((url: string) => {
+      if (url.includes('/api/orderflow/candles')) return pending as Promise<never>;
+      return routerFetch(url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      render(<OrderflowPage />);
+    });
+
+    // Раньше на это место сразу вставало «Данных пока нет», и страница первые
+    // секунды уверенно сообщала, что данных нет, хотя они ехали.
+    expect(document.querySelector('.btc-spin')).toBeTruthy();
+    expect(screen.queryByText('of.empty')).not.toBeInTheDocument();
+
+    await act(async () => {
+      release({ ok: true, json: () => Promise.resolve({ ...MAIN_DATA, heatmap: null }) });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(document.querySelector('.btc-spin')).toBeFalsy());
+  });
+
+  it('свечи рисуются, даже когда карта лимиток ещё не пришла', async () => {
+    const fetchMock = vi.fn((url: string) => {
+      // Вторая фаза (наложения) не отвечает — график всё равно должен быть.
+      if (url.startsWith('/api/orderflow?')) return new Promise(() => {}) as Promise<never>;
+      if (url.includes('/api/orderflow/candles')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({
+          symbol: 'BTCUSDT', exchange: 'binance-futures', range: '1d',
+          from: CANDLES[0].t, to: CANDLES[CANDLES.length - 1].t, candles: CANDLES,
+        }) });
+      }
+      return routerFetch(url);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await act(async () => {
+      render(<OrderflowPage />);
+    });
+
+    await waitFor(() => expect(document.querySelector('canvas')).toBeTruthy());
+    expect(screen.queryByText('of.empty')).not.toBeInTheDocument();
+  });
 });

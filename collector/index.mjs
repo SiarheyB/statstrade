@@ -1251,76 +1251,99 @@ async function backfillTradeRollup() {
 // прогонами (раз в 5 минут), пока каскад не поравняется с минутным уровнем.
 const CASCADE_CHUNK_HOURS = 24 * 14; // сколько периодов сворачиваем за прогон
 const CASCADE_CHUNK_DAYS = 90;
+// Свежий хвост, который закрывается на каждом прогоне до разбора истории.
+const CASCADE_TAIL_HOURS = 6;
+const CASCADE_TAIL_DAYS = 2;
+
+function unitMs(unit) {
+  return unit === "day" ? 86_400_000 : 3600_000;
+}
 
 /**
- * Свернуть один уровень каскада.
+ * Свернуть один уровень каскада за диапазон [lo, hi).
  *
- * @param srcPrices  таблица цен-источник  (минутная для часового уровня, часовая для дневного)
- * @param dstPrices  таблица цен-приёмник
- * @param srcSnaps   таблица счётчиков-источник
- * @param dstSnaps   таблица счётчиков-приёмник
- * @param unit       'hour' | 'day' — шаг целевого бакета
- * @param limit      сколько целевых периодов обработать за прогон
+ * Диапазон задаётся снаружи (см. rollupCascade), потому что порядок свёртки
+ * важнее самой свёртки: сперва свежий хвост, затем история назад.
+ *
  * @returns сколько строк цен записано
  */
-async function rollupLevel(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, limit) {
-  // Откуда продолжать: последний уже свёрнутый период (его считаем заново — он
-  // почти наверняка был неполным), иначе — начало истории источника.
-  //
-  // Данные, доехавшие в источник ЗАДНИМ ЧИСЛОМ раньше этой границы, прогон не
-  // подхватит: чтобы пересобрать каскад целиком, целевые таблицы очищают, и
-  // ближайшие прогоны наполняют их заново порциями.
-  const { rows: state } = await pool.query(
-    `SELECT (SELECT MAX("bucket") FROM "${dstPrices}") AS done,
-            (SELECT MIN("bucket") FROM "${srcPrices}") AS first`,
-  );
-  const from = state[0]?.done ?? state[0]?.first;
-  if (!from) return 0; // источник пуст — сворачивать нечего
-
-  // Границы порции. Текущий, ещё не завершённый период ВКЛЮЧАЕМ: иначе правый
-  // край карты — самое интересное место — на дневном уровне был бы пустым до
-  // полуночи UTC. Свёртка идемпотентна (перезапись, не сложение), поэтому
-  // незавершённый период просто пересчитывается на каждом прогоне; он дешёвый —
-  // день собирается из двух десятков часовых строк, час из шестидесяти минутных.
-  const bounds = `
-    WITH b AS (
-      SELECT date_trunc($2, $1::timestamptz) AS lo,
-             LEAST(date_trunc($2, now()) + ('1 ${unit}')::interval,
-                   date_trunc($2, $1::timestamptz) + ($3 || ' ${unit}')::interval) AS hi
-    )`;
+async function rollupRange(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, lo, hi) {
+  if (!lo || !hi || lo >= hi) return 0;
 
   const { rowCount } = await pool.query(
-    `${bounds}
-     INSERT INTO "${dstPrices}" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
-     SELECT s."symbol", s."exchange", date_trunc($2, s."bucket") AS bkt, s."price",
+    `INSERT INTO "${dstPrices}" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
+     SELECT s."symbol", s."exchange", date_trunc($3, s."bucket") AS bkt, s."price",
             SUM(s."volSum"), SUM(s."bidSum"), SUM(s."askSum")
-     FROM "${srcPrices}" s, b
-     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     FROM "${srcPrices}" s
+     WHERE s."bucket" >= $1 AND s."bucket" < $2
      GROUP BY s."symbol", s."exchange", bkt, s."price"
      ON CONFLICT ("symbol","exchange","bucket","price")
      DO UPDATE SET "volSum" = EXCLUDED."volSum",
                    "bidSum" = EXCLUDED."bidSum",
                    "askSum" = EXCLUDED."askSum"`,
-    [from, unit, String(limit)],
+    [lo, hi, unit],
   );
 
   // Счётчики снапшотов — тем же окном: из них computeOrderflow берёт нормировку
   // (число бирж / число снапшотов в колонке), и разъехавшись с ценами она
   // исказила бы яркость карты.
   await pool.query(
-    `${bounds}
-     INSERT INTO "${dstSnaps}" ("symbol","exchange","bucket","snaps","midSum")
-     SELECT s."symbol", s."exchange", date_trunc($2, s."bucket") AS bkt,
+    `INSERT INTO "${dstSnaps}" ("symbol","exchange","bucket","snaps","midSum")
+     SELECT s."symbol", s."exchange", date_trunc($3, s."bucket") AS bkt,
             SUM(s."snaps")::int, SUM(s."midSum")
-     FROM "${srcSnaps}" s, b
-     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     FROM "${srcSnaps}" s
+     WHERE s."bucket" >= $1 AND s."bucket" < $2
      GROUP BY s."symbol", s."exchange", bkt
      ON CONFLICT ("symbol","exchange","bucket")
      DO UPDATE SET "snaps" = EXCLUDED."snaps", "midSum" = EXCLUDED."midSum"`,
-    [from, unit, String(limit)],
+    [lo, hi, unit],
   );
 
   return rowCount ?? 0;
+}
+
+/**
+ * Один уровень каскада: свежий хвост + порция истории.
+ *
+ * Порядок именно такой, потому что каскад догоняет историю не за один прогон.
+ * Правый край карты — то, ради чего на неё смотрят, — должен быть свёрнут
+ * ВСЕГДА, поэтому хвост закрывается первым, а история идёт НАЗАД от уже
+ * свёрнутого края (MIN(dst)) к началу источника. Обратный порядок (вперёд от
+ * MAX(dst)) не работает: свёрнутый хвост сам становится максимумом, и история
+ * не разбирается никогда.
+ *
+ * Свёртка идемпотентна — перезаписывает суммы, а не прибавляет, — поэтому
+ * пересчёт незавершённого периода на каждом прогоне безопасен.
+ */
+async function rollupLevel(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, chunk, tail) {
+  const step = unitMs(unit);
+  const { rows } = await pool.query(
+    `SELECT (SELECT MIN("bucket") FROM "${srcPrices}") AS src_lo,
+            (SELECT MAX("bucket") FROM "${srcPrices}") AS src_hi,
+            (SELECT MIN("bucket") FROM "${dstPrices}") AS dst_lo`,
+  );
+  const srcLo = rows[0]?.src_lo && new Date(rows[0].src_lo);
+  const srcHi = rows[0]?.src_hi && new Date(rows[0].src_hi);
+  if (!srcLo || !srcHi) return 0; // источник пуст — сворачивать нечего
+
+  // 1. Свежий хвост: последние `tail` периодов источника. Верхняя граница —
+  //    за концом данных, чтобы текущий незавершённый период тоже попал.
+  const tailLo = new Date(Math.max(srcLo.getTime(), srcHi.getTime() - tail * step));
+  let written = await rollupRange(
+    srcPrices, dstPrices, srcSnaps, dstSnaps, unit,
+    tailLo, new Date(srcHi.getTime() + step),
+  );
+
+  // 2. Порция истории — назад от самого раннего свёрнутого периода.
+  const dstLo = rows[0]?.dst_lo ? new Date(rows[0].dst_lo) : tailLo;
+  if (dstLo.getTime() > srcLo.getTime()) {
+    const histLo = new Date(Math.max(srcLo.getTime(), dstLo.getTime() - chunk * step));
+    written += await rollupRange(
+      srcPrices, dstPrices, srcSnaps, dstSnaps, unit, histLo, dstLo,
+    );
+  }
+
+  return written;
 }
 
 /**
@@ -1360,14 +1383,14 @@ async function rollupCascade() {
     const h = await rollupLevel(
       "ObSnapshotRollup", "ObSnapshotRollupH",
       "ObRollupBucket", "ObRollupBucketH",
-      "hour", CASCADE_CHUNK_HOURS,
+      "hour", CASCADE_CHUNK_HOURS, CASCADE_TAIL_HOURS,
     );
     // Дневной уровень строим из часового, а не из минутного: он уже в сотни раз
     // меньше, и суммы совпадают — сложение ассоциативно.
     const d = await rollupLevel(
       "ObSnapshotRollupH", "ObSnapshotRollupD",
       "ObRollupBucketH", "ObRollupBucketD",
-      "day", CASCADE_CHUNK_DAYS,
+      "day", CASCADE_CHUNK_DAYS, CASCADE_TAIL_DAYS,
     );
     const fp = await rollupFootprintLevel(CASCADE_CHUNK_HOURS);
     if (h || d || fp) console.log(`[cascade] свёрнуто строк: час=${h} сутки=${d} футпринт=${fp}`);
@@ -1463,6 +1486,6 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 } // end isMain
 
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
-export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel, rollupFootprintLevel };
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel, rollupRange, rollupFootprintLevel };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
 export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };
