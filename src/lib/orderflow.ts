@@ -42,6 +42,35 @@ export const CANDLES_IN_WINDOW: Record<string, number> = {
 };
 export const DEFAULT_CANDLES = 300;
 
+// Длительность одной свечи таймфрейма. Ширина окна = TF_MS × CANDLES_IN_WINDOW.
+export const TF_MS: Record<string, number> = {
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "12h": 12 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+};
+
+/**
+ * Границы окна карты ордеров.
+ *
+ * `toMs` передаётся явно, когда окно уже посчитано другим запросом: свечи и
+ * наложения теперь грузятся ДВУМЯ запросами (сначала свечи — график виден
+ * сразу, потом heatmap поверх него), и если каждый возьмёт свой `Date.now()`,
+ * их сетки времени разъедутся на длину первого запроса — карта сместится
+ * относительно свечей.
+ */
+export function orderflowWindow(
+  range: string,
+  toMs: number = Date.now(),
+): { from: number; to: number; tf: number } | null {
+  const tf = TF_MS[range];
+  if (!tf) return null;
+  return { from: toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES), to: toMs, tf };
+}
+
 // Интервал свечей = выбранный таймфрейм (Binance klines interval).
 const CANDLE_INTERVAL: Record<string, string> = {
   "5m": "5m",

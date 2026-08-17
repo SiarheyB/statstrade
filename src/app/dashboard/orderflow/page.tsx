@@ -181,6 +181,8 @@ export default function OrderflowPage() {
   const [exchange, setExchange] = useState("binance-futures");
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
+  // Свечи уже нарисованы, карта лимиток ещё считается (вторая фаза load).
+  const [overlaysLoading, setOverlaysLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [minPct, setMinPct] = useState(20);
   const [brightness, setBrightness] = useState(55);
@@ -483,33 +485,52 @@ export default function OrderflowPage() {
     onDrawingMoved: handleDrawingMoved,
     onDeleteSelected: handleDeleteSelectedDrawing,
   });
+  // Загрузка в две фазы: сначала свечи, потом наложения.
+  //
+  // Свечи читаются из ObCandle по первичному ключу — это десятки миллисекунд,
+  // и график с настоящими осями появляется сразу. Карта лимиток за то же окно
+  // (до года данных) считается заметно дольше, и раньше страница ждала её,
+  // чтобы показать хоть что-нибудь. Теперь она ложится поверх уже готового
+  // графика, а `overlaysLoading` рисует на её слое индикатор загрузки.
+  //
+  // Фазы идут ПОСЛЕДОВАТЕЛЬНО, а не параллельно: тяжёлая агрегация иначе
+  // конкурирует со свечами за пул соединений Prisma и за ядра сервера, и
+  // свечи приходят почти одновременно с ней — то есть весь смысл теряется.
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const tz = timezone;
-      const res = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}&tz=${tz}`);
+      const q = `range=${range}&symbol=${symbol}&exchange=${exchange}`;
+      // Фаза 1 — свечи.
+      const res = await fetch(`/api/orderflow/candles?${q}`);
       const d = await res.json();
       if (!res.ok) {
-        if (res.status === 400 && d.error?.includes("timezone")) {
-          console.warn("[orderflow] timezone rejected by server, retrying without tz");
-          const res2 = await fetch(`/api/orderflow?range=${range}&symbol=${symbol}&exchange=${exchange}`);
-          if (!res2.ok) throw new Error(await res2.text());
-          const d2 = await res2.json();
-          setData(d2);
-          return;
-        }
         setError(d.error ?? "Error");
         setData(null);
         return;
       }
       offRef.current = null;
-      setData(d);
+      setData({ ...d, heatmap: null, delta: null, footprint: null, bigTrades: [] });
+      setLoading(false);
+
+      // Фаза 2 — наложения на ту же границу окна, что у свечей.
+      setOverlaysLoading(true);
+      const res2 = await fetch(`/api/orderflow?${q}&tz=${timezone}&candles=0&to=${d.to}`);
+      if (!res2.ok) {
+        // Свечи уже нарисованы — страница остаётся рабочей, сообщаем только про
+        // наложения.
+        const err = await res2.json().catch(() => ({}));
+        console.warn("[orderflow] overlays failed:", err?.error);
+        return;
+      }
+      const d2 = await res2.json();
+      setData((prev) => (prev ? { ...prev, ...d2, candles: prev.candles } : prev));
     } catch (e) {
       setError("Network error");
       console.error("[orderflow] load error:", e);
     } finally {
       setLoading(false);
+      setOverlaysLoading(false);
     }
   }, [range, symbol, exchange, timezone]);
 
@@ -1434,6 +1455,14 @@ export default function OrderflowPage() {
                   <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-background/80 px-2 py-1 text-xs text-muted-foreground">
                     <RefreshCw className="h-3 w-3 animate-spin" />
                     {t("of.loadingHistory")}
+                  </div>
+                )}
+                {/* Свечи уже нарисованы, карта лимиток ещё считается — иначе
+                    пустой фон читался бы как «лимиток за это окно нет». */}
+                {overlaysLoading && !loadingHistory && (
+                  <div className="absolute left-2 top-2 flex items-center gap-1.5 rounded bg-background/80 px-2 py-1 text-xs text-muted-foreground">
+                    <RefreshCw className="h-3 w-3 animate-spin" />
+                    {t("of.loadingOverlays")}
                   </div>
                 )}
               </div>

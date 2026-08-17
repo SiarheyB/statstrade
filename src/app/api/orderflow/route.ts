@@ -6,28 +6,16 @@ import {
   computeFootprint,
   computeBigTrades,
   fetchOrderflowCandles,
-  CANDLES_IN_WINDOW,
-  DEFAULT_CANDLES,
+  orderflowWindow,
+  TF_MS,
 } from "@/lib/orderflow";
 import { isTimezone, normalizeTimezone } from "@/lib/timezone";
 import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 30;
 
-// Кнопки = таймфрейм свечи → длительность одной свечи в мс. Окно просмотра
-// растягивается на CANDLES_IN_WINDOW свечей этого таймфрейма (как на графике),
-// поэтому 15m рисует 15-минутные свечи, 1h — часовые и т.д. Большие таймфреймы
-// ограничены ретеншном коллектора (RETENTION_DAYS): покажется столько свечей,
-// на сколько хватает истории стакана.
-const TF_MS: Record<string, number> = {
-  "5m": 5 * 60_000,
-  "15m": 15 * 60_000,
-  "1h": 60 * 60_000,
-  "4h": 4 * 60 * 60_000,
-  "12h": 12 * 60 * 60_000,
-  "1d": 24 * 60 * 60_000,
-  "1w": 7 * 24 * 60 * 60_000,
-};
+// Таймфрейм и ширина окна — в lib/orderflow (TF_MS + orderflowWindow): те же
+// значения нужны эндпоинту свечей, который грузится первой фазой.
 
 // Сколько свечей таймфрейма ТЯНЕМ в окно. Определено в orderflow.ts
 // (импортируется выше) — чтобы fetchOrderflowCandles и buildPayload
@@ -40,7 +28,7 @@ type Payload = {
   from: number;
   to: number;
   heatmap: Awaited<ReturnType<typeof computeOrderflow>>;
-  candles: Awaited<ReturnType<typeof fetchOrderflowCandles>>;
+  candles: Awaited<ReturnType<typeof fetchOrderflowCandles>> | null;
   delta: Awaited<ReturnType<typeof computeDelta>>;
   footprint: Awaited<ReturnType<typeof computeFootprint>>;
   bigTrades: Awaited<ReturnType<typeof computeBigTrades>>;
@@ -54,17 +42,27 @@ type Payload = {
 const TTL_MS = 3000;
 const cache = createRouteCache(TTL_MS);
 
-async function buildPayload(symbol: string, exchange: string, range: string, tf: number): Promise<Payload> {
-  const toMs = Date.now();
-  const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
+// withCandles=false — вторая фаза загрузки: свечи уже пришли из
+// /api/orderflow/candles, и повторно тянуть их (а вместе с ними ходить в
+// Binance за формирующейся свечой — это 366 из ~400 мс, см. комментарий у
+// fetchOrderflowCandles) незачем.
+async function buildPayload(
+  symbol: string,
+  exchange: string,
+  range: string,
+  toMs: number,
+  withCandles: boolean,
+): Promise<Payload> {
+  const win = orderflowWindow(range, toMs)!;
+  const fromMs = win.from;
   const [heatmap, candles, delta, footprint, bigTrades] = await Promise.all([
-    computeOrderflow(symbol, exchange, fromMs, toMs),
-    fetchOrderflowCandles(symbol, exchange, range, fromMs, toMs),
-    computeDelta(symbol, exchange, fromMs, toMs),
-    computeFootprint(symbol, exchange, range, fromMs, toMs),
-    computeBigTrades(symbol, exchange, fromMs, toMs),
+    computeOrderflow(symbol, exchange, fromMs, win.to),
+    withCandles ? fetchOrderflowCandles(symbol, exchange, range, fromMs, win.to) : Promise.resolve(null),
+    computeDelta(symbol, exchange, fromMs, win.to),
+    computeFootprint(symbol, exchange, range, fromMs, win.to),
+    computeBigTrades(symbol, exchange, fromMs, win.to),
   ]);
-  return { symbol, exchange, range, from: fromMs, to: toMs, heatmap, candles, delta, footprint, bigTrades };
+  return { symbol, exchange, range, from: fromMs, to: win.to, heatmap, candles, delta, footprint, bigTrades };
 }
 
 export async function GET(req: Request) {
@@ -76,10 +74,28 @@ export async function GET(req: Request) {
   const exchange = (url.searchParams.get("exchange") ?? "binance-futures").toLowerCase().replace(/[^a-z0-9-]/g, "");
   const range = url.searchParams.get("range") ?? "1h";
   const tzParam = url.searchParams.get("tz");
+  // candles=0 — свечи уже получены первой фазой (/api/orderflow/candles).
+  const withCandles = url.searchParams.get("candles") !== "0";
+  // to — правая граница окна, посчитанная первой фазой: обе половины должны
+  // лежать на одной сетке времени, иначе карта съедет относительно свечей.
+  const toParam = url.searchParams.get("to");
 
   const tf = TF_MS[range];
   if (!tf) return badRequest("Неизвестный таймфрейм");
   if (symbol.length < 5 || symbol.length > 20) return badRequest("Некорректный символ");
+
+  // Границу принимаем только «около сейчас»: окно карты всегда заканчивается
+  // текущим моментом, а произвольное `to` из адресной строки означало бы
+  // сколь угодно тяжёлый запрос по чужому диапазону.
+  const now = Date.now();
+  let toMs = now;
+  if (toParam !== null) {
+    const parsed = Number(toParam);
+    if (!Number.isFinite(parsed) || Math.abs(now - parsed) > 60_000) {
+      return badRequest("Некорректная граница окна");
+    }
+    toMs = parsed;
+  }
 
   // Validate timezone if provided
   let timezone: string | undefined;
@@ -90,13 +106,15 @@ export async function GET(req: Request) {
     timezone = normalizeTimezone(tzParam);
   }
 
-  const key = `${symbol}|${exchange}|${range}|${timezone ?? "none"}`;
+  // `to` в ключ не входит: он гуляет в пределах минуты от «сейчас», и включать
+  // его — значит гарантированно промахиваться мимо кэша на каждом опросе LIVE.
+  const key = `${symbol}|${exchange}|${range}|${timezone ?? "none"}|${withCandles ? 1 : 0}`;
   try {
     // fetch = кэш + дедупликация «в полёте»: пока считается первый запрос,
     // параллельные переиспользуют его промис, а не запускают вторую тяжёлую
     // агрегацию (фронт опрашивает эндпоинт раз в 3 секунды).
     const response = await cache.fetch(key, async () => ({
-      ...(await buildPayload(symbol, exchange, range, tf)),
+      ...(await buildPayload(symbol, exchange, range, toMs, withCandles)),
       timezone: timezone || "auto", // Default to auto if not provided
     }));
     return NextResponse.json(response);

@@ -156,6 +156,7 @@ const en: Dict = {
   "of.hintBrightness": "Display brightness of the heatmap — does not change the data, only how vivid the walls look.",
   "of.hintRefresh": "Reload data now.",
   "of.loadingHistory": "Loading history…",
+  "of.loadingOverlays": "Loading order book map…",
   "of.historyStart": "Start of available history",
 
   // forex
@@ -1362,6 +1363,7 @@ const ru: Dict = {
   "of.hintBrightness": "Яркость отображения карты — не меняет данные, только насыщенность свечения стен.",
   "of.hintRefresh": "Перезагрузить данные сейчас.",
   "of.loadingHistory": "Загрузка истории…",
+  "of.loadingOverlays": "Загрузка карты лимиток…",
   "of.historyStart": "Начало доступной истории",
 
   // forex
