@@ -129,6 +129,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     currentPrice: number;
     candlesFrom: Date;
     candlesTo: Date;
+    lastVolume: number | null;
   }[] = [];
 
   for (const [index, symbol] of symbols.entries()) {
@@ -230,6 +231,11 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         currentPrice,
         candlesFrom,
         candlesTo,
+        // В долларах (объём в базовом активе × цена закрытия), а не в штуках
+        // токена — так число хоть в общем порядке сопоставимо с $-объёмом,
+        // который показывают биржевые виджеты (хотя те агрегируют несколько
+        // бирж, а здесь только Binance USDT-M).
+        lastVolume: candles[candles.length - 1].v != null ? candles[candles.length - 1].v! * currentPrice : null,
       });
     }
     cb.onSymbolDone?.(symbol, index, rows.length);
