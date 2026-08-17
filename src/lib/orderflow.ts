@@ -472,6 +472,11 @@ export async function computeFootprint(
 ): Promise<Footprint | null> {
   const interval = CANDLE_MS[range] ?? 60_000;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
+  // Уровень каскада футпринта — по длительности свечи: бакет не должен быть
+  // крупнее её, иначе кластеры одной свечи размажутся по соседним. От часа и
+  // выше свеча собирается из целых часовых бакетов (на дневной ТФ — ровно 24
+  // строки вместо 288 пятиминутных).
+  const fpTable = interval >= 3600_000 ? "ObFootprintRollupH" : "ObFootprintRollup";
   // ВАЖНО: алиас НЕ должен называться "bucket". В Postgres GROUP BY сначала
   // ищет колонку входной таблицы и только потом алиас SELECT, а в
   // ObFootprintRollup колонка "bucket" есть — группировка молча шла по сырому
@@ -484,11 +489,27 @@ export async function computeFootprint(
            "price" AS price,
            SUM("buyVol")::float8 AS buy,
            SUM("sellVol")::float8 AS sell
-    FROM "ObFootprintRollup"
+    FROM ${Prisma.raw(`"${fpTable}"`)}
     WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
     GROUP BY candle, "price"
     ORDER BY candle
   `;
+  // Часовой уровень мог ещё не наполниться (каскад догоняет историю после
+  // деплоя) — тогда читаем пятиминутный, он полон всегда.
+  if (rows.length === 0 && fpTable !== "ObFootprintRollup") {
+    rows = await prisma.$queryRaw<
+      { candle: bigint; price: number; buy: number; sell: number }[]
+    >`
+      SELECT (floor(extract(epoch from "bucket") * 1000 / ${interval}) * ${interval})::int8 AS candle,
+             "price" AS price,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM "ObFootprintRollup"
+      WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY candle, "price"
+      ORDER BY candle
+    `;
+  }
   if (rows.length === 0) {
     // Группировка по свече и цене — в Postgres, вместо переноса всех сырых строк
     // за окно в Node (уровни × снапшоты — быстро растёт).

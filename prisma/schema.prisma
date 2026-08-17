@@ -627,6 +627,22 @@ model ObFootprintRollup {
 //
 // levels — JSON [{ price, bidVol, askVol }] того же снапшота, что писался в
 // ObSnapshot: уровни уже отфильтрованы порогом minCoins.
+// Часовой уровень футпринта — поверх пятиминутного ObFootprintRollup, по той же
+// логике, что и у стакана (см. ObSnapshotRollupH): на дневных и недельных
+// свечах пятиминутные бакеты за окно шириной в год — это миллионы строк ради
+// кластеров, которые всё равно схлопнутся в свечу.
+model ObFootprintRollupH {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало ЧАСА (UTC)
+  price    Float
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+
+  @@id([symbol, exchange, bucket, price])
+  @@index([symbol, bucket])
+}
+
 model ObLatestBook {
   symbol   String
   exchange String

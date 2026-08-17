@@ -313,6 +313,42 @@ describe("rollupLevelFor", () => {
   });
 });
 
+describe("computeFootprint: выбор уровня каскада", () => {
+  // Имя таблицы приходит либо значением (Prisma.raw — выбранный уровень), либо
+  // прямо в шаблоне запроса (жёстко зашитый путь отката).
+  const tableOf = (callIndex: number): string => {
+    const call = mocks.queryRaw.mock.calls[callIndex] ?? [];
+    const template = Array.isArray(call[0]) ? (call[0] as string[]).join(" ") : "";
+    const values = call
+      .slice(1)
+      .map((v: unknown) => (v as { strings?: string[] })?.strings?.join("") ?? "")
+      .join(" ");
+    return `${template} ${values}`;
+  };
+
+  it("свечи от часа и выше читают часовой уровень", async () => {
+    mocks.queryRaw.mockResolvedValue([{ candle: 0n, price: 100, buy: 1, sell: 2 }]);
+    await computeFootprint("BTCUSDT", "binance-futures", "1d", 0, 86_400_000);
+    expect(tableOf(0)).toContain("ObFootprintRollupH");
+  });
+
+  it("мелкие свечи читают пятиминутный уровень", async () => {
+    mocks.queryRaw.mockResolvedValue([{ candle: 0n, price: 100, buy: 1, sell: 2 }]);
+    await computeFootprint("BTCUSDT", "binance-futures", "5m", 0, 300_000);
+    expect(tableOf(0)).toContain('"ObFootprintRollup"');
+  });
+
+  it("спускается на пятиминутный, пока часовой не наполнен", async () => {
+    mocks.queryRaw
+      .mockResolvedValueOnce([]) // часовой пуст
+      .mockResolvedValueOnce([{ candle: 0n, price: 100, buy: 1, sell: 2 }]);
+    const fp = await computeFootprint("BTCUSDT", "binance-futures", "1d", 0, 86_400_000);
+    expect(fp).not.toBeNull();
+    expect(tableOf(0)).toContain("ObFootprintRollupH");
+    expect(tableOf(1)).toContain('"ObFootprintRollup"');
+  });
+});
+
 describe("computeOrderflow: выбор уровня каскада", () => {
   // Имя таблицы приходит в мок как Prisma.raw внутри значений запроса.
   const tablesOf = (callIndex: number): string => {

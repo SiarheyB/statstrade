@@ -1277,6 +1277,38 @@ async function rollupLevel(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, limit
   return rowCount ?? 0;
 }
 
+/**
+ * Свёртка футпринта: часовой уровень из пятиминутного. Отдельная функция, а не
+ * rollupLevel: у футпринта другие колонки (buyVol/sellVol) и нет парной таблицы
+ * счётчиков — нормировать кластеры не нужно, они складываются как есть.
+ */
+async function rollupFootprintLevel(limit) {
+  const { rows: state } = await pool.query(
+    `SELECT (SELECT MAX("bucket") FROM "ObFootprintRollupH") AS done,
+            (SELECT MIN("bucket") FROM "ObFootprintRollup") AS first`,
+  );
+  const from = state[0]?.done ?? state[0]?.first;
+  if (!from) return 0;
+
+  const { rowCount } = await pool.query(
+    `WITH b AS (
+       SELECT date_trunc('hour', $1::timestamptz) AS lo,
+              LEAST(date_trunc('hour', now()) + interval '1 hour',
+                    date_trunc('hour', $1::timestamptz) + ($2 || ' hour')::interval) AS hi
+     )
+     INSERT INTO "ObFootprintRollupH" ("symbol","exchange","bucket","price","buyVol","sellVol")
+     SELECT s."symbol", s."exchange", date_trunc('hour', s."bucket") AS bkt, s."price",
+            SUM(s."buyVol"), SUM(s."sellVol")
+     FROM "ObFootprintRollup" s, b
+     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     GROUP BY s."symbol", s."exchange", bkt, s."price"
+     ON CONFLICT ("symbol","exchange","bucket","price")
+     DO UPDATE SET "buyVol" = EXCLUDED."buyVol", "sellVol" = EXCLUDED."sellVol"`,
+    [from, String(limit)],
+  );
+  return rowCount ?? 0;
+}
+
 async function rollupCascade() {
   try {
     const h = await rollupLevel(
@@ -1291,7 +1323,8 @@ async function rollupCascade() {
       "ObRollupBucketH", "ObRollupBucketD",
       "day", CASCADE_CHUNK_DAYS,
     );
-    if (h || d) console.log(`[cascade] свёрнуто строк: час=${h} сутки=${d}`);
+    const fp = await rollupFootprintLevel(CASCADE_CHUNK_HOURS);
+    if (h || d || fp) console.log(`[cascade] свёрнуто строк: час=${h} сутки=${d} футпринт=${fp}`);
   } catch (err) {
     console.error(`[cascade] ошибка: ${err.message}`);
   }
@@ -1384,6 +1417,6 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 } // end isMain
 
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
-export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel };
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel, rollupFootprintLevel };
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
 export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };
