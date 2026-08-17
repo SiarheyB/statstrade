@@ -29,6 +29,38 @@ describe("computeBreakoutSignals", () => {
     expect(signals.direction).toBe("long");
   });
 
+  it("tags level_confirmed for a local_stop level that leans breakout, without swaying the bias vote", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 100, 102, 98, 100));
+    for (let i = 10; i < 15; i++) candles.push(candle(i, 118.5, 119.5, 118, 119));
+
+    const withType = computeBreakoutSignals(candles, LEVEL, ATR, "local_stop");
+    expect(withType.for).toContain("level_confirmed");
+    const withoutType = computeBreakoutSignals(candles, LEVEL, ATR);
+    expect(withoutType.for).not.toContain("level_confirmed");
+    // Одинаковый bias с/без метки — она не участвует в голосовании.
+    expect(withType.bias).toBe(withoutType.bias);
+  });
+
+  it("does not tag level_confirmed for a local_stop level that leans false_breakout", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 6; i++) {
+      const base = 90 + i * 6;
+      candles.push(candle(i, base, base + 6, base - 1, base + 5));
+    }
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR, "local_stop");
+    expect(signals.bias).toBe("false_breakout");
+    expect(signals.for).not.toContain("level_confirmed");
+  });
+
+  it("does not tag level_confirmed for other level types", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 100, 102, 98, 100));
+    for (let i = 10; i < 15; i++) candles.push(candle(i, 118.5, 119.5, 118, 119));
+    const signals = computeBreakoutSignals(candles, LEVEL, ATR, "structure_break");
+    expect(signals.for).not.toContain("level_confirmed");
+  });
+
   it("leans false_breakout on big bars, far close, and a long unrelieved move with no accumulation", () => {
     const candles: DailyCandle[] = [];
     // Длинный безоткатный подход большими барами, без накопления, close далеко от уровня
