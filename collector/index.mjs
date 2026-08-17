@@ -26,7 +26,11 @@ const cfg = {
   // хардкод 30 дней и полностью игнорировала настроенные здесь дни. Убрано.
   retentionDays: Number(process.env.RETENTION_DAYS ?? 7),         // сырые снапшоты ObSnapshot
   tradeRetentionDays: Number(process.env.TRADE_RETENTION_DAYS ?? process.env.RETENTION_DAYS ?? 30), // сделки/футпринт/крупные
-  rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 365), // агрегаты хранить 365 дней
+  // Агрегаты карты ордеров (Ob*Rollup) — это ВСЯ история лимиток: сырьё живёт
+  // недели, а картинку на любом горизонте рисуют именно они. Поэтому по
+  // умолчанию не чистим их вовсе (0 = хранить вечно). Прежний дефолт 365
+  // молча удалял бы историю по достижении года.
+  rollupRetention: Number(process.env.ROLLUP_RETENTION_DAYS ?? 0), // 0 = хранить вечно
   candleRetentionDays: Number(process.env.CANDLE_RETENTION_DAYS ?? 365), // свечи (ObCandle) хранить 365 дней
   // Полный скан дневных свечей по всем USDT-парам Binance spot (фича
   // "Рекомендации", см. TRADE_RECOMMENDATIONS_PLAN.md). Выключено по
@@ -890,6 +894,51 @@ async function getEpochs() {
   return map;
 }
 
+// BRIN-индексы по bucket на rollup-таблицах.
+//
+// Нужны ровно одному запросу — DELETE в pruneOld() по границе времени (и
+// ручной чистке из админки). Прежние btree по (bucket) стоили ~16 Б на строку,
+// то есть гигабайты на сотнях миллионов строк; BRIN на append-only времени
+// весит килобайты и для диапазонного условия работает не хуже.
+//
+// Создаём здесь, а не в SQL-миграции app: CONCURRENTLY нельзя выполнить внутри
+// транзакции, в которую Prisma заворачивает миграцию, а обычный CREATE INDEX
+// заблокировал бы вставки на минуты — и накопленные бакеты потерялись бы
+// (flushRollup удаляет бакет из памяти до записи).
+const ROLLUP_BRIN = [
+  ["ObSnapshotRollup", "ObSnapshotRollup_bucket_brin"],
+  ["ObFootprintRollup", "ObFootprintRollup_bucket_brin"],
+  ["ObTradeRollup", "ObTradeRollup_bucket_brin"],
+  ["ObRollupBucket", "ObRollupBucket_bucket_brin"],
+];
+
+async function ensureRollupIndexes() {
+  for (const [tbl, idx] of ROLLUP_BRIN) {
+    try {
+      // Прерванный CONCURRENTLY оставляет индекс невалидным: он не используется
+      // планировщиком и молча тормозит чистку. Такой сносим и строим заново.
+      const { rows } = await pool.query(
+        `SELECT i.indisvalid FROM pg_class c
+         JOIN pg_index i ON i.indexrelid = c.oid
+         WHERE c.relname = $1`,
+        [idx],
+      );
+      if (rows.length && rows[0].indisvalid === false) {
+        await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS "${idx}"`);
+      } else if (rows.length) {
+        continue;
+      }
+      await pool.query(
+        `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${idx}" ON "${tbl}" USING brin ("bucket")`,
+      );
+      console.log(`[index] BRIN ${idx} готов`);
+    } catch (err) {
+      // Не фатально: без индекса чистка просто идёт медленнее.
+      console.error(`[index] ${idx}: ${err.message}`);
+    }
+  }
+}
+
 async function pruneOld() {
   try {
     for (const tbl of PARTITIONED_TABLES) {
@@ -928,8 +977,14 @@ async function pruneOld() {
       tradeDropped += r.rows[0]?.n ?? 0;
     }
     const total = snapDropped + tradeDropped;
-    // Rollup‑таблицы — НЕ партиционированы, чистим DELETE‑ом по ROLLUP_RETENTION_DAYS
+    // Rollup‑таблицы — НЕ партиционированы, чистим DELETE‑ом по ROLLUP_RETENTION_DAYS.
+    //
+    // rollupRetention <= 0 означает «хранить вечно» — это дефолт: агрегаты и
+    // есть вся история лимиток. Проверка обязательна: без неё интервал
+    // '0 days' означал бы «удалить всё до текущего момента», то есть ровно
+    // противоположное задуманному.
     let rollupDeleted = 0;
+    if (cfg.rollupRetention > 0) {
     {
       const r = await pool.query(
         `DELETE FROM "ObSnapshotRollup" WHERE bucket < NOW() - ($1 || ' days')::interval`,
@@ -958,6 +1013,7 @@ async function pruneOld() {
       );
       rollupDeleted += r.rowCount ?? 0;
     }
+    }
     // Свечи (ObCandle) НЕ чистим автоматически — в отличие от снапшотов/сделок/
     // rollup, история OHLCV лёгкая и ценна сама по себе (лежит в основе
     // ленивой подгрузки графика). Раньше здесь был DELETE по
@@ -974,7 +1030,8 @@ async function pruneOld() {
     if (total || rollupDeleted) {
       console.log(
         `[prune] сброшено ${total} партиций (снапшоты: ${cfg.retentionDays}д, сделки: ${cfg.tradeRetentionDays}д); ` +
-        `удалено ${rollupDeleted} строк rollup (retention: ${cfg.rollupRetention}д)`,
+        `удалено ${rollupDeleted} строк rollup ` +
+        `(retention: ${cfg.rollupRetention > 0 ? `${cfg.rollupRetention}д` : "вечно"})`,
       );
     }
   } catch (err) {
@@ -1174,6 +1231,8 @@ const flushTimer = startRollupFlushBeat();
 const pruneTimer = setInterval(pruneOld, 3600_000);
 setTimeout(async () => {
   await ensureRetentionEpochs();
+  // Индексы — до первой чистки: BRIN по bucket нужен именно её DELETE-ам.
+  await ensureRollupIndexes();
   await pruneOld();
 }, 10_000);
 

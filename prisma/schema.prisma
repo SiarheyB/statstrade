@@ -14,32 +14,32 @@ datasource db {
 }
 
 model User {
-  id        String            @id @default(cuid())
-  email     String            @unique
-  password  String? // bcrypt hash (null for Google-only accounts)
-  googleId  String?           @unique // Google "sub" when linked to a Google account
-  name      String?
-  createdAt DateTime          @default(now())
+  id                   String                @id @default(cuid())
+  email                String                @unique
+  password             String? // bcrypt hash (null for Google-only accounts)
+  googleId             String?               @unique // Google "sub" when linked to a Google account
+  name                 String?
+  createdAt            DateTime              @default(now())
   // Last time the user was seen on an authenticated request (throttled write,
   // ~once/hour). Drives adaptive auto-sync backoff: idle users sync less often.
-  lastSeenAt DateTime?
+  lastSeenAt           DateTime?
   // JSON arrays of user-configurable dropdown options for trade annotations.
-  entryPointOptions String?
-  entryTypeOptions  String?
-  mistakeOptions    String?
-  patternOptions    String?
+  entryPointOptions    String?
+  entryTypeOptions     String?
+  mistakeOptions       String?
+  patternOptions       String?
   // Two-factor auth (TOTP / Google Authenticator). Secret is AES-256-GCM
   // encrypted at rest; only active once the user confirms a code.
-  twoFactorEnabled  Boolean @default(false)
-  twoFactorSecret   String?
+  twoFactorEnabled     Boolean               @default(false)
+  twoFactorSecret      String?
   // Версия сессионного токена: JWT с меньшей версией недействителен. Инкремент
   // при смене пароля отзывает все выданные ранее cookie (см. lib/auth.ts).
-  tokenVersion      Int     @default(0)
-  accounts     ExchangeAccount[]
-  annotations  TradeAnnotation[]
-  playbooks    Playbook[]
-  shareLinks   ShareLink[]
-  drawings     UserDrawing[]
+  tokenVersion         Int                   @default(0)
+  accounts             ExchangeAccount[]
+  annotations          TradeAnnotation[]
+  playbooks            Playbook[]
+  shareLinks           ShareLink[]
+  drawings             UserDrawing[]
   cloudStorageAccounts CloudStorageAccount[]
 }
 
@@ -65,22 +65,22 @@ model AdminAudit {
 // trade. Trades have no DB row of their own, so they are referenced by a
 // stable composite key (account + symbol + market + entry timestamp).
 model TradeAnnotation {
-  id         String   @id @default(cuid())
-  userId     String
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tradeKey   String
-  entryPoint String? // ТВХ (точка входа)
-  entryType  String? // тип входа
-  mistake    String? // ошибка в сделке
-  pattern    String? // паттерн
-  stopLoss   Float? // цена стоп-лосса (для маркера на графике)
-  note       String?
+  id             String   @id @default(cuid())
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tradeKey       String
+  entryPoint     String? // ТВХ (точка входа)
+  entryType      String? // тип входа
+  mistake        String? // ошибка в сделке
+  pattern        String? // паттерн
+  stopLoss       Float? // цена стоп-лосса (для маркера на графике)
+  note           String?
   // Скриншот сделки, загруженный пользователем в СВОЁ облако (Google Drive).
   // Мы храним только публичную ссылку — не сам файл. imageProvider/imageFileId
   // нужны для UI (иконка сервиса) и потенциальной переустановки прав доступа.
-  imageUrl      String?
-  imageProvider String? // "google_drive"
-  imageFileId   String? // id файла в облаке провайдера
+  imageUrl       String?
+  imageProvider  String? // "google_drive"
+  imageFileId    String? // id файла в облаке провайдера
   // Публичная ссылка на страницу просмотра файла — работает БЕЗ входа в
   // приложение (в отличие от imageUrl, который для yandex_disk указывает на
   // наш защищённый сессией прокси /api/trade-images/view, нужный для показа
@@ -88,7 +88,7 @@ model TradeAnnotation {
   // по себе публичный, так что тут дублируется то же значение. Используется
   // в CSV-экспорте сделок.
   imagePublicUrl String?
-  updatedAt  DateTime @updatedAt
+  updatedAt      DateTime @updatedAt
 
   @@unique([userId, tradeKey])
   @@index([userId])
@@ -100,16 +100,16 @@ model TradeAnnotation {
 // храним и не видим файлы пользователя, только используем узкий OAuth-scope
 // drive.file (доступ лишь к файлам, созданным этим приложением).
 model CloudStorageAccount {
-  id            String   @id @default(cuid())
-  userId        String
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  provider      String   // "google_drive"
-  accessToken   String   // encrypted (AES-256-GCM)
-  refreshToken  String   // encrypted (AES-256-GCM)
-  expiresAt     DateTime
-  accountEmail  String?  // для отображения "подключено как you@gmail.com"
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider     String // "google_drive"
+  accessToken  String // encrypted (AES-256-GCM)
+  refreshToken String // encrypted (AES-256-GCM)
+  expiresAt    DateTime
+  accountEmail String? // для отображения "подключено как you@gmail.com"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@unique([userId, provider])
   @@index([userId])
@@ -117,48 +117,48 @@ model CloudStorageAccount {
 
 // A connected exchange account (one API key) belonging to a user.
 model ExchangeAccount {
-  id         String    @id @default(cuid())
-  userId     String
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  exchange   String // binance | bybit | okx | mt4 | mt5 | manual
-  label      String
+  id                  String          @id @default(cuid())
+  userId              String
+  user                User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exchange            String // binance | bybit | okx | mt4 | mt5 | manual
+  label               String
   // Data source. "exchange" = CCXT API sync; mt4/mt5/manual = file-imported
   // round-trips (no API keys, no sync).
-  source          String  @default("exchange")
-  accountCurrency String  @default("USD") // account currency for imported (forex) trades
-  assetClass      String? // null = crypto | "forex"
-  apiKey     String? // AES-256-GCM encrypted (null for imported/manual accounts)
-  apiSecret  String? // AES-256-GCM encrypted (null for imported/manual accounts)
-  passphrase String? // AES-256-GCM encrypted (OKX requires a passphrase)
-  marketType String    @default("both") // spot | futures | both
-  demoTrading Boolean  @default(false) // Bybit Demo Trading key -> use demo API host
-  balance    Float?    // last fetched account balance/equity in USDT (deposit)
-  balanceAt  DateTime? // when balance was last fetched
-  capital    Float?    // user-set capital for this account (Overview), overrides balance
-  createdAt  DateTime  @default(now())
-  lastSyncAt DateTime?
-  syncStatus String    @default("idle") // idle | syncing | error
-  syncError  String?
+  source              String          @default("exchange")
+  accountCurrency     String          @default("USD") // account currency for imported (forex) trades
+  assetClass          String? // null = crypto | "forex"
+  apiKey              String? // AES-256-GCM encrypted (null for imported/manual accounts)
+  apiSecret           String? // AES-256-GCM encrypted (null for imported/manual accounts)
+  passphrase          String? // AES-256-GCM encrypted (OKX requires a passphrase)
+  marketType          String          @default("both") // spot | futures | both
+  demoTrading         Boolean         @default(false) // Bybit Demo Trading key -> use demo API host
+  balance             Float? // last fetched account balance/equity in USDT (deposit)
+  balanceAt           DateTime? // when balance was last fetched
+  capital             Float? // user-set capital for this account (Overview), overrides balance
+  createdAt           DateTime        @default(now())
+  lastSyncAt          DateTime?
+  syncStatus          String          @default("idle") // idle | syncing | error
+  syncError           String?
   // Background auto-sync on a schedule.
-  autoSync            Boolean @default(false)
-  syncIntervalMinutes Int     @default(60)
+  autoSync            Boolean         @default(false)
+  syncIntervalMinutes Int             @default(60)
   // Chunked background import progress. A scan walks a persisted task plan
   // (one task per trading pair on per-symbol exchanges like Binance) in
   // time-bounded chunks so it survives serverless timeouts.
-  syncPhase    String? // null | "full" | "incremental"
-  syncPlan     String? // JSON array of "kind|symbol" tasks for the active scan
-  syncCursor   Int       @default(0) // index of the next task to process
-  syncTotal    Int       @default(0) // total tasks in the active scan
-  syncImported Int       @default(0) // fills imported so far in the active scan
-  fullSyncAt   DateTime? // when the last full (all-pairs) scan completed
+  syncPhase           String? // null | "full" | "incremental"
+  syncPlan            String? // JSON array of "kind|symbol" tasks for the active scan
+  syncCursor          Int             @default(0) // index of the next task to process
+  syncTotal           Int             @default(0) // total tasks in the active scan
+  syncImported        Int             @default(0) // fills imported so far in the active scan
+  fullSyncAt          DateTime? // when the last full (all-pairs) scan completed
   // Когда материализованные сделки (Trade) в последний раз пересобраны целиком
   // для этого аккаунта. NULL = ещё ни разу → /api/stats пересоберёт при первом
   // обращении (бэкафилл после деплоя / legacy-аккаунты).
-  tradesRebuiltAt DateTime?
-  fills          Fill[]
-  importedTrades ImportedTrade[]
-  trades         Trade[]
-  tradeHourly    TradeHourly[]
+  tradesRebuiltAt     DateTime?
+  fills               Fill[]
+  importedTrades      ImportedTrade[]
+  trades              Trade[]
+  tradeHourly         TradeHourly[]
 
   @@index([userId])
 }
@@ -171,26 +171,26 @@ model ExchangeAccount {
 model Trade {
   // Стабильный ключ = accountId:symbol:market:entryMs — совпадает с
   // TradeAnnotation.tradeKey, аннотации клеятся по нему.
-  id         String          @id
-  accountId  String
-  account    ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  symbol     String
-  base       String
-  quote      String
-  market     String // spot | swap | future
-  exchange   String
-  side       String // long | short
-  entryTime  DateTime
-  exitTime   DateTime
-  qty        Float // peak position size (base)
-  entryPrice Float // average entry
-  exitPrice  Float // average exit
-  grossPnl   Float
-  fees       Float
-  netPnl     Float
-  returnPct  Float
-  fillCount  Int
-  result     String // win | loss | breakeven
+  id          String          @id
+  accountId   String
+  account     ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  symbol      String
+  base        String
+  quote       String
+  market      String // spot | swap | future
+  exchange    String
+  side        String // long | short
+  entryTime   DateTime
+  exitTime    DateTime
+  qty         Float // peak position size (base)
+  entryPrice  Float // average entry
+  exitPrice   Float // average exit
+  grossPnl    Float
+  fees        Float
+  netPnl      Float
+  returnPct   Float
+  fillCount   Int
+  result      String // win | loss | breakeven
   // MFE/MAE — «лучшая возможная цена» за время удержания и максимальная
   // просадка, в % от цены входа. У ЗАКРЫТОЙ сделки они неизменны, поэтому
   // считаются один раз и сохраняются (см. lib/analytics/mfe.ts). Раньше это
@@ -205,11 +205,11 @@ model Trade {
   // Счётчик неудачных попыток (биржа недоступна, свечи не совпали с ценами
   // сделки). Нужен, чтобы не долбить биржу бесконечно из-за делистнутой пары:
   // после MFE_MAX_ATTEMPTS сделка перестаёт попадать в очередь.
-  mfeAttempts Int @default(0)
+  mfeAttempts Int             @default(0)
   // R-multiple — посчитан и сохранён один раз (см. lib/analytics/rr.ts),
   // а не при каждом запросе /api/stats. Пересчитывается точечно при: ребилде
   // сделок аккаунта, правке stopLoss в TradeAnnotation, смене риск-профиля.
-  rr Float?
+  rr          Float?
 
   @@index([accountId, exitTime])
   @@index([accountId, symbol, market])
@@ -234,22 +234,22 @@ model Trade {
 // Агрегат покрывает и crypto (Trade), и импортированные форекс/MT-сделки
 // (ImportedTrade) — обе таблицы сворачиваются в одни и те же строки.
 model TradeHourly {
-  accountId String
-  account   ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  hour      DateTime        @db.Timestamp(3) // начало часа exitTime в UTC
-  trades    Int             @default(0)
-  wins      Int             @default(0)
-  losses    Int             @default(0)
-  netPnl    Float           @default(0)
-  grossProfit Float         @default(0) // Σ netPnl прибыльных сделок
-  grossLoss   Float         @default(0) // Σ |netPnl| убыточных (положительное число)
-  fees      Float           @default(0)
+  accountId   String
+  account     ExchangeAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  hour        DateTime        @db.Timestamp(3) // начало часа exitTime в UTC
+  trades      Int             @default(0)
+  wins        Int             @default(0)
+  losses      Int             @default(0)
+  netPnl      Float           @default(0)
+  grossProfit Float           @default(0) // Σ netPnl прибыльных сделок
+  grossLoss   Float           @default(0) // Σ |netPnl| убыточных (положительное число)
+  fees        Float           @default(0)
   // R-мультипликаторы: суммы уже сохранённого Trade.rr / ImportedTrade.rr —
   // не пересчитываются (см. lib/analytics/rr.ts). netR = winR + lossR.
-  winR      Float           @default(0) // Σ положительных rr
-  lossR     Float           @default(0) // Σ отрицательных rr (отрицательное число)
-  rTrades   Int             @default(0) // сколько сделок часа имеют посчитанный rr
-  updatedAt DateTime        @updatedAt
+  winR        Float           @default(0) // Σ положительных rr
+  lossR       Float           @default(0) // Σ отрицательных rr (отрицательное число)
+  rTrades     Int             @default(0) // сколько сделок часа имеют посчитанный rr
+  updatedAt   DateTime        @updatedAt
 
   @@id([accountId, hour])
   @@index([hour])
@@ -268,28 +268,28 @@ model ImportedTrade {
   symbol       String // EURUSD, XAUUSD, US30 ...
   base         String
   quote        String
-  market       String  @default("forex")
+  market       String          @default("forex")
   side         String // long | short
   lots         Float
   qty          Float // lots * contractSize (base units)
-  contractSize Float   @default(100000)
+  contractSize Float           @default(100000)
   entryTime    DateTime
   exitTime     DateTime
   entryPrice   Float
   exitPrice    Float
   stopLoss     Float?
   takeProfit   Float?
-  commission   Float    @default(0) // account currency
-  swap         Float    @default(0) // account currency
+  commission   Float           @default(0) // account currency
+  swap         Float           @default(0) // account currency
   grossProfit  Float // broker profit before swap/commission, account currency
   netPnl       Float // grossProfit + swap - commission
   pips         Float?
-  currency     String   @default("USD") // account currency at import time
+  currency     String          @default("USD") // account currency at import time
   comment      String?
-  importedAt   DateTime @default(now())
+  importedAt   DateTime        @default(now())
   importBatch  String? // id of the upload batch (for rollback)
   // R-multiple — та же схема, что у Trade.rr (см. lib/analytics/rr.ts).
-  rr Float?
+  rr           Float?
 
   @@unique([accountId, externalId])
   @@index([accountId])
@@ -313,7 +313,7 @@ model Fill {
   price        Float
   amount       Float // base amount filled
   cost         Float // quote cost = price * amount
-  fee          Float          @default(0) // fee amount
+  fee          Float           @default(0) // fee amount
   feeCurrency  String?
   realizedPnl  Float? // exchange-provided realized pnl, when available (futures)
   takerOrMaker String?
@@ -386,13 +386,13 @@ model ObBigTrade {
 // Pruned by the collector via DELETE on t older than CANDLE_RETENTION_DAYS.
 model ObCandle {
   symbol   String
-  exchange String   // binance-futures or binance-spot
-  interval String   // 5m, 15m, 1h, 4h, 12h, 1d, 1w
+  exchange String // binance-futures or binance-spot
+  interval String // 5m, 15m, 1h, 4h, 12h, 1d, 1w
   t        DateTime @db.Timestamptz(3) // candle open time (UTC)
-  o        Float    // open price
-  h        Float    // high price
-  l        Float    // low price
-  c        Float    // close price
+  o        Float // open price
+  h        Float // high price
+  l        Float // low price
+  c        Float // close price
   v        Float    @default(0) // volume in base asset
 
   @@id([symbol, exchange, interval, t])
@@ -420,19 +420,19 @@ model RetentionEpoch {
 // UserDrawing — created by direct DB migration, not yet in tracked schema.
 // Added here to resolve Prisma migration drift. Types match the existing DB columns.
 model UserDrawing {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   symbol    String
   exchange  String
   toolType  String
   points    String
-  color     String   @default("#e6b800")
-  lineWidth Int      @default(2)
+  color     String    @default("#e6b800")
+  lineWidth Int       @default(2)
   fillColor String?
   label     String?
-  createdAt DateTime @default(now()) @db.Timestamp
-  updatedAt DateTime @updatedAt @db.Timestamp
+  createdAt DateTime  @default(now()) @db.Timestamp
+  updatedAt DateTime  @updatedAt @db.Timestamp
   deletedAt DateTime? @db.Timestamp
 
   @@index([userId, symbol, exchange])
@@ -442,18 +442,18 @@ model UserDrawing {
 // UserLevel — created by direct DB migration, not yet in tracked schema.
 // Added here to resolve Prisma migration drift. Types match the existing DB columns.
 model UserLevel {
-  id        String   @id
+  id        String    @id
   userId    String
   symbol    String
   exchange  String
   price     Float
   type      String
   label     String?
-  strength  Int      @default(1)
+  strength  Int       @default(1)
   timeframe String?
   color     String?
-  createdAt DateTime @default(now()) @db.Timestamp
-  updatedAt DateTime @updatedAt @db.Timestamp
+  createdAt DateTime  @default(now()) @db.Timestamp
+  updatedAt DateTime  @updatedAt @db.Timestamp
   deletedAt DateTime? @db.Timestamp
 
   @@unique([userId, symbol, exchange, price, type])
@@ -507,11 +507,14 @@ model ObSnapshotRollup {
   volSum   Float    @default(0) // Σ(bidVol+askVol) по снапшотам бакета
   bidSum   Float    @default(0) // Σ bidVol
   askSum   Float    @default(0) // Σ askVol
+  // Индекса (symbol, exchange, bucket) здесь НЕТ намеренно: это точный префикс
+  // первичного ключа, он не обслуживал ни одного запроса, а на сотнях млн строк
+  // стоил гигабайты и замедлял вставку (миграция orderflow_index_diet).
+  // По (bucket) индекс тоже не объявлен: для DELETE в pruneOld() достаточно
+  // BRIN, а его Prisma описать не умеет — создаёт коллектор (ensureRollupIndexes).
 
   @@id([symbol, exchange, bucket, price])
-  @@index([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
-  @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval, без symbol
 }
 
 // Минутный rollup ленты сделок — то же, что ObSnapshotRollup для стакана.
@@ -526,10 +529,10 @@ model ObTradeRollup {
   buyVol   Float    @default(0) // Σ агрессивных покупок за минуту
   sellVol  Float    @default(0) // Σ агрессивных продаж
   trades   Int      @default(0) // Σ печатей (для скорости ленты)
+  // (bucket) — BRIN, создаётся коллектором; см. ObSnapshotRollup.
 
   @@id([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
-  @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval
 }
 
 // Rollup футпринта: объём покупок/продаж по ценовым уровням в ПЯТИМИНУТНОМ
@@ -547,11 +550,10 @@ model ObFootprintRollup {
   price    Float
   buyVol   Float    @default(0)
   sellVol  Float    @default(0)
+  // (symbol, exchange, bucket) — префикс PK, удалён; (bucket) — BRIN от коллектора.
 
   @@id([symbol, exchange, bucket, price])
-  @@index([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
-  @@index([bucket]) // pruneOld()
 }
 
 // Последний снапшот стакана — одна строка на (symbol, exchange). Профиль
@@ -581,10 +583,10 @@ model ObRollupBucket {
   bucket   DateTime @db.Timestamptz(3)
   snaps    Int      @default(0) // число снапшотов фида в бакете
   midSum   Float    @default(0) // Σ mid по снапшотам (avg mid = midSum/snaps)
+  // (bucket) — BRIN, создаётся коллектором; см. ObSnapshotRollup.
 
   @@id([symbol, exchange, bucket])
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
-  @@index([bucket]) // pruneOld(): DELETE WHERE bucket < NOW() - interval, без symbol
 }
 
 // Editable collector settings (read by the collector every ~30s, edited in the
@@ -592,13 +594,13 @@ model ObRollupBucket {
 // levels whose resting size (bid+ask) is at least this many base coins. Bigger
 // threshold = only large walls stored = far less data / disk.
 model CollectorConfig {
-  symbol    String // "BTCUSDT", "ETHUSDT", …
-  market    String   @default("spot") // spot | futures — свой порог на каждый рынок
-  minCoins  Float // minimum resting size (base coins) to record a level
+  symbol     String // "BTCUSDT", "ETHUSDT", …
+  market     String   @default("spot") // spot | futures — свой порог на каждый рынок
+  minCoins   Float // minimum resting size (base coins) to record a level
   // «Отбирать всё»: писать ВСЕ уровни стакана без порога (minCoins игнорируется,
   // шумовой фильтр по нотионалу тоже). Внимание: объём данных сильно растёт.
-  collectAll Boolean @default(false)
-  updatedAt DateTime @updatedAt
+  collectAll Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
 
   @@id([symbol, market])
 }
@@ -609,13 +611,13 @@ model CollectorConfig {
 // старую переписку. Существовавшие до тикетов треды смигрированы в один
 // legacy-тикет на пользователя (id = "legacy-<userId>").
 model SupportTicket {
-  id            String    @id @default(cuid())
+  id            String           @id @default(cuid())
   userId        String // владелец тикета (клиент)
   subject       String // тема: первая строка первого сообщения (обрезка)
-  status        String    @default("open") // open | closed
-  createdAt     DateTime  @default(now())
+  status        String           @default("open") // open | closed
+  createdAt     DateTime         @default(now())
   closedAt      DateTime?
-  lastMessageAt DateTime  @default(now()) // для сортировки инбокса
+  lastMessageAt DateTime         @default(now()) // для сортировки инбокса
   messages      SupportMessage[]
 
   @@index([userId, lastMessageAt])
@@ -729,7 +731,7 @@ model RiskProfile {
 model FxDepth {
   id       BigInt   @id @default(autoincrement())
   symbol   String // EUR/USD, GBP/USD, ...
-  exchange String @default("dukascopy")
+  exchange String   @default("dukascopy")
   t        DateTime @db.Timestamptz(3)
   price    Float
   bidVol   Float    @default(0)
@@ -742,7 +744,7 @@ model FxDepth {
 // OHLCV candles for forex pairs, fetched from Twelve Data time_series API.
 model FxCandle {
   symbol   String // EUR/USD, GBP/USD, ...
-  exchange String @default("twelvedata")
+  exchange String   @default("twelvedata")
   interval String // 5m, 15m, 1h, 4h, 12h, 1d, 1w
   t        DateTime @db.Timestamptz(3) // candle open time
   o        Float
@@ -759,13 +761,13 @@ model FxCandle {
 // Одна строка = один снапшот bid/ask для пары в момент времени.
 // Используется для B/A spread, delta, CVD, imbalance.
 model FxQuote {
-  symbol   String   // EUR/USD, GBP/USD, ...
+  symbol   String // EUR/USD, GBP/USD, ...
   exchange String   @default("twelvedata")
   t        DateTime @db.Timestamptz(3) // quote timestamp
-  bid      Float    // bid price
-  ask      Float    // ask price
-  mid      Float    // (bid + ask) / 2
-  spread   Float    // ask - bid
+  bid      Float // bid price
+  ask      Float // ask price
+  mid      Float // (bid + ask) / 2
+  spread   Float // ask - bid
   volume   Float    @default(0) // total volume (from quote)
 
   @@id([symbol, exchange, t])
@@ -800,11 +802,11 @@ model FxDepthRollup {
 
 // Metadata about a minute bucket: snapshot count and mid-price sum.
 model FxRollupBucket {
-  symbol   String
-  exchange String   @default("dukascopy")
-  bucket   DateTime @db.Timestamptz(3)
-  snapCount Int     @default(0)
-  midSum   Float    @default(0)
+  symbol    String
+  exchange  String   @default("dukascopy")
+  bucket    DateTime @db.Timestamptz(3)
+  snapCount Int      @default(0)
+  midSum    Float    @default(0)
 
   @@id([symbol, exchange, bucket])
   @@index([symbol, bucket])
@@ -844,15 +846,15 @@ model FeatureConfig {
 }
 
 model ImportLog {
-  id          String    @id @default(uuid())
-  module      String
-  accountId   String?
-  eventType   String
-  message     String
-  details     Json?
-  level       String
-  timestamp   DateTime  @default(now())
-  createdAt   DateTime  @default(now())
+  id        String   @id @default(uuid())
+  module    String
+  accountId String?
+  eventType String
+  message   String
+  details   Json?
+  level     String
+  timestamp DateTime @default(now())
+  createdAt DateTime @default(now())
 
   @@index([timestamp])
   @@index([module])
@@ -886,35 +888,35 @@ model Playbook {
 // without giving them a login. `token` is the only credential — high-entropy,
 // looked up directly (never enumerated), no separate user id in the URL.
 model ShareLink {
-  id        String    @id @default(cuid())
-  userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String    @unique
-  label     String? // e.g. "For my mentor"
-  createdAt DateTime  @default(now())
+  id           String    @id @default(cuid())
+  userId       String
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  token        String    @unique
+  label        String? // e.g. "For my mentor"
+  createdAt    DateTime  @default(now())
   lastViewedAt DateTime?
-  revokedAt DateTime?
+  revokedAt    DateTime?
 
   @@index([userId])
 }
 
 model Announcement {
-  id        String   @id @default(cuid())
+  id        String             @id @default(cuid())
   title     String
   body      String
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  active    Boolean            @default(true)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
   reads     AnnouncementRead[]
 
   @@map("Announcement")
 }
 
 model AnnouncementRead {
-  id             String   @id @default(cuid())
+  id             String       @id @default(cuid())
   userId         String
   announcementId String
-  readAt         DateTime @default(now())
+  readAt         DateTime     @default(now())
   announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
 
   @@unique([userId, announcementId])
@@ -965,4 +967,3 @@ model LevelSetup {
   @@index([bias])
   @@map("LevelSetup")
 }
-
