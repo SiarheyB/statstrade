@@ -73,9 +73,10 @@ describe("computeBreakoutSignals", () => {
     expect(signals.against).toContain("long_move_no_accumulation");
     expect(signals.against).toContain("close_far_from_level");
     expect(signals.bias).toBe("false_breakout");
-    // Цена ушла выше уровня 120 (последнее закрытие 125), т.е. уровень снизу →
-    // ложный пробой вниз = отбой вверх, лонг.
-    expect(signals.direction).toBe("long");
+    // Уровень 120 пробит ТОЛЬКО ЧТО (последнее закрытие 125, до этого цена
+    // была под ним) — значит подхода снизу не было, был свежий пробой вверх.
+    // Ложный пробой = возврат обратно под уровень, то есть шорт.
+    expect(signals.direction).toBe("short");
   });
 
   it("tags near_retest when the level was touched within the last 10 bars", () => {
@@ -188,6 +189,16 @@ describe("biasDirection", () => {
     expect(biasDirection("false_breakout", 120, 100)).toBe("short");
     expect(biasDirection("false_breakout", 80, 100)).toBe("long");
     expect(biasDirection("neutral", 120, 100)).toBeNull();
+  });
+
+  it("follows the actual break when the level was just taken out", () => {
+    // Цена под уровнем, но оказалась там не подходом снизу, а свежим пробоем
+    // вниз: пробой продолжается вниз (шорт), а не разворачивается в лонг.
+    expect(biasDirection("breakout", 120, 100, "down")).toBe("short");
+    expect(biasDirection("false_breakout", 120, 100, "down")).toBe("long");
+    // Симметрично для пробитого вверх сопротивления.
+    expect(biasDirection("breakout", 80, 100, "up")).toBe("long");
+    expect(biasDirection("false_breakout", 80, 100, "up")).toBe("short");
   });
 });
 

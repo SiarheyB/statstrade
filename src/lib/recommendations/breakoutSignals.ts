@@ -16,13 +16,55 @@ import type { DailyCandle } from "./levels";
 export type Bias = "breakout" | "false_breakout" | "neutral";
 
 /**
- * Сторона сделки, которую подразумевает сетап. Выводится из положения уровня
- * относительно текущей цены:
+ * Сторона сделки, которую подразумевает сетап. Базово выводится из положения
+ * уровня относительно текущей цены — цена подходит к уровню и пробивает его
+ * дальше в ту же сторону:
  *  - уровень ВЫШЕ цены: пробой = вверх (long), ложный пробой = отбой вниз (short);
  *  - уровень НИЖЕ цены: пробой = вниз (short), ложный пробой = отбой вверх (long).
+ *
+ * Исключение — уровень, который цена пробила ТОЛЬКО ЧТО (см. freshBreakDirection).
+ * Тогда «подхода» не было: цена уже по другую сторону, и пробой продолжается
+ * в том направлении, в котором случился, а не разворачивается навстречу. Без
+ * этой поправки свежепробитая вниз поддержка читалась как «сопротивление над
+ * ценой» и давала лонг в падающем рынке.
+ *
  * Для нейтрального bias направления нет.
  */
 export type Direction = "long" | "short";
+
+/**
+ * Насколько недавним должен быть переход цены через уровень, чтобы считать
+ * его «тем самым» пробоем, а не сменой роли уровня. Старый переход означает
+ * обратное: цена давно закрепилась с этой стороны, уровень стал зеркальным,
+ * и подход к нему — снова обычный подход.
+ */
+export const FRESH_BREAK_BARS = 10;
+
+/**
+ * Направление последнего перехода цены через уровень, если он свежий.
+ * `deadband` гасит дрожание закрытий вокруг самого уровня.
+ */
+export function freshBreakDirection(
+  candles: DailyCandle[],
+  levelPrice: number,
+  deadband = 0,
+  freshBars = FRESH_BREAK_BARS,
+): "up" | "down" | null {
+  const sideOf = (close: number): 1 | -1 | 0 => {
+    if (close > levelPrice + deadband) return 1;
+    if (close < levelPrice - deadband) return -1;
+    return 0;
+  };
+  const currentSide = sideOf(candles[candles.length - 1].c);
+  if (currentSide === 0) return null;
+  // Идём назад до первого бара, закрывшегося по ДРУГУЮ сторону уровня.
+  for (let i = candles.length - 2, bars = 1; i >= 0; i--, bars++) {
+    const side = sideOf(candles[i].c);
+    if (side === 0 || side === currentSide) continue;
+    return bars <= freshBars ? (currentSide === 1 ? "up" : "down") : null;
+  }
+  return null; // цена всю историю с этой стороны — уровень не пробивали вовсе
+}
 
 export interface BreakoutSignals {
   for: string[];
@@ -31,8 +73,20 @@ export interface BreakoutSignals {
   direction: Direction | null;
 }
 
-export function biasDirection(bias: Bias, levelPrice: number, currentPrice: number): Direction | null {
+export function biasDirection(
+  bias: Bias,
+  levelPrice: number,
+  currentPrice: number,
+  freshBreak: "up" | "down" | null = null,
+): Direction | null {
   if (bias === "neutral") return null;
+  // Уровень только что пробит: сторона пробоя уже известна по факту, гадать
+  // по геометрии не нужно. Пробой = продолжение в ту же сторону, ложный
+  // пробой = возврат обратно за уровень.
+  if (freshBreak) {
+    const continuation: Direction = freshBreak === "up" ? "long" : "short";
+    return bias === "breakout" ? continuation : continuation === "long" ? "short" : "long";
+  }
   const levelAbove = levelPrice >= currentPrice;
   if (bias === "breakout") return levelAbove ? "long" : "short";
   return levelAbove ? "short" : "long";
@@ -202,6 +256,6 @@ export function computeBreakoutSignals(
     for: displayFor,
     against: againstFactors,
     bias,
-    direction: biasDirection(bias, levelPrice, last.c),
+    direction: biasDirection(bias, levelPrice, last.c, freshBreakDirection(candles, levelPrice, atr * 0.1)),
   };
 }
