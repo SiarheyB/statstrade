@@ -13,7 +13,6 @@ const baseProps = {
   result: "win",
   pattern: null as string | null,
   imageUrl: null as string | null,
-  imageProvider: null as string | null,
   connected: true,
   onUploaded: vi.fn(),
   onDeleted: vi.fn(),
@@ -77,11 +76,10 @@ describe("TradeImageCell", () => {
       <TradeImageCell
         {...baseProps}
         imageUrl="https://example.com/image.png"
-        imageProvider="google_drive"
         onPreview={onPreview}
       />,
     );
-    const previewBtn = screen.getByText("Google Drive");
+    const previewBtn = screen.getByText("BTCUSDT_2024-01-01_00-00_win");
     fireEvent.click(previewBtn);
     expect(onPreview).toHaveBeenCalledWith("https://example.com/image.png");
   });
@@ -93,7 +91,6 @@ describe("TradeImageCell", () => {
       <TradeImageCell
         {...baseProps}
         imageUrl="https://example.com/image.png"
-        imageProvider="google_drive"
         onDeleted={onDeleted}
       />,
     );

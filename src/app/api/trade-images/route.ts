@@ -15,6 +15,7 @@ import {
 } from "@/lib/integrations/googleDrive";
 import { uploadFile, publishResource, getPublicUrl, YandexDiskError } from "@/lib/integrations/yandexDisk";
 import { logError } from "@/lib/errorLog";
+import { buildTradeImageName } from "@/lib/tradeImageName";
 
 // Скриншоты кладём в отдельную папку, а не в корень "Мой диск"/"Приложения"
 // пользователя — так их легко найти и они не мешаются среди остальных файлов.
@@ -22,40 +23,12 @@ import { logError } from "@/lib/errorLog";
 // (DEAL_FOLDER) — там своя структура путей, но имя то же самое сознательно.
 const DEAL_FOLDER_NAME = "tradingstat_deal";
 
-const RESULT_LABELS: Record<string, string> = { win: "win", loss: "loss", breakeven: "breakeven" };
-
-// Человекочитаемое имя файла на диске пользователя:
-// СИМВОЛ_ГГГГ-ММ-ДД_ЧЧ-ММ_результат.png (время входа, UTC).
-// symbol/entryTime/result — необязательные (пришли от клиента вместе с
-// формой); если чего-то нет или формат не распознан, откатываемся на старое
-// имя по tradeKey, чтобы загрузка не ломалась из-за косметики.
-function buildFilename(
-  symbol: string | null,
-  entryTimeIso: string | null,
-  result: string | null,
-  tradeKey: string,
-  ext: string,
-): string {
-  const cleanSymbol = symbol?.trim().replace(/[^a-zA-Z0-9]/g, "").slice(0, 30);
-  const entryMs = entryTimeIso ? Date.parse(entryTimeIso) : NaN;
-  const resultLabel = result ? RESULT_LABELS[result] : undefined;
-
-  if (!cleanSymbol || !Number.isFinite(entryMs) || !resultLabel) {
-    return `tradestats_${tradeKey.replace(/[^a-zA-Z0-9_-]/g, "_")}.${ext}`;
-  }
-
-  const d = new Date(entryMs);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  const stamp = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}_${pad(d.getUTCHours())}-${pad(d.getUTCMinutes())}`;
-  return `${cleanSymbol}_${stamp}_${resultLabel}.${ext}`;
-}
-
 // Строит подпапки "год/месяц/паттерн" внутри DEAL_FOLDER_NAME — так
 // скриншоты не копятся все в одной куче, а разложены по времени входа и
 // торговому паттерну. Год и месяц — отдельные уровни (в папке года лежат
 // 12 папок месяцев "01".."12"), а не одна папка "год-месяц". Если entryTime
 // не распознан или pattern не задан, используем безопасные фоллбэки, чтобы
-// загрузка не ломалась из-за косметики (та же логика, что в buildFilename).
+// загрузка не ломалась из-за косметики (та же логика, что в buildTradeImageName).
 function buildFolderSegments(entryTimeIso: string | null, pattern: string | null): string[] {
   const entryMs = entryTimeIso ? Date.parse(entryTimeIso) : NaN;
   let year: string;
@@ -138,7 +111,7 @@ export async function POST(req: Request) {
   const entryTimeStr = typeof entryTimeRaw === "string" ? entryTimeRaw : null;
   const patternStr = typeof patternRaw === "string" ? patternRaw : null;
 
-  const filename = buildFilename(
+  const filename = buildTradeImageName(
     typeof symbolRaw === "string" ? symbolRaw : null,
     entryTimeStr,
     typeof resultRaw === "string" ? resultRaw : null,

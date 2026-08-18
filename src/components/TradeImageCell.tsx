@@ -4,14 +4,10 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { Upload, Trash2, ImageIcon, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { buildTradeImageName } from "@/lib/tradeImageName";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = "image/png,image/jpeg,image/webp,image/gif";
-
-const PROVIDER_LABELS: Record<string, string> = {
-  google_drive: "Google Drive",
-  yandex_disk: "Яндекс.Диск",
-};
 
 // Ячейка колонки «Изображение» в таблице сделок. Три состояния:
 //  1. Ни один облачный провайдер не подключён → ссылка в настройки.
@@ -25,7 +21,6 @@ export default function TradeImageCell({
   result,
   pattern,
   imageUrl,
-  imageProvider,
   connected,
   onUploaded,
   onDeleted,
@@ -40,7 +35,6 @@ export default function TradeImageCell({
   result: string;
   pattern: string | null;
   imageUrl: string | null;
-  imageProvider?: string | null;
   connected: boolean;
   onUploaded: (url: string, provider: string, publicUrl: string | null) => void;
   onDeleted: () => void;
@@ -106,23 +100,17 @@ export default function TradeImageCell({
   }
 
   if (imageUrl) {
-    // Для Яндекс.Диска imageUrl — наш собственный относительный прокси-путь
-    // (см. /api/trade-images/view), у него нет хоста для парсинга — там
-    // показываем название провайдера вместо домена.
-    let label = imageProvider ? PROVIDER_LABELS[imageProvider] : undefined;
-    if (!label) {
-      try {
-        label = new URL(imageUrl).hostname.replace(/^www\./, "");
-      } catch {
-        label = imageUrl;
-      }
-    }
+    // Подписью служит то же имя, под которым файл лежит в облаке
+    // пользователя (см. lib/tradeImageName), а не домен/провайдер — так
+    // ссылку в таблице легко сопоставить с файлом на диске. Расширения нет:
+    // в БД хранится только ссылка, реальный формат мы тут не знаем.
+    const label = buildTradeImageName(symbol, entryTime, result, tradeKey);
     return (
       <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
         <button
           type="button"
           onClick={() => onPreview(imageUrl)}
-          className="inline-flex items-center gap-1 text-xs text-accent hover:underline max-w-[110px] truncate"
+          className="inline-flex items-center gap-1 text-xs text-accent hover:underline max-w-[170px] truncate"
           title={imageUrl}
         >
           <ImageIcon size={13} className="shrink-0" />

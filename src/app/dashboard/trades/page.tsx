@@ -552,7 +552,6 @@ export default function TradesPage() {
                                 result={tr.result}
                                 pattern={a.pattern}
                                 imageUrl={imageOf(tr).url}
-                                imageProvider={imageOf(tr).provider}
                                 connected={cloudConnected}
                                 onUploaded={(url, provider, publicUrl) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider, publicUrl } }))}
                                 onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null, publicUrl: null } }))}
