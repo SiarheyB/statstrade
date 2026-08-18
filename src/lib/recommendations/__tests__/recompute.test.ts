@@ -38,6 +38,22 @@ function choppedSeries() {
   return rows;
 }
 
+// Падающий тренд, а близкий уровень — ПИВОТНЫЙ ХАЙ над ценой: пробой такого
+// уровня подразумевал бы лонг, то есть сделку против направления рынка.
+// Ровно случай LABUSDT 18.08.2026, из-за которого правило «только по тренду»
+// расширили с ЛП на все сетапы.
+function downtrendUnderPivotHigh() {
+  const rows = [];
+  let i = 0;
+  for (; i < 60; i++) {
+    const p = 200 - i * 1.4; // 200 -> ~117
+    rows.push(row(i, p, p + 0.5, p - 1.5, p - 1));
+  }
+  rows.push(row(i++, 118, 125, 117.5, 124)); // пивотный хай на 125
+  for (; i < 80; i++) rows.push(row(i, 124.8, 124.95, 124.75, 124.9)); // подход вплотную снизу
+  return rows;
+}
+
 describe("recomputeRecommendations", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -113,6 +129,17 @@ describe("recomputeRecommendations", () => {
     expect(result.levelsWritten).toBe(0);
     expect(result.candidates).toBe(0);
     expect(result.rejected.level_chopped).toBeGreaterThan(0);
+    expect(mockPrisma.levelSetup.createMany).not.toHaveBeenCalled();
+  });
+
+  it("drops counter-trend setups — no breakout long while the market falls", async () => {
+    mockPrisma.obCandle.findMany
+      .mockResolvedValueOnce([{ symbol: "FALLUSDT" }])
+      .mockResolvedValueOnce(asDbRows(downtrendUnderPivotHigh()));
+
+    const result = await recomputeRecommendations();
+    expect(result.rejected.counter_trend).toBeGreaterThan(0);
+    expect(result.levelsWritten).toBe(0);
     expect(mockPrisma.levelSetup.createMany).not.toHaveBeenCalled();
   });
 

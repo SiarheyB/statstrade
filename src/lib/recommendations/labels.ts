@@ -41,7 +41,7 @@ export const REJECT_REASON_LABELS: Record<string, string> = {
   no_runway: "нет запаса хода до следующего уровня",
   no_breakout_preconditions: "нет предпосылок к пробою (подход не спокойный)",
   no_false_breakout_preconditions: "нет предпосылок к ЛП (подход не быстрый)",
-  counter_trend: "ЛП против глобального тренда",
+  counter_trend: "Сетап против глобального тренда",
   not_retracement_source: "уровень не от отката структуры",
   retest_too_recent: "уровень касали меньше 10 дней назад",
 };
