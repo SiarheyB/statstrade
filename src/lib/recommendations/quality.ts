@@ -31,6 +31,13 @@ export interface LevelQuality {
   deepestFalseBreakoutAtr: number;
   /** Самая длинная серия проколов ПОДРЯД (см. maxConsecutivePierces). */
   consecutiveFalseBreakouts: number;
+  /**
+   * Глубина прокола на САМОМ ПОСЛЕДНЕМ закрытом баре, в ATR (0 — не прокалывал).
+   * Стоит отдельно от deepestFalseBreakoutAtr, который считается по истории
+   * БЕЗ последнего бара: у свежего прокола принципиально нет ни одного дня
+   * после него, а значит нет и подтверждения, что уровень выстоял.
+   */
+  lastBarPierceAtr: number;
   /** Доля баров окна, заходивших в зону сразу ЗА уровнем («заражённость»). */
   contamination: number;
   /** Запас хода: до следующего уровня за пробойной плоскостью, в ATR. */
@@ -93,6 +100,8 @@ export interface QualityThresholds {
   consecutivePierceAtr: number;
   /** Прокол глубже этого (в ATR) — «глубокий ЛП», стопы уже сняты. */
   deepFalseBreakoutAtr: number;
+  /** Порог глубины для НЕПОДТВЕРЖДЁННОГО прокола — вчерашнего (см. lastBarPierceAtr). */
+  unconfirmedPierceAtr: number;
   maxContamination: number;
   minRunwayAtr: number;
   maxCloseDistanceAtr: number;
@@ -144,6 +153,15 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   consecutivePierceAtr: 0.02,
   // «Глубокий ЛП» — стопы за уровнем уже сняты, энергии на пробой меньше.
   deepFalseBreakoutAtr: 0.75,
+  // Тот же смысл, но строже — для прокола, случившегося ВЧЕРА (на последнем
+  // закрытом баре). Порог ниже deepFalseBreakoutAtr намеренно: у старого
+  // прокола есть дни после него, и если уровень их выстоял, не пустив цену
+  // за себя, — прокол оказался разведкой, стопы сняты, пробой впереди. У
+  // вчерашнего прокола такого дня нет вовсе, подтверждать нечем, и заход в
+  // пробой означал бы ставку на импульс, который только что выдохся. Конспект
+  // называет неглубоким ЛП размер стопа (10-15% ATR); берём вдвое мягче, чтобы
+  // не резать нормальные проколы-разведки на границе шума.
+  unconfirmedPierceAtr: 0.3,
   // «Пустота в пробойной плоскости»: за уровнем почти не торговали.
   maxContamination: 0.1,
   minRunwayAtr: 1,
@@ -376,6 +394,10 @@ export function assessLevelQuality(
   // «вчера проколол — сегодня снова проколол» целиком лежит в конце окна и в
   // history (без последнего бара) была бы не видна.
   const windowWithLast = candles.slice(-th.window);
+  // Прокол последнего закрытого бара: те же правила, что в findPierces, но
+  // окно ровно из двух баров — предыдущий нужен лишь чтобы определить, с
+  // какой стороны цена подошла.
+  const lastBarPierce = candles.length >= 2 ? findPierces(candles.slice(-2), levelPrice, atr, th.minPierceAtr) : { deepestAtr: 0 };
   const approach3 = candles.slice(-3);
   const touchDistance = side === "above" ? levelPrice - last.h : last.l - levelPrice;
 
@@ -385,6 +407,7 @@ export function assessLevelQuality(
     falseBreakouts: pierces.count,
     deepestFalseBreakoutAtr: pierces.deepestAtr,
     consecutiveFalseBreakouts: maxConsecutivePierces(windowWithLast, levelPrice, atr, th.consecutivePierceAtr, th.deadbandAtr),
+    lastBarPierceAtr: lastBarPierce.deepestAtr,
     contamination: contaminationRatio(contaminationHistory, levelPrice, atr, side, th.contaminationZoneAtr),
     runwayAtr: runwayAtr(levelPrice, significantLevels, atr, side),
     closeDistanceAtr: Math.abs(last.c - levelPrice) / atr,
@@ -415,6 +438,7 @@ export type RejectReason =
   | "too_many_false_breakouts"
   | "consecutive_false_breakouts"
   | "deep_false_breakout"
+  | "unconfirmed_deep_pierce"
   | "contaminated_zone"
   | "no_runway"
   | "no_breakout_preconditions"
@@ -458,6 +482,13 @@ export function passesQualityGate(
   if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");
 
   if (bias === "breakout") {
+    // Фильтр в фильтре: вчерашний прокол глубже unconfirmedPierceAtr. После
+    // такого дня уровень ещё ни разу не устоял — ни одного бара, который бы
+    // его НЕ пробивал, попросту нет, — а первоначальный импульс уже потрачен
+    // на сам прокол. Заходить в пробой на следующий день не от чего.
+    // Проверка живёт внутри ветки breakout: для ЛП свежий прокол — это не
+    // помеха, а сам сетап.
+    if (q.lastBarPierceAtr > th.unconfirmedPierceAtr) rejectedBy.push("unconfirmed_deep_pierce");
     if (q.closeDistanceAtr > th.maxCloseDistanceAtr) rejectedBy.push("close_far_from_level");
     if (!q.touched) rejectedBy.push("did_not_reach_level");
     const calmApproach =

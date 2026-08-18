@@ -231,4 +231,37 @@ describe("expanded setup card", () => {
     expect(screen.queryByText(/вчера не дошли/)).not.toBeInTheDocument();
     expect(screen.queryByText(/за уровнем чисто/)).not.toBeInTheDocument();
   });
+
+  // Прокол вчерашнего бара не входит в falseBreakouts, и без отдельной ветки
+  // чип бодро сообщал бы «ложных пробоев не было» именно в тот день, когда
+  // уровень прокололи (реальный случай SHAZUSDT 17.08.2026).
+  it("shows yesterday's pierce instead of claiming there were no false breakouts", async () => {
+    const pierced = [
+      {
+        ...SETUPS[1],
+        id: "pierced",
+        symbol: "SHAZ",
+        quality: { crossings: 0, falseBreakouts: 0, lastBarPierceAtr: 0.57, runwayAtr: 3 },
+      },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (typeof url === "string" && url.startsWith("/api/features")) {
+          return { ok: true, json: async () => ({ value: { enabled: true } }) } as unknown as Response;
+        }
+        if (typeof url === "string" && url.includes("/candles")) {
+          return { ok: true, json: async () => ({ candles: CANDLES }) } as unknown as Response;
+        }
+        return { ok: true, json: async () => ({ setups: pierced }) } as unknown as Response;
+      }),
+    );
+
+    render(<RecommendationsPage />);
+    await screen.findByText(/Ложный пробой · лонг/);
+    await userEvent.click(screen.getByText("SHAZ"));
+
+    expect(await screen.findByText("прокол вчера 0.57×ATR")).toBeInTheDocument();
+    expect(screen.queryByText("ложных пробоев не было")).not.toBeInTheDocument();
+  });
 });

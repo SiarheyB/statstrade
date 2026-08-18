@@ -166,6 +166,33 @@ describe("assessLevelQuality", () => {
     expect(q.consecutiveFalseBreakouts).toBe(2);
     expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("consecutive_false_breakouts");
   });
+
+  it("measures a pierce that happened on the very last closed bar", () => {
+    // Кейс SHAZUSDT 17.08.2026: бар проколол уровень на 0.5+ ATR и закрылся
+    // обратно под ним. falseBreakouts считается по истории БЕЗ последнего
+    // бара и такого прокола не видит вовсе — для него отдельная метрика.
+    const candles = [...background(40), candle(40, 118, 119, 117, 118), candle(41, 118, 123, 117, 118)];
+    const q = assessLevelQuality(candles, 120, ATR, 118, []);
+    expect(q.falseBreakouts).toBe(0);
+    expect(q.lastBarPierceAtr).toBeCloseTo(0.75, 2);
+  });
+});
+
+describe("passesQualityGate — свежий прокол", () => {
+  it("rejects a breakout when yesterday's pierce was deep and nothing confirmed the level yet", () => {
+    const q = quality({ lastBarPierceAtr: 0.57 });
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("unconfirmed_deep_pierce");
+  });
+
+  it("keeps a breakout when the fresh pierce was shallow", () => {
+    const q = quality({ lastBarPierceAtr: 0.2 });
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).not.toContain("unconfirmed_deep_pierce");
+  });
+
+  it("never applies the rule to a false breakout — there the fresh pierce IS the setup", () => {
+    const q = quality({ lastBarPierceAtr: 1.2, approachGapAtr: 1.5, approachNetMoveAtr: 2 });
+    expect(passesQualityGate(q, "false_breakout", NEUTRAL).rejectedBy).not.toContain("unconfirmed_deep_pierce");
+  });
 });
 
 function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
@@ -175,6 +202,7 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     falseBreakouts: 0,
     deepestFalseBreakoutAtr: 0,
     consecutiveFalseBreakouts: 0,
+    lastBarPierceAtr: 0,
     contamination: 0,
     runwayAtr: Infinity,
     closeDistanceAtr: 0.1,

@@ -33,6 +33,7 @@ type Quality = {
   crossings?: number | null;
   falseBreakouts?: number | null;
   deepestFalseBreakoutAtr?: number | null;
+  lastBarPierceAtr?: number | null;
   contamination?: number | null;
   runwayAtr?: number | null;
   closeDistanceAtr?: number | null;
@@ -82,6 +83,10 @@ function QualityChips({ q, atr, bias }: { q: Quality | null | undefined; atr: nu
   const crossings = num(q.crossings);
   const falseBreakouts = num(q.falseBreakouts);
   const deepestAtr = num(q.deepestFalseBreakoutAtr);
+  // Прокол вчерашнего бара в falseBreakouts не входит (те считаются по истории
+  // без последнего бара), поэтому без отдельной ветки чип написал бы «ложных
+  // пробоев не было» ровно в тот день, когда прокол и случился.
+  const lastBarPierceAtr = num(q.lastBarPierceAtr);
   const contamination = num(q.contamination);
 
   // Требование к подходу у пробоя и ЛП противоположное: пробою нужно
@@ -126,15 +131,18 @@ function QualityChips({ q, atr, bias }: { q: Quality | null | undefined; atr: nu
       ? null
       : {
           text:
-            falseBreakouts === 0
-              ? "ложных пробоев не было"
-              : deepestAtr === null
-                ? `${falseBreakouts} ЛП`
-                : `${falseBreakouts} ЛП, глубина ${deepestAtr.toFixed(2)}×ATR`,
+            lastBarPierceAtr !== null && lastBarPierceAtr > 0
+              ? `прокол вчера ${lastBarPierceAtr.toFixed(2)}×ATR`
+              : falseBreakouts === 0
+                ? "ложных пробоев не было"
+                : deepestAtr === null
+                  ? `${falseBreakouts} ЛП`
+                  : `${falseBreakouts} ЛП, глубина ${deepestAtr.toFixed(2)}×ATR`,
           tooltip:
             "Ложный пробой (ЛП) — бар, чей хай/лоу проколол уровень, но закрытие вернулось обратно. Глубина — на " +
             "сколько ATR цена успела уйти за уровень при проколе. Глубокий прокол значит, что стопы за уровнем уже " +
-            "сняты, и энергии для настоящего пробоя может не хватить.",
+            "сняты, и энергии для настоящего пробоя может не хватить. Прокол на вчерашнем баре показывается отдельно: " +
+            "после него ещё не было ни одного дня, который бы уровень удержал.",
         },
     contamination === null
       ? null
