@@ -410,9 +410,24 @@ curl -s -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cu
 системный крон хоста** — защищённый endpoint `/api/cron/recommendations`, тот же `CRON_SECRET`:
 ```bash
 ( crontab -l 2>/dev/null; \
-  echo '5 0 * * * curl -fsS --max-time 55 -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" http://127.0.0.1:3000/api/cron/recommendations >/dev/null 2>&1' \
+  echo '5 3 * * * curl -fsS --max-time 300 -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" http://127.0.0.1:3000/api/cron/recommendations >/dev/null 2>&1' \
 ) | crontab -
 ```
+> **Время в crontab — локальное для хоста, а нужный момент задан в UTC.** `5 3` выше — это
+> для хоста в MSK (UTC+3, переводов на летнее время нет): 03:05 MSK = 00:05 UTC. На хосте в
+> другой зоне пересчитайте час сами: `date` покажет текущую зону.
+>
+> Наивное `5 0 * * *` — грабли: cron прочитает его как 00:05 ПО МЕСТНОМУ времени, на MSK-хосте
+> это 21:05 UTC, то есть ДО закрытия дневной свечи. Пересчёт отработает, но по позавчерашнему
+> дню — в панели это видно как отставание «свечи по …» на сутки. Директива `CRON_TZ=UTC`
+> выглядит как решение, но Debian-овский cron её молча игнорирует (проверено на bookworm:
+> строка в crontab есть, а `journalctl -u cron` показывает запуски по MSK) — не полагайтесь
+> на неё, ставьте локальный час явно.
+>
+> Проверить, когда крон реально стрелял:
+> ```bash
+> sudo journalctl -u cron --since "3 days ago" | grep recommendations
+> ```
 Проверка вручную (должно вернуть `{"ok":true,...}`, может занять до пары минут — сначала
 дозагружаются свежие свечи с Binance по всем парам, потом считаются уровни):
 ```bash
