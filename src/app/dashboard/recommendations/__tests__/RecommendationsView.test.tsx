@@ -325,3 +325,79 @@ describe("ATR panel", () => {
     expect(screen.getByText(/Для пробоя весь путь уже пройден/)).toBeInTheDocument();
   });
 });
+
+// ЛП2Б: цена уже за уровнем, поэтому карточка говорит не «сколько идти до
+// уровня», а «сколько вернуть обратно», и бюджет считается на завтра.
+describe("ЛП2Б card", () => {
+  const SETUP_2B = [
+    {
+      id: "3",
+      symbol: "PRLUSDT",
+      levelPrice: 100,
+      levelType: "retracement",
+      strength: 9,
+      distanceAtr: 0.06,
+      returnMoveAtr: 0.14,
+      bias: "false_breakout_2b",
+      direction: "short",
+      signals: { for: ["false_breakout_2b", "fast_approach_2b", "far_retest_2b"], against: [] },
+      quality: QUALITY,
+      atr: 10,
+      currentPrice: 100.6,
+      bsuAt: new Date(D(3)).toISOString(),
+      candlesTo: new Date(D(12)).toISOString(),
+      lastVolume: 40_000_000,
+    },
+  ];
+
+  function mock2b(candles = CANDLES) {
+    return vi.fn(async (url: string) => {
+      if (typeof url === "string" && url.startsWith("/api/features")) {
+        return { ok: true, json: async () => ({ value: { enabled: true } }) } as unknown as Response;
+      }
+      if (typeof url === "string" && url.includes("/candles")) {
+        return { ok: true, json: async () => ({ candles }) } as unknown as Response;
+      }
+      return { ok: true, json: async () => ({ setups: SETUP_2B }) } as unknown as Response;
+    });
+  }
+
+  beforeEach(() => {
+    setFormatLocale("ru");
+    setFormatTimezone("UTC");
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows the return path instead of the distance to the level", async () => {
+    vi.stubGlobal("fetch", mock2b());
+    render(<RecommendationsPage />);
+    expect(await screen.findByText(/ЛП2Б · шорт/)).toBeInTheDocument();
+    // В свёрнутой шапке — «за уровнем», а не «до уровня», и возврат.
+    expect(screen.getByText(/за уровнем 0\.06×ATR/)).toBeInTheDocument();
+    expect(screen.getByText(/возврат 0\.14×ATR/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("PRLUSDT"));
+    expect(await screen.findByText("Чтобы ЛП2Б состоялся завтра")).toBeInTheDocument();
+    expect(screen.getByText(/Уровень уже пробит/)).toBeInTheDocument();
+    expect(screen.getByText(/Уровень пробит вверх, закрылись над ним/)).toBeInTheDocument();
+    // Возврат в пределах одного ATR — рядовой день.
+    expect(screen.getByText(/примерно в 80% дней/)).toBeInTheDocument();
+  });
+
+  it("warns when today's bar has already taken the price back", async () => {
+    // Сегодняшний бар (позже candlesTo) закрылся ниже уровня 100 — возврат пошёл.
+    const withReturn = [...CANDLES.slice(0, -1), { t: D(13), o: 100.6, h: 101, l: 94, c: 95 }];
+    vi.stubGlobal("fetch", mock2b(withReturn));
+    render(<RecommendationsPage />);
+    await screen.findByText(/ЛП2Б · шорт/);
+    await userEvent.click(screen.getByText("PRLUSDT"));
+    expect(await screen.findByText(/Возврат уже начался/)).toBeInTheDocument();
+  });
+
+  it("offers a ЛП2Б filter", async () => {
+    vi.stubGlobal("fetch", mock2b());
+    render(<RecommendationsPage />);
+    await screen.findByText(/ЛП2Б · шорт/);
+    expect(screen.getByRole("button", { name: "ЛП2Б" })).toBeInTheDocument();
+  });
+});

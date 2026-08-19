@@ -5,7 +5,7 @@ import { TrendingUp, TrendingDown, ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
-import { falseBreakoutBudget, todayProgress, type MoveFeasibility } from "@/lib/recommendations/atrBudget";
+import { falseBreakoutBudget, returnMoveBudget, todayProgress, type MoveFeasibility } from "@/lib/recommendations/atrBudget";
 import { fmtDate, fmtPrice, numLocale } from "@/lib/format";
 
 // Компактная запись $-объёма (1 234 567 → "$1.23M") — своя, а не fmtNumSmart:
@@ -34,7 +34,7 @@ function volumeClass(v: number): string {
   return "text-profit";
 }
 
-type Bias = "breakout" | "false_breakout";
+type Bias = "breakout" | "false_breakout" | "false_breakout_2b";
 type Direction = "long" | "short";
 
 // Метрики качества добавлялись в разное время, поэтому у старых записей часть
@@ -62,6 +62,8 @@ type LevelSetup = {
   levelType: string;
   strength: number;
   distanceAtr: number;
+  /** Только у ЛП2Б: обратный путь за уровень, в ATR. */
+  returnMoveAtr?: number | null;
   bias: Bias;
   direction: Direction;
   signals: { for: string[]; against: string[] };
@@ -197,6 +199,7 @@ const BIAS_FILTERS: { key: Bias | "all"; label: string }[] = [
   { key: "all", label: "Все сетапы" },
   { key: "breakout", label: "Пробой" },
   { key: "false_breakout", label: "Ложный пробой" },
+  { key: "false_breakout_2b", label: "ЛП2Б" },
 ];
 
 const DIRECTION_FILTERS: { key: Direction | "all"; label: string }[] = [
@@ -208,6 +211,7 @@ const DIRECTION_FILTERS: { key: Direction | "all"; label: string }[] = [
 const BIAS_LABELS: Record<Bias, string> = {
   breakout: "Пробой",
   false_breakout: "Ложный пробой",
+  false_breakout_2b: "ЛП2Б",
 };
 
 // Цвет бейджа — по направлению сделки (лонг зелёный / шорт красный), а не по
@@ -550,10 +554,22 @@ function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | n
   // База расчёта — цена анализа, ТА ЖЕ, что в свёрнутой шапке карточки:
   // иначе на одном экране висели бы два разных «нужен ход». Живая цена
   // показывается отдельной строкой ниже, когда успела заметно уйти.
+  const returnAtr = num(setup.returnMoveAtr);
+  // У 2Б цена уже ЗА уровнем: бюджет — не путь до уровня, а обратный путь.
   const budget =
-    setup.bias === "false_breakout" ? falseBreakoutBudget(setup.currentPrice, setup.levelPrice, atr) : null;
+    setup.bias === "false_breakout"
+      ? falseBreakoutBudget(setup.currentPrice, setup.levelPrice, atr)
+      : setup.bias === "false_breakout_2b" && returnAtr !== null
+        ? returnMoveBudget(returnAtr, atr)
+        : null;
+  const is2b = setup.bias === "false_breakout_2b";
+  // Пробили вверх — возврат это уход ПОД уровень, и наоборот. Считаем по
+  // живой цене: сетап рассчитан по вчерашнему закрытию и за сегодня мог уже
+  // отработать.
+  const returned2bToday =
+    is2b && livePrice !== null && (setup.direction === "short" ? livePrice < setup.levelPrice : livePrice > setup.levelPrice);
   const liveBudget =
-    budget && livePrice !== null ? falseBreakoutBudget(livePrice, setup.levelPrice, atr) : null;
+    budget && !is2b && livePrice !== null ? falseBreakoutBudget(livePrice, setup.levelPrice, atr) : null;
   // «Заметно» — от 0.1 ATR разницы: меньше не меняет решения, а строку бы
   // добавляло каждый раз.
   const liveShifted = liveBudget !== null && Math.abs(liveBudget.totalAtr - budget!.totalAtr) >= 0.1;
@@ -589,18 +605,37 @@ function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | n
           {budget ? (
             <>
               <div className="text-[11px] uppercase tracking-wide text-faint">
-                Чтобы ложный пробой состоялся сегодня
+                {is2b ? "Чтобы ЛП2Б состоялся завтра" : "Чтобы ложный пробой состоялся сегодня"}
               </div>
               <div className="mt-0.5 flex items-baseline gap-2">
                 <span className={clsx("text-lg font-semibold", FEASIBILITY[budget.feasibility].text)}>
                   {budget.totalAtr.toFixed(2)}×ATR
                 </span>
-                <span className="text-xs text-muted">размах бара ≈ {fmtAtrPrice(budget.totalPrice)}</span>
+                <span className="text-xs text-muted">
+                  {is2b ? "обратный путь" : "размах бара"} ≈ {fmtAtrPrice(budget.totalPrice)}
+                </span>
               </div>
-              <AtrRuler needAtr={budget.totalAtr} doneAtr={progress?.movedAtr} tone={budget.feasibility} />
+              {/* У 2Б бюджет считается на ЗАВТРАШНИЙ бар, поэтому ход,
+                  сделанный сегодня, на этой шкале не отмечаем — он про другой
+                  день и только путал бы. */}
+              <AtrRuler
+                needAtr={budget.totalAtr}
+                doneAtr={is2b ? undefined : progress?.movedAtr}
+                tone={budget.feasibility}
+              />
               <div className="mt-2 text-xs text-muted">
-                Дойти до уровня — {budget.toLevelAtr.toFixed(2)}×ATR, проколоть его — ещё{" "}
-                {budget.pierceAtr.toFixed(2)}×ATR, и всё это одним баром, с возвратом обратно.
+                {is2b ? (
+                  <>
+                    Уровень уже пробит, и закрылись всего в {(budget.totalAtr - 0.08).toFixed(2)}×ATR за ним —
+                    завтрашнему бару остаётся вернуть цену обратно под уровень. Это короткий путь: в отличие от
+                    обычного ЛП, идти до уровня уже не нужно.
+                  </>
+                ) : (
+                  <>
+                    Дойти до уровня — {budget.toLevelAtr.toFixed(2)}×ATR, проколоть его — ещё{" "}
+                    {budget.pierceAtr.toFixed(2)}×ATR, и всё это одним баром, с возвратом обратно.
+                  </>
+                )}
               </div>
               <div className="mt-1 text-xs">
                 <span className={FEASIBILITY[budget.feasibility].text}>
@@ -612,6 +647,12 @@ function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | n
                   {budget.feasibility !== "routine" && "; ход в пределах 1×ATR — в 80%"}.
                 </span>
               </div>
+              {is2b && returned2bToday && (
+                <div className="mt-1 text-xs text-profit">
+                  Возврат уже начался: сегодня цена ушла обратно за уровень ({fmtAtrPrice(livePrice!)}). Сетап
+                  отрабатывается прямо сейчас, заготовка на завтра может быть уже неактуальна.
+                </div>
+              )}
               {liveShifted && liveBudget && (
                 <div className="mt-1 text-xs text-faint">
                   Считаем от цены закрытия {fmtDate(setup.candlesTo)}. Сейчас цена {fmtAtrPrice(livePrice!)} — от
@@ -657,10 +698,13 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
   // Требуемый ход показываем и в свёрнутой шапке: по нему список
   // просматривают, не раскрывая каждую карточку. Считается от цены анализа —
   // живые свечи в свёрнутом виде ещё не загружены.
+  const headReturnAtr = num(setup.returnMoveAtr);
   const headBudget =
     setup.bias === "false_breakout"
       ? falseBreakoutBudget(setup.currentPrice, setup.levelPrice, setup.atr)
-      : null;
+      : setup.bias === "false_breakout_2b" && headReturnAtr !== null
+        ? returnMoveBudget(headReturnAtr, setup.atr)
+        : null;
   const [candles, setCandles] = useState<Candle[] | null>(null);
   const [loadingCandles, setLoadingCandles] = useState(false);
 
@@ -696,13 +740,15 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
             <span className="text-xs text-muted">{levelTypeLabel(setup.levelType)}</span>
           </div>
           <div className="text-sm text-muted mt-1">
-            Уровень {setup.levelPrice} · цена {setup.currentPrice} · до уровня{" "}
+            Уровень {setup.levelPrice} · цена {setup.currentPrice} ·{" "}
+            {setup.bias === "false_breakout_2b" ? "за уровнем" : "до уровня"}{" "}
             {setup.distanceAtr.toFixed(2)}×ATR · сила {setup.strength}
             {headBudget && (
               <>
                 {" · "}
                 <span className={FEASIBILITY[headBudget.feasibility].text}>
-                  нужен ход {headBudget.totalAtr.toFixed(2)}×ATR
+                  {setup.bias === "false_breakout_2b" ? "возврат" : "нужен ход"}{" "}
+                  {headBudget.totalAtr.toFixed(2)}×ATR
                 </span>
               </>
             )}
@@ -720,8 +766,14 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
       {open && (
         <div className="px-4 pb-4 space-y-3">
           <div className="text-xs text-faint">
-            {setup.levelPrice >= setup.currentPrice ? "Уровень выше цены" : "Уровень ниже цены"} ·{" "}
-            {BIAS_LABELS[setup.bias].toLowerCase()} отсюда отрабатывается в{" "}
+            {setup.bias === "false_breakout_2b"
+              ? setup.currentPrice >= setup.levelPrice
+                ? "Уровень пробит вверх, закрылись над ним"
+                : "Уровень пробит вниз, закрылись под ним"
+              : setup.levelPrice >= setup.currentPrice
+                ? "Уровень выше цены"
+                : "Уровень ниже цены"}{" "}
+            · {BIAS_LABELS[setup.bias].toLowerCase()} отсюда отрабатывается в{" "}
             <span className={setup.direction === "long" ? "text-profit" : "text-loss"}>
               {directionLabel(setup.direction)}
             </span>

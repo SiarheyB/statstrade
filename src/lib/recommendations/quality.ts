@@ -127,6 +127,11 @@ export interface QualityThresholds {
 // Пороги откалиброваны на реальной выдаче Binance USDT-M (526 пар): из ~2000
 // уровней рядом с ценой гейт оставляет полтора-два десятка — то есть короткий
 // список готовых инструментов, а не каталог рынка.
+// Предельный обратный путь у ЛП2Б: maxCloseBeyondAtr + minPierceAtr из
+// falseBreakout2b.ts (0.35 + 0.08). Дублируется числом, а не импортом, чтобы quality.ts не
+// зависел от детектора (импорт в обратную сторону уже есть).
+const DEFAULT_2B_MAX_RETURN_ATR = 0.43;
+
 export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // Запил смотрим по недавней истории (~3 месяца): «чистота слева» — про то,
   // как уровень вёл себя на подходе, а не про всю историю инструмента.
@@ -442,7 +447,8 @@ export type RejectReason =
   | "contaminated_zone"
   | "no_runway"
   | "no_breakout_preconditions"
-  | "no_false_breakout_preconditions";
+  | "no_false_breakout_preconditions"
+  | "no_2b_preconditions";
 
 export interface GateResult {
   ok: boolean;
@@ -466,7 +472,7 @@ export interface GateResult {
  */
 export function passesQualityGate(
   q: LevelQuality,
-  bias: "breakout" | "false_breakout",
+  bias: "breakout" | "false_breakout" | "false_breakout_2b",
   signals: { for: string[]; against: string[] },
   th: QualityThresholds = DEFAULT_THRESHOLDS,
 ): GateResult {
@@ -478,10 +484,24 @@ export function passesQualityGate(
   // пробой, ни ЛП от него отрабатывать нечего.
   if (q.consecutiveFalseBreakouts > th.maxConsecutiveFalseBreakouts) rejectedBy.push("consecutive_false_breakouts");
   if (q.deepestFalseBreakoutAtr > th.deepFalseBreakoutAtr) rejectedBy.push("deep_false_breakout");
-  if (q.contamination > th.maxContamination) rejectedBy.push("contaminated_zone");
-  if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");
+  // Заражённость и запас хода считаются в сторону ПРОБОЙНОЙ плоскости. Для
+  // ЛП2Б работа идёт в обратную сторону — обратно от уровня, туда, откуда
+  // цена только что пришла, — поэтому обе метрики к нему неприменимы: пустота
+  // впереди пробоя не помогает возврату, а «запас хода» у возврата свой (до
+  // уровня, откуда начинался разгон).
+  if (bias !== "false_breakout_2b") {
+    if (q.contamination > th.maxContamination) rejectedBy.push("contaminated_zone");
+    if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");
+  }
 
-  if (bias === "breakout") {
+  if (bias === "false_breakout_2b") {
+    // Всё специфичное для 2Б (свежесть пробоя, закрытие впритык за уровнем,
+    // быстрый подход, дальний ретест) проверяет detectFalseBreakout2b — здесь
+    // остаётся только «чистота слева» из общих проверок выше. Дублировать её
+    // условия здесь нельзя: LevelQuality считает подход относительно стороны
+    // уровня, а у 2Б цена уже по другую его сторону.
+    if (!signals.for.includes("false_breakout_2b")) rejectedBy.push("no_2b_preconditions");
+  } else if (bias === "breakout") {
     // Фильтр в фильтре: вчерашний прокол глубже unconfirmedPierceAtr. После
     // такого дня уровень ещё ни разу не устоял — ни одного бара, который бы
     // его НЕ пробивал, попросту нет, — а первоначальный импульс уже потрачен
@@ -518,14 +538,31 @@ export function passesQualityGate(
  * сегодняшнего прокола и возврата. Нужно, чтобы из прошедших гейт оставить в
  * выдаче только несколько лучших инструментов.
  */
-export function qualityScore(q: LevelQuality, strength: number, bias: "breakout" | "false_breakout" = "breakout"): number {
+export function qualityScore(
+  q: LevelQuality,
+  strength: number,
+  bias: "breakout" | "false_breakout" | "false_breakout_2b" = "breakout",
+  returnMoveAtr: number | null = null,
+): number {
+  const clean = 1 - Math.min(1, q.crossings / (DEFAULT_THRESHOLDS.maxCrossings + 1));
+  const strengthNorm = Math.min(1, strength / 6);
+
+  const empty = 1 - Math.min(1, q.contamination / DEFAULT_THRESHOLDS.maxContamination);
+  const runway = Math.min(1, (Number.isFinite(q.runwayAtr) ? q.runwayAtr : 5) / 5);
+
+  // У ЛП2Б своя мера «близости»: не подход к уровню, а длина ОБРАТНОГО пути —
+  // чем короче возврат, тем выше шанс, что завтрашний бар его пройдёт. Веса
+  // при этом общие: со своей шкалой 2Б систематически получал более высокий
+  // score и вытеснял пробойные сетапы у тех же инструментов (правило «один
+  // инструмент — один сетап» оставляет лучший по score).
+  if (bias === "false_breakout_2b") {
+    const closeness = returnMoveAtr === null ? 0.5 : 1 - Math.min(1, returnMoveAtr / DEFAULT_2B_MAX_RETURN_ATR);
+    return 0.35 * closeness + 0.2 * clean + 0.2 * empty + 0.15 * runway + 0.1 * strengthNorm;
+  }
+
   const closeness =
     bias === "breakout"
       ? 1 - Math.min(1, q.closeDistanceAtr / DEFAULT_THRESHOLDS.maxCloseDistanceAtr)
       : Math.min(1, q.approachGapAtr / (DEFAULT_THRESHOLDS.minFalseBreakoutApproachGapAtr * 2));
-  const clean = 1 - Math.min(1, q.crossings / (DEFAULT_THRESHOLDS.maxCrossings + 1));
-  const empty = 1 - Math.min(1, q.contamination / DEFAULT_THRESHOLDS.maxContamination);
-  const runway = Math.min(1, (Number.isFinite(q.runwayAtr) ? q.runwayAtr : 5) / 5);
-  const strengthNorm = Math.min(1, strength / 6);
   return 0.35 * closeness + 0.2 * clean + 0.2 * empty + 0.15 * runway + 0.1 * strengthNorm;
 }

@@ -30,7 +30,14 @@ export function directionLabel(direction: string | null | undefined): string {
 }
 
 // Почему уровень не попал в выдачу — для статистики пересчёта в админке.
+export const BIAS_2B_SIGNAL_LABELS: Record<string, string> = {
+  false_breakout_2b: "уровень пробит, но закрылись впритык за ним",
+  fast_approach_2b: "быстрый подход большими барами",
+  far_retest_2b: "дальний ретест — уровень давно не трогали",
+};
+
 export const REJECT_REASON_LABELS: Record<string, string> = {
+  no_2b_preconditions: "нет предпосылок ЛП2Б",
   close_far_from_level: "день закрылся далеко от уровня",
   did_not_reach_level: "вчера до уровня не дошли",
   close_near_level: "вчера подошли слишком близко для ЛП (нет разгона на прокол)",
@@ -69,5 +76,5 @@ export const SIGNAL_LABELS: Record<string, string> = {
 };
 
 export function signalLabel(key: string): string {
-  return SIGNAL_LABELS[key] ?? key;
+  return SIGNAL_LABELS[key] ?? BIAS_2B_SIGNAL_LABELS[key] ?? key;
 }

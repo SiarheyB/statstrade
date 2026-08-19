@@ -104,3 +104,21 @@ export function todayProgress(high: number, low: number, atr: number): TodayProg
     leftAtr: Math.max(0, 1 - movedAtr),
   };
 }
+
+/**
+ * Бюджет хода для ЛП2Б: пробойный бар уже случился и закрылся ЗА уровнем,
+ * поэтому завтрашнему бару нужно не дойти до уровня, а вернуть цену обратно —
+ * пройти то, что ушло за уровень, плюс заход под него. Величина считается
+ * детектором (returnMoveAtr) и здесь только переводится в цену и вердикт.
+ */
+export function returnMoveBudget(returnMoveAtr: number, atr: number): AtrBudget | null {
+  if (!(atr > 0) || !Number.isFinite(returnMoveAtr) || returnMoveAtr < 0) return null;
+  return {
+    toLevelAtr: 0,
+    pierceAtr: 0,
+    totalAtr: returnMoveAtr,
+    totalPrice: returnMoveAtr * atr,
+    oddsShare: dayMoveOdds(returnMoveAtr),
+    feasibility: feasibilityOf(returnMoveAtr),
+  };
+}

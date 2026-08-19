@@ -8,6 +8,7 @@ import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { detectLevels, filterLevelsNearPrice, computeAtr, detectTrend, type DailyCandle } from "./levels";
 import { computeBreakoutSignals } from "./breakoutSignals";
+import { detectFalseBreakout2b } from "./falseBreakout2b";
 import {
   assessLevelQuality,
   passesQualityGate,
@@ -28,6 +29,8 @@ const DAY_MS = 86_400_000;
 // Сила уровня, начиная с которой он считается «значимым» и учитывается как
 // препятствие в запасе хода (см. quality.ts, runwayAtr).
 const SIGNIFICANT_LEVEL_STRENGTH = 3;
+// Типы уровней, от которых имеет смысл ЛП2Б (см. комментарий у suitable2bLevel).
+const LEVEL_TYPES_2B = new Set(["retracement", "structure_break", "break_point", "mirror", "historical"]);
 
 export interface RecomputeResult {
   symbolsScanned: number;
@@ -119,6 +122,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     levelType: string;
     strength: number;
     distanceAtr: number;
+    returnMoveAtr: number | null;
     bias: string;
     direction: string;
     signals: { for: string[]; against: string[] };
@@ -159,7 +163,30 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     const significantLevels = levels.filter((l) => l.strength >= SIGNIFICANT_LEVEL_STRENGTH).map((l) => l.price);
 
     for (const level of nearby) {
-      const signals = computeBreakoutSignals(candles, level.price, atr, level.type);
+      // ЛП2Б проверяем ПЕРВЫМ и отдельной веткой: у него всё зеркально
+      // обычному разбору. Цена уже по другую сторону уровня, поэтому и bias
+      // по голосованию факторов, и требования гейта к подходу здесь не
+      // работают — сетап целиком описывается detectFalseBreakout2b.
+      // Разворот против свежего импульса имеет смысл только от уровня, который
+      // рынок реально уважает: на живой выдаче уровни силы 2 давали половину
+      // всех 2Б и были заметно слабее остальных по всем метрикам.
+      //
+      // Тип уровня для 2Б ограничен структурными: сетап требует ДАЛЬНЕГО
+      // ретеста, а local_stop («локальная опорная точка») по построению живёт
+      // несколько дней — «давно не тронутым» он быть не может, и его линия
+      // проводится по свежему локальному экстремуму, а не по уважаемому
+      // рынком уровню. Границы гэпов сюда же: касаний, которые делают уровень
+      // уровнем, у них нет.
+      const suitable2bLevel = LEVEL_TYPES_2B.has(level.type) && level.strength >= SIGNIFICANT_LEVEL_STRENGTH;
+      const setup2b = suitable2bLevel ? detectFalseBreakout2b(candles, level.price, atr) : null;
+      const signals = setup2b
+        ? {
+            for: ["false_breakout_2b", "fast_approach_2b", "far_retest_2b"],
+            against: [],
+            bias: "false_breakout_2b" as const,
+            direction: setup2b.direction,
+          }
+        : computeBreakoutSignals(candles, level.price, atr, level.type);
       // Нейтральные сетапы (факторов "за" и "против" поровну) не сохраняем:
       // торговать по ним нечего, а в списке они только шумят.
       if (signals.bias === "neutral" || !signals.direction) {
@@ -174,7 +201,12 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
       // ЛП, и в выдачу попадал, например, "пробой в лонг" у пары, падающей
       // третий месяц подряд. При "range" (тренд не читается) правило не
       // применяем вовсе — старое поведение как fallback.
-      if (trend !== "range") {
+      // ЛП2Б исключён намеренно: он по определению идёт ПРОТИВ только что
+      // случившегося импульса (пробили вверх — работаем вниз), и фильтр «по
+      // тренду» отбрасывал бы ровно те сетапы, ради которых он добавлен.
+      // Защита от «ловли ножей» здесь другая — сам детектор требует закрытие
+      // впритык к уровню и дальний ретест.
+      if (trend !== "range" && signals.bias !== "false_breakout_2b") {
         const trendDirection = trend === "down" ? "short" : "long";
         if (signals.direction !== trendDirection) {
           rejected.counter_trend = (rejected.counter_trend ?? 0) + 1;
@@ -223,6 +255,10 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         levelType: level.type,
         strength: level.strength,
         distanceAtr: Math.abs(level.price - currentPrice) / atr,
+        // Для 2Б расстояние до уровня — не «сколько идти», а «насколько ушли
+        // ЗА него»: цена уже с другой стороны. Возврат — эта же величина плюс
+        // заход обратно, её и показываем в карточке.
+        returnMoveAtr: setup2b?.returnMoveAtr ?? null,
         bias: signals.bias,
         direction: signals.direction,
         signals: { for: signals.for, against: signals.against },
@@ -230,7 +266,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         // ставится стрелка и подпись с датой.
         bsuAt: new Date(level.formedAt),
         quality,
-        score: qualityScore(quality, level.strength, signals.bias),
+        score: qualityScore(quality, level.strength, signals.bias, setup2b?.returnMoveAtr ?? null),
         atr,
         currentPrice,
         candlesFrom,

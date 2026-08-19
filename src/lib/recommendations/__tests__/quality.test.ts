@@ -6,6 +6,7 @@ import {
   findPierces,
   maxConsecutivePierces,
   passesQualityGate,
+  qualityScore,
   runwayAtr,
   DEFAULT_THRESHOLDS,
   type LevelQuality,
@@ -290,5 +291,36 @@ describe("passesQualityGate", () => {
     expect(DEFAULT_THRESHOLDS.minFalseBreakoutApproachGapAtr).toBe(1);
     expect(DEFAULT_THRESHOLDS.fastApproachWindow).toBe(10);
     expect(DEFAULT_THRESHOLDS.minFastApproachNetMoveAtr).toBe(1.5);
+  });
+});
+
+// ЛП2Б: цена уже по другую сторону уровня, поэтому «пустота за уровнем» и
+// «запас хода» к нему неприменимы — работа идёт обратно, туда, откуда пришли.
+describe("passesQualityGate for ЛП2Б", () => {
+  // Заведомо провальные для остальных сетапов contamination/runway.
+  const clean2b = quality({ contamination: 0.9, runwayAtr: 0 });
+
+  it("ignores contamination and runway", () => {
+    const gate = passesQualityGate(clean2b, "false_breakout_2b", { for: ["false_breakout_2b"], against: [] });
+    expect(gate.ok).toBe(true);
+  });
+
+  it("still requires a clean level on the left", () => {
+    const chopped = { ...clean2b, crossings: 5 };
+    const gate = passesQualityGate(chopped, "false_breakout_2b", { for: ["false_breakout_2b"], against: [] });
+    expect(gate.ok).toBe(false);
+    expect(gate.rejectedBy).toContain("level_chopped");
+  });
+
+  it("rejects when the detector did not confirm the setup", () => {
+    const gate = passesQualityGate(clean2b, "false_breakout_2b", { for: [], against: [] });
+    expect(gate.ok).toBe(false);
+    expect(gate.rejectedBy).toContain("no_2b_preconditions");
+  });
+
+  it("scores a shorter return path higher", () => {
+    const near = qualityScore(clean2b, 5, "false_breakout_2b", 0.12);
+    const far = qualityScore(clean2b, 5, "false_breakout_2b", 0.42);
+    expect(near).toBeGreaterThan(far);
   });
 });

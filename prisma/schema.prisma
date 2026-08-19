@@ -1022,25 +1022,29 @@ model CronHeartbeat {
 }
 
 model LevelSetup {
-  id           String   @id @default(cuid())
-  symbol       String
-  exchange     String // "binance-spot"
-  levelPrice   Float
-  levelType    String // break_point | mirror | historical | parabar | gap | pullback_border | range_border | reworked
-  strength     Int // число подтверждений/касаний уровня
-  distanceAtr  Float // расстояние от текущей цены в долях ATR
-  bias         String // breakout | false_breakout (нейтральные сетапы не сохраняются)
-  direction    String // long | short — сторона сделки, следующая из bias и положения уровня к цене
-  signals      Json // { for: string[], against: string[] } — какие факторы сработали
-  bsuAt        DateTime // БСУ — бар, сформировавший уровень (док: «бар, сформировавший уровень»)
-  quality      Json // метрики чистоты уровня из quality.ts (запилы, заражённость, запас хода)
-  score        Float // ранг качества сетапа: по нему отбираются лучшие N инструментов
-  atr          Float
-  currentPrice Float
-  lastVolume   Float? // $-объём (base asset × цена закрытия) последнего закрытого дневного бара
-  candlesFrom  DateTime // диапазон дневных свечей, использованный для расчёта/картинки
-  candlesTo    DateTime
-  createdAt    DateTime @default(now())
+  id            String   @id @default(cuid())
+  symbol        String
+  exchange      String // "binance-spot"
+  levelPrice    Float
+  levelType     String // break_point | mirror | historical | parabar | gap | pullback_border | range_border | reworked
+  strength      Int // число подтверждений/касаний уровня
+  distanceAtr   Float // расстояние от текущей цены в долях ATR
+  // Только для ЛП2Б: сколько завтрашнему бару пройти, чтобы вернуть цену за
+  // уровень (в ATR). У остальных сетапов null — там «путь» считается от
+  // distanceAtr, цена ещё не по другую сторону уровня.
+  returnMoveAtr Float?
+  bias          String // breakout | false_breakout | false_breakout_2b (нейтральные сетапы не сохраняются)
+  direction     String // long | short — сторона сделки, следующая из bias и положения уровня к цене
+  signals       Json // { for: string[], against: string[] } — какие факторы сработали
+  bsuAt         DateTime // БСУ — бар, сформировавший уровень (док: «бар, сформировавший уровень»)
+  quality       Json // метрики чистоты уровня из quality.ts (запилы, заражённость, запас хода)
+  score         Float // ранг качества сетапа: по нему отбираются лучшие N инструментов
+  atr           Float
+  currentPrice  Float
+  lastVolume    Float? // $-объём (base asset × цена закрытия) последнего закрытого дневного бара
+  candlesFrom   DateTime // диапазон дневных свечей, использованный для расчёта/картинки
+  candlesTo     DateTime
+  createdAt     DateTime @default(now())
 
   @@index([symbol, exchange])
   @@index([bias])

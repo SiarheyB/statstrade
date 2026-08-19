@@ -5,7 +5,7 @@ import { recommendationsAccessError } from "@/lib/recommendationsAccess";
 
 // Нейтральные сетапы не сохраняются при пересчёте (см. recompute.ts), поэтому
 // и в фильтре их нет.
-const VALID_BIAS = new Set(["breakout", "false_breakout"]);
+const VALID_BIAS = new Set(["breakout", "false_breakout", "false_breakout_2b"]);
 const VALID_DIRECTION = new Set(["long", "short"]);
 
 export async function GET(req: Request) {
