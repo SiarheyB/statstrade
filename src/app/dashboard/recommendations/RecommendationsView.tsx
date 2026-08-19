@@ -6,7 +6,7 @@ import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
 import { falseBreakoutBudget, returnMoveBudget, todayProgress, type MoveFeasibility } from "@/lib/recommendations/atrBudget";
-import { fmtDate, fmtPrice, numLocale } from "@/lib/format";
+import { fmtDate, fmtPrice, fmtTime, numLocale } from "@/lib/format";
 
 // Компактная запись $-объёма (1 234 567 → "$1.23M") — своя, а не fmtNumSmart:
 // нужна короткая форма, не тысячи с разделителями. Значение уже в долларах
@@ -539,7 +539,16 @@ function AtrRuler({ needAtr, doneAtr, tone }: { needAtr: number; doneAtr?: numbe
  * правой половины нет: там путь до уровня уже пройден вчерашним закрытием,
  * и справа стоит именно это.
  */
-function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | null }) {
+function AtrPanel({
+  setup,
+  candles,
+  liveBarAt,
+}: {
+  setup: LevelSetup;
+  candles: Candle[] | null;
+  /** Момент, на который актуален сегодняшний бар (null — данные из суточного скана). */
+  liveBarAt: number | null;
+}) {
   const atr = setup.atr;
   if (!(atr > 0)) return null;
   const atrPctOfPrice = (atr / setup.currentPrice) * 100;
@@ -590,7 +599,9 @@ function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | n
           </div>
           {progress && (
             <div className="mt-2 text-xs">
-              <span className="text-faint">Сегодня уже пройдено: </span>
+              <span className="text-faint">
+                Сегодня уже пройдено{liveBarAt ? ` (на ${fmtTime(liveBarAt)})` : " (по данным ночного скана)"}:{" "}
+              </span>
               <span className={progress.exhausted ? "text-warn" : "text-fg"}>
                 {progress.movedAtr.toFixed(2)}×ATR ({Math.round(progress.movedPct)}%)
               </span>
@@ -706,6 +717,7 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
         ? returnMoveBudget(headReturnAtr, setup.atr)
         : null;
   const [candles, setCandles] = useState<Candle[] | null>(null);
+  const [liveBarAt, setLiveBarAt] = useState<number | null>(null);
   const [loadingCandles, setLoadingCandles] = useState(false);
 
   async function toggle() {
@@ -718,6 +730,7 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
         if (res.ok) {
           const j = await res.json();
           const all: Candle[] = j.candles ?? [];
+          setLiveBarAt(typeof j.liveBarAt === "number" ? j.liveBarAt : null);
           // Окно графика растягиваем так, чтобы БСУ был виден: если уровень
           // сформирован давно, без этого стрелке некуда встать.
           const bsuIdx = all.findIndex((c) => Math.abs(c.t - Date.parse(setup.bsuAt)) < DAY_MS / 2);
@@ -778,7 +791,7 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
               {directionLabel(setup.direction)}
             </span>
           </div>
-          <AtrPanel setup={setup} candles={candles} />
+          <AtrPanel setup={setup} candles={candles} liveBarAt={liveBarAt} />
 
           <QualityChips q={setup.quality} atr={setup.atr} bias={setup.bias} />
 

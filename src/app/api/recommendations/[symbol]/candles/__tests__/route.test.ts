@@ -71,3 +71,68 @@ describe("GET /api/recommendations/[symbol]/candles", () => {
     expect(body.candles.map((c: { t: number }) => c.t)).toEqual([1000, 2000, 3000]);
   });
 });
+
+// Свечи для рекомендаций пишет суточный скан, поэтому сегодняшний бар в БД
+// устаревает к обеду. Роут дотягивает его с биржи — иначе «сегодня уже
+// пройдено N×ATR» в карточке показывало бы утреннее состояние.
+describe("живой сегодняшний бар", () => {
+  beforeEach(() => {
+    mockGetAuthUser.mockReset();
+    asUser();
+    vi.mocked(featureConfig.getFeatureConfig).mockResolvedValue({ enabled: true } as any);
+    // Роут запрашивает orderBy: desc и разворачивает сам — мок отдаёт в том
+    // же порядке, что и БД: сначала самая свежая свеча.
+    mockPrisma.obCandle.findMany.mockResolvedValue([
+      { t: new Date(172_800_000), o: 1.5, h: 1.6, l: 1.4, c: 1.55, v: 20 },
+      { t: new Date(86_400_000), o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+    ] as any);
+  });
+
+  it("replaces the last bar with the exchange one", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [[172_800_000, "1.5", "9.9", "0.1", "9.0", "999"]],
+      })),
+    );
+    const res = await GET(new Request(base), params("BTCUSDT"));
+    const body = await res.json();
+    expect(body.candles).toHaveLength(2);
+    // Тот же бар по времени — обновлён, а не добавлен вторым.
+    expect(body.candles[1]).toMatchObject({ t: 172_800_000, h: 9.9, l: 0.1, c: 9 });
+    // Закрытая история из БД не трогается.
+    expect(body.candles[0]).toMatchObject({ h: 2, l: 0.5 });
+    expect(typeof body.liveBarAt).toBe("number");
+    vi.unstubAllGlobals();
+  });
+
+  it("appends the bar when today is missing from the DB", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => [[259_200_000, "1.6", "1.9", "1.5", "1.8", "5"]],
+      })),
+    );
+    const res = await GET(new Request(base), params("BTCUSDT"));
+    const body = await res.json();
+    expect(body.candles).toHaveLength(3);
+    expect(body.candles[2]).toMatchObject({ t: 259_200_000, c: 1.8 });
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to the DB when the exchange is unavailable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("network down");
+    }));
+    const res = await GET(new Request(base), params("BTCUSDT"));
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.candles).toHaveLength(2);
+    expect(body.candles[1]).toMatchObject({ h: 1.6, l: 1.4 });
+    // Клиент по этому полю подписывает, что данные из ночного скана.
+    expect(body.liveBarAt).toBeNull();
+    vi.unstubAllGlobals();
+  });
+});
