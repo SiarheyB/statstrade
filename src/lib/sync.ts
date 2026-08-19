@@ -10,6 +10,7 @@ import {
   fetchBalanceUsdt,
   isExchangeId,
   normalizeFill,
+  withNetworkRetry,
   type ExchangeId,
   type MarketKind,
   type NormalizedFill,
@@ -342,7 +343,7 @@ async function buildPlan(
   for (const kind of kinds) {
     const exchange = createExchange(exchangeId, creds, kind, demo);
     try {
-      await exchange.loadMarkets();
+      await withNetworkRetry(() => exchange.loadMarkets());
       const markets = (exchange.markets ?? {}) as unknown as Record<string, Record<string, unknown>>;
       const symbols = new Set<string>();
 
@@ -462,7 +463,8 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
         let ex = exchanges.get(kind);
         if (!ex) {
           ex = createExchange(exchangeId, creds, kind, account.demoTrading);
-          await ex.loadMarkets();
+          const created = ex;
+          await withNetworkRetry(() => created.loadMarkets());
           exchanges.set(kind, ex);
         }
         const label = symbol || kind;

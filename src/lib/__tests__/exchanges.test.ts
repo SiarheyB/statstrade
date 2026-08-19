@@ -40,12 +40,21 @@ vi.mock("ccxt", () => {
       return instance;
     });
 
+  class NetworkError extends Error {}
+  class RequestTimeout extends NetworkError {}
+  class ExchangeNotAvailable extends NetworkError {}
+  class AuthenticationError extends Error {}
+
   return {
     default: {
       binance: ctorFor("binance"),
       bybit: ctorFor("bybit"),
       okx: ctorFor("okx"),
       kraken: ctorFor("kraken"),
+      NetworkError,
+      RequestTimeout,
+      ExchangeNotAvailable,
+      AuthenticationError,
     },
   };
 });
@@ -55,7 +64,9 @@ import {
   createExchange,
   fetchBalanceUsdt,
   getPublicExchange,
+  withNetworkRetry,
 } from "@/lib/exchanges";
+import ccxt from "ccxt";
 
 describe("exchanges - normalizeFill", () => {
   const mockExchange = {
@@ -344,5 +355,65 @@ describe("exchanges - getPublicExchange", () => {
     const exBybit = await getPublicExchange("bybit", "swap");
     expect((exBybit as any).__id).toBe("bybit");
     expect((exBybit as any).__config.options?.defaultType).toBe("swap");
+  });
+});
+
+
+// Дефолтный таймаут ccxt — 10 секунд, и синк на нём регулярно падал: тяжёлый
+// loadMarkets просто не успевал. Плюс у binance loadMarkets по умолчанию тянет
+// приватный справочник валют, который и был самым частым источником таймаутов.
+describe("exchanges - настройки клиента", () => {
+  beforeEach(() => {
+    shared.created.length = 0;
+    vi.clearAllMocks();
+  });
+
+  it("raises the request timeout above the ccxt default", () => {
+    createExchange("binance", { apiKey: "k", apiSecret: "s" }, "swap");
+    expect(shared.created[0].__config.timeout).toBe(30_000);
+  });
+
+  it("does not fetch the currency directory when loading markets", () => {
+    createExchange("binance", { apiKey: "k", apiSecret: "s" }, "spot");
+    expect(shared.created[0].__config.options).toMatchObject({
+      defaultType: "spot",
+      fetchCurrencies: false,
+    });
+  });
+
+  it("applies the same settings to keyless public clients", async () => {
+    // kraken:swap не трогают другие тесты файла — модульный кэш
+    // getPublicExchange живёт весь прогон, и уже созданный клиент не дал бы
+    // увидеть конфиг.
+    await getPublicExchange("kraken", "swap");
+    const cfg = shared.created[shared.created.length - 1].__config;
+    expect(cfg.timeout).toBe(30_000);
+    expect(cfg.options).toMatchObject({ fetchCurrencies: false });
+  });
+});
+
+describe("exchanges - withNetworkRetry", () => {
+  it("retries a timeout and succeeds", async () => {
+    let calls = 0;
+    const fn = vi.fn().mockImplementation(async () => {
+      calls++;
+      if (calls < 3) throw new (ccxt as any).RequestTimeout("timed out");
+      return "ok";
+    });
+    await expect(withNetworkRetry(fn)).resolves.toBe("ok");
+    expect(fn).toHaveBeenCalledTimes(3);
+  });
+
+  it("gives up after the last attempt and rethrows", async () => {
+    const fn = vi.fn().mockRejectedValue(new (ccxt as any).RequestTimeout("timed out"));
+    await expect(withNetworkRetry(fn, 2)).rejects.toThrow("timed out");
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  // Неверный ключ повтором не исправить — только задержали бы синк.
+  it("does not retry non-network errors", async () => {
+    const fn = vi.fn().mockRejectedValue(new (ccxt as any).AuthenticationError("bad key"));
+    await expect(withNetworkRetry(fn)).rejects.toThrow("bad key");
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });

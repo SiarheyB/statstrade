@@ -7,6 +7,55 @@ import type { ExchangeId } from "@/lib/exchangeIds";
 export type { ExchangeId, ExchangeMeta } from "@/lib/exchangeIds";
 export { SUPPORTED_EXCHANGES, EXCHANGE_IDS, isExchangeId } from "@/lib/exchangeIds";
 
+/**
+ * Таймаут HTTP-запросов к бирже. Дефолт ccxt — 10 секунд, и на них синк
+ * регулярно падал: loadMarkets тянет справочник инструментов (у bybit spot это
+ * мегабайты JSON), а домашний сервер за реверс-прокси не всегда успевает.
+ * Переопределяется через EXCHANGE_TIMEOUT_MS.
+ */
+const TIMEOUT_MS = Number(process.env.EXCHANGE_TIMEOUT_MS ?? 30_000);
+
+/**
+ * Общие опции для всех создаваемых клиентов ccxt.
+ *
+ * `fetchCurrencies: false` — у binance loadMarkets иначе дёргает приватный
+ * sapi/v1/capital/config/getall (справочник валют, сетей и комиссий вывода).
+ * Запрос тяжёлый и был самой частой причиной таймаутов синка, а данные его
+ * нам не нужны: нигде в коде exchange.currencies не читается — для сделок
+ * достаточно markets.
+ */
+function baseOptions(kind: MarketKind): Record<string, unknown> {
+  return { defaultType: kind, fetchCurrencies: false };
+}
+
+/**
+ * Повтор сетевого вызова к бирже при таймауте/сетевом сбое.
+ *
+ * Один такой сбой на loadMarkets раньше валил не одну задачу, а все задачи
+ * этого типа рынка подряд: клиент не попадал в кэш, и следующая задача снова
+ * шла за справочником инструментов — и снова получала таймаут. Ошибки уровня
+ * логики (неверный ключ, неподдерживаемый метод, отказ биржи) не повторяем:
+ * повтор их не исправит, а только задержит синк.
+ */
+export async function withNetworkRetry<T>(fn: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const retriable =
+        err instanceof ccxt.RequestTimeout ||
+        err instanceof ccxt.NetworkError ||
+        err instanceof ccxt.ExchangeNotAvailable;
+      if (!retriable || attempt === attempts) throw err;
+      lastErr = err;
+      // 1с, затем 3с — биржа успевает «отдышаться», а синк не застревает надолго.
+      await new Promise((r) => setTimeout(r, attempt * 2000 - 1000));
+    }
+  }
+  throw lastErr;
+}
+
 export type ExchangeCredentials = {
   apiKey: string;
   apiSecret: string;
@@ -28,9 +77,8 @@ export function createExchange(
     secret: creds.apiSecret,
     password: creds.passphrase ?? undefined,
     enableRateLimit: true,
-    options: {
-      defaultType: kind, // spot | swap
-    },
+    timeout: TIMEOUT_MS,
+    options: baseOptions(kind), // spot | swap
   });
   // Demo / testnet keys only work against the exchange's demo environment.
   // Bybit has its own "Demo Trading" host (enableDemoTrading); Binance (testnet)
@@ -97,7 +145,8 @@ export async function getPublicExchange(
     ) => Exchange;
     exchange = new ctor({
       enableRateLimit: true,
-      options: { defaultType: kind },
+      timeout: TIMEOUT_MS,
+      options: baseOptions(kind),
     });
     publicCache.set(key, exchange);
   }
