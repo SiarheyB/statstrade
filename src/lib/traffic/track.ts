@@ -13,14 +13,48 @@ import type { NextRequest, NextFetchEvent, NextResponse } from "next/server";
 import { buildHit, cookiesEnabled, shortHash, SESSION_COOKIE, SESSION_MAX_AGE, VISITOR_COOKIE, VISITOR_MAX_AGE } from "./hit";
 import { isTrackablePath } from "./paths";
 
-function ingestUrl(): string {
-  // Только петля: наружу (через публичный хост) запрос ходить не должен —
-  // это лишний круг через туннель и лишний трафик.
-  // Именно "localhost", а не "127.0.0.1": next dev на macOS слушает только
-  // IPv6 (*:3000 → ::1), и запрос на IPv4-адрес просто виснет. Имя резолвится
-  // в оба стека, и в контейнере (0.0.0.0), и локально.
-  const base = process.env.ANALYTICS_INGEST_URL || `http://localhost:${process.env.PORT || 3000}`;
-  return `${base.replace(/\/$/, "")}/api/analytics/collect`;
+// Только петля: наружу (через публичный хост) запрос ходить не должен — это
+// лишний круг через туннель и лишний трафик.
+//
+// Кандидатов два, потому что «свой же адрес» — на удивление скользкое место.
+// Сначала "localhost": next dev на macOS слушает только IPv6 (*:3000 → ::1), и
+// запрос на 127.0.0.1 там просто виснет. Но бывает и наоборот — окружение, где
+// localhost резолвится в ::1, а сервер слушает только IPv4. Поэтому если первый
+// адрес не отозвался, пробуем второй и запоминаем рабочий: молча потерять всю
+// статистику из-за резолвинга имени — худший из возможных исходов.
+function ingestCandidates(): string[] {
+  const port = process.env.PORT || 3000;
+  const explicit = process.env.ANALYTICS_INGEST_URL;
+  const bases = explicit ? [explicit] : [`http://localhost:${port}`, `http://127.0.0.1:${port}`];
+  return bases.map((b) => `${b.replace(/\/$/, "")}/api/analytics/collect`);
+}
+
+// Адрес, который сработал в прошлый раз: чтобы не ходить по кандидатам на
+// каждом просмотре страницы.
+let workingUrl: string | null = null;
+
+export async function sendHit(body: string, key: string): Promise<void> {
+  const urls = workingUrl ? [workingUrl, ...ingestCandidates().filter((u) => u !== workingUrl)] : ingestCandidates();
+  for (const url of urls) {
+    try {
+      await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-analytics-key": key },
+        body,
+      });
+      // Ответ получен — адрес рабочий, даже если статус не 200 (404 означает
+      // несовпадение общего секрета, и перебор остальных адресов тут не поможет).
+      workingUrl = url;
+      return;
+    } catch {
+      // по этому адресу приёмника нет — пробуем следующий
+    }
+  }
+}
+
+/** Только для тестов: сбросить запомненный адрес приёмника. */
+export function resetIngestUrlCache(): void {
+  workingUrl = null;
 }
 
 /** Общий секрет middleware ↔ роут приёма. Отдельная переменная не нужна. */
@@ -116,15 +150,7 @@ export async function trackVisit(
     // есть всегда, а его отсутствие означает вызов middleware напрямую из
     // теста — туда лезть по сети точно не надо.
     if (!event) return;
-    event.waitUntil(
-      fetch(ingestUrl(), {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-analytics-key": await ingestKey() },
-        body: JSON.stringify(built.hit),
-      }).catch(() => {
-        // приёмник недоступен (перезапуск app) — событие просто теряется
-      }),
-    );
+    event.waitUntil(sendHit(JSON.stringify(built.hit), await ingestKey()));
   } catch {
     // никогда не мешаем основному ответу
   }

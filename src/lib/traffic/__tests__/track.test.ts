@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
-import { pageViewKind } from "@/lib/traffic/track";
+import { pageViewKind, resetIngestUrlCache, sendHit } from "@/lib/traffic/track";
 
 function req(url: string, headers: Record<string, string> = {}, method = "GET") {
   return new NextRequest(new Request(`https://tradestats.app${url}`, { method, headers }));
@@ -47,5 +47,66 @@ describe("pageViewKind", () => {
     expect(pageViewKind(req("/news", { accept: "image/avif,image/webp" }))).toBeNull();
     expect(pageViewKind(req("/news", { accept: "application/json" }))).toBeNull();
     expect(pageViewKind(req("/news", { accept: "*/*", "sec-fetch-dest": "image" }))).toBeNull();
+  });
+});
+
+describe("sendHit: адрес приёмника", () => {
+  const realFetch = global.fetch;
+
+  beforeEach(() => {
+    resetIngestUrlCache();
+    delete process.env.ANALYTICS_INGEST_URL;
+  });
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  it("шлёт событие на петлю, а не наружу", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await sendHit("{}", "key");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:3000/api/analytics/collect");
+    expect(fetchMock.mock.calls[0][1].headers["x-analytics-key"]).toBe("key");
+  });
+
+  it("если по имени не достучались — пробует IPv4-адрес (иначе статистика молча теряется)", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValue(new Response("{}"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await sendHit("{}", "key");
+    expect(fetchMock.mock.calls.map((c) => c[0])).toEqual([
+      "http://localhost:3000/api/analytics/collect",
+      "http://127.0.0.1:3000/api/analytics/collect",
+    ]);
+  });
+
+  it("рабочий адрес запоминается — перебор не повторяется на каждом просмотре", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("ECONNREFUSED"))
+      .mockResolvedValue(new Response("{}"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await sendHit("{}", "key");
+    fetchMock.mockClear();
+    await sendHit("{}", "key");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:3000/api/analytics/collect");
+  });
+
+  it("заданный явно ANALYTICS_INGEST_URL используется как есть", async () => {
+    process.env.ANALYTICS_INGEST_URL = "http://app:3000/";
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}"));
+    global.fetch = fetchMock as unknown as typeof fetch;
+    await sendHit("{}", "key");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://app:3000/api/analytics/collect");
+    delete process.env.ANALYTICS_INGEST_URL;
+  });
+
+  it("недоступный приёмник не роняет запрос пользователя", async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error("down")) as unknown as typeof fetch;
+    await expect(sendHit("{}", "key")).resolves.toBeUndefined();
   });
 });
