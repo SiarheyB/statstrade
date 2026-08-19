@@ -1,5 +1,5 @@
-import { NextResponse } from "next/server";
 import { COOKIE_NAME } from "@/lib/auth";
+import { redirectLocal } from "@/lib/api";
 
 // Выход из демо. Единственный изменяющий запрос, который middleware пропускает
 // от демо-сессии (см. middleware.ts) — иначе из демо было бы не выйти.
@@ -8,8 +8,8 @@ import { COOKIE_NAME } from "@/lib/auth";
 // next/headers (clearSessionCookie): при собственном NextResponse.redirect
 // изменения cookie-стора в ответ не попадают, и выход молча ничего не делал —
 // браузер уходил на «/» с живой демо-сессией.
-export async function POST(req: Request) {
-  const res = NextResponse.redirect(new URL("/", req.url), { status: 303 });
+export async function POST() {
+  const res = redirectLocal("/");
   res.cookies.set(COOKIE_NAME, "", { path: "/", maxAge: 0 });
   return res;
 }

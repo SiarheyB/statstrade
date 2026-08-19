@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import crypto from "node:crypto";
 import { cookies } from "next/headers";
-import { getAuthUser } from "@/lib/api";
+import { getAuthUser, redirectLocal } from "@/lib/api";
 import { getAuthUrl, isYandexDiskConfigured } from "@/lib/integrations/yandexDisk";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 
@@ -13,7 +13,7 @@ const STATE_MAX_AGE = 60 * 10; // 10 минут на прохождение cons
 // callback — защита от CSRF (подмены OAuth-редиректа третьей стороной).
 export async function GET(req: Request) {
   const user = await getAuthUser();
-  if (!user) return NextResponse.redirect(new URL("/login", req.url));
+  if (!user) return redirectLocal("/login", 307);
 
   if (!isYandexDiskConfigured()) {
     return NextResponse.json({ error: "Яндекс.Диск не настроен на сервере" }, { status: 503 });

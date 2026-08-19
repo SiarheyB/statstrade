@@ -75,3 +75,16 @@ export function sharedCacheHeaders(maxAgeSec: number, swrSec: number): HeadersIn
     "Cache-Control": `public, max-age=${maxAgeSec}, s-maxage=${maxAgeSec}, stale-while-revalidate=${swrSec}`,
   };
 }
+
+/**
+ * Редирект на СВОЙ путь. Относительный Location — намеренно: `new URL(path,
+ * req.url)` за реверс-прокси (Tailscale Funnel/Cloudflare) даёт внутренний
+ * адрес контейнера, и браузер получал `Location: http://localhost:3000/`.
+ * Такой переход мёртв: и по смешанному контенту, и по нашей же CSP
+ * `form-action 'self'` — POST-форма молча «ничего не делала».
+ * Относительный Location валиден (RFC 7231) и разрешается браузером
+ * относительно публичного адреса.
+ */
+export function redirectLocal(path: string, status = 303): NextResponse {
+  return new NextResponse(null, { status, headers: { Location: path } });
+}
