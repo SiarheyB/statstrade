@@ -23,6 +23,7 @@ const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 // «/api/demo» — вход в демо: если демо-cookie уже стоит (повторный клик по
 // кнопке на лендинге, старая сессия в браузере), запрос обязан пройти, иначе
 // вместо дашборда пользователь видит 403 «изменения недоступны».
+const LOGOUT_PATHS = new Set(["/api/demo/exit", "/api/auth/logout"]);
 const DEMO_ALLOWED_MUTATIONS = new Set(["/api/demo", "/api/demo/exit", "/api/auth/logout"]);
 
 type SessionClaims = { userId: string; email: string; v?: number; demo?: boolean };
@@ -118,7 +119,9 @@ export async function middleware(req: NextRequest) {
   // DB-backed проверка (см. lib/auth.ts:getSession) всё равно происходит на
   // каждой странице /dashboard и /admin, так что продление истёкшего по
   // tokenVersion токена никого не пускает дальше него.
-  if (valid && claims && secret) {
+  // Продление НЕ делаем на запросах выхода: иначе middleware переставил бы
+  // свежую cookie поверх той, что роут только что снял, и выйти было бы нельзя.
+  if (valid && claims && secret && !LOGOUT_PATHS.has(pathname)) {
     const fresh = await new SignJWT({
       userId: claims.userId,
       email: claims.email,
