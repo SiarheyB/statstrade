@@ -115,8 +115,17 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
   return (
     <div className="min-h-screen flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
+        {/* onPointerDown, а не только клик: когда фокус внутри iframe кнопки
+            Google, браузер тратит первый клик по странице на возврат фокуса в
+            документ — логотип срабатывал лишь со второго раза. href остаётся:
+            без JS и для «открыть в новой вкладке» работает как обычная ссылка. */}
         <Link
           href="/"
+          onPointerDown={(e) => {
+            if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+            e.preventDefault();
+            router.push("/");
+          }}
           className="flex items-center justify-center gap-2 font-semibold text-lg mb-8"
         >
           <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-accent/15 text-accent">
@@ -283,6 +292,12 @@ export default function AuthForm({ mode }: { mode: "login" | "register" }) {
               </Link>
             </>
           )}
+        </p>
+
+        <p className="text-center text-sm mt-2">
+          <Link href="/" className="text-muted hover:text-fg transition">
+            ← {t("auth.toHome")}
+          </Link>
         </p>
       </div>
     </div>
