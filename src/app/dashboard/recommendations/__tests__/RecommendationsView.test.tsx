@@ -309,9 +309,10 @@ describe("ATR panel", () => {
     render(<RecommendationsPage />);
     await screen.findByText(/нужен ход 2\.08×ATR/);
     await userEvent.click(screen.getByText("ETHUSDT"));
-    // Обе цифры считаются от цены анализа, поэтому совпадают; живая цена, если
-    // ушла, выносится отдельной строкой.
-    expect(await screen.findAllByText(/2\.08×ATR/)).toHaveLength(2);
+    // Все цифры считаются от цены анализа, поэтому совпадают: значение в
+    // шапке, в подсказке к нему и в панели. Живая цена, если ушла, выносится
+    // отдельной строкой.
+    expect(await screen.findAllByText(/2\.08×ATR/)).toHaveLength(3);
     expect(screen.getByText(/Сейчас цена/)).toBeInTheDocument();
   });
 
@@ -399,5 +400,33 @@ describe("ЛП2Б card", () => {
     render(<RecommendationsPage />);
     await screen.findByText(/ЛП2Б · шорт/);
     expect(screen.getByRole("button", { name: "ЛП2Б" })).toBeInTheDocument();
+  });
+});
+
+// Цифры в свёрнутой шапке ничего не говорят новичку, поэтому у каждой есть
+// подсказка при наведении (рендерится в разметке всегда, скрыта через CSS).
+describe("подсказки в шапке карточки", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch());
+    setFormatLocale("ru");
+    setFormatTimezone("UTC");
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("explains the distance, strength and volume", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/Пробой · лонг/);
+
+    // В списке две карточки, поэтому подсказок каждого вида тоже две.
+    expect(screen.getAllByText(/Сколько цене осталось пройти до уровня/)).toHaveLength(2);
+    expect(screen.getAllByText(/Сила уровня — сколько раз рынок на него отреагировал/)).toHaveLength(2);
+    expect(screen.getAllByText(/Оборот за последний день в долларах/)).toHaveLength(2);
+    expect(screen.getAllByText(/Цена уровня — линия, от которой считается весь сетап/)).toHaveLength(2);
+  });
+
+  it("explains the required move for a false breakout", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/Ложный пробой · лонг/);
+    expect(screen.getByText(/дойти до уровня, проколоть его и вернуться/)).toBeInTheDocument();
   });
 });

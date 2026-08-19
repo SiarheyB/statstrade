@@ -191,6 +191,28 @@ function QualityChips({ q, atr, bias }: { q: Quality | null | undefined; atr: nu
   );
 }
 
+/**
+ * Подсказка при наведении для цифр в свёрнутой шапке карточки. Шапка — это
+ * кнопка раскрытия, поэтому внутри только неинтерактивные span: подсказка
+ * живёт на чистом CSS (group-hover), клик по ней всё так же раскрывает
+ * карточку и ничего не перехватывает.
+ */
+function Hint({ text, children, className }: { text: string; children: React.ReactNode; className?: string }) {
+  return (
+    <span className="group/hint inline-block">
+      <span className={clsx("cursor-help underline decoration-dotted decoration-faint underline-offset-2", className)}>
+        {children}
+      </span>
+      {/* Растягивается по СТРОКЕ карточки (ближайший relative-предок), а не по
+          самому слову: привязка к слову уводила подсказку за правый край
+          экрана — на мобильной ширине так вылезала половина из них. */}
+      <span className="pointer-events-none absolute left-0 right-0 top-full z-40 mt-1 hidden max-w-md whitespace-normal rounded-md border border-border bg-bg px-2.5 py-1.5 text-xs font-normal text-fg shadow-lg group-hover/hint:block">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 type Candle = { t: number; o: number; h: number; l: number; c: number; v?: number };
 
 type FeatureValue = { enabled: boolean };
@@ -743,32 +765,77 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
     }
   }
 
+  // Без overflow-hidden: он обрезал бы подсказки, вылезающие за карточку.
+  // Скругление перенесено на саму кнопку, чтобы её фон при наведении не
+  // выходил за уголки.
   return (
-    <div className="rounded-xl border border-border bg-surface-1 overflow-hidden">
-      <button onClick={toggle} className="w-full flex items-center gap-3 p-4 text-left hover:bg-surface-2 transition">
+    <div className="rounded-xl border border-border bg-surface-1">
+      <button
+        onClick={toggle}
+        className={clsx(
+          "w-full flex items-center gap-3 p-4 text-left hover:bg-surface-2 transition rounded-t-xl",
+          !open && "rounded-b-xl",
+        )}
+      >
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex items-center gap-2 flex-wrap">
             <span className="font-semibold">{setup.symbol}</span>
             <BiasBadge bias={setup.bias} direction={setup.direction} />
-            <span className="text-xs text-muted">{levelTypeLabel(setup.levelType)}</span>
+            <Hint
+              text={`Как построен уровень: ${levelTypeLabel(setup.levelType)}. Тип показывает, откуда взялась эта цена — например откат, слом структуры, зеркальный уровень или локальная опорная точка. Чем «структурнее» тип, тем чаще рынок его уважает.`}
+              className="text-xs text-muted"
+            >
+              {levelTypeLabel(setup.levelType)}
+            </Hint>
           </div>
-          <div className="text-sm text-muted mt-1">
-            Уровень {setup.levelPrice} · цена {setup.currentPrice} ·{" "}
-            {setup.bias === "false_breakout_2b" ? "за уровнем" : "до уровня"}{" "}
-            {setup.distanceAtr.toFixed(2)}×ATR · сила {setup.strength}
+          <div className="relative text-sm text-muted mt-1">
+            <Hint text="Цена уровня — линия, от которой считается весь сетап. Именно её цена должна пробить (для пробоя) или проколоть и вернуться (для ложного пробоя).">
+              Уровень {setup.levelPrice}
+            </Hint>{" "}
+            ·{" "}
+            <Hint text={`Цена закрытия последнего проанализированного дня (${fmtDate(setup.candlesTo)}). Сегодняшний день ещё идёт и в расчёт сетапа не входит — раскройте карточку, чтобы увидеть текущее состояние.`}>
+              цена {setup.currentPrice}
+            </Hint>{" "}
+            ·{" "}
+            <Hint
+              text={
+                setup.bias === "false_breakout_2b"
+                  ? `Насколько цена уже ушла ЗА уровень — она его пробила и закрылась с другой стороны. Измеряется в ATR, среднем дневном ходе инструмента: ${setup.distanceAtr.toFixed(2)}×ATR это ${(setup.distanceAtr * 100).toFixed(0)}% обычного дневного движения.`
+                  : `Сколько цене осталось пройти до уровня, в ATR — среднем дневном ходе инструмента. ${setup.distanceAtr.toFixed(2)}×ATR значит ${(setup.distanceAtr * 100).toFixed(0)}% обычного дневного движения: чем меньше, тем ближе цена к уровню.`
+              }
+            >
+              {setup.bias === "false_breakout_2b" ? "за уровнем" : "до уровня"}{" "}
+              {setup.distanceAtr.toFixed(2)}×ATR
+            </Hint>{" "}
+            ·{" "}
+            <Hint text={`Сила уровня — сколько раз рынок на него отреагировал: касания, отбои, развороты. Здесь ${setup.strength}. Чем больше, тем больше участников видят эту цену и тем серьёзнее уровень.`}>
+              сила {setup.strength}
+            </Hint>
             {headBudget && (
               <>
                 {" · "}
-                <span className={FEASIBILITY[headBudget.feasibility].text}>
+                <Hint
+                  text={
+                    setup.bias === "false_breakout_2b"
+                      ? `Сколько завтрашнему бару пройти, чтобы вернуть цену обратно за уровень: ${headBudget.totalAtr.toFixed(2)}×ATR. ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: встречается примерно в ${Math.round(headBudget.oddsShare * 100)}% торговых дней.`
+                      : `Сколько сегодняшнему бару нужно пройти, чтобы сетап состоялся: дойти до уровня, проколоть его и вернуться — итого ${headBudget.totalAtr.toFixed(2)}×ATR размаха. ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: встречается примерно в ${Math.round(headBudget.oddsShare * 100)}% торговых дней.`
+                  }
+                  className={FEASIBILITY[headBudget.feasibility].text}
+                >
                   {setup.bias === "false_breakout_2b" ? "возврат" : "нужен ход"}{" "}
                   {headBudget.totalAtr.toFixed(2)}×ATR
-                </span>
+                </Hint>
               </>
             )}
             {setup.lastVolume != null && (
               <>
                 {" · "}
-                <span className={volumeClass(setup.lastVolume)}>объём {fmtVolume(setup.lastVolume)}</span>
+                <Hint
+                  text={`Оборот за последний день в долларах. Это про ликвидность: на тонком рынке цена ходит рывками, а вход и выход дороже из-за проскальзывания. Цвет: до $10 млн — тонко (красный), $10-20 млн — средне (жёлтый), больше $20 млн — комфортно (зелёный).`}
+                  className={volumeClass(setup.lastVolume)}
+                >
+                  объём {fmtVolume(setup.lastVolume)}
+                </Hint>
               </>
             )}
           </div>
