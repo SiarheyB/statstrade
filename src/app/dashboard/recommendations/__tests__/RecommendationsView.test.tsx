@@ -265,3 +265,63 @@ describe("expanded setup card", () => {
     expect(screen.queryByText("ложных пробоев не было")).not.toBeInTheDocument();
   });
 });
+
+// Блок «ход инструмента»: ATR показывается всегда, а бюджет хода на сегодня —
+// только у ложного пробоя (у пробоя путь до уровня уже пройден вчерашним
+// закрытием, и «сколько пройти» там нечего показывать).
+describe("ATR panel", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", mockFetch());
+    setFormatLocale("ru");
+    setFormatTimezone("UTC");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("shows the required move for a false breakout, in the list and in the card", async () => {
+    render(<RecommendationsPage />);
+    // ETHUSDT: цена 84, уровень 80, ATR 2 → до уровня 2×ATR, плюс прокол 0.08.
+    expect(await screen.findByText(/нужен ход 2\.08×ATR/)).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("ETHUSDT"));
+    expect(await screen.findByText("ATR — средний дневной ход")).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("Чтобы ложный пробой состоялся сегодня")).toBeInTheDocument();
+    expect(screen.getByText("2.08×ATR")).toBeInTheDocument();
+    // Разбор пути: до уровня + прокол, одним баром.
+    expect(screen.getByText(/Дойти до уровня — 2\.00×ATR/)).toBeInTheDocument();
+    expect(screen.getByText(/проколоть его — ещё 0\.08×ATR/)).toBeInTheDocument();
+    // Вердикт по статистике дневных ходов из конспекта.
+    expect(screen.getByText("ход, который бывает редко")).toBeInTheDocument();
+    expect(screen.getByText(/примерно в 5% дней/)).toBeInTheDocument();
+  });
+
+  it("shows how much of the daily ATR today's bar has already spent", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/Ложный пробой · лонг/);
+    await userEvent.click(screen.getByText("ETHUSDT"));
+    // Сегодняшний бар в CANDLES: h-l = 4, ATR 2 → 2.00×ATR.
+    expect(await screen.findByText(/2\.00×ATR \(200%\)/)).toBeInTheDocument();
+    expect(screen.getByText(/дневной ход почти выбран/)).toBeInTheDocument();
+  });
+
+  it("keeps the required move consistent with the collapsed header", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/нужен ход 2\.08×ATR/);
+    await userEvent.click(screen.getByText("ETHUSDT"));
+    // Обе цифры считаются от цены анализа, поэтому совпадают; живая цена, если
+    // ушла, выносится отдельной строкой.
+    expect(await screen.findAllByText(/2\.08×ATR/)).toHaveLength(2);
+    expect(screen.getByText(/Сейчас цена/)).toBeInTheDocument();
+  });
+
+  it("shows the ATR but no move budget for a breakout setup", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/Пробой · лонг/);
+    await userEvent.click(screen.getByText("BTCUSDT"));
+    expect(await screen.findByText("ATR — средний дневной ход")).toBeInTheDocument();
+    expect(screen.getByText("Путь до уровня")).toBeInTheDocument();
+    expect(screen.queryByText("Чтобы ложный пробой состоялся сегодня")).not.toBeInTheDocument();
+    expect(screen.getByText(/Для пробоя весь путь уже пройден/)).toBeInTheDocument();
+  });
+});

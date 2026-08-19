@@ -5,6 +5,7 @@ import { TrendingUp, TrendingDown, ChevronDown, ChevronUp } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
+import { falseBreakoutBudget, todayProgress, type MoveFeasibility } from "@/lib/recommendations/atrBudget";
 import { fmtDate, fmtPrice, numLocale } from "@/lib/format";
 
 // Компактная запись $-объёма (1 234 567 → "$1.23M") — своя, а не fmtNumSmart:
@@ -13,6 +14,15 @@ import { fmtDate, fmtPrice, numLocale } from "@/lib/format";
 function fmtVolume(v: number): string {
   if (!Number.isFinite(v)) return "—";
   return "$" + new Intl.NumberFormat(numLocale(), { notation: "compact", maximumFractionDigits: 2 }).format(v);
+}
+
+// Величины «в цене» (ATR, размах бара) — короткий формат: fmtPrice для
+// дорогих инструментов даёт пять знаков после запятой (37.86760), и в тексте
+// это читается как шум. Для копеечной крипты знаки, наоборот, нужны — там
+// остаётся fmtPrice.
+function fmtAtrPrice(v: number): string {
+  if (!Number.isFinite(v)) return "—";
+  return v >= 1 ? v.toLocaleString(numLocale(), { maximumFractionDigits: 2 }) : fmtPrice(v);
 }
 
 // Светофор ликвидности по дневному объёму: <10M — тонко (красный),
@@ -458,8 +468,199 @@ function LevelSnapshot({
   );
 }
 
+// Цвет и вердикт по требуемому дневному ходу: до 1 ATR — рядовой день,
+// до 2 — редкий, дальше — почти не встречается (статистика из конспекта,
+// см. DAY_MOVE_ODDS).
+const FEASIBILITY: Record<MoveFeasibility, { text: string; bar: string; note: string }> = {
+  routine: { text: "text-profit", bar: "bg-profit", note: "обычный дневной ход" },
+  stretch: { text: "text-warn", bar: "bg-warn", note: "ход больше обычного" },
+  unlikely: { text: "text-loss", bar: "bg-loss", note: "ход, который бывает редко" },
+};
+
+// Линейка дневного хода: 0..3 ATR с засечками на каждом ATR. Заполнение —
+// сколько нужно пройти сегодня; отдельной меткой показан ход, уже сделанный
+// текущим баром, чтобы «нужно» и «уже прошли» читались на одной шкале.
+function AtrRuler({ needAtr, doneAtr, tone }: { needAtr: number; doneAtr?: number; tone: MoveFeasibility }) {
+  const MAX = 3;
+  const pct = (v: number) => Math.min(100, Math.max(0, (v / MAX) * 100));
+  return (
+    <div className="mt-2">
+      <div className="relative h-2 rounded-full bg-surface-2">
+        <div
+          className={clsx("absolute inset-y-0 left-0 rounded-full", FEASIBILITY[tone].bar)}
+          style={{ width: `${pct(needAtr)}%` }}
+        />
+        {[1, 2].map((tick) => (
+          <div key={tick} className="absolute inset-y-0 w-px bg-bg/70" style={{ left: `${pct(tick)}%` }} />
+        ))}
+        {doneAtr != null && doneAtr > 0 && (
+          <div
+            className="absolute -top-1 h-4 w-0.5 rounded bg-fg"
+            style={{ left: `${pct(doneAtr)}%` }}
+            title={`сегодня уже пройдено ${doneAtr.toFixed(2)}×ATR`}
+          />
+        )}
+      </div>
+      {/* Подписи позиционируются по тем же долям, что и засечки: при
+          justify-between «1×ATR» и «2×ATR» вставали по краям своих третей и
+          не совпадали с делениями, из-за чего шкала читалась неверно. */}
+      <div className="relative mt-1 h-3 text-[10px] text-faint">
+        {[0, 1, 2, 3].map((tick) => (
+          <span
+            key={tick}
+            // Крайние подписи прижимаем к границам трека, а не центрируем по
+            // ним: иначе половина «0» и «3×» вылезает за шкалу.
+            className={clsx("absolute whitespace-nowrap", tick !== 0 && tick !== 3 && "-translate-x-1/2")}
+            style={tick === 3 ? { right: 0 } : { left: `${pct(tick)}%` }}
+          >
+            {tick === 0 ? "0" : `${tick}×`}
+          </span>
+        ))}
+      </div>
+      {doneAtr != null && doneAtr > 0 && (
+        <div className="mt-0.5 text-[10px] text-faint">
+          <span className="mr-1 inline-block h-2 w-0.5 translate-y-[1px] rounded bg-fg" />
+          сегодня пройдено {doneAtr.toFixed(2)}×ATR
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * «Ход инструмента» — блок, который переводит цифры в ATR на человеческий
+ * язык. Слева всегда сам ATR (для обоих сетапов), справа — только для
+ * ложного пробоя: сколько бару нужно пройти СЕГОДНЯ, чтобы дойти до уровня,
+ * проколоть его и вернуться, и насколько такой день типичен. Для пробоя
+ * правой половины нет: там путь до уровня уже пройден вчерашним закрытием,
+ * и справа стоит именно это.
+ */
+function AtrPanel({ setup, candles }: { setup: LevelSetup; candles: Candle[] | null }) {
+  const atr = setup.atr;
+  if (!(atr > 0)) return null;
+  const atrPctOfPrice = (atr / setup.currentPrice) * 100;
+
+  // Сегодняшний (незакрытый) бар — он идёт после дня, по которому считали
+  // анализ. Если его ещё нет, живую часть просто не показываем.
+  const analysedTo = Date.parse(setup.candlesTo);
+  const liveBar = candles?.find((c) => c.t > analysedTo) ?? null;
+  const progress = liveBar ? todayProgress(liveBar.h, liveBar.l, atr) : null;
+  const livePrice = liveBar?.c ?? null;
+
+  // База расчёта — цена анализа, ТА ЖЕ, что в свёрнутой шапке карточки:
+  // иначе на одном экране висели бы два разных «нужен ход». Живая цена
+  // показывается отдельной строкой ниже, когда успела заметно уйти.
+  const budget =
+    setup.bias === "false_breakout" ? falseBreakoutBudget(setup.currentPrice, setup.levelPrice, atr) : null;
+  const liveBudget =
+    budget && livePrice !== null ? falseBreakoutBudget(livePrice, setup.levelPrice, atr) : null;
+  // «Заметно» — от 0.1 ATR разницы: меньше не меняет решения, а строку бы
+  // добавляло каждый раз.
+  const liveShifted = liveBudget !== null && Math.abs(liveBudget.totalAtr - budget!.totalAtr) >= 0.1;
+  const closeDistanceAtr = num(setup.quality?.closeDistanceAtr);
+
+  return (
+    <div className="rounded-lg border border-border bg-surface-2/40 p-3">
+      <div className="grid gap-3 sm:grid-cols-2 sm:divide-x sm:divide-border">
+        <div className="sm:pr-3">
+          <div className="text-[11px] uppercase tracking-wide text-faint">ATR — средний дневной ход</div>
+          <div className="mt-0.5 flex items-baseline gap-2">
+            <span className="text-lg font-semibold">{fmtAtrPrice(atr)}</span>
+            <span className="text-xs text-muted">≈ {atrPctOfPrice.toFixed(1)}% цены</span>
+          </div>
+          <div className="mt-1 text-xs text-muted">
+            Столько инструмент проходит за день в среднем: хай минус лоу, усреднённые по пяти последним
+            обычным дням (слишком большие и слишком мелкие бары в расчёт не идут).
+          </div>
+          {progress && (
+            <div className="mt-2 text-xs">
+              <span className="text-faint">Сегодня уже пройдено: </span>
+              <span className={progress.exhausted ? "text-warn" : "text-fg"}>
+                {progress.movedAtr.toFixed(2)}×ATR ({Math.round(progress.movedPct)}%)
+              </span>
+              {progress.exhausted && (
+                <span className="text-warn"> — дневной ход почти выбран, на импульс сегодня рассчитывать поздно</span>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="sm:pl-3">
+          {budget ? (
+            <>
+              <div className="text-[11px] uppercase tracking-wide text-faint">
+                Чтобы ложный пробой состоялся сегодня
+              </div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className={clsx("text-lg font-semibold", FEASIBILITY[budget.feasibility].text)}>
+                  {budget.totalAtr.toFixed(2)}×ATR
+                </span>
+                <span className="text-xs text-muted">размах бара ≈ {fmtAtrPrice(budget.totalPrice)}</span>
+              </div>
+              <AtrRuler needAtr={budget.totalAtr} doneAtr={progress?.movedAtr} tone={budget.feasibility} />
+              <div className="mt-2 text-xs text-muted">
+                Дойти до уровня — {budget.toLevelAtr.toFixed(2)}×ATR, проколоть его — ещё{" "}
+                {budget.pierceAtr.toFixed(2)}×ATR, и всё это одним баром, с возвратом обратно.
+              </div>
+              <div className="mt-1 text-xs">
+                <span className={FEASIBILITY[budget.feasibility].text}>
+                  {FEASIBILITY[budget.feasibility].note}
+                </span>
+                <span className="text-faint">
+                  {" "}
+                  — такой размах бывает примерно в {Math.round(budget.oddsShare * 100)}% дней
+                  {budget.feasibility !== "routine" && "; ход в пределах 1×ATR — в 80%"}.
+                </span>
+              </div>
+              {liveShifted && liveBudget && (
+                <div className="mt-1 text-xs text-faint">
+                  Считаем от цены закрытия {fmtDate(setup.candlesTo)}. Сейчас цена {fmtAtrPrice(livePrice!)} — от
+                  неё нужно{" "}
+                  <span className={FEASIBILITY[liveBudget.feasibility].text}>
+                    {liveBudget.totalAtr.toFixed(2)}×ATR
+                  </span>
+                  .
+                </div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="text-[11px] uppercase tracking-wide text-faint">Путь до уровня</div>
+              <div className="mt-0.5 flex items-baseline gap-2">
+                <span className="text-lg font-semibold text-profit">
+                  {closeDistanceAtr !== null ? `${closeDistanceAtr.toFixed(2)}×ATR` : "вплотную"}
+                </span>
+                {closeDistanceAtr !== null && (
+                  <span className="text-xs text-muted">≈ {fmtAtrPrice(closeDistanceAtr * atr)}</span>
+                )}
+              </div>
+              <div className="mt-2 text-xs text-muted">
+                Для пробоя весь путь уже пройден: вчерашний день закрылся вплотную к уровню, и бару остаётся
+                только пройти сам уровень — отдельный запас хода на подход не нужен.
+              </div>
+              {progress && !progress.exhausted && (
+                <div className="mt-1 text-xs text-faint">
+                  Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
+                  {fmtAtrPrice(progress.leftAtr * atr)}).
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SetupCard({ setup }: { setup: LevelSetup }) {
   const [open, setOpen] = useState(false);
+  // Требуемый ход показываем и в свёрнутой шапке: по нему список
+  // просматривают, не раскрывая каждую карточку. Считается от цены анализа —
+  // живые свечи в свёрнутом виде ещё не загружены.
+  const headBudget =
+    setup.bias === "false_breakout"
+      ? falseBreakoutBudget(setup.currentPrice, setup.levelPrice, setup.atr)
+      : null;
   const [candles, setCandles] = useState<Candle[] | null>(null);
   const [loadingCandles, setLoadingCandles] = useState(false);
 
@@ -495,8 +696,16 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
             <span className="text-xs text-muted">{levelTypeLabel(setup.levelType)}</span>
           </div>
           <div className="text-sm text-muted mt-1">
-            Уровень {setup.levelPrice} · цена {setup.currentPrice} · {setup.distanceAtr.toFixed(2)}×ATR ·
-            сила {setup.strength}
+            Уровень {setup.levelPrice} · цена {setup.currentPrice} · до уровня{" "}
+            {setup.distanceAtr.toFixed(2)}×ATR · сила {setup.strength}
+            {headBudget && (
+              <>
+                {" · "}
+                <span className={FEASIBILITY[headBudget.feasibility].text}>
+                  нужен ход {headBudget.totalAtr.toFixed(2)}×ATR
+                </span>
+              </>
+            )}
             {setup.lastVolume != null && (
               <>
                 {" · "}
@@ -517,6 +726,8 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
               {directionLabel(setup.direction)}
             </span>
           </div>
+          <AtrPanel setup={setup} candles={candles} />
+
           <QualityChips q={setup.quality} atr={setup.atr} bias={setup.bias} />
 
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
