@@ -17,10 +17,13 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 5; // 5 hours
 
 // Методы, не меняющие состояние: их демо-сессии разрешены.
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-// Изменяющие запросы, которые демо-сессии всё же разрешены: оба про ВЫХОД из
-// неё. Без /api/auth/logout кнопка «Выйти» в меню молча получала 403 —
-// cookie оставалась, и гость не мог выйти из демо штатным способом.
-const DEMO_ALLOWED_MUTATIONS = new Set(["/api/demo/exit", "/api/auth/logout"]);
+// Изменяющие запросы, которые демо-сессии всё же разрешены. Без
+// /api/auth/logout кнопка «Выйти» в меню молча получала 403 — cookie
+// оставалась, и гость не мог выйти из демо штатным способом.
+// «/api/demo» — вход в демо: если демо-cookie уже стоит (повторный клик по
+// кнопке на лендинге, старая сессия в браузере), запрос обязан пройти, иначе
+// вместо дашборда пользователь видит 403 «изменения недоступны».
+const DEMO_ALLOWED_MUTATIONS = new Set(["/api/demo", "/api/demo/exit", "/api/auth/logout"]);
 
 type SessionClaims = { userId: string; email: string; v?: number; demo?: boolean };
 
