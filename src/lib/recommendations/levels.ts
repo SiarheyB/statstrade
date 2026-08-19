@@ -77,18 +77,38 @@ function median(xs: number[]): number {
 }
 
 // ATR — хай минус лоу дневного бара, среднее по последним `lookback`
-// "нормальным" барам (без паранормальных: >=1.5x или <=0.5x базовой оценки).
-// Базовая оценка — медиана диапазонов в чуть более широком окне (устойчива
-// к выбросам сама по себе, не нужен отдельный "предварительный ATR").
-export function computeAtr(candles: DailyCandle[], lookback = 5): number {
+// НОРМАЛЬНЫМ барам. Паранормальный (конспект): >=1.5x или <=0.5x самого ATR.
+//
+// Окно НЕ фиксировано: если среди последних 5 баров попался паранормальный,
+// берём шестой, седьмой и т.д., пока не наберётся ровно `lookback` нормальных
+// — выброшенный бар не должен уменьшать выборку. Порог считается от самой
+// оценки ATR, поэтому уточняем её итеративно: стартуем с МЕДИАНЫ ближнего
+// окна (среднее для старта не годится — один паранормальный бар задирает его
+// так, что нормальные бары уходят под порог 0.5x и выборка пустеет) и
+// пересчитываем, пока состав выборки меняется
+// (сходится за 2-3 шага; предел итераций — страховка от зацикливания на
+// пограничном баре).
+export function computeAtr(candles: DailyCandle[], lookback = 5, maxWindow = 30): number {
   if (candles.length === 0) return 0;
-  const window = candles.slice(-Math.max(lookback + 5, 10));
-  const ranges = window.map((c) => c.h - c.l);
-  const baseline = median(ranges);
-  if (baseline <= 0) return mean(candles.slice(-lookback).map((c) => c.h - c.l));
-  const normal = ranges.filter((r) => r <= baseline * 1.5 && r >= baseline * 0.5);
-  const pool = normal.length > 0 ? normal : ranges;
-  return mean(pool.slice(-lookback)) || baseline;
+  const ranges = candles.slice(-maxWindow).map((c) => c.h - c.l);
+  let est = median(ranges.slice(-Math.max(lookback * 2, 10)));
+  if (est <= 0) return 0;
+  for (let iter = 0; iter < 20; iter++) {
+    const pool: number[] = [];
+    for (let i = ranges.length - 1; i >= 0 && pool.length < lookback; i--) {
+      const r = ranges[i];
+      if (r >= 1.5 * est || r <= 0.5 * est) continue;
+      pool.push(r);
+    }
+    // Нормальных не набралось даже в максимальном окне — инструмент целиком
+    // «рваный». Берём что есть, лишь бы не вернуть ноль.
+    if (pool.length === 0) return est;
+    const next = mean(pool);
+    if (next <= 0) return est;
+    if (Math.abs(next - est) / est < 1e-9) return next;
+    est = next;
+  }
+  return est;
 }
 
 export function isParanormalBar(candle: DailyCandle, atr: number): boolean {

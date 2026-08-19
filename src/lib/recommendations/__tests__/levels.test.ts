@@ -34,6 +34,26 @@ describe("computeAtr", () => {
     const atr = computeAtr(candles, 5);
     expect(atr).toBeCloseTo(4, 5);
   });
+
+  // Конспект: выброшенный паранормальный бар не сокращает выборку — вместо
+  // него берётся ещё один бар глубже, чтобы нормальных всё равно было пять.
+  it("widens the window so `lookback` NORMAL bars are always averaged", () => {
+    // 5 старых баров по 4, затем паранормальный, затем 4 бара по 6.
+    const candles = flatSeries(5, 100, 4);
+    candles.push(candle(5, 100, 130, 70, 110)); // паранормальный, range=60
+    for (let i = 0; i < 4; i++) candles.push(candle(6 + i, 100, 103, 97, 100)); // range=6
+    // Без расширения усреднились бы только четыре шестёрки -> 6.
+    // С расширением берётся ещё и четвёрка из-за паранормального: (6*4+4)/5.
+    expect(computeAtr(candles, 5)).toBeCloseTo((6 * 4 + 4) / 5, 5);
+  });
+
+  // Затухание волатильности: слишком МАЛЫЙ бар (<=0.5 ATR) тоже паранормальный
+  // и тоже выбрасывается — на нём ATR не занижается.
+  it("drops bars that are too small (<= 0.5x ATR), not just too big", () => {
+    const candles = flatSeries(9, 100, 10);
+    candles.push(candle(9, 100, 100.5, 99.5, 100)); // range=1, это 0.1 ATR
+    expect(computeAtr(candles, 5)).toBeCloseTo(10, 5);
+  });
 });
 
 describe("isParanormalBar", () => {
