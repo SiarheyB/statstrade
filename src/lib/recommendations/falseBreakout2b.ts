@@ -48,6 +48,18 @@ export interface FalseBreakout2bThresholds {
   accumulationWindow: number;
   /** Допуск «бар коснулся уровня» при поиске прошлых касаний, в ATR. */
   touchToleranceAtr: number;
+  /** Насколько близко к уровню должен закрыться бар, чтобы считаться ретестом. */
+  retestCloseNearAtr: number;
+  /**
+   * Накопление СО СТОРОНЫ ПРОБОЯ: сколько из последних баров закрылись вплотную
+   * к уровню. Цена, которая несколько дней жмётся к уровню, готовит честный
+   * пробой — 2Б от такого подхода не работает.
+   */
+  maxBarsHuggingLevel: number;
+  /** Окно, в котором считаются «жмущиеся» бары. */
+  huggingWindow: number;
+  /** Что считается «вплотную к уровню» для этих баров, в ATR. */
+  huggingCloseAtr: number;
 }
 
 export const DEFAULT_2B_THRESHOLDS: FalseBreakout2bThresholds = {
@@ -70,6 +82,11 @@ export const DEFAULT_2B_THRESHOLDS: FalseBreakout2bThresholds = {
   accumulationRangeAtr: 1,
   accumulationWindow: 5,
   touchToleranceAtr: 0.3,
+  retestCloseNearAtr: 0.75,
+  // Два бара рядом с уровнем — ещё подход, три и больше — уже топтание.
+  maxBarsHuggingLevel: 2,
+  huggingWindow: 6,
+  huggingCloseAtr: 1,
 };
 
 export type Break2bSide = "up" | "down";
@@ -104,24 +121,27 @@ function mean(xs: number[]): number {
 }
 
 /**
- * Сколько баров назад уровня в последний раз касались, считая от пробойного
- * бара (он сам — `candles.length - 1`). Infinity, если касаний не было.
+ * Сколько баров назад уровень в последний раз ТЕСТИРОВАЛИ, считая от
+ * пробойного бара. Infinity, если ретестов не было.
  *
- * Бары САМОГО подхода (последние `skipRecent` перед пробоем) не считаются
- * касанием: разгон к уровню — часть этого же сетапа, и почти любой крупный
- * бар подхода попадает в допуск. Без этого «дальний ретест» не выполнялся бы
- * никогда — последний бар разгона всегда «трогал» уровень за день до пробоя.
+ * Ретест — это не «бар дотянулся до уровня», а «цена у уровня задержалась»:
+ * бар должен и достать до уровня, и ЗАКРЫТЬСЯ рядом с ним (closeNearAtr).
+ * Бар разгона, пролетевший мимо уровня и закрывшийся далеко, ретестом не
+ * считается — иначе условие дальнего ретеста не выполнялось бы никогда.
+ * Раньше вместо этого слепо пропускались последние N баров, и сетап проходил
+ * даже когда цена несколько дней подряд жалась к уровню перед самым пробоем.
  */
-function daysSinceLastTouch(
+function daysSinceLastRetest(
   candles: DailyCandle[],
   levelPrice: number,
   tolerance: number,
-  skipRecent: number,
+  closeNear: number,
 ): number {
   const breakIndex = candles.length - 1;
-  for (let i = breakIndex - skipRecent; i >= 0; i--) {
+  for (let i = breakIndex - 1; i >= 0; i--) {
     const c = candles[i];
-    if (c.l - tolerance <= levelPrice && c.h + tolerance >= levelPrice) return breakIndex - i;
+    const reached = c.l - tolerance <= levelPrice && c.h + tolerance >= levelPrice;
+    if (reached && Math.abs(c.c - levelPrice) <= closeNear) return breakIndex - i;
   }
   return Infinity;
 }
@@ -165,8 +185,20 @@ export function detectFalseBreakout2b(
   if (approachNetMoveAtr < th.minApproachNetMoveAtr && approachBarsRatio < th.minApproachBarsRatio) return null;
 
   // Дальний ретест: до пробоя уровень должен был долго стоять нетронутым.
-  const daysSinceTouch = daysSinceLastTouch(candles, levelPrice, atr * th.touchToleranceAtr, th.approachWindow);
+  const daysSinceTouch = daysSinceLastRetest(
+    candles,
+    levelPrice,
+    atr * th.touchToleranceAtr,
+    atr * th.retestCloseNearAtr,
+  );
   if (daysSinceTouch < th.minDaysSinceTouch) return null;
+
+  // Накопление со стороны пробоя: цена несколько дней подряд закрывалась
+  // вплотную к уровню. Это подготовка честного пробоя, а не разгон к нему.
+  const hugging = candles
+    .slice(-(th.huggingWindow + 1), -1)
+    .filter((c) => Math.abs(c.c - levelPrice) <= atr * th.huggingCloseAtr).length;
+  if (hugging > th.maxBarsHuggingLevel) return null;
 
   // Накопления ПОД УРОВНЕМ быть не должно: поджатие вплотную к уровню — это
   // подготовка честного пробоя (конспект перечисляет накопление среди

@@ -26,8 +26,8 @@ function series(overrides: { close?: number; high?: number; approachFlat?: boole
     candles.push(bar(22, 63, 65, 62, 64));
   } else {
     candles.push(bar(20, 62, 75, 61, 74));
-    candles.push(bar(21, 74, 88, 73, 87));
-    candles.push(bar(22, 87, 97, 86, 96));
+    candles.push(bar(21, 74, 84, 73, 82));
+    candles.push(bar(22, 82, 90, 81, 89));
   }
   candles.push(bar(23, 96, overrides.high ?? 106, 95, overrides.close ?? 101));
   return candles;
@@ -104,19 +104,35 @@ describe("detectFalseBreakout2b", () => {
 
   it("rejects a recent retest — the level must have stood untouched", () => {
     const candles = series();
-    // Касание уровня за 8 дней до пробоя — уже вне окна подхода, но ближе
-    // порога в 10 дней.
-    candles[15] = bar(15, 60, 100.5, 58, 62);
+    // Полноценный ретест за 8 дней до пробоя: бар достал до уровня и
+    // закрылся рядом с ним — ближе порога в 20 дней.
+    candles[15] = bar(15, 95, 100.5, 94, 98);
     expect(detectFalseBreakout2b(candles, LEVEL, ATR)).toBeNull();
   });
 
-  // Бары разгона почти всегда попадают в допуск «коснулись уровня» — если их
-  // засчитывать, дальний ретест не выполнится ни разу.
-  it("does not count the approach bars themselves as a retest", () => {
+  // Бар разгона пролетает мимо уровня и закрывается далеко — это не ретест,
+  // иначе условие дальнего ретеста не выполнялось бы никогда.
+  it("does not count a fast approach bar as a retest", () => {
     const candles = series();
-    // Последний бар подхода подошёл вплотную к уровню — это не ретест.
-    candles[22] = bar(22, 87, 99.5, 86, 98);
+    // Бар дотянулся до уровня тенью, но закрылся в 1.5 ATR от него.
+    candles[22] = bar(22, 82, 100.5, 81, 85);
     expect(detectFalseBreakout2b(candles, LEVEL, ATR)).not.toBeNull();
+  });
+
+  // А вот бар, который достал до уровня И ЗАКРЫЛСЯ рядом, — полноценный
+  // ретест: цена у уровня задержалась.
+  it("counts a bar that reached the level and closed near it as a retest", () => {
+    const candles = series();
+    candles[22] = bar(22, 82, 100.5, 81, 97);
+    expect(detectFalseBreakout2b(candles, LEVEL, ATR)).toBeNull();
+  });
+
+  // «Накопление со стороны пробоя»: цена несколько дней жмётся к уровню — это
+  // подготовка честного пробоя (живой случай DEEPUSDT 18.08.2026).
+  it("rejects when price hugged the level for days before the break", () => {
+    const candles = series();
+    for (let i = 18; i <= 22; i++) candles[i] = bar(i, 95, 99, 93, 96);
+    expect(detectFalseBreakout2b(candles, LEVEL, ATR)).toBeNull();
   });
 
   it("rejects when the price was already beyond the level the day before", () => {
