@@ -10,7 +10,7 @@
 
 import { prisma } from "@/lib/db";
 
-export type CronJob = "recommendations.recompute";
+export type CronJob = "recommendations.recompute" | "analytics.rollup";
 export type CronSource = "scheduler" | "cron";
 
 /**

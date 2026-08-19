@@ -3,8 +3,9 @@ import { prisma } from "@/lib/db";
 import { getFeedFreshness, ONLINE_THRESHOLD_MS } from "@/lib/admin";
 import { getDeployStatus } from "@/lib/deployStatus";
 import { getServerT, getTimezone } from "@/lib/i18n/server";
-import { ianaFor } from "@/lib/timezone";
-import { Users, Plug, AlertTriangle, Layers, Activity, RefreshCw, CheckCircle2 } from "lucide-react";
+import { ianaFor, offsetMinutes } from "@/lib/timezone";
+import { getTodayGlance } from "@/lib/traffic/query";
+import { Users, Plug, AlertTriangle, Layers, Activity, RefreshCw, CheckCircle2, BarChart3 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -64,6 +65,8 @@ export default async function AdminOverviewPage() {
   // Число фидов берём из freshness (он же — из маленькой rollup-таблицы), чтобы
   // не делать distinct-скан по разросшейся ObSnapshot (вешал страницу).
   const freshness = await getFeedFreshness();
+  // Посещаемость за сегодня — сводка на главной, подробности в /admin/traffic.
+  const glance = await getTodayGlance(offsetMinutes(await getTimezone()) ?? 0);
   const staleFeeds = freshness.filter((f) => f.stale);
   const deploy = await getDeployStatus();
 
@@ -158,6 +161,12 @@ export default async function AdminOverviewPage() {
           value={freshness.length}
           hint={t("admin.overview.stat.feedsHint")}
         />
+        <Stat
+          label={t("admin.overview.stat.visitorsToday")}
+          value={glance.visitors.toLocaleString(nf)}
+          side={{ label: t("admin.overview.stat.viewsToday"), value: glance.views.toLocaleString(nf) }}
+          hint={t("admin.overview.stat.visitorsTodayHint", { n: glance.botViews.toLocaleString(nf) })}
+        />
       </div>
 
       <div className="mt-8 grid gap-4 sm:grid-cols-2">
@@ -168,6 +177,15 @@ export default async function AdminOverviewPage() {
           <div>
             <div className="font-medium">{t("admin.overview.cardCollector.title")}</div>
             <div className="mt-1 text-sm text-muted">{t("admin.overview.cardCollector.desc")}</div>
+          </div>
+        </Link>
+        <Link href="/admin/traffic" className="card p-5 hover:border-accent/40 transition flex items-start gap-4">
+          <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-accent/15 text-accent shrink-0">
+            <BarChart3 size={20} />
+          </span>
+          <div>
+            <div className="font-medium">{t("admin.overview.cardTraffic.title")}</div>
+            <div className="mt-1 text-sm text-muted">{t("admin.overview.cardTraffic.desc")}</div>
           </div>
         </Link>
         <Link href="/admin/users" className="card p-5 hover:border-accent/40 transition flex items-start gap-4">

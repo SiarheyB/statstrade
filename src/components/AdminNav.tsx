@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
@@ -22,6 +22,7 @@ const LINKS = [
     { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
   { href: "/admin/announcements", key: "admin.nav.announcements", icon: Megaphone },
   { href: "/admin/support", key: "admin.nav.support", icon: Headset },
+  { href: "/admin/traffic", key: "admin.nav.traffic", icon: BarChart3 },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
   { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },

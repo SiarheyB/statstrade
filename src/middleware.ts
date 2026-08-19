@@ -1,6 +1,7 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
 import { isDemoBlocked } from "@/lib/demoAccess";
+import { trackVisit } from "@/lib/traffic/track";
 
 const COOKIE_NAME = "ts_session";
 
@@ -49,7 +50,17 @@ async function verifySessionClaims(
   }
 }
 
-export async function middleware(req: NextRequest) {
+// Статистика посещаемости: обёртка вокруг всей логики ниже. Считаем ПОСЛЕ
+// того, как основной обработчик принял решение (в т.ч. на редиректах гостя с
+// /dashboard на /login — это тоже визит), но до отдачи ответа: сюда же
+// вешаются cookie посетителя/визита. Внутри всё в try/catch — см. track.ts.
+export async function middleware(req: NextRequest, event: NextFetchEvent) {
+  const { res, claims } = await handle(req);
+  await trackVisit(req, res, event, claims);
+  return res;
+}
+
+async function handle(req: NextRequest): Promise<{ res: NextResponse; claims: SessionClaims | null }> {
   const { pathname } = req.nextUrl;
   const token = req.cookies.get(COOKIE_NAME)?.value;
   const secretStr = process.env.JWT_SECRET;
@@ -65,7 +76,7 @@ export async function middleware(req: NextRequest) {
   // переменной. Роль проверяет getAdminSession() в каждом роуте; здесь мы
   // гарантируем только то, что анонима не будет ни при каких обстоятельствах.
   if (pathname.startsWith("/api/admin") && !valid) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return { res: NextResponse.json({ error: "Not found" }, { status: 404 }), claims };
   }
 
   // Protect the dashboard and admin area (the admin-role check is enforced in
@@ -76,7 +87,7 @@ export async function middleware(req: NextRequest) {
       const url = req.nextUrl.clone();
       url.pathname = "/login";
       url.searchParams.set("next", pathname);
-      return NextResponse.redirect(url);
+      return { res: NextResponse.redirect(url), claims };
     }
   }
 
@@ -85,7 +96,7 @@ export async function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
     url.search = "";
-    return NextResponse.redirect(url);
+    return { res: NextResponse.redirect(url), claims };
   }
 
   // Демо-сессия («посмотреть без регистрации», см. lib/demoSession.ts) —
@@ -96,19 +107,22 @@ export async function middleware(req: NextRequest) {
   // в меню: спрятанный пункт всё равно открывался бы по прямому адресу.
   if (claims?.demo && isDemoBlocked(pathname)) {
     if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ error: "Раздел недоступен в демо-режиме" }, { status: 403 });
+      return { res: NextResponse.json({ error: "Раздел недоступен в демо-режиме" }, { status: 403 }), claims };
     }
     const url = req.nextUrl.clone();
     url.pathname = "/dashboard";
     url.search = "";
-    return NextResponse.redirect(url);
+    return { res: NextResponse.redirect(url), claims };
   }
 
   if (claims?.demo && !SAFE_METHODS.has(req.method) && !DEMO_ALLOWED_MUTATIONS.has(pathname)) {
-    return NextResponse.json(
-      { error: "Демо-режим: изменения недоступны. Создайте аккаунт, чтобы работать со своими данными." },
-      { status: 403 },
-    );
+    return {
+      res: NextResponse.json(
+        { error: "Демо-режим: изменения недоступны. Создайте аккаунт, чтобы работать со своими данными." },
+        { status: 403 },
+      ),
+      claims,
+    };
   }
 
   const res = NextResponse.next();
@@ -141,12 +155,22 @@ export async function middleware(req: NextRequest) {
     });
   }
 
-  return res;
+  return { res, claims };
 }
 
 export const config = {
-  // /api/:path* — включая фоновые запросы (SyncProvider и т.п.) с уже
-  // открытой вкладки, а не только переходы между страницами, иначе открытая
-  // в фоне вкладка не продлевала бы сессию и разлогинивала бы активного юзера.
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register", "/api/:path*"],
+  // Раньше здесь был точечный список (/dashboard, /admin, /login, /register,
+  // /api) — ровно то, что нужно гардам. Теперь matcher сплошной: статистика
+  // посещаемости обязана видеть и публичные страницы (лендинг, /news,
+  // /calendar, /share/…), иначе главный вопрос «сколько людей вообще заходит»
+  // остаётся без ответа. На гарды это не влияет — они по-прежнему смотрят на
+  // префикс пути; добавилось лишь продление сессии на публичных страницах.
+  // /api/:path* по-прежнему внутри: фоновые запросы (SyncProvider и т.п.) с уже
+  // открытой вкладки должны продлевать сессию, иначе открытая в фоне вкладка
+  // разлогинивала бы активного пользователя.
+  // Исключены статика Next и файлы с расширением — там нечего проверять и
+  // нечего считать.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:png|jpe?g|gif|svg|webp|avif|ico|css|js|map|txt|xml|json|woff2?|ttf)$).*)",
+  ],
 };

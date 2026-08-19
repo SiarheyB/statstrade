@@ -35,6 +35,28 @@
   крупные сделки — отдельно (`OB_TRADE_RETENTION_DAYS`), rollup — дольше
   (`ROLLUP_RETENTION_DAYS`, не задан в `docker-compose.prod.yml` → дефолт 365 дней).
 
+## Посещаемость сайта (`/admin/traffic`)
+
+- Свой счётчик, не внешняя аналитика: считает **на сервере** (`src/middleware.ts`
+  → `lib/traffic/track.ts` → внутренний POST на `/api/analytics/collect`), поэтому
+  видит и посетителей с блокировщиками, и роботов. Браузерный маячок
+  (`components/TrafficBeacon.tsx`) — второй слой: подтверждает «JS исполнился»
+  (`jsConfirmed`) и досылает переходы внутри приложения.
+- **Грабли Next 16:** заголовки `RSC: 1` / `Next-Router-Prefetch: 1` до middleware
+  НЕ доходят — фреймворк снимает их раньше. Отличать документ от служебного
+  запроса роутера приходится по `Sec-Fetch-Dest`/`Sec-Fetch-Mode`; иначе каждая
+  предзагрузка ссылки считалась бы просмотром (см. `pageViewKind`).
+- **matcher middleware сплошной** (все пути, кроме статики) — раньше был точечный
+  список. Гарды от этого не изменились: они по-прежнему смотрят на префикс пути.
+- Приёмник дёргается по `http://localhost:$PORT` (НЕ `127.0.0.1`: `next dev` на
+  macOS слушает только IPv6, запрос на IPv4 виснет).
+- В БД не хранится ни одного IP: `visitorId` — cookie `ts_vid` либо хэш IP+UA с
+  солью (`ANALYTICS_SALT`, по умолчанию `JWT_SECRET`).
+- `PageView` — самая быстрорастущая таблица; чистит её крон
+  `/api/cron/analytics` (свёртка в `TrafficDaily` + удаление старше
+  `ANALYTICS_RETENTION_DAYS`, дефолт 90). Без этой задачи в crontab таблица
+  растёт бесконечно — см. docs/SELF_HOSTING.md §9.3.
+
 ## i18n / часовой пояс — сквозной паттерн
 
 - Язык (`src/lib/i18n/`) и таймзона (`src/lib/timezone.ts`) хранятся **одинаково**:

@@ -1050,3 +1050,102 @@ model LevelSetup {
   @@index([bias])
   @@map("LevelSetup")
 }
+
+// ─── Посещаемость сайта (админ-раздел «Трафик») ──────────────────────────────
+// Своя аналитика вместо Google Analytics/Plausible: проект самохостится, внешние
+// счётчики (а) не видны из части стран аудитории, (б) режутся блокировщиками,
+// (в) вообще не показывают роботов — а на публичном сайте это половина трафика.
+// Сбор — на сервере (middleware → /api/analytics/collect), поэтому в статистику
+// попадают и посетители с блокировщиками, и краулеры.
+// Персональных данных нет: IP не хранится, только необратимый хэш внутри
+// идентификатора посетителя (см. lib/traffic/hit.ts).
+
+// Сырое событие: один просмотр страницы. Живёт ANALYTICS_RETENTION_DAYS суток
+// (по умолчанию 90), дальше остаются только суточные агрегаты TrafficDaily.
+model PageView {
+  id          String   @id @default(cuid())
+  ts          DateTime @default(now())
+  sessionId   String // визит (см. VisitSession)
+  visitorId   String // посетитель: cookie ts_vid либо хэш IP+UA за сутки
+  path        String // нормализованный путь: /share/[token], /admin/users/[id]
+  isBot       Boolean  @default(false)
+  botName     String? // "Googlebot", "GPTBot (OpenAI)", …
+  botCategory String? // search | ai | seo | social | monitor | tool | scanner | other
+  source      String // direct | search | social | referral | campaign | internal
+  refHost     String? // хост источника или значение utm_source
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  device      String // desktop | mobile | tablet | bot | unknown
+  browser     String?
+  os          String?
+  lang        String?
+  country     String?
+  authed      Boolean  @default(false) // был ли валидный сеанс на момент запроса
+  userId      String? // id пользователя, если он был авторизован
+  nav         String   @default("load") // load — полная загрузка, spa — переход внутри приложения
+
+  @@index([ts])
+  @@index([isBot, ts])
+  @@index([path, ts])
+  @@index([sessionId])
+}
+
+// Визит: цепочка просмотров одного посетителя без 30-минутных пауз. Отсюда
+// берутся отказы (визит из одной страницы), глубина, длительность, страницы
+// входа/выхода и конверсия в регистрацию.
+model VisitSession {
+  id          String   @id // = PageView.sessionId
+  visitorId   String
+  startedAt   DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  views       Int      @default(0)
+  entryPath   String
+  exitPath    String
+  isBot       Boolean  @default(false)
+  botName     String?
+  botCategory String?
+  botReason   String? // на основании чего признан роботом (для отладки эвристик)
+  // Маячок в браузере отработал → JS исполняется, это почти наверняка человек.
+  jsConfirmed Boolean  @default(false)
+  source      String
+  refHost     String?
+  referrer    String?
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  device      String
+  browser     String?
+  os          String?
+  lang        String?
+  country     String?
+  screen      String? // "1920x1080" — приходит от маячка
+  userAgent   String?
+  authed      Boolean  @default(false)
+  userId      String?
+  // Конверсии в рамках визита: регистрация / вход. Отвечает на главный вопрос
+  // «сколько из зашедших дошли до аккаунта».
+  registered  Boolean  @default(false)
+  loggedIn    Boolean  @default(false)
+
+  @@index([startedAt])
+  @@index([isBot, startedAt])
+  @@index([visitorId])
+  @@index([lastSeenAt])
+}
+
+// Суточный агрегат для долгого хранения: сырые PageView чистятся, эти строки
+// остаются. Универсальная форма scope/key, чтобы новые разрезы не требовали
+// новой таблицы и миграции.
+model TrafficDaily {
+  day      DateTime @db.Date
+  kind     String // human | bot
+  scope    String // total | path | source | refHost | device | country | bot | entry
+  key      String // "" для total, иначе значение разреза
+  views    Int      @default(0)
+  sessions Int      @default(0)
+  visitors Int      @default(0)
+
+  @@id([day, kind, scope, key])
+  @@index([day])
+}

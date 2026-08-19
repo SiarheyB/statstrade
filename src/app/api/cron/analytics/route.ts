@@ -1,0 +1,38 @@
+// Ночная свёртка посещаемости: суточные агрегаты + чистка сырых просмотров.
+// Дёргается системным кроном хоста тем же CRON_SECRET, что /api/cron/sync
+// (см. docs/SELF_HOSTING.md). Без этой задачи таблица PageView растёт вечно.
+
+import { NextResponse } from "next/server";
+import { rollupTraffic } from "@/lib/traffic/rollup";
+import { recordCronRun } from "@/lib/cronHeartbeat";
+
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
+function authorized(req: Request): boolean {
+  const secret = process.env.CRON_SECRET;
+  if (!secret) return false;
+  return req.headers.get("authorization") === `Bearer ${secret}`;
+}
+
+async function handle(req: Request) {
+  if (!process.env.CRON_SECRET) {
+    return NextResponse.json({ error: "CRON_SECRET не задан" }, { status: 500 });
+  }
+  if (!authorized(req)) {
+    return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
+  }
+  // Пересчитываем не только вчера, а последние трое суток: если сервер был
+  // выключен (домашний мини-ПК), пропущенные дни доедутся следующим прогоном.
+  const result = await rollupTraffic(3);
+  await recordCronRun("analytics.rollup", "cron");
+  return NextResponse.json({ ok: true, ...result });
+}
+
+export async function GET(req: Request) {
+  return handle(req);
+}
+
+export async function POST(req: Request) {
+  return handle(req);
+}

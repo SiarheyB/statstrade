@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope, Geist_Mono } from "next/font/google";
 import { getLocale, getTimezone } from "@/lib/i18n/server";
 import { I18nProvider } from "@/lib/i18n/provider";
+import TrafficBeacon from "@/components/TrafficBeacon";
 import "./globals.css";
 
 // Manrope — premium modern grotesk with full Cyrillic support (the UI is
@@ -48,6 +49,8 @@ export default async function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <I18nProvider locale={locale} timezone={timezone}>{children}</I18nProvider>
+        {/* Счётчик посещаемости, см. components/TrafficBeacon.tsx */}
+        <TrafficBeacon />
       </body>
     </html>
   );

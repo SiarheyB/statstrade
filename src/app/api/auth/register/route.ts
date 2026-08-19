@@ -6,6 +6,7 @@ import { badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { verifyTurnstile } from "@/lib/turnstile";
 import { MIN_PASSWORD_LENGTH, isValidPassword } from "@/lib/password";
+import { trackConversion } from "@/lib/traffic/conversion";
 
 const schema = z.object({
   email: z.string().email("Некорректный email").max(254),
@@ -55,6 +56,9 @@ export async function POST(req: Request) {
     });
 
     await createSessionCookie({ userId: user.id, email: user.email }, user.tokenVersion);
+    // Конверсия визита: по ней в /admin/traffic видно, какие источники дают не
+    // просто заходы, а регистрации.
+    await trackConversion("registered", user.id);
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {
     return serverError((err as Error).message);

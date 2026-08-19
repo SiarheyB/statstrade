@@ -5,6 +5,7 @@ import { verifyPassword, createSessionCookie, createPendingCookie } from "@/lib/
 import { badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { kickUserSync } from "@/lib/sync";
+import { trackConversion } from "@/lib/traffic/conversion";
 
 const schema = z.object({
   email: z.string().email("Некорректный email").max(254),
@@ -56,6 +57,7 @@ export async function POST(req: Request) {
     }
 
     await createSessionCookie({ userId: user.id, email: user.email }, user.tokenVersion);
+    await trackConversion("loggedIn", user.id); // отметка визита в статистике
     kickUserSync(user.id); // freshen accounts on return, fire-and-forget
     return NextResponse.json({ id: user.id, email: user.email, name: user.name });
   } catch (err) {

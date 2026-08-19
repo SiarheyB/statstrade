@@ -441,6 +441,30 @@ curl -s -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cu
 > фильтром качества и почему) видно в `/admin/recommendations` — там же ручная кнопка
 > «Пересчитать сейчас», если не хотите ждать полночи UTC.
 
+### 9.3 Свёртка статистики посещаемости (системный крон)
+Раздел `/admin/traffic` считает посещаемость по сырым событиям (`PageView`, `VisitSession`).
+Это самая быстрорастущая таблица приложения — роботы на публичном сайте генерируют строк
+больше, чем люди. Раз в сутки нужно свернуть их в агрегаты (`TrafficDaily`, хранятся
+бессрочно) и удалить сырьё старше `ANALYTICS_RETENTION_DAYS` (по умолчанию 90 суток):
+```bash
+( crontab -l 2>/dev/null; \
+  echo '20 4 * * * curl -fsS --max-time 120 -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" http://127.0.0.1:3000/api/cron/analytics >/dev/null 2>&1' \
+) | crontab -
+```
+Час не важен (задача не привязана к рыночному времени) — важно только не совпасть с бэкапом
+и пересчётом рекомендаций. Прогон захватывает последние трое суток, поэтому если мини-ПК был
+выключен, пропущенные дни досчитаются следующим запуском.
+
+Проверка вручную:
+```bash
+curl -s -H "Authorization: Bearer $(grep -E ^CRON_SECRET= ~/statstrade/.env | cut -d= -f2)" \
+  http://127.0.0.1:3000/api/cron/analytics
+```
+> Сам сбор кроном не управляется — события пишет приложение на каждом запросе страницы
+> (middleware → `/api/analytics/collect`). Если в `/admin/traffic` висит предупреждение
+> «просмотров нет», проверьте `ANALYTICS_ENABLED` и что порт в `ANALYTICS_INGEST_URL`
+> совпадает с портом контейнера.
+
 ---
 
 ## 10. Бэкап базы данных
@@ -513,6 +537,7 @@ sudo tailscale funnel status
 - [ ] `ENABLE_SCHEDULER=false` в `.env`, в crontab задача синхронизации бирж (`/api/cron/sync`).
 - [ ] (если нужна фича «Рекомендации») `OB_SCAN_ALL_USDT_PAIRS=true` в `.env`, в crontab задача
       пересчёта уровней (`/api/cron/recommendations`, см. §9.2).
+- [ ] Задача свёртки посещаемости в cron (`/api/cron/analytics`, см. §9.3).
 - [ ] Авто-бэкап БД в cron.
 - [ ] Проверен авто-деплой: тестовый коммит в `main` → через пару минут изменения на сайте.
 ```

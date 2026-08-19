@@ -27,6 +27,11 @@ vi.mock("@/lib/admin", () => ({
   getFeedFreshness: vi.fn(),
 }));
 
+// Сводка посещаемости на главной админки (см. lib/traffic/query.ts).
+vi.mock("@/lib/traffic/query", () => ({
+  getTodayGlance: async () => ({ visitors: 7, views: 19, botViews: 4 }),
+}));
+
 describe("AdminOverviewPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
