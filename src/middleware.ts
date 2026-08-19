@@ -2,6 +2,7 @@ import { NextResponse, type NextFetchEvent, type NextRequest } from "next/server
 import { SignJWT, jwtVerify } from "jose";
 import { isDemoBlocked } from "@/lib/demoAccess";
 import { trackVisit } from "@/lib/traffic/track";
+import { isScannerPath } from "@/lib/traffic/bots";
 
 const COOKIE_NAME = "ts_session";
 
@@ -55,6 +56,21 @@ async function verifySessionClaims(
 // /dashboard на /login — это тоже визит), но до отдачи ответа: сюда же
 // вешаются cookie посетителя/визита. Внутри всё в try/catch — см. track.ts.
 export async function middleware(req: NextRequest, event: NextFetchEvent) {
+  // Пути, по которым ходят только сканеры уязвимостей (/wp-login.php, /.env,
+  // /phpmyadmin — таких маршрутов у приложения нет и не будет). Отвечаем сразу
+  // коротким 404, не поднимая рендер страницы 404: на домашнем мини-ПК это
+  // заметная разница, когда бот перебирает сотни путей подряд. В статистику
+  // такой запрос всё равно попадает — по нему в /admin/traffic видно, что сайт
+  // щупают, и срабатывает оповещение о всплеске сканеров.
+  if (isScannerPath(req.nextUrl.pathname)) {
+    const blocked = new NextResponse("Not found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    });
+    await trackVisit(req, blocked, event, null);
+    return blocked;
+  }
+
   const { res, claims } = await handle(req);
   await trackVisit(req, res, event, claims);
   return res;

@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { rollupTraffic } from "@/lib/traffic/rollup";
 import { recordCronRun } from "@/lib/cronHeartbeat";
+import { runTrafficAlerts } from "@/lib/traffic/alerts";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -25,8 +26,11 @@ async function handle(req: Request) {
   // Пересчитываем не только вчера, а последние трое суток: если сервер был
   // выключен (домашний мини-ПК), пропущенные дни доедутся следующим прогоном.
   const result = await rollupTraffic(3);
+  // Суточные проверки (в т.ч. обвал посещаемости) — здесь: сравнение с
+  // недельным средним имеет смысл раз в сутки, а не на каждом событии.
+  const alerts = await runTrafficAlerts("daily");
   await recordCronRun("analytics.rollup", "cron");
-  return NextResponse.json({ ok: true, ...result });
+  return NextResponse.json({ ok: true, ...result, alerts: alerts.map((a) => a.kind) });
 }
 
 export async function GET(req: Request) {

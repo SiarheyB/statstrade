@@ -17,6 +17,8 @@ export type TrafficReport = {
   sessions: SessionStats;
   /** Изменение к предыдущему периоду той же длины: null — сравнивать не с чем. */
   deltas: { views: number | null; visitors: number | null; sessions: number | null };
+  /** Сами цифры прошлого периода — чтобы «−40%» можно было прочитать как «было 50, стало 30». */
+  previous: { views: number; visitors: number; sessions: number; registered: number };
   series: SeriesPoint[];
   pages: PageRow[];
   sources: SourceRow[];
@@ -72,6 +74,12 @@ export async function getTrafficReport(
       views: delta(totals.humanViews, prevTotals.humanViews),
       visitors: delta(totals.humanVisitors, prevTotals.humanVisitors),
       sessions: delta(sessions.sessions, prevSessions.sessions),
+    },
+    previous: {
+      views: prevTotals.humanViews,
+      visitors: prevTotals.humanVisitors,
+      sessions: prevSessions.sessions,
+      registered: prevSessions.registered,
     },
     series,
     pages,

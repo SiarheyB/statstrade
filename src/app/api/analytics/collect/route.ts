@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { recordHit } from "@/lib/traffic/ingest";
+import { maybeRunFastAlerts } from "@/lib/traffic/alerts";
 import { ingestKey } from "@/lib/traffic/track";
 import type { TrafficHit } from "@/lib/traffic/hit";
 
@@ -54,5 +55,8 @@ export async function POST(req: Request) {
   if (!parsed.success) return NextResponse.json({ error: "bad payload" }, { status: 400 });
 
   const result = await recordHit(parsed.data as TrafficHit);
+  // Между делом (не чаще раза в 15 минут) проверяем аномалии: всплеск сканеров
+  // и остановку сбора. Отдельный крон ради этого не нужен, см. lib/traffic/alerts.ts.
+  maybeRunFastAlerts();
   return NextResponse.json({ ok: true, result });
 }

@@ -8,6 +8,21 @@ import { parseUa, primaryLang } from "./ua";
 import { classifySource, type SourceKind } from "./referrer";
 import { normalizePath } from "./paths";
 
+/**
+ * Режим без cookie. По умолчанию счётчик ставит две технические cookie
+ * (посетитель + визит) — без них не отличить «10 заходов одного человека» от
+ * «10 разных людей» дольше суток.
+ *
+ * ANALYTICS_COOKIES=false переводит сбор в полностью бескуковый режим: никакие
+ * cookie не ставятся и не читаются, идентификатор считается как хэш IP+UA с
+ * солью и живёт ровно сутки. Возвращаемость при этом не отслеживается — зато
+ * не нужен баннер согласия (в ЕС первая же аналитическая cookie формально
+ * требует согласия пользователя).
+ */
+export function cookiesEnabled(): boolean {
+  return process.env.ANALYTICS_COOKIES !== "false";
+}
+
 /** Cookie идентификатора посетителя (год) и текущего визита (30 минут). */
 export const VISITOR_COOKIE = "ts_vid";
 export const SESSION_COOKIE = "ts_sid";
@@ -60,6 +75,37 @@ export async function shortHash(input: string): Promise<string> {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+// Заголовки, в которых прокси/CDN сообщает страну посетителя. Сам сервер
+// определить её не может (GeoIP-базы в приложении нет и не будет — это
+// десятки мегабайт, которые надо ещё и обновлять), поэтому страна появляется
+// в статистике, только если трафик идёт через Cloudflare или другой CDN,
+// проставляющий такой заголовок. Без него колонка просто пустая, см.
+// docs/SELF_HOSTING.md.
+const COUNTRY_HEADERS = [
+  "cf-ipcountry", // Cloudflare (в т.ч. бесплатный тариф)
+  "x-vercel-ip-country",
+  "x-geo-country",
+  "x-country-code",
+  "x-appengine-country",
+  "fastly-client-country",
+];
+
+// Заглушки, которыми CDN отвечает, когда страну определить не удалось:
+// XX — неизвестно, T1 — выход из Tor, ZZ/A1/A2 — анонимайзеры и спутник.
+const UNKNOWN_COUNTRIES = new Set(["XX", "T1", "ZZ", "A1", "A2", "AP", "EU"]);
+
+/** Двухбуквенный код страны из заголовков CDN, либо null. */
+export function countryFromHeaders(h: Headers): string | null {
+  for (const name of COUNTRY_HEADERS) {
+    const raw = h.get(name);
+    if (!raw) continue;
+    const code = raw.trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(code) || UNKNOWN_COUNTRIES.has(code)) continue;
+    return code;
+  }
+  return null;
 }
 
 /** IP клиента из заголовков прокси (nginx/Cloudflare/туннель). */
@@ -119,8 +165,11 @@ export async function buildHit(input: BuildHitInput): Promise<BuiltHit> {
   const dayKey = now.toISOString().slice(0, 10);
   const halfHour = Math.floor(now.getTime() / (SESSION_MAX_AGE * 1000));
 
-  const visitorId = input.visitorCookie || `h${await shortHash(`${ipHash}|${dayKey}`)}`;
-  const sessionId = input.sessionCookie || `s${await shortHash(`${ipHash}|${halfHour}`)}`;
+  // В бескуковом режиме присланные cookie игнорируем целиком: иначе после
+  // выключения режима старые значения продолжали бы «узнавать» посетителей.
+  const withCookies = cookiesEnabled();
+  const visitorId = (withCookies && input.visitorCookie) || `h${await shortHash(`${ipHash}|${dayKey}`)}`;
+  const sessionId = (withCookies && input.sessionCookie) || `s${await shortHash(`${ipHash}|${halfHour}`)}`;
 
   const src = classifySource(
     input.refererOverride ?? headers.get("referer"),
@@ -151,7 +200,7 @@ export async function buildHit(input: BuildHitInput): Promise<BuiltHit> {
       browser: uaInfo.browser,
       os: uaInfo.os,
       lang: primaryLang(headers.get("accept-language")),
-      country: headers.get("cf-ipcountry") || headers.get("x-vercel-ip-country") || null,
+      country: countryFromHeaders(headers),
       authed: input.authed ?? false,
       userId: input.userId ?? null,
       userAgent: ua ? ua.slice(0, 400) : null,

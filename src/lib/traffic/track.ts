@@ -10,7 +10,7 @@
 // через waitUntil — ответ пользователю оно не задерживает.
 
 import type { NextRequest, NextFetchEvent, NextResponse } from "next/server";
-import { buildHit, shortHash, SESSION_COOKIE, SESSION_MAX_AGE, VISITOR_COOKIE, VISITOR_MAX_AGE } from "./hit";
+import { buildHit, cookiesEnabled, shortHash, SESSION_COOKIE, SESSION_MAX_AGE, VISITOR_COOKIE, VISITOR_MAX_AGE } from "./hit";
 import { isTrackablePath } from "./paths";
 
 function ingestUrl(): string {
@@ -98,15 +98,19 @@ export async function trackVisit(
       nav,
     });
 
-    const secure = process.env.NODE_ENV === "production";
-    // httpOnly: cookie нужна только серверу; из JS её читать незачем.
-    res.cookies.set(VISITOR_COOKIE, built.visitorId, {
-      httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: VISITOR_MAX_AGE,
-    });
-    // Скользящие 30 минут: пауза дольше — и это уже следующий визит.
-    res.cookies.set(SESSION_COOKIE, built.sessionId, {
-      httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE,
-    });
+    // ANALYTICS_COOKIES=false — бескуковый режим (см. hit.ts): ничего не ставим,
+    // идентификатор целиком считается из хэша.
+    if (cookiesEnabled()) {
+      const secure = process.env.NODE_ENV === "production";
+      // httpOnly: cookie нужна только серверу; из JS её читать незачем.
+      res.cookies.set(VISITOR_COOKIE, built.visitorId, {
+        httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: VISITOR_MAX_AGE,
+      });
+      // Скользящие 30 минут: пауза дольше — и это уже следующий визит.
+      res.cookies.set(SESSION_COOKIE, built.sessionId, {
+        httpOnly: true, secure, sameSite: "lax", path: "/", maxAge: SESSION_MAX_AGE,
+      });
+    }
 
     // Без NextFetchEvent отправлять некуда и незачем: в реальном рантайме он
     // есть всегда, а его отсутствие означает вызов middleware напрямую из

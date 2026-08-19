@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { Activity, Bot, Users, Eye, LogIn, Timer, MousePointerClick } from "lucide-react";
+import { Activity, Bot, Users, Eye, LogIn, Timer, MousePointerClick, Download } from "lucide-react";
 import { getServerT, getTimezone } from "@/lib/i18n/server";
 import { offsetMinutes } from "@/lib/timezone";
 import { getTrafficReport } from "@/lib/traffic/report";
 import { isPeriod, PERIODS, type PeriodKey } from "@/lib/traffic/periods";
 import type { Audience } from "@/lib/traffic/query";
 import { retentionDays } from "@/lib/traffic/ingest";
+import { cookiesEnabled } from "@/lib/traffic/hit";
 import TrafficLive from "@/components/admin/TrafficLive";
 
 export const dynamic = "force-dynamic";
@@ -39,6 +40,9 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
   const botShare = r.totals.views ? r.totals.botViews / r.totals.views : 0;
 
   const href = (p: PeriodKey, a: Audience) => `/admin/traffic?p=${p}&a=${a}`;
+  // Цифра прошлого периода рядом с процентом изменения: «−40%» без «было 50»
+  // читается как гадание. Для «всего времени» сравнивать не с чем.
+  const was = (n: number) => (period === "all" ? undefined : t("admin.traffic.was", { n: num(n) }));
   const bucketLabel = (iso: string) => {
     // Значения уже сдвинуты в зону админа на стороне SQL — берём UTC-части,
     // иначе сдвиг применился бы дважды (см. CLAUDE.md, раздел про таймзону).
@@ -93,21 +97,41 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
         ))}
       </div>
 
+      {/* Выгрузка в CSV: сравнивать «до и после публикации», строить свои
+          графики и хранить историю удобнее в таблице, а не в этом разделе. */}
+      <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted">
+        <Download size={14} />
+        <span>{t("admin.traffic.export")}:</span>
+        {(["days", "pages", "sources", "bots", "visits"] as const).map((what) => (
+          <a
+            key={what}
+            href={`/api/admin/traffic/export?what=${what}&p=${period}&a=${audience}&tz=${tzOffsetMin}`}
+            className="px-2 py-1 rounded-md bg-surface-2 hover:text-fg transition"
+          >
+            {t(`admin.traffic.export.${what}`)}
+          </a>
+        ))}
+      </div>
+
       <TrafficLive initial={r.live} />
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat icon={<Users size={16} />} label={t("admin.traffic.kpi.visitors")} value={num(r.totals.humanVisitors)}
-          delta={r.deltas.visitors} hint={t("admin.traffic.kpi.visitorsHint", { n: num(r.sessions.newVisitors) })} />
+          delta={r.deltas.visitors} hint={t("admin.traffic.kpi.visitorsHint", { n: num(r.sessions.newVisitors) })}
+          was={was(r.previous.visitors)} />
         <Stat icon={<MousePointerClick size={16} />} label={t("admin.traffic.kpi.sessions")} value={num(r.sessions.sessions)}
-          delta={r.deltas.sessions} hint={t("admin.traffic.kpi.sessionsHint", { n: pct(r.sessions.bounceRate) })} />
+          delta={r.deltas.sessions} hint={t("admin.traffic.kpi.sessionsHint", { n: pct(r.sessions.bounceRate) })}
+          was={was(r.previous.sessions)} />
         <Stat icon={<Eye size={16} />} label={t("admin.traffic.kpi.views")} value={num(r.totals.humanViews)}
-          delta={r.deltas.views} hint={t("admin.traffic.kpi.viewsHint", { n: r.sessions.viewsPerSession.toFixed(1) })} />
+          delta={r.deltas.views} hint={t("admin.traffic.kpi.viewsHint", { n: r.sessions.viewsPerSession.toFixed(1) })}
+          was={was(r.previous.views)} />
         <Stat icon={<Timer size={16} />} label={t("admin.traffic.kpi.duration")} value={mmss(r.sessions.avgDurationSec)}
           hint={t("admin.traffic.kpi.durationHint")} />
         <Stat icon={<LogIn size={16} />} label={t("admin.traffic.kpi.registered")} value={num(r.sessions.registered)}
           hint={t("admin.traffic.kpi.registeredHint", {
             n: r.sessions.sessions ? pct(r.sessions.registered / r.sessions.sessions) : "0%",
-          })} />
+          })}
+          was={was(r.previous.registered)} />
         <Stat icon={<LogIn size={16} />} label={t("admin.traffic.kpi.loggedIn")} value={num(r.sessions.loggedIn)}
           hint={t("admin.traffic.kpi.loggedInHint")} />
         <Stat icon={<Bot size={16} />} label={t("admin.traffic.kpi.bots")} value={pct(botShare)}
@@ -185,7 +209,14 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
         {/* Страна известна, только если перед приложением стоит прокси, который
             её проставляет (Cloudflare) — иначе карточку не показываем вовсе. */}
         {r.countries.some((c) => c.key !== "\u2014") && (
-          <Card title={t("admin.traffic.countries")}><Bars rows={r.countries} fmt={num} pct={pct} empty={t("admin.traffic.empty")} /></Card>
+          <Card title={t("admin.traffic.countries")}>
+            <Bars
+              rows={r.countries.map((c) => ({ ...c, key: c.key === "\u2014" ? t("admin.traffic.countryUnknown") : countryLabel(c.key, locale) }))}
+              fmt={num}
+              pct={pct}
+              empty={t("admin.traffic.empty")}
+            />
+          </Card>
         )}
       </div>
 
@@ -216,7 +247,9 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
               v.entryPath,
               v.exitPath,
               num(v.views),
-              [v.device, v.browser, v.os].filter(Boolean).join(" · "),
+              [v.country ? countryLabel(v.country, locale).split(" ")[0] : null, v.device, v.browser, v.os]
+                .filter(Boolean)
+                .join(" · "),
             ])}
             empty={t("admin.traffic.empty")}
           />
@@ -224,10 +257,25 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
       </div>
 
       <p className="mt-6 text-xs text-muted">
-        {t("admin.traffic.footnote", { days: retentionDays() })}
+        {t("admin.traffic.footnote", { days: retentionDays() })}{" "}
+        {cookiesEnabled() ? t("admin.traffic.footnoteCookies") : t("admin.traffic.footnoteCookieless")}
       </p>
     </div>
   );
+}
+
+// Код страны → «🇩🇪 Германия». Флаг складывается из regional indicator symbols
+// (латинская буква + 0x1F1A5), название — через Intl, без своих словарей.
+function countryLabel(code: string, locale: string): string {
+  if (!/^[A-Z]{2}$/.test(code)) return code;
+  const flag = String.fromCodePoint(...[...code].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65));
+  let name = code;
+  try {
+    name = new Intl.DisplayNames([locale === "ru" ? "ru" : "en"], { type: "region" }).of(code) ?? code;
+  } catch {
+    // экзотический код, которого не знает Intl — покажем как есть
+  }
+  return `${flag} ${name}`;
 }
 
 function strParam(v: string | string[] | undefined): string | null {
@@ -240,8 +288,8 @@ function mmss(sec: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-function Stat({ icon, label, value, hint, delta }: {
-  icon: React.ReactNode; label: string; value: string; hint?: string; delta?: number | null;
+function Stat({ icon, label, value, hint, delta, was }: {
+  icon: React.ReactNode; label: string; value: string; hint?: string; delta?: number | null; was?: string;
 }) {
   return (
     <div className="card p-4">
@@ -258,6 +306,7 @@ function Stat({ icon, label, value, hint, delta }: {
         )}
       </div>
       {hint && <div className="mt-1 text-xs text-muted">{hint}</div>}
+      {was && <div className="text-xs text-faint">{was}</div>}
     </div>
   );
 }

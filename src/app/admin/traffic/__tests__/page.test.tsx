@@ -20,6 +20,7 @@ const report = (over: Partial<TrafficReport> = {}): TrafficReport => ({
     registered: 2, loggedIn: 5, jsConfirmed: 28, newVisitors: 18,
   },
   deltas: { views: 0.2, visitors: -0.1, sessions: null },
+  previous: { views: 80, visitors: 28, sessions: 30, registered: 1 },
   series: [{ bucket: "2026-08-18T00:00:00.000Z", humanViews: 40, humanVisitors: 12, botViews: 10 }],
   pages: [{ path: "/", views: 60, visitors: 20, entries: 18, bounceRate: 0.3 }],
   sources: [{ source: "search", refHost: "google.com", sessions: 12, visitors: 10, bounceRate: 0.2, registered: 1 }],
@@ -54,6 +55,19 @@ describe("AdminTrafficPage", () => {
     expect(screen.getAllByText(/google\.com/).length).toBeGreaterThan(0);
     expect(screen.getByText("/register")).toBeInTheDocument();
     expect(screen.getByTestId("live")).toBeInTheDocument();
+    // Цифры прошлого периода подписаны рядом с процентом изменения.
+    expect(screen.getAllByText(/admin\.traffic\.was/).length).toBeGreaterThan(0);
+  });
+
+  it("даёт ссылки на выгрузку CSV с текущим периодом и аудиторией", async () => {
+    mockReport.mockResolvedValue(report());
+    const { container } = render(
+      (await AdminTrafficPage({ searchParams: Promise.resolve({ p: "30d", a: "bot" }) })) as React.ReactElement,
+    );
+    const link = container.querySelector('a[href*="/api/admin/traffic/export"]') as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toContain("p=30d");
+    expect(link.getAttribute("href")).toContain("a=bot");
+    expect(link.getAttribute("href")).toContain("tz=180");
   });
 
   it("период и аудитория читаются из URL", async () => {

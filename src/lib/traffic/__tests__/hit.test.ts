@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildHit, shortHash, clientIpFromHeaders } from "@/lib/traffic/hit";
+import { buildHit, shortHash, clientIpFromHeaders, countryFromHeaders } from "@/lib/traffic/hit";
 
 const CHROME =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
@@ -21,6 +21,23 @@ describe("clientIpFromHeaders", () => {
     expect(clientIpFromHeaders(new Headers({ "cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2" }))).toBe("1.1.1.1");
     expect(clientIpFromHeaders(new Headers({ "x-forwarded-for": "2.2.2.2, 10.0.0.1" }))).toBe("2.2.2.2");
     expect(clientIpFromHeaders(new Headers())).toBe("unknown");
+  });
+});
+
+describe("countryFromHeaders", () => {
+  it("берёт страну из заголовка CDN", () => {
+    expect(countryFromHeaders(new Headers({ "cf-ipcountry": "de" }))).toBe("DE");
+    expect(countryFromHeaders(new Headers({ "x-vercel-ip-country": "BY" }))).toBe("BY");
+  });
+
+  it("заглушки CDN («страна неизвестна», Tor, анонимайзер) за страну не считаются", () => {
+    expect(countryFromHeaders(new Headers({ "cf-ipcountry": "XX" }))).toBeNull();
+    expect(countryFromHeaders(new Headers({ "cf-ipcountry": "T1" }))).toBeNull();
+    expect(countryFromHeaders(new Headers({ "cf-ipcountry": "RUS" }))).toBeNull(); // не двухбуквенный код
+  });
+
+  it("без CDN страны нет — и это нормально, колонка просто пустая", () => {
+    expect(countryFromHeaders(new Headers())).toBeNull();
   });
 });
 
@@ -87,6 +104,21 @@ describe("buildHit", () => {
     const a = await buildHit({ url: new URL("https://tradestats.app/"), headers: headers({ "x-forwarded-for": "5.5.5.5" }), now: NOW });
     const b = await buildHit({ url: new URL("https://tradestats.app/"), headers: headers({ "x-forwarded-for": "6.6.6.6" }), now: NOW });
     expect(a.visitorId).not.toBe(b.visitorId);
+  });
+
+  it("бескуковый режим: присланные cookie игнорируются, идентификатор считается сам", async () => {
+    process.env.ANALYTICS_COOKIES = "false";
+    const { visitorId, sessionId } = await buildHit({
+      url: new URL("https://tradestats.app/"),
+      headers: headers(),
+      visitorCookie: "vid-1",
+      sessionCookie: "sid-1",
+      now: NOW,
+    });
+    expect(visitorId).not.toBe("vid-1");
+    expect(visitorId.startsWith("h")).toBe(true);
+    expect(sessionId.startsWith("s")).toBe(true);
+    delete process.env.ANALYTICS_COOKIES;
   });
 
   it("токен публичной ссылки в событие не попадает", async () => {
