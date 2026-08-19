@@ -13,6 +13,15 @@ import { useI18n } from "@/lib/i18n/provider";
 // Live per-account scan progress, mirrored from the chunked sync endpoint.
 export type SyncProg = { done: number; total: number; imported: number; phase: string | null };
 
+/**
+ * Ход импорта отчёта MetaTrader.
+ *
+ * `upload` — файл уходит на сервер, процент известен точно; `processing` —
+ * сервер разбирает отчёт и пишет сделки, сколько это займёт заранее не
+ * известно, поэтому фаза показывается «бегущей» полосой без процентов.
+ */
+export type ImportProg = { phase: "upload" | "processing"; loaded: number; total: number };
+
 type SyncAccount = {
   id: string;
   source: string;
@@ -24,6 +33,9 @@ type SyncAccount = {
 
 type Ctx = {
   progress: Record<string, SyncProg>;
+  /** Импорты отчётов, идущие прямо сейчас, по id аккаунта. */
+  importing: Record<string, ImportProg>;
+  importReport: (accountId: string, file: File) => Promise<void>;
   syncing: Record<string, boolean>;
   anySyncing: boolean;
   // Bumped (to Date.now()) whenever any account scan finishes, so pages can
@@ -53,6 +65,7 @@ const isMt = (s: string) => s === "mt4" || s === "mt5";
 export default function SyncProvider({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const [progress, setProgress] = useState<Record<string, SyncProg>>({});
+  const [importing, setImporting] = useState<Record<string, ImportProg>>({});
   const [syncing, setSyncing] = useState<Record<string, boolean>>({});
   const [completedAt, setCompletedAt] = useState(0);
   const [notice, setNotice] = useState<string | null>(null);
@@ -105,6 +118,72 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     [t],
   );
 
+  /**
+   * Импорт отчёта MetaTrader. Живёт здесь, а не на странице счетов, ровно по
+   * той же причине, что и синк: провайдер смонтирован в layout дашборда, и
+   * загрузка продолжается, когда пользователь уходит на другую страницу — на
+   * самой странице запрос обрывался бы вместе с её размонтированием.
+   *
+   * XMLHttpRequest, а не fetch: нужен прогресс ОТПРАВКИ файла, а fetch его не
+   * отдаёт (upload-стримы в браузерах пока недоступны без ReadableStream-дуплекса).
+   */
+  const importReport = useCallback(
+    (accountId: string, file: File) =>
+      new Promise<void>((resolve) => {
+        if (importing[accountId]) return resolve();
+        setImporting((s) => ({ ...s, [accountId]: { phase: "upload", loaded: 0, total: file.size } }));
+
+        const fd = new FormData();
+        fd.append("file", file);
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `/api/accounts/${accountId}/import`);
+
+        xhr.upload.onprogress = (e) => {
+          if (!e.lengthComputable) return;
+          setImporting((s) => ({
+            ...s,
+            [accountId]: { phase: "upload", loaded: e.loaded, total: e.total },
+          }));
+        };
+        // Файл ушёл целиком — дальше сервер разбирает отчёт и пишет сделки.
+        xhr.upload.onload = () => {
+          setImporting((s) => ({
+            ...s,
+            [accountId]: { phase: "processing", loaded: file.size, total: file.size },
+          }));
+        };
+
+        const finish = (message: string | null) => {
+          setImporting((s) => {
+            const next = { ...s };
+            delete next[accountId];
+            return next;
+          });
+          if (message) setNotice(message);
+          setCompletedAt(Date.now());
+          resolve();
+        };
+
+        xhr.onload = () => {
+          let data: { error?: string; imported?: number; skipped?: number } = {};
+          try {
+            data = JSON.parse(xhr.responseText);
+          } catch {
+            // Пустой или битый ответ — сообщение ниже всё равно осмысленное.
+          }
+          finish(
+            xhr.status >= 200 && xhr.status < 300
+              ? t("acc.mt.imported", { n: data.imported ?? 0, skipped: data.skipped ?? 0 })
+              : (data.error ?? t("settings.saveError")),
+          );
+        };
+        xhr.onerror = () => finish(t("settings.saveError"));
+        xhr.onabort = () => finish(null);
+        xhr.send(fd);
+      }),
+    [importing, t],
+  );
+
   const syncAll = useCallback(async () => {
     const res = await fetch("/api/accounts");
     if (!res.ok) return;
@@ -144,11 +223,38 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
     };
   }, [syncAccount]);
 
+  // Переход между страницами дашборда импорт переживает (провайдер живёт в
+  // layout), а вот перезагрузка или закрытие вкладки его оборвёт — на этот
+  // случай браузер спросит подтверждение.
+  useEffect(() => {
+    if (Object.keys(importing).length === 0) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      // Текст своим сообщением браузеры давно не показывают, но сам факт
+      // непустого returnValue включает системный диалог.
+      e.returnValue = t("acc.mt.import.leaveWarning");
+      return e.returnValue;
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [importing, t]);
+
   const anySyncing = Object.keys(syncing).length > 0;
 
   return (
     <SyncCtx.Provider
-      value={{ progress, syncing, anySyncing, completedAt, notice, setNotice, syncAccount, syncAll }}
+      value={{
+        progress,
+        importing,
+        importReport,
+        syncing,
+        anySyncing,
+        completedAt,
+        notice,
+        setNotice,
+        syncAccount,
+        syncAll,
+      }}
     >
       {children}
     </SyncCtx.Provider>

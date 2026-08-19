@@ -15,9 +15,12 @@ vi.mock("@/lib/i18n/provider", () => ({
 
 const mockSyncAccount = vi.fn();
 const mockSetNotice = vi.fn();
+const mockImportReport = vi.fn();
 let syncState = {
   progress: {} as Record<string, { done: number; total: number; imported: number; phase: string | null }>,
   syncing: {} as Record<string, boolean>,
+  // Импорт отчёта тоже идёт через провайдер — чтобы переживать уход со страницы.
+  importing: {} as Record<string, { phase: "upload" | "processing"; loaded: number; total: number }>,
   completedAt: 0,
   notice: null as string | null,
 };
@@ -26,6 +29,8 @@ vi.mock("@/components/SyncProvider", () => ({
   useSync: () => ({
     progress: syncState.progress,
     syncing: syncState.syncing,
+    importing: syncState.importing,
+    importReport: mockImportReport,
     completedAt: syncState.completedAt,
     notice: syncState.notice,
     setNotice: mockSetNotice,
@@ -75,6 +80,7 @@ beforeEach(() => {
   syncState = {
     progress: {},
     syncing: {},
+    importing: {},
     completedAt: 0,
     notice: null,
   };
@@ -195,5 +201,47 @@ describe("AccountsPage", () => {
     const btn = noticeBox?.querySelector("button");
     if (btn) fireEvent.click(btn);
     expect(mockSetNotice).toHaveBeenCalledWith(null);
+  });
+});
+
+// Импорт отчёта показывает прогресс и не блокирует уход со страницы: сама
+// загрузка живёт в SyncProvider (layout дашборда), карточка лишь отражает её
+// состояние.
+describe("AccountsPage — прогресс импорта", () => {
+  it("shows the upload percentage while the file is being sent", async () => {
+    syncState.importing = { "acc-mt": { phase: "upload", loaded: 512, total: 1024 } };
+    global.fetch = vi.fn((url: string) => {
+      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    expect(await screen.findByText("acc.mt.import.uploading")).toBeInTheDocument();
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  // На разборе отчёта сервер не сообщает прогресс, поэтому процент не рисуем —
+  // выдуманное число хуже честной «бегущей» полосы.
+  it("shows the processing phase without a percentage", async () => {
+    syncState.importing = { "acc-mt": { phase: "processing", loaded: 1024, total: 1024 } };
+    global.fetch = vi.fn((url: string) => {
+      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    expect(await screen.findByText("acc.mt.import.processing")).toBeInTheDocument();
+    expect(screen.queryByText("100%")).not.toBeInTheDocument();
+  });
+
+  it("renders no import progress when nothing is running", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    await screen.findByText("My MT4");
+    expect(screen.queryByText("acc.mt.import.uploading")).not.toBeInTheDocument();
   });
 });

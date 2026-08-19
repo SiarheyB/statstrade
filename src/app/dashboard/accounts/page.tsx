@@ -15,7 +15,7 @@ import {
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
-import { useSync } from "@/components/SyncProvider";
+import { useSync, type ImportProg } from "@/components/SyncProvider";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchangeIds";
 
 // Ключевые слова, указывающие на ошибку прав доступа API-ключа.
@@ -83,7 +83,8 @@ export default function AccountsPage() {
   const { t } = useI18n();
   // Exchange syncing is driven by the dashboard-level SyncProvider so a running
   // scan survives navigation between dashboard pages.
-  const { progress, syncing, completedAt, notice, setNotice, syncAccount } = useSync();
+  const { progress, syncing, importing, importReport, completedAt, notice, setNotice, syncAccount } =
+    useSync();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -142,22 +143,9 @@ export default function AccountsPage() {
     }
   }
 
-  // Import another MetaTrader report into an existing MT account.
-  async function importReport(id: string, file: File) {
-    setBusy(id);
-    setNotice(null);
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await fetch(`/api/accounts/${id}/import`, { method: "POST", body: fd });
-      const data = await res.json();
-      if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
-      else setNotice(t("acc.mt.imported", { n: data.imported, skipped: data.skipped }));
-    } finally {
-      setBusy(null);
-      load();
-    }
-  }
+  // Импорт отчёта живёт в SyncProvider (layout дашборда): загрузка должна
+  // продолжаться, когда пользователь уходит с этой страницы, а вместе с её
+  // размонтированием запрос бы оборвался.
 
   async function remove(id: string) {
     if (!confirm(t("acc.confirmDelete"))) return;
@@ -264,10 +252,10 @@ export default function AccountsPage() {
                         type="file"
                         accept=".htm,.html,.html"
                         className="hidden"
-                        disabled={busy === a.id}
+                        disabled={busy === a.id || !!importing[a.id]}
                         onChange={(e) => {
                           const f = e.target.files?.[0];
-                          if (f) importReport(a.id, f);
+                          if (f) void importReport(a.id, f);
                           e.currentTarget.value = "";
                         }}
                       />
@@ -342,6 +330,8 @@ export default function AccountsPage() {
                   phase={progress[a.id].phase}
                 />
               )}
+
+              {importing[a.id] && <ImportProgressBar prog={importing[a.id]} />}
 
               {!isMtSource(a.source) && (
                 <div className="flex items-center gap-3 mt-3 pt-3 border-t border-border text-xs">
@@ -834,6 +824,50 @@ function PermissionErrorBanner({
           </details>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Ход импорта отчёта. Две фазы с разной природой прогресса: отправка файла
+ * измерима в байтах, а разбор отчёта на сервере — нет, поэтому там вместо
+ * процентов бежит анимированная полоса.
+ */
+function ImportProgressBar({ prog }: { prog: ImportProg }) {
+  const { t } = useI18n();
+  const uploading = prog.phase === "upload";
+  const pct = prog.total > 0 ? Math.min(100, Math.round((prog.loaded / prog.total) * 100)) : 0;
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between text-xs mb-1.5">
+        <span className="inline-flex items-center gap-1.5 text-accent font-medium">
+          <Upload size={12} className="animate-pulse" />
+          {uploading ? t("acc.mt.import.uploading") : t("acc.mt.import.processing")}
+        </span>
+        {uploading && <span className="font-mono text-faint tabular-nums">{pct}%</span>}
+      </div>
+      <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+        {uploading ? (
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-accent/60 to-accent transition-[width] duration-300 ease-out"
+            style={{ width: `${pct}%` }}
+          />
+        ) : (
+          // Сервер уже разбирает файл: сколько это займёт, клиент не знает —
+          // честнее показать движение без числа, чем выдуманный процент.
+          <div className="h-full w-1/3 animate-[importScan_1.2s_ease-in-out_infinite] rounded-full bg-gradient-to-r from-accent/60 to-accent" />
+        )}
+      </div>
+      <style jsx>{`
+        @keyframes importScan {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(300%);
+          }
+        }
+      `}</style>
     </div>
   );
 }
