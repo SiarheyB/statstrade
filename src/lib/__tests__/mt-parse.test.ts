@@ -11,6 +11,15 @@ const mt4Html = `<table>
 <tr><td>2002</td><td>2024.05.13 10:00:00</td><td>buy</td><td>0.20</td><td>EURUSD</td><td>1.2000</td><td>1.1900</td><td>2024.05.13 11:00:00</td><td>1.2050</td><td>-1.00</td><td>0.00</td><td>0.05</td><td>25.00</td></tr>
 </table>`;
 
+// Реальная шапка русского ReportHistory из MT5 (GerchikCo-MT5, UTF-16): в MT5
+// у строк данных на одну ячейку больше, чем в шапке, поэтому хвост колонок
+// парсер берёт с конца — см. buildMt5.
+const mt5RussianHtml = `<table>
+<tr><th>Позиции</th></tr>
+<tr><th>Время</th><th>Позиция</th><th>Символ</th><th>Тип</th><th>Объем</th><th>Цена</th><th>S / L</th><th>T / P</th><th>Время</th><th>Цена</th><th>Комиссия</th><th>Своп</th><th>Прибыль</th></tr>
+<tr><td>2026.08.21 15:04:48</td><td>31608540</td><td>XAUUSD</td><td>sell</td><td></td><td>4</td><td>4594.21</td><td>4594.25</td><td>4559.50</td><td>2026.08.21 17:21:08</td><td>4582.73</td><td>-0.40</td><td>0.00</td><td>45.92</td></tr>
+</table>`;
+
 describe("parseStatement", () => {
   it("parses an MT5 positions report", () => {
     const r = parseStatement(mt5Html);
@@ -77,5 +86,21 @@ describe("parseStatement", () => {
       `<table><tr><td>Balance:</td><td>717.10</td></tr></table>` + mt5Html,
     );
     expect(r.balance).toBeCloseTo(717.1);
+  });
+});
+
+describe("parseStatement — русский отчёт MT5", () => {
+  it("разбирает позицию из русской выгрузки", () => {
+    const r = parseStatement(mt5RussianHtml);
+    expect(r.format).toBe("mt5");
+    expect(r.trades).toHaveLength(1);
+    const t = r.trades[0];
+    expect(t.externalId).toBe("31608540");
+    expect(t.symbol).toBe("XAUUSD");
+    expect(t.side).toBe("short");
+    expect(t.entryPrice).toBeCloseTo(4594.21);
+    expect(t.exitPrice).toBeCloseTo(4582.73);
+    expect(t.stopLoss).toBeCloseTo(4594.25);
+    expect(t.grossProfit).toBeCloseTo(45.92);
   });
 });

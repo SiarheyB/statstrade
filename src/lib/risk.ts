@@ -115,6 +115,15 @@ export type RRTradeInput = {
 
 // Stop-loss-distance model: 1R = |entry - stop| price move, fees expressed in
 // the same R units. Used when no risk-manager profile overrides it.
+//
+// Считаем ровно по тому стопу, что стоит в колонке «Стоп», без попыток
+// угадать «настоящий» риск. Отдельно стоит помнить, что форекс-отчёты MT4/MT5
+// отдают S/L НА МОМЕНТ ЗАКРЫТИЯ: если стоп был подтянут в безубыток, в колонку
+// попадёт он, и R получится огромным (XAUUSD: вход 4594.21, стоп 4594.25,
+// выход 4582.73 → +286.98R). Это не ошибка расчёта — в поле «Стоп» у сделки
+// можно вписать тот стоп, с которым входили, и R пересчитается.
+//
+// Пустой стоп или стоп ровно в точке входа → R нет (делить не на что).
 export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): number | null {
   if (stopLoss == null) return null;
   const oneR = Math.abs(tr.entryPrice - stopLoss);

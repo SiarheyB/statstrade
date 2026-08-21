@@ -58,3 +58,6 @@ next-env.d.ts
 /logs/
 log.txt
 PERFORMANCE_AUDIT.md
+
+# личные торговые отчёты, которые кладут сюда для отладки импорта
+/test/

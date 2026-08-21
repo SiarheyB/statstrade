@@ -292,6 +292,29 @@ describe("tradeRR / stopDistanceRR", () => {
     expect(stopDistanceRR(long, 100)).toBeNull();
   });
 
+  // MT4/MT5 отдают S/L на момент ЗАКРЫТИЯ: если стоп был подтянут в безубыток,
+  // в колонку попадает он. Считаем ровно по тому стопу, что указан, — правило
+  // трейдера: «есть стоп — считаем, нет стопа — R не заполняем». Реальные
+  // строки из ReportHistory (XAUUSD, GerchikCo-MT5, 21.08.2026).
+  describe("стоп из форекс-отчёта", () => {
+    it("считает R по указанному стопу, даже если он подтянут в безубыток", () => {
+      // Шорт 4594.21 → 4582.73, стоп 4594.25: риск 0.04 на движение 11.48.
+      const trade = { ...long, side: "short" as const, entryPrice: 4594.21, exitPrice: 4582.73, qty: 4, netPnl: 45.52 };
+      expect(stopDistanceRR(trade, 4594.25)).toBeCloseTo(287, 0);
+    });
+
+    it("считает R по настоящему стопу той же сессии", () => {
+      // Шорт 4594.66 → 4602.55, стоп 4602.55 сработал: ровно −1R минус комиссия.
+      const trade = { ...long, side: "short" as const, entryPrice: 4594.66, exitPrice: 4602.55, qty: 2, fees: 0.2, netPnl: -15.98 };
+      expect(stopDistanceRR(trade, 4602.55)).toBeCloseTo(-1.01, 2);
+    });
+
+    it("не заполняет R, когда стопа нет", () => {
+      const trade = { ...long, entryPrice: 4585.74, exitPrice: 4593.58, qty: 2, netPnl: 15.49 };
+      expect(stopDistanceRR(trade, null)).toBeNull();
+    });
+  });
+
   it("measures the move in stop distances for a long", () => {
     // Стоп в 5 пунктах, прошли 10 → 2R.
     expect(stopDistanceRR(long, 95)).toBe(2);
