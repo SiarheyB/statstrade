@@ -90,12 +90,21 @@ const RULES: { re: RegExp; name: string; category: BotCategory }[] = [
 
 // Пути, по которым ходят только сканеры уязвимостей: у приложения таких
 // маршрутов нет и не было. Совпадение — надёжный признак робота даже с
-// «человеческим» User-Agent (сканеры подделывают его в первую очередь).
+// «человеческим» User-Agent (сканеры подделывают его в первую очередь; в
+// логах регулярно встречается «Googlebot», запрашивающий /backend/.env).
 const SCANNER_PATHS =
-  /^\/(wp-|wordpress|xmlrpc\.php|\.env|\.git|\.aws|\.ssh|phpmyadmin|pma|adminer|vendor\/|cgi-bin|owa\/|autodiscover|boaform|hnap1|solr|actuator|telescope|_ignition|config\.json|credentials|backup\.(sql|zip|tar))/i;
+  /^\/(wp-|wordpress|xmlrpc\.php|\.env|\.git|\.aws|\.ssh|phpmyadmin|pma|adminer|vendor\/|cgi-bin|owa\/|autodiscover|boaform|hnap1|solr|actuator|telescope|_ignition|config\.json|credentials|graphql|backup\.(sql|zip|tar))/i;
+
+// Те же секреты, но не в корне: боты перебирают их по каталогам —
+// /backend/.env, /api/.env, /app/config/.git/config.
+const SCANNER_NESTED = /\/(\.env|\.git|\.aws|\.ssh|\.svn|\.htpasswd)(\/|$|\.)/i;
+
+// Конфиги деплоя в корне: serverless.yml, application.yml, docker-compose.yml.
+// У приложения статики с такими именами нет — Next отдаёт только /public.
+const SCANNER_CONFIG_FILES = /^\/[^/]*\.(ya?ml|ini|conf|bak|old|sql|pem|key)$/i;
 
 export function isScannerPath(path: string): boolean {
-  return SCANNER_PATHS.test(path);
+  return SCANNER_PATHS.test(path) || SCANNER_NESTED.test(path) || SCANNER_CONFIG_FILES.test(path);
 }
 
 export type BotSignals = {

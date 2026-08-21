@@ -65,4 +65,40 @@ describe("isScannerPath", () => {
     expect(isScannerPath("/dashboard/trades")).toBe(false);
     expect(isScannerPath("/")).toBe(false);
   });
+
+  // Боты перебирают секреты не только в корне: /backend/.env, /api/.git/config.
+  it("ловит секреты во вложенных каталогах", () => {
+    expect(isScannerPath("/backend/.env")).toBe(true);
+    expect(isScannerPath("/config/.env.production")).toBe(true);
+    expect(isScannerPath("/api/.git/config")).toBe(true);
+    expect(isScannerPath("/app/.ssh/id_rsa")).toBe(true);
+    // Слово, лишь начинающееся так же, — обычная страница.
+    expect(isScannerPath("/environment")).toBe(false);
+    expect(isScannerPath("/news/dotenv-guide")).toBe(false);
+  });
+
+  // Конфиги деплоя в корне: serverless.yml, application.yml, дампы, ключи.
+  it("ловит конфиги и дампы в корне", () => {
+    expect(isScannerPath("/serverless.yml")).toBe(true);
+    expect(isScannerPath("/application.yaml")).toBe(true);
+    expect(isScannerPath("/dump.sql")).toBe(true);
+    expect(isScannerPath("/private.pem")).toBe(true);
+    expect(isScannerPath("/graphql")).toBe(true);
+    // Настоящая статика и служебные файлы приложения — не сканер.
+    expect(isScannerPath("/robots.txt")).toBe(false);
+    expect(isScannerPath("/sitemap.xml")).toBe(false);
+    expect(isScannerPath("/manifest.webmanifest")).toBe(false);
+    expect(isScannerPath("/favicon.ico")).toBe(false);
+    expect(isScannerPath("/_next/static/chunk.js")).toBe(false);
+  });
+
+  // Подделанный User-Agent поисковика на сканерском пути: путь важнее подписи,
+  // иначе такие запросы портят статистику индексации в /admin/traffic.
+  it("путь перевешивает подпись поисковика", () => {
+    const v = detectBot({
+      userAgent: "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)",
+      path: "/backend/.env",
+    });
+    expect(v).toMatchObject({ isBot: true, name: "Сканер уязвимостей", category: "scanner" });
+  });
 });
