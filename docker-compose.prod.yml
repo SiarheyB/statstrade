@@ -207,10 +207,15 @@ services:
       FX_SYMBOLS: ${FX_SYMBOLS:-EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY,XAU/USD}
       FINNHUB_API_KEY: ${FINNHUB_API_KEY}
       TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY}
-      # Инструменты, которые идут из Dukascopy, а не из Finnhub/Twelve Data:
-      # металлов нет в WS Finnhub и на free-плане Twelve Data. Ключ не нужен.
+      # Dukascopy — ОСНОВНОЙ источник по всем парам (ключ не нужен). Finnhub
+      # ниже поднимается автоматически, только если Dukascopy замолчит; список
+      # ниже — инструменты, которых у резерва нет и подхватить он их не сможет.
       FX_DUKASCOPY_SYMBOLS: ${FX_DUKASCOPY_SYMBOLS:-XAU/USD,XAG/USD}
       FX_DUKASCOPY_POLL_SEC: ${FX_DUKASCOPY_POLL_SEC:-15}
+      FX_DUKASCOPY_FAIL_CYCLES: ${FX_DUKASCOPY_FAIL_CYCLES:-4}
+      # Twelve Data выключен: историю приносит Dukascopy, а free-лимит и так
+      # был в перерасходе. Включать только осознанно.
+      FX_TWELVEDATA_ENABLED: ${FX_TWELVEDATA_ENABLED:-0}
       FX_FALLBACK_INTERVAL_SEC: ${FX_FALLBACK_INTERVAL_SEC:-900}
       FX_FLUSH_INTERVAL_SEC: ${FX_FLUSH_INTERVAL_SEC:-15}
       FX_CANDLE_RETENTION_DAYS: ${FX_CANDLE_RETENTION_DAYS:-365}

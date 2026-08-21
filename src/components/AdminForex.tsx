@@ -36,8 +36,12 @@ type HealthData = {
   instruments: number;
   symbols?: string[];
   backfillDone: boolean;
-  ws: { apiKeySet?: boolean; connected: boolean; reconnects: number; totalTrades: number; lastTradeAt: string | null };
-  twelveData: { apiKeySet: boolean; totalCalls: number; fallbackIntervalSec: number };
+  // Роль источников поменялась: основной — Dukascopy, Finnhub стал резервом.
+  // Поля необязательные — коллектор старой версии их не отдаёт.
+  primarySource?: string;
+  fallbackActive?: boolean;
+  ws: { apiKeySet?: boolean; role?: string; active?: boolean; connected: boolean; reconnects: number; totalTrades: number; lastTradeAt: string | null };
+  twelveData: { enabled?: boolean; apiKeySet: boolean; totalCalls: number; fallbackIntervalSec: number };
   // Появился вместе с золотом: металлы и история 1m идут из Dukascopy, ключа
   // он не требует (см. collector/forex/dukascopy.mjs). У коллекторов старой
   // версии этого блока в /health нет — отсюда необязательность.
@@ -46,6 +50,7 @@ type HealthData = {
     pollSec: number;
     totalCalls: number;
     errors: number;
+    failStreak?: number;
     lastOkAt: string | null;
   };
   errors: number;
@@ -122,6 +127,10 @@ export default function AdminForex() {
   const h = data?.health;
   const online = h?.ok && h.data?.healthy;
   const wsOk = h?.ok && h.data?.ws.connected;
+  // Резерв включается сам, когда основной источник молчит (collector:
+  // updateFallbackState). Иконку «WS отключён» в обычном режиме показывать
+  // нельзя — это не поломка, а штатное состояние.
+  const isFallback = !!h?.data?.fallbackActive;
 
   // Пары, у которых свежая свеча самого мелкого таймфрейма (5m) сильно
   // отстаёт — вероятный признак проблемы с этой конкретной парой.
@@ -187,10 +196,14 @@ export default function AdminForex() {
               <Hint text="Сколько валютных пар коллектор сейчас отслеживает (подписан на них)." />
             </span>
             <span className="flex items-center gap-1.5 text-muted">
-              {wsOk ? <Wifi size={14} className="text-profit" /> : <WifiOff size={14} className="text-loss" />}
-              Finnhub WS: {h.data.ws.apiKeySet === false ? "ключ не задан" : wsOk ? "подключён" : "отключён"}
+              {wsOk ? <Wifi size={14} className={isFallback ? "text-loss" : "text-profit"} /> : <WifiOff size={14} className={isFallback ? "text-loss" : "text-faint"} />}
+              Finnhub WS: {h.data.ws.apiKeySet === false
+                ? "ключ не задан"
+                : isFallback
+                  ? (wsOk ? "ПОДХВАТИЛ (Dukascopy молчит)" : "поднимается…")
+                  : "в резерве"}
               {h.data.ws.reconnects > 0 && ` (реконнектов: ${h.data.ws.reconnects})`}
-              <Hint text="Finnhub WebSocket — источник тиков (сделок) в реальном времени по ВАЛЮТНЫМ парам. «Отключён» или частые реконнекты — тики не приходят живьём, свежие свечи по парам не наполняются, но история дозагружается через Twelve Data. «Ключ не задан» — FINNHUB_API_KEY пуст или не похож на ключ; металлы это не затрагивает, они идут из Dukascopy." />
+              <Hint text="Finnhub WebSocket — РЕЗЕРВНЫЙ источник тиков по валютным парам. В обычном режиме соединение не поднимается вовсе («в резерве») — данные идут из Dukascopy. «ПОДХВАТИЛ» означает, что основной источник замолчал и коллектор переключился на тики; металлы в этом режиме не обновляются, у Finnhub их нет. «Ключ не задан» — FINNHUB_API_KEY пуст, то есть резерва нет совсем." />
             </span>
             <span className="text-muted flex items-center gap-1">
               тиков: {h.data.ws.totalTrades.toLocaleString("ru-RU")}
@@ -201,16 +214,18 @@ export default function AdminForex() {
               <Hint text="Сколько времени прошло с последней полученной сделки от Finnhub WS." />
             </span>
             <span className="text-muted flex items-center gap-1">
-              Twelve Data: {h.data.twelveData.apiKeySet ? `${h.data.twelveData.totalCalls} запросов` : "ключ не задан"}
-              <Hint text="Twelve Data — резервный REST-источник: докачивает историю (бэкафилл) и подстраховывает, если WS не даёт свежих тиков. Число — сколько запросов к его API сделано с запуска." />
+              Twelve Data: {h.data.twelveData.enabled === false
+                ? "выключен"
+                : h.data.twelveData.apiKeySet ? `${h.data.twelveData.totalCalls} запросов` : "ключ не задан"}
+              <Hint text="Twelve Data — резерв последней очереди. По умолчанию выключен (FX_TWELVEDATA_ENABLED≠1): историю по всем парам теперь приносит Dukascopy, а бесплатного лимита Twelve Data в 800 запросов/сутки на все пары и таймфреймы не хватало." />
             </span>
             {h.data.dukascopy && (
               <span className={clsx("flex items-center gap-1", h.data.dukascopy.errors > 0 ? "text-loss" : "text-muted")}>
-                Dukascopy: {h.data.dukascopy.symbols.length > 0
+                Dukascopy (основной): {h.data.dukascopy.symbols.length > 0
                   ? `${h.data.dukascopy.symbols.join(", ")} · ${h.data.dukascopy.totalCalls} запросов`
                   : "инструменты не заданы"}
                 {h.data.dukascopy.errors > 0 && ` · ошибок: ${h.data.dukascopy.errors}`}
-                <Hint text="Dukascopy — источник металлов (золото XAU/USD, серебро) и истории таймфрейма 1m для всех пар. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось." />
+                <Hint text="Dukascopy — основной источник данных по ВСЕМ инструментам: и валютным парам, и металлам. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось. Если он замолчит на несколько циклов подряд, коллектор сам поднимет резервный Finnhub." />
               </span>
             )}
             {h.data.dukascopy && (

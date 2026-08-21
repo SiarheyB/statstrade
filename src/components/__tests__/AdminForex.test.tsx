@@ -55,7 +55,9 @@ describe('AdminForex', () => {
       expect(screen.getByText(/forex-collector:/)).toBeInTheDocument();
     });
     expect(screen.getByText(/online/)).toBeInTheDocument();
-    expect(screen.getByText(/подключён/)).toBeInTheDocument();
+    // Finnhub теперь резерв: в штатном режиме он и должен быть «в резерве»,
+    // а не «подключён» — данные идут из Dukascopy.
+    expect(screen.getByText(/Finnhub WS: в резерве/)).toBeInTheDocument();
     expect(screen.getByText('EURUSD')).toBeInTheDocument();
   });
 
@@ -159,11 +161,11 @@ describe('AdminForex', () => {
     render(<AdminForex />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Dukascopy: XAU\/USD · 42 запросов/)).toBeInTheDocument();
+      expect(screen.getByText(/Dukascopy \(основной\): XAU\/USD · 42 запросов/)).toBeInTheDocument();
     });
   });
 
-  it('различает «ключ Finnhub не задан» и «WS отключён»', async () => {
+  it('различает «ключ Finnhub не задан» и штатный резерв', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -182,6 +184,26 @@ describe('AdminForex', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Finnhub WS: ключ не задан/)).toBeInTheDocument();
+    });
+  });
+
+  it('показывает, что резерв подхватил сбор, когда Dukascopy молчит', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => {
+          const p = makePayload();
+          (p.health.data as Record<string, unknown>).fallbackActive = true;
+          return Promise.resolve(p);
+        },
+      }),
+    );
+
+    render(<AdminForex />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/ПОДХВАТИЛ \(Dukascopy молчит\)/)).toBeInTheDocument();
     });
   });
 

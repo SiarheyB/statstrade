@@ -1,27 +1,34 @@
-// Forex collector — три источника с разными ролями:
+// Forex collector. ОСНОВНОЙ источник — Dukascopy, остальные два включаются
+// только когда он недоступен.
 //
-//   1. Finnhub WebSocket — реальные тики по валютным парам (мажорам).
-//   2. Twelve Data REST  — история мажоров при старте + редкий fallback-догон.
-//   3. Dukascopy freeserv — готовые свечи по инструментам, которых нет у
-//      первых двух (золото XAU/USD), плюс история таймфрейма 1m для всех пар.
+//   1. Dukascopy freeserv — свечи по ВСЕМ инструментам: и валютные пары, и
+//      металлы. Без ключа, с многолетней историей и таймфреймом 1m.
+//   2. Finnhub WebSocket  — АВТОМАТИЧЕСКИЙ резерв: включается, когда Dukascopy
+//      перестал отвечать, и выключается, когда тот вернулся. Металлов у
+//      Finnhub нет, поэтому он подхватывает только валютные пары.
+//   3. Twelve Data REST   — резерв последней очереди, ПО УМОЛЧАНИЮ ВЫКЛЮЧЕН
+//      (FX_TWELVEDATA_ENABLED=1, чтобы включить).
 //
-// Почему так:
-//   Twelve Data free tier (800 запросов/день, 8/мин) не тянет обновление
-//   каждые 5 минут по всем мажорам × всем таймфреймам — уходит в лимит.
-//   Finnhub free tier даёт WebSocket с тиками (сделками) без ограничения на
-//   число сообщений (лимитируется только число подписанных символов, до 50) —
-//   поэтому коллектор сам агрегирует тики в свечи 1m/5m/15m/1h/4h/1d/1w в
-//   памяти и льёт их в Postgres. REST /forex/candle у Finnhub — premium-only
-//   на free-плане, поэтому для истории и на случай обрыва WS используется
-//   Twelve Data (батчим до 8 символов в одном запросе).
-//   Золота (XAU/USD) на free-планах Twelve Data нет (у них это commodity, а не
-//   forex), поэтому оно целиком идёт через Dukascopy — там оно бесплатно, без
-//   ключа и с многолетней историей на 1m. Подробности — collector/forex/dukascopy.mjs.
+// Почему Dukascopy стал основным (было наоборот — тики Finnhub + история
+// Twelve Data):
+//   • не нужен ни один ключ, а free-план Twelve Data (800 запросов/сутки) на
+//     всех парах × всех таймфреймах уходил в перерасход;
+//   • у мажоров история и «живая» часть теперь из одного источника, то есть в
+//     одной шкале объёма: раньше бэкафилл шёл из Twelve Data, а свежие свечи
+//     собирались из тиков Finnhub, и объёмы на стыке не сходились;
+//   • 1m появляется сам собой, без отдельного бэкафилла;
+//   • металлов (золото) у Finnhub нет вовсе, а на free-плане Twelve Data они
+//     закрыты — с ними всё равно был нужен Dukascopy;
+//   • WS Finnhub на слабом канале регулярно рвался (code=1006), а опрос
+//     переживает обрывы без состояния.
+//
+// Чем платим: опрос раз в FX_DUKASCOPY_POLL_SEC вместо push по вебсокету. На
+// практике не хуже — в БД свечи всё равно сбрасывались раз в 15 секунд.
 //
 // Архитектура:
-//   Finnhub WS (тики) → агрегатор свечей в памяти → Postgres (FxCandle)
-//   Twelve Data REST  → бэкафилл истории мажоров при старте + fallback-догон
-//   Dukascopy REST    → свечи по FX_DUKASCOPY_SYMBOLS (опрос) + история 1m всем
+//   Dukascopy REST   → свечи по всем парам (опрос) + история при старте
+//   Finnhub WS       → тики → агрегатор свечей в памяти (только при сбое Dukascopy)
+//   Twelve Data REST → бэкафилл/догон истории (только если явно включён)
 //
 // ⚠️ exchange="finnhub" у всех строк FxCandle — это ИСТОРИЧЕСКИЙ ТЕГ ОДНОГО
 //    ЛОГИЧЕСКОГО РЯДА, а не имя провайдера: под ним лежат и свечи из тиков
@@ -38,6 +45,7 @@
 import http from "node:http";
 import pg from "pg";
 import { fetchCandles as dukasFetchCandles, DUKAS_INTERVAL } from "./dukascopy.mjs";
+import { createFallbackController, isMarketClosed } from "./fallback.mjs";
 
 // ─── Конфигурация из ENV ──────────────────────────────────────────────────
 
@@ -61,12 +69,21 @@ const cfg = {
   symbols: (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY,XAU/USD")
     .split(",").map(s => s.trim()).filter(Boolean),
 
-  // Инструменты, которые собираются из Dukascopy, а не из Finnhub/Twelve Data.
-  // Металлов нет ни в WS Finnhub, ни на free-плане Twelve Data, поэтому для
-  // них Dukascopy — единственный бесплатный источник (и заодно единственный,
-  // который виден из РБ без прокси).
-  dukascopySymbols: (process.env.FX_DUKASCOPY_SYMBOLS ?? "XAU/USD,XAG/USD")
+  // Инструменты, которые Finnhub обслужить НЕ может: металлов нет ни в его WS,
+  // ни на free-плане Twelve Data. Из Dukascopy собираются все пары, а этот
+  // список нужен, чтобы резервный источник не пытался подписаться на то, чего
+  // у него нет.
+  dukascopyOnlySymbols: (process.env.FX_DUKASCOPY_SYMBOLS ?? "XAU/USD,XAG/USD")
     .split(",").map(s => s.trim()).filter(Boolean),
+
+  // Twelve Data по умолчанию не используется: его роль (история мажоров)
+  // перешла к Dukascopy, а бесплатный лимит и так был в перерасходе.
+  twelveDataEnabled: process.env.FX_TWELVEDATA_ENABLED === "1",
+
+  // Через сколько подряд неудачных циклов опроса Dukascopy поднимать резервный
+  // Finnhub. 4 цикла — около минуты при шаге 15с: достаточно, чтобы пережить
+  // единичный 503, и достаточно быстро, чтобы не потерять заметный кусок данных.
+  dukascopyFailCycles: Number(process.env.FX_DUKASCOPY_FAIL_CYCLES ?? 4),
 
   // Единый тег источника для всех свечей форекса (и WS, и REST-бэкафилл
   // пишут под одним exchange — это один логический ряд для приложения).
@@ -122,7 +139,7 @@ if (!cfg.databaseUrl) {
 // времени. Видно и в логе при старте, и в /health (finnhub.apiKeySet), и в
 // /admin/forex по лагу свечей.
 if (!cfg.finnhubApiKey) {
-  console.error("[fx] ВНИМАНИЕ: FINNHUB_API_KEY не задан — валютные пары не будут обновляться в реальном времени (металлы из FX_DUKASCOPY_SYMBOLS собираются без ключа)");
+  console.log("[fx] FINNHUB_API_KEY не задан — резервного источника не будет; сбор идёт из Dukascopy, ключ ему не нужен");
 }
 
 // ─── Postgres ──────────────────────────────────────────────────────────────
@@ -187,19 +204,15 @@ function toFinnhubSymbol(symbol) {
   return `OANDA:${symbol.replace("/", "_")}`;
 }
 
-// Кто обслуживает символ. Металлы (и всё, что перечислено в
-// FX_DUKASCOPY_SYMBOLS) идут через Dukascopy и НЕ подписываются на Finnhub и
-// не запрашиваются у Twelve Data — там их либо нет, либо они платные.
-function isDukascopySymbol(symbol) {
-  return cfg.dukascopySymbols.includes(symbol);
+// Может ли резервный источник (Finnhub/Twelve Data) обслужить символ.
+// Металлы — нет: у Finnhub их нет в WS, у Twelve Data они за платным планом.
+function isDukascopyOnly(symbol) {
+  return cfg.dukascopyOnlySymbols.includes(symbol);
 }
 
-function finnhubSymbols() {
-  return cfg.symbols.filter(s => !isDukascopySymbol(s));
-}
-
-function dukascopySymbols() {
-  return cfg.symbols.filter(s => isDukascopySymbol(s));
+/** Пары, которые способен подхватить резервный источник. */
+function fallbackSymbols() {
+  return cfg.symbols.filter(s => !isDukascopyOnly(s));
 }
 
 function fromFinnhubSymbol(fhSymbol) {
@@ -358,7 +371,7 @@ async function fetchAndStoreBatch(interval, outputsize, startDate) {
 
   // Символы Dukascopy (металлы) в батч не попадают: у Twelve Data их нет на
   // free-плане, и каждый такой символ просто съедал бы кредит впустую.
-  const symbols = finnhubSymbols();
+  const symbols = fallbackSymbols();
   if (symbols.length === 0) return 0;
 
   const requestedMultiple = symbols.length > 1;
@@ -403,12 +416,17 @@ function daysAgoIso(days) {
 // На старте: полная история по всем таймфреймам (батчами по символам).
 async function backfillAll() {
   if (!forexEnabled) return;
+  if (!cfg.twelveDataEnabled) {
+    console.log("[fx/td] Twelve Data выключен (FX_TWELVEDATA_ENABLED≠1) — историю приносит Dukascopy");
+    backfillDone = true;
+    return;
+  }
   if (!cfg.twelveDataApiKey) {
     console.log("[fx/td] TWELVEDATA_API_KEY не задан — бэкафилл истории пропущен, ждём накопления тиков из Finnhub");
     backfillDone = true;
     return;
   }
-  console.log(`[fx/td] backfill: начинаем для ${finnhubSymbols().length} символов, ${Object.keys(TF_MAP).length} таймфреймов (батч по символам)`);
+  console.log(`[fx/td] backfill: начинаем для ${fallbackSymbols().length} символов, ${Object.keys(TF_MAP).length} таймфреймов (батч по символам)`);
 
   for (const interval of CANDLE_INTERVALS) {
     // 1m у Twelve Data не запрашиваем совсем (см. TF_MAP) — им занимается
@@ -453,7 +471,7 @@ async function backfillAll() {
 // Периодический fallback-догон: подстраховка, если WS оборвался/пропустил тики.
 // Батч по символам, редкий (fallbackIntervalSec) — не расходует лимит впустую.
 async function fallbackCatchUp() {
-  if (!forexEnabled || !cfg.twelveDataApiKey) return;
+  if (!forexEnabled || !cfg.twelveDataEnabled || !cfg.twelveDataApiKey) return;
   for (const interval of Object.keys(TF_MAP)) {
     const outputsize = interval === "5m" || interval === "15m" ? 20 : 5;
     await fetchAndStoreBatch(interval, outputsize);
@@ -465,12 +483,9 @@ async function fallbackCatchUp() {
 // не батчим с остальными, чтобы не пересчитывать общий cfg.symbols на лету.
 async function backfillOneSymbol(symbol) {
   if (!forexEnabled) return;
-  // Металлы Twelve Data не отдаёт — у них своя история, из Dukascopy.
-  if (isDukascopySymbol(symbol)) {
-    await backfillDukascopySymbol(symbol);
-    return;
-  }
-  if (!cfg.twelveDataApiKey) return;
+  // Историю по всем инструментам приносит Dukascopy — и по парам, и по металлам.
+  await backfillDukascopySymbol(symbol);
+  if (!cfg.twelveDataEnabled || !cfg.twelveDataApiKey) return;
   console.log(`[fx/td] backfill нового символа ${symbol}…`);
   for (const interval of CANDLE_INTERVALS) {
     const twelveInterval = TF_MAP[interval];
@@ -549,8 +564,14 @@ function aggregateToInterval(candles, interval) {
   return Array.from(buckets.values()).sort((a, b) => a.t - b.t);
 }
 
-// Один запрос к Dukascopy + запись в БД. Ошибку не пробрасываем: недоступность
-// Dukascopy не должна ронять сбор по остальным парам.
+/**
+ * Один запрос к Dukascopy + запись в БД.
+ *
+ * Ошибку не пробрасываем — недоступность одного инструмента не должна ронять
+ * сбор по остальным, — но и не прячем: возвращаем null именно при неудачном
+ * запросе, чтобы опрос отличал «источник молчит» (повод поднять резерв) от
+ * «данных нет» (закрытый рынок — там 0 свечей и это норма).
+ */
 async function fetchAndStoreDukascopy(symbol, interval, limit) {
   if (!forexEnabled) return 0;
   try {
@@ -574,7 +595,7 @@ async function fetchAndStoreDukascopy(symbol, interval, limit) {
   } catch (err) {
     dukasErrors++;
     console.error(`[fx/dukas] ${symbol} ${interval}: ${err.message}`);
-    return 0;
+    return null;
   }
 }
 
@@ -662,37 +683,35 @@ async function backfillDukascopySymbol(symbol) {
   }
 }
 
-// История 1m для пар, которые в реальном времени идут через Finnhub. Без неё
-// новый таймфрейм был бы пустым до тех пор, пока не накопятся тики.
-async function backfillM1ForFinnhubSymbols() {
-  for (const symbol of finnhubSymbols()) {
-    // 3 дня (~5000 минуток торговли) — этого хватает, чтобы таймфрейм открылся
-    // не пустым; дальше ряд наращивают тики Finnhub.
-    if (await hasHistoryDepth(symbol, "1m", 3)) continue;
-    const stored = await fetchAndStoreDukascopy(symbol, "1m", 5000);
-    if (stored > 0) console.log(`[fx/dukas] ${symbol} 1m: +${stored} свечей (история)`);
-    await new Promise(r => setTimeout(r, 1500));
-  }
-}
-
 async function backfillDukascopyAll() {
   if (!forexEnabled) return;
-  for (const symbol of dukascopySymbols()) {
+  for (const symbol of cfg.symbols) {
     await backfillDukascopySymbol(symbol);
   }
-  await backfillM1ForFinnhubSymbols();
   console.log(`[fx/dukas] backfill завершён (запросов: ${dukasCalls}, ошибок: ${dukasErrors})`);
 }
 
-// Периодический опрос. Тики Dukascopy отдаёт с задержкой 0.5–3с, но нам нужны
-// свечи, поэтому «живость» определяется шагом опроса: 1m обновляется каждые
+// Периодический опрос — основной способ получения свечей.
+//
+// «Живость» определяется шагом опроса: 1m обновляется каждые
 // dukascopyPollSec, старшие таймфреймы — кратно реже (им чаще и не нужно).
 let dukasPollTick = 0;
 
+// На закрытом рынке опрашиваем редко — только чтобы не проспать открытие и
+// дозаписать последние минуты пятницы.
+const CLOSED_MARKET_POLL_MS = 5 * 60_000;
+let lastClosedPollAt = 0;
+
 async function pollDukascopy() {
   if (!forexEnabled) return;
-  const symbols = dukascopySymbols();
+  const symbols = cfg.symbols;
   if (symbols.length === 0) return;
+
+  const now = Date.now();
+  if (isMarketClosed(now)) {
+    if (now - lastClosedPollAt < CLOSED_MARKET_POLL_MS) return;
+    lastClosedPollAt = now;
+  }
 
   const n = dukasPollTick++;
   const stepsPerMinute = Math.max(1, Math.round(60 / cfg.dukascopyPollSec));
@@ -710,15 +729,52 @@ async function pollDukascopy() {
   if (n % stepsPerMinute === 0) formingIntervals.push("1h", "4h");
   if (n % (stepsPerMinute * 5) === 0) formingIntervals.push("1d", "1w");
 
+  let attempts = 0;
+  let failures = 0;
   for (const symbol of symbols) {
     for (const interval of fetchIntervals) {
-      await fetchAndStoreDukascopy(symbol, interval, DUKAS_POLL_LIMIT[interval] ?? 3);
+      attempts++;
+      const ok = await fetchAndStoreDukascopy(symbol, interval, DUKAS_POLL_LIMIT[interval] ?? 3);
+      if (ok === null) failures++;
     }
     for (const interval of formingIntervals) {
       await refreshFormingBucket(symbol, interval);
     }
   }
+
+  fallback.recordCycle({ attempts, failures, marketClosed: isMarketClosed(now) });
 }
+
+// ─── Автоматический резерв: Finnhub при сбое Dukascopy ────────────────────
+//
+// Резерв — именно резерв: пока Dukascopy отвечает, WS не поднимается вообще,
+// и лишних подписок нет. Металлы он подхватить не может, поэтому при долгом
+// сбое Dukascopy золото просто перестаёт обновляться — это видно в /health и
+// в /admin/forex по отставанию свечей.
+//
+// Решение о переключении принимает createFallbackController (fallback.mjs) —
+// там же оно и покрыто тестами.
+
+const fallback = createFallbackController({
+  failCycles: cfg.dukascopyFailCycles,
+  onEnable: () => {
+    const symbols = fallbackSymbols();
+    console.error(`[fx/fallback] Dukascopy не отвечает ${fallback.failStreak} циклов подряд — поднимаю Finnhub WS для ${symbols.length} пар`);
+    if (symbols.length === 0) {
+      console.error("[fx/fallback] ...но подхватывать нечего: в списке только инструменты, которых у Finnhub нет");
+      return;
+    }
+    if (!cfg.finnhubApiKey) {
+      console.error("[fx/fallback] ...но FINNHUB_API_KEY не задан — резерва нет, данные не собираются");
+      return;
+    }
+    connectFinnhub();
+  },
+  onDisable: () => {
+    console.log("[fx/fallback] Dukascopy снова отвечает — выключаю резервный Finnhub WS");
+    disconnectFinnhub();
+  },
+});
 
 // ─── Finnhub WebSocket: тики → агрегация свечей в памяти ──────────────────
 
@@ -792,11 +848,11 @@ const WS_STABLE_MS = 30_000;
 
 function connectFinnhub() {
   if (!forexEnabled) return;
-  if (!cfg.finnhubApiKey) return; // конфигурация «только Dukascopy» — подключаться некуда
-  if (finnhubSymbols().length === 0) {
-    console.log("[fx/ws] валютных пар в списке нет — Finnhub не нужен");
-    return;
-  }
+  if (!cfg.finnhubApiKey) return; // без ключа резерва нет — сбор идёт из Dukascopy
+  // Резерв поднимается только контроллером (fallback.mjs): пока основной
+  // источник отвечает, соединение не нужно.
+  if (!fallback.active) return;
+  if (fallbackSymbols().length === 0) return;
   const url = `${cfg.finnhubWsUrl}?token=${cfg.finnhubApiKey}`;
   console.log(`[fx/ws] подключение к Finnhub WS…`);
 
@@ -811,8 +867,8 @@ function connectFinnhub() {
   ws.onopen = () => {
     wsConnected = true;
     wsOpenedAt = Date.now();
-    const symbols = finnhubSymbols();
-    console.log(`[fx/ws] подключено, подписываемся на ${symbols.length} пар`);
+    const symbols = fallbackSymbols();
+    console.log(`[fx/ws] подключено, подписываемся на ${symbols.length} пар (резервный режим)`);
     for (const symbol of symbols) {
       ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) }));
     }
@@ -859,8 +915,19 @@ function connectFinnhub() {
   };
 }
 
+/** Гасит резервное соединение и отменяет запланированный реконнект. */
+function disconnectFinnhub() {
+  if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+  if (ws) {
+    try { ws.close(); } catch { /* noop */ }
+    ws = null;
+  }
+  wsConnected = false;
+}
+
 function scheduleReconnect() {
   if (!forexEnabled || wsReconnectTimer) return;
+  if (!fallback.active) return; // Dukascopy уже вернулся — переподключаться незачем
   wsReconnects++;
   wsReconnectTimer = setTimeout(() => {
     wsReconnectTimer = null;
@@ -940,8 +1007,8 @@ async function syncSymbolsFromConfig() {
   console.log(`[fx/config] изменение списка пар: +[${added.join(",")}] -[${removed.join(",")}]`);
 
   for (const symbol of removed) {
-    // Металлы на Finnhub не подписаны — отписываться не от чего.
-    if (wsConnected && ws && !isDukascopySymbol(symbol)) {
+    // Металлов на Finnhub нет, и вне резервного режима подписок нет вовсе.
+    if (fallback.active && wsConnected && ws && !isDukascopyOnly(symbol)) {
       try { ws.send(JSON.stringify({ type: "unsubscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
     }
     liveCandles.delete(symbol);
@@ -951,7 +1018,7 @@ async function syncSymbolsFromConfig() {
   cfg.symbols.push(...target);
 
   for (const symbol of added) {
-    if (wsConnected && ws && !isDukascopySymbol(symbol)) {
+    if (fallback.active && wsConnected && ws && !isDukascopyOnly(symbol)) {
       try { ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
     }
     // На старте историю тянет общий бэкафилл — здесь только пары, добавленные
@@ -980,11 +1047,14 @@ async function checkForexEnabled() {
     forexEnabled = next;
     if (!forexEnabled) {
       console.log(`[fx/toggle] раздел "Форекс" выключен в админке — останавливаем сбор данных`);
-      if (ws) { try { ws.close(); } catch { /* noop */ } }
-      if (wsReconnectTimer) { clearTimeout(wsReconnectTimer); wsReconnectTimer = null; }
+      // Опрос Dukascopy останавливается сам (проверка forexEnabled в начале
+      // pollDukascopy), а резервное соединение нужно погасить явно.
+      disconnectFinnhub();
+      fallback.reset();
     } else {
       console.log(`[fx/toggle] раздел "Форекс" снова включён — возобновляем сбор данных`);
-      connectFinnhub();
+      // Резерв не поднимаем: сбор возобновит опрос Dukascopy, а Finnhub
+      // включится сам, если тот молчит.
     }
   } catch (err) {
     console.error(`[fx/toggle] ошибка чтения FeatureConfig: ${err.message}`);
@@ -1004,23 +1074,32 @@ const server = http.createServer(async (req, res) => {
       instruments: cfg.symbols.length,
       symbols: cfg.symbols,
       backfillDone,
+      // Кто сейчас реально приносит данные. Раньше основным был Finnhub,
+      // теперь он резерв — админка читает это поле, чтобы не выдавать
+      // «WS отключён» за поломку.
+      primarySource: "dukascopy",
+      fallbackActive: fallback.active,
       ws: {
         apiKeySet: cfg.finnhubApiKey.length > 0,
+        role: "fallback",
+        active: fallback.active,
         connected: wsConnected,
         reconnects: wsReconnects,
         totalTrades,
         lastTradeAt: lastTradeAt ? new Date(lastTradeAt).toISOString() : null,
       },
       twelveData: {
+        enabled: cfg.twelveDataEnabled,
         apiKeySet: cfg.twelveDataApiKey.length > 0,
         totalCalls: totalTwelveDataCalls,
         fallbackIntervalSec: cfg.fallbackIntervalSec,
       },
       dukascopy: {
-        symbols: dukascopySymbols(),
+        symbols: cfg.symbols,
         pollSec: cfg.dukascopyPollSec,
         totalCalls: dukasCalls,
         errors: dukasErrors,
+        failStreak: fallback.failStreak,
         lastOkAt: lastDukasOkAt ? new Date(lastDukasOkAt).toISOString() : null,
       },
       errors: writeErrors,
@@ -1051,21 +1130,17 @@ async function start() {
   initialSyncDone = true;
 
   console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange} forexEnabled=${forexEnabled}`);
-  // Список пар только что пришёл из БД — теперь видно, что реально соберётся.
-  const dukas = dukascopySymbols();
-  const viaFinnhub = finnhubSymbols();
-  console.log(`[fx/start] Dukascopy: ${dukas.length ? dukas.join(",") : "—"} | Finnhub: ${viaFinnhub.length ? viaFinnhub.join(",") : "—"}${!cfg.finnhubApiKey && viaFinnhub.length ? " (без ключа — только история)" : ""}`);
+  const reserve = cfg.finnhubApiKey ? `Finnhub (резерв, ${fallbackSymbols().length} пар)` : "резерва нет (FINNHUB_API_KEY не задан)";
+  console.log(`[fx/start] источник: Dukascopy — все ${cfg.symbols.length} инструментов | ${reserve}`);
 
-  // 1. Бэкафилл истории через Twelve Data (если задан ключ).
+  // 1. Бэкафилл истории через Twelve Data — только если его явно включили.
   backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
 
-  // 2. Бэкафилл через Dukascopy: металлы целиком + история 1m для всех пар.
-  //    Отдельной цепочкой от Twelve Data — они не мешают друг другу и не
-  //    делят лимиты.
+  // 2. Основной бэкафилл: Dukascopy по всем инструментам и таймфреймам.
   backfillDukascopyAll().catch(err => console.error(`[fx/dukas] fatal: ${err.message}`));
 
-  // 3. Основной источник реального времени — Finnhub WS.
-  connectFinnhub();
+  // 3. Finnhub НЕ поднимаем: он включится сам, если Dukascopy замолчит
+  //    (см. контроллер резерва выше и fallback.mjs).
 }
 start().catch(err => console.error(`[fx/start] fatal: ${err.message}`));
 
