@@ -6,8 +6,11 @@ import * as featureConfig from "@/lib/featureConfig";
 const DAY_MS = 86_400_000;
 const START = Date.UTC(2026, 0, 1);
 
-function row(dayOffset: number, o: number, h: number, l: number, c: number) {
-  return { symbol: "BTCUSDT", exchange: "binance-futures", interval: "1d", t: new Date(START + dayOffset * DAY_MS), o, h, l, c, v: 0 };
+// v — объём в базовом активе. По умолчанию заведомо выше порога ликвидности
+// (MIN_DAILY_VOLUME_USD): тонкие инструменты пересчёт отбрасывает до анализа,
+// и с нулевым объёмом ни один тест уровней не дошёл бы до гейта.
+function row(dayOffset: number, o: number, h: number, l: number, c: number, v = 1_000_000) {
+  return { symbol: "BTCUSDT", exchange: "binance-futures", interval: "1d", t: new Date(START + dayOffset * DAY_MS), o, h, l, c, v };
 }
 
 // Серия, проходящая фильтр качества (quality.ts): ровный фон, один пивотный
@@ -92,6 +95,18 @@ describe("recomputeRecommendations", () => {
     }[];
     expect(data[0].currentPrice).toBe(lastClose);
     expect(data[0].candlesTo.getTime()).toBe(series[series.length - 1].t.getTime());
+  });
+
+  // Порог ликвидности: на стакане меньше $1 млн в день исполнение съедает
+  // сетап, поэтому такие пары не анализируются вовсе.
+  it("skips thin instruments before analysing them", async () => {
+    const thin = seriesWithPivot().map((r) => ({ ...r, v: 100 })); // 100 × ~110 = $11k
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce([{ symbol: "THINUSDT" }]).mockResolvedValueOnce(asDbRows(thin));
+
+    const result = await recomputeRecommendations();
+    expect(result.levelsWritten).toBe(0);
+    expect(result.rejected.thin_volume).toBe(1);
+    expect(mockPrisma.levelSetup.createMany).not.toHaveBeenCalled();
   });
 
   it("skips symbols with too few candles", async () => {

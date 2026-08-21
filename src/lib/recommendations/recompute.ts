@@ -32,6 +32,10 @@ const DAY_MS = 86_400_000;
 // Сила уровня, начиная с которой он считается «значимым» и учитывается как
 // препятствие в запасе хода (см. quality.ts, runwayAtr).
 const SIGNIFICANT_LEVEL_STRENGTH = 3;
+// Порог ликвидности: инструменты, у которых дневной оборот меньше $1 млн, в
+// выдачу не идут вовсе. На таком стакане вход и выход сами двигают цену, и
+// разница между расчётным и реальным исполнением съедает весь сетап.
+const MIN_DAILY_VOLUME_USD = 1_000_000;
 // Типы уровней, от которых имеет смысл ЛП2Б (см. комментарий у suitable2bLevel).
 const LEVEL_TYPES_2B = new Set(["retracement", "structure_break", "break_point", "mirror", "historical"]);
 
@@ -153,6 +157,14 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
       continue;
     }
     const currentPrice = candles[candles.length - 1].c;
+    // Отсекаем тонкие инструменты до анализа: считать по ним уровни незачем,
+    // а пересчёт идёт по всем 700 парам биржи.
+    const lastVolumeUsd = candles[candles.length - 1].v != null ? candles[candles.length - 1].v! * currentPrice : null;
+    if (lastVolumeUsd != null && lastVolumeUsd < MIN_DAILY_VOLUME_USD) {
+      rejected.thin_volume = (rejected.thin_volume ?? 0) + 1;
+      cb.onSymbolDone?.(symbol, index, rows.length);
+      continue;
+    }
     const candlesFrom = new Date(candles[0].t);
     const candlesTo = new Date(candles[candles.length - 1].t);
 
@@ -246,6 +258,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         currentPrice,
         significantLevels.filter((p) => p !== level.price),
         thresholds,
+        level.formedAt,
       );
       const gate = passesQualityGate(quality, signals.bias, { for: signals.for, against: signals.against }, thresholds);
       if (!gate.ok) {
@@ -280,7 +293,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         // токена — так число хоть в общем порядке сопоставимо с $-объёмом,
         // который показывают биржевые виджеты (хотя те агрегируют несколько
         // бирж, а здесь только Binance USDT-M).
-        lastVolume: candles[candles.length - 1].v != null ? candles[candles.length - 1].v! * currentPrice : null,
+        lastVolume: lastVolumeUsd,
       });
     }
     cb.onSymbolDone?.(symbol, index, rows.length);

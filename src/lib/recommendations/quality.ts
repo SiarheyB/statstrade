@@ -80,6 +80,18 @@ export interface LevelQuality {
    * до уровня с проколом и возвратом за один сегодняшний бар.
    */
   turnAwayAtr: number;
+  /**
+   * Насколько цена уже уходила ЗАКРЫТИЕМ за уровень ПОСЛЕ его образования, в
+   * ATR (0 — не уходила). Свежий хвост в BREACH_FRESH_BARS баров не считается:
+   * там пробой либо ещё не подтверждён, либо это ровно тот пробой, ради
+   * которого существует ЛП2Б.
+   *
+   * Трейдер называет такой уровень закрытым: откат, выше которого потом
+   * закрылись, поглощён следующим движением, и ЛП от него уже не работает —
+   * рабочей остаётся следующая, ещё не снятая точка структуры (SFPUSDT: откат
+   * 0.2912 от 22.05 перекрыт закрытиями 30-31.05, рабочий уровень — 0.3132).
+   */
+  breachedAfterFormedAtr: number;
 }
 
 export interface QualityThresholds {
@@ -128,6 +140,14 @@ export interface QualityThresholds {
    * предыдущего (см. turnAwayAtr), прежде чем подход считается прерванным.
    */
   maxTurnAwayAtr: number;
+  /**
+   * Для ЛП: насколько глубоко цена могла закрываться за уровнем после его
+   * образования (см. breachedAfterFormedAtr), прежде чем считать уровень
+   * снятым. Тот же допуск шума, что у касания.
+   */
+  maxBreachAfterFormedAtr: number;
+  /** Хвост баров, в котором закрытие за уровнем ещё не «уровень снят». */
+  breachFreshBars: number;
   /** Подход «на малых барах» — средний диапазон не больше этого × ATR. */
   smallBarsRatio: number;
   /** Подход «на больших барах» — средний диапазон не меньше этого × ATR. */
@@ -196,6 +216,10 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // Отскок в четверть ATR — ещё дрожание внутри подхода; больше — цена уже
   // развернулась от уровня. Тот же допуск, что у «касания» уровня.
   maxTurnAwayAtr: 0.25,
+  maxBreachAfterFormedAtr: 0.25,
+  // Столько же баров, сколько freshBreakDirection в breakoutSignals считает
+  // пробой свежим: вчерашний уход за уровень — это сетап, а не история.
+  breachFreshBars: 10,
   smallBarsRatio: 0.8,
   bigBarsRatio: 1.2,
   // Разделяет реальный "довгий безвідкатний рух" от многодневного пологого
@@ -398,6 +422,30 @@ function hasGapApproach(candles: DailyCandle[], levelPrice: number, atr: number,
   return false;
 }
 
+// Самый глубокий уход ЗАКРЫТИЕМ за уровень после его образования, в ATR.
+// Хвост в `freshBars` баров не смотрим: свежий пробой — это сегодняшняя
+// ситуация (в том числе заготовка ЛП2Б), а не свидетельство, что уровень
+// давно сняли.
+function breachAfterFormed(
+  candles: DailyCandle[],
+  levelPrice: number,
+  atr: number,
+  side: LevelSide,
+  formedAt: number | undefined,
+  freshBars: number,
+): number {
+  if (formedAt == null || atr <= 0) return 0;
+  const until = candles.length - 1 - freshBars;
+  let deepest = 0;
+  for (let i = 0; i <= until; i++) {
+    const bar = candles[i];
+    if (bar.t <= formedAt) continue;
+    const beyond = side === "above" ? bar.c - levelPrice : levelPrice - bar.c;
+    if (beyond > deepest) deepest = beyond;
+  }
+  return deepest / atr;
+}
+
 export function assessLevelQuality(
   candles: DailyCandle[],
   levelPrice: number,
@@ -405,6 +453,8 @@ export function assessLevelQuality(
   currentPrice: number,
   significantLevels: number[],
   th: QualityThresholds = DEFAULT_THRESHOLDS,
+  /** БСУ уровня — от него считается breachedAfterFormedAtr. */
+  levelFormedAt?: number,
 ): LevelQuality {
   const side: LevelSide = levelPrice >= currentPrice ? "above" : "below";
   const last = candles[candles.length - 1];
@@ -445,6 +495,7 @@ export function assessLevelQuality(
     gapApproach: hasGapApproach(candles, levelPrice, atr),
     approachNetMoveAtr: netMoveAtr(candles, atr, th.fastApproachWindow),
     turnAwayAtr: (touchDistance - prevTouchDistance) / atr,
+    breachedAfterFormedAtr: breachAfterFormed(candles, levelPrice, atr, side, levelFormedAt, th.breachFreshBars),
   };
 }
 
@@ -473,6 +524,7 @@ export type RejectReason =
   | "no_breakout_preconditions"
   | "no_false_breakout_preconditions"
   | "turned_away_from_level"
+  | "level_already_taken"
   | "no_2b_preconditions";
 
 export interface GateResult {
@@ -557,6 +609,10 @@ export function passesQualityGate(
     // уже развернулись (JCTUSDT: слив на 5×ATR, а последние два дня — отскок
     // вверх от дна, до уровня стало дальше на 0.63×ATR).
     if (q.turnAwayAtr > th.maxTurnAwayAtr) rejectedBy.push("turned_away_from_level");
+    // Уровень уже сняли: после образования цена закрывалась за ним. Такой
+    // откат поглощён следующим движением, и ждать от него разворота нечего —
+    // рабочей осталась следующая, ещё не пройденная точка структуры.
+    if (q.breachedAfterFormedAtr > th.maxBreachAfterFormedAtr) rejectedBy.push("level_already_taken");
   }
 
   return { ok: rejectedBy.length === 0, rejectedBy };

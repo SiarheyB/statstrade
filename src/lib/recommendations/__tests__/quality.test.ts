@@ -213,6 +213,7 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     gapApproach: false,
     approachNetMoveAtr: 0.3,
     turnAwayAtr: 0,
+    breachedAfterFormedAtr: 0,
     ...overrides,
   };
 }
@@ -356,5 +357,42 @@ describe("passesQualityGate — развернувшийся подход", () =
     const candles = [...background(40), candle(40, 117, 119, 116, 118), candle(41, 117, 116, 113, 114)];
     const q = assessLevelQuality(candles, 120, ATR, 114, []);
     expect(q.turnAwayAtr).toBeCloseTo(0.75, 2);
+  });
+});
+
+
+// «Уровень уже сняли»: после образования цена закрывалась за уровнем, значит
+// откат поглощён следующим движением и ЛП от него ждать нечего (SFPUSDT: откат
+// 0.2912 от 22.05, перекрытый закрытиями 30-31.05).
+describe("passesQualityGate — снятый уровень", () => {
+  const FAST = { for: [], against: ["big_bars_approach"] };
+
+  it("rejects a false breakout from a level price has already closed beyond", () => {
+    const q = quality({ approachGapAtr: 1.1, approachNetMoveAtr: 3, touched: false, breachedAfterFormedAtr: 1.35 });
+    const res = passesQualityGate(q, "false_breakout", FAST);
+    expect(res.ok).toBe(false);
+    expect(res.rejectedBy).toContain("level_already_taken");
+  });
+
+  it("tolerates noise-sized closes beyond the level", () => {
+    const q = quality({ approachGapAtr: 1.1, approachNetMoveAtr: 3, touched: false, breachedAfterFormedAtr: 0.2 });
+    expect(passesQualityGate(q, "false_breakout", FAST).ok).toBe(true);
+  });
+
+  it("ignores a fresh break — that is the ЛП2Б setup, not an old level", () => {
+    // Бар за уровнем стоит внутри хвоста breachFreshBars, поэтому в метрику
+    // он не попадает вовсе: считаем её от БСУ и до length-1-breachFreshBars.
+    // Уровень 120 над ценой; последние пять баров закрылись ВЫШЕ него, но это
+    // хвост — метрика их не видит.
+    const candles = [...background(40), ...Array.from({ length: 5 }, (_, i) => candle(41 + i, 121, 126, 120, 125))];
+    const q = assessLevelQuality(candles, 120, ATR, 118, [], DEFAULT_THRESHOLDS, candles[0].t);
+    expect(q.breachedAfterFormedAtr).toBe(0);
+  });
+
+  it("measures the deepest close beyond the level after the BSU", () => {
+    // Уровень 120 сверху; на 15-м баре окна закрытие 123 — это 0.75×ATR за него.
+    const candles = [...background(20), candle(20, 121, 124, 120, 123), ...background(15, 21)];
+    const q = assessLevelQuality(candles, 120, ATR, 100, [], DEFAULT_THRESHOLDS, candles[0].t);
+    expect(q.breachedAfterFormedAtr).toBeCloseTo(0.75, 2);
   });
 });
