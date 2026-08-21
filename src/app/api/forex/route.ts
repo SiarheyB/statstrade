@@ -12,6 +12,7 @@ export const maxDuration = 30;
 // Таймфреймы (совпадают с collector/forex/index.mjs)
 // 12h не поддерживается Twelve Data — агрегируем из 1h.
 const TF_MS: Record<string, number> = {
+  "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "1h": 60 * 60_000,
@@ -27,6 +28,9 @@ const TF_MS: Record<string, number> = {
 // расширить дефолтный масштаб (свечи остаются «огромными» даже после
 // увеличения VISIBLE_CANDLES).
 const CANDLES_IN_WINDOW: Record<string, number> = {
+  // 1m живёт ровно столько, сколько задано FX_M1_RETENTION_DAYS в коллекторе
+  // (30 дней по умолчанию) — просить окно шире смысла нет.
+  "1m": 2000,  // ~1.4 суток торговли
   "5m": 2000,  // ~7 суток
   "15m": 1800, // ~18.75 суток
   "1h": 1600,  // ~66.7 дней

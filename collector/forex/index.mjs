@@ -1,32 +1,55 @@
-// Forex collector — Finnhub WebSocket (реальные тики) как основной источник +
-// Twelve Data REST как источник истории и fallback-догон.
+// Forex collector — три источника с разными ролями:
+//
+//   1. Finnhub WebSocket — реальные тики по валютным парам (мажорам).
+//   2. Twelve Data REST  — история мажоров при старте + редкий fallback-догон.
+//   3. Dukascopy freeserv — готовые свечи по инструментам, которых нет у
+//      первых двух (золото XAU/USD), плюс история таймфрейма 1m для всех пар.
 //
 // Почему так:
 //   Twelve Data free tier (800 запросов/день, 8/мин) не тянет обновление
 //   каждые 5 минут по всем мажорам × всем таймфреймам — уходит в лимит.
 //   Finnhub free tier даёт WebSocket с тиками (сделками) без ограничения на
 //   число сообщений (лимитируется только число подписанных символов, до 50) —
-//   поэтому коллектор сам агрегирует тики в свечи 5m/15m/1h/4h/1d/1w в
+//   поэтому коллектор сам агрегирует тики в свечи 1m/5m/15m/1h/4h/1d/1w в
 //   памяти и льёт их в Postgres. REST /forex/candle у Finnhub — premium-only
 //   на free-плане, поэтому для истории и на случай обрыва WS используется
 //   Twelve Data (батчим до 8 символов в одном запросе).
+//   Золота (XAU/USD) на free-планах Twelve Data нет (у них это commodity, а не
+//   forex), поэтому оно целиком идёт через Dukascopy — там оно бесплатно, без
+//   ключа и с многолетней историей на 1m. Подробности — collector/forex/dukascopy.mjs.
 //
 // Архитектура:
-//   Finnhub WS (тики) → агрегатор свечей в памяти → Postgres (FxCandle, exchange="finnhub")
-//   Twelve Data REST  → бэкафилл истории при старте + периодический fallback-догон
-//                        (пишет в тот же exchange="finnhub", т.к. это тот же логический ряд)
+//   Finnhub WS (тики) → агрегатор свечей в памяти → Postgres (FxCandle)
+//   Twelve Data REST  → бэкафилл истории мажоров при старте + fallback-догон
+//   Dukascopy REST    → свечи по FX_DUKASCOPY_SYMBOLS (опрос) + история 1m всем
+//
+// ⚠️ exchange="finnhub" у всех строк FxCandle — это ИСТОРИЧЕСКИЙ ТЕГ ОДНОГО
+//    ЛОГИЧЕСКОГО РЯДА, а не имя провайдера: под ним лежат и свечи из тиков
+//    Finnhub, и бары Twelve Data, и бары Dukascopy (включая золото, которого у
+//    Finnhub вообще нет). Приложение фильтрует свечи именно по этому значению
+//    (src/app/api/forex/*), поэтому менять его нельзя без миграции данных.
 //
 // Ограничения free tier:
 //   Twelve Data: 8 запросов/мин, 800/день, до 8 символов в одном запросе.
 //   Finnhub: WS без лимита на сообщения, до 50 подписанных символов.
+//   Dukascopy: ключа нет; лимит не документирован, отвечает 503 при частых
+//   запросах — отсюда вежливый темп опроса и ретраи в dukascopy.mjs.
 
 import http from "node:http";
 import pg from "pg";
+import { fetchCandles as dukasFetchCandles, DUKAS_INTERVAL } from "./dukascopy.mjs";
 
 // ─── Конфигурация из ENV ──────────────────────────────────────────────────
 
 const cfg = {
-  symbols: (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY")
+  symbols: (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY,XAU/USD")
+    .split(",").map(s => s.trim()).filter(Boolean),
+
+  // Инструменты, которые собираются из Dukascopy, а не из Finnhub/Twelve Data.
+  // Металлов нет ни в WS Finnhub, ни на free-плане Twelve Data, поэтому для
+  // них Dukascopy — единственный бесплатный источник (и заодно единственный,
+  // который виден из РБ без прокси).
+  dukascopySymbols: (process.env.FX_DUKASCOPY_SYMBOLS ?? "XAU/USD,XAG/USD")
     .split(",").map(s => s.trim()).filter(Boolean),
 
   // Единый тег источника для всех свечей форекса (и WS, и REST-бэкафилл
@@ -47,7 +70,18 @@ const cfg = {
   // Как часто сбрасывать в БД текущие (ещё открытые) свечи, собранные из тиков.
   flushIntervalSec: Number(process.env.FX_FLUSH_INTERVAL_SEC ?? 15),
 
+  // Базовый шаг опроса Dukascopy. На нём обновляется 1m; более старшие
+  // таймфреймы — реже (см. pollDukascopy), чтобы не долбить недокументированный
+  // эндпоинт чаще, чем нужно.
+  dukascopyPollSec: Number(process.env.FX_DUKASCOPY_POLL_SEC ?? 15),
+
   candleRetentionDays: Number(process.env.FX_CANDLE_RETENTION_DAYS ?? 365),
+
+  // 1m хранится отдельно и заметно короче: это самый быстрорастущий ряд
+  // (1440 свечей в сутки на инструмент против 288 у 5m), а нужен он только
+  // для интрадей-разметки. При 365 днях, как у остальных таймфреймов, одна
+  // таблица FxCandle съела бы миллионы строк на 8 ГБ сервере.
+  m1RetentionDays: Number(process.env.FX_M1_RETENTION_DAYS ?? 30),
 
   databaseUrl: process.env.DATABASE_URL,
   port: Number(process.env.PORT ?? 8081),
@@ -58,9 +92,16 @@ if (!cfg.databaseUrl) {
   process.exit(1);
 }
 
+// Ключ Finnhub нужен только для валютных пар. Инструменты из
+// FX_DUKASCOPY_SYMBOLS (металлы) собираются без единого ключа, поэтому
+// конфигурация «только золото» — валидная, и падать на старте в ней нельзя.
 if (!cfg.finnhubApiKey) {
-  console.error("[fx] FATAL: FINNHUB_API_KEY не задан");
-  process.exit(1);
+  const needsFinnhub = cfg.symbols.some(s => !cfg.dukascopySymbols.includes(s));
+  if (needsFinnhub) {
+    console.error("[fx] FATAL: FINNHUB_API_KEY не задан, а в FX_SYMBOLS есть валютные пары");
+    process.exit(1);
+  }
+  console.log("[fx] FINNHUB_API_KEY не задан — работаем только по инструментам Dukascopy");
 }
 
 // ─── Postgres ──────────────────────────────────────────────────────────────
@@ -69,6 +110,10 @@ const pool = new pg.Pool({ connectionString: cfg.databaseUrl, max: 4 });
 
 // ─── Таймфреймы ───────────────────────────────────────────────────────────
 
+// Наш таймфрейм → интервал Twelve Data. 1m тут намеренно нет: минутку по всем
+// парам free-план TD не потянет (8 кредитов/мин, 800/сутки — и они уже уходят
+// на остальные таймфреймы), поэтому её историю приносит Dukascopy, а «живую»
+// часть — агрегатор тиков Finnhub.
 const TF_MAP = {
   "5m": "5min",
   "15m": "15min",
@@ -78,9 +123,12 @@ const TF_MAP = {
   "1w": "1week",
 };
 
-const CANDLE_INTERVALS = Object.keys(TF_MAP);
+// Все таймфреймы, которые собирает коллектор (должны совпадать с TF_MS в
+// src/app/api/forex/route.ts и RANGES в ForexView.tsx).
+const CANDLE_INTERVALS = ["1m", ...Object.keys(TF_MAP)];
 
 const INTERVAL_MS = {
+  "1m": 60_000,
   "5m": 5 * 60_000,
   "15m": 15 * 60_000,
   "1h": 60 * 60_000,
@@ -116,6 +164,21 @@ function bucketStart(ms, interval) {
 
 function toFinnhubSymbol(symbol) {
   return `OANDA:${symbol.replace("/", "_")}`;
+}
+
+// Кто обслуживает символ. Металлы (и всё, что перечислено в
+// FX_DUKASCOPY_SYMBOLS) идут через Dukascopy и НЕ подписываются на Finnhub и
+// не запрашиваются у Twelve Data — там их либо нет, либо они платные.
+function isDukascopySymbol(symbol) {
+  return cfg.dukascopySymbols.includes(symbol);
+}
+
+function finnhubSymbols() {
+  return cfg.symbols.filter(s => !isDukascopySymbol(s));
+}
+
+function dukascopySymbols() {
+  return cfg.symbols.filter(s => isDukascopySymbol(s));
 }
 
 function fromFinnhubSymbol(fhSymbol) {
@@ -226,34 +289,44 @@ function toCandleRow(value, symbol, interval) {
   };
 }
 
+// Сколько свечей вставляем одним INSERT. Ограничение не наше, а протокола
+// Postgres: не больше 65535 bind-параметров на запрос, а у нас 9 параметров на
+// строку. Бэкафилл 1m тянет до 20 000 баров за раз — без разбиения на пачки
+// весь запрос падал целиком с «bind message has N parameter formats but 0
+// parameters», и минутный ряд молча оставался пустым.
+const INSERT_CHUNK_ROWS = 5000;
+
 async function storeCandleRows(rows) {
   if (rows.length === 0) return 0;
 
-  const values = [];
-  const params = [];
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const b = params.length;
-    values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`);
-    params.push(r.symbol, r.exchange, r.interval, r.t, r.o, r.h, r.l, r.c, r.v);
-  }
+  let stored = 0;
+  for (let offset = 0; offset < rows.length; offset += INSERT_CHUNK_ROWS) {
+    const chunk = rows.slice(offset, offset + INSERT_CHUNK_ROWS);
+    const values = [];
+    const params = [];
+    for (const r of chunk) {
+      const b = params.length;
+      values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7},$${b + 8},$${b + 9})`);
+      params.push(r.symbol, r.exchange, r.interval, r.t, r.o, r.h, r.l, r.c, r.v);
+    }
 
-  try {
-    await pool.query(
-      `INSERT INTO "FxCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
-       VALUES ${values.join(",")}
-       ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
-         "h" = EXCLUDED."h", "l" = EXCLUDED."l", "c" = EXCLUDED."c", "v" = EXCLUDED."v"`,
-      params,
-    );
-    writeErrors = 0;
-    lastWriteOkAt = Date.now();
-    return rows.length;
-  } catch (err) {
-    writeErrors++;
-    console.error(`[fx/store] error: ${err.message}`);
-    return 0;
+    try {
+      await pool.query(
+        `INSERT INTO "FxCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+         VALUES ${values.join(",")}
+         ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+           "h" = EXCLUDED."h", "l" = EXCLUDED."l", "c" = EXCLUDED."c", "v" = EXCLUDED."v"`,
+        params,
+      );
+      writeErrors = 0;
+      lastWriteOkAt = Date.now();
+      stored += chunk.length;
+    } catch (err) {
+      writeErrors++;
+      console.error(`[fx/store] error: ${err.message}`);
+    }
   }
+  return stored;
 }
 
 // Бэкафилл/догон для одного таймфрейма по всем символам разом (батч).
@@ -262,12 +335,17 @@ async function fetchAndStoreBatch(interval, outputsize, startDate) {
   if (!twelveInterval) return 0;
   if (!cfg.twelveDataApiKey) return 0;
 
-  const requestedMultiple = cfg.symbols.length > 1;
-  const data = await fetchTimeSeriesBatch(cfg.symbols, twelveInterval, outputsize, startDate);
+  // Символы Dukascopy (металлы) в батч не попадают: у Twelve Data их нет на
+  // free-плане, и каждый такой символ просто съедал бы кредит впустую.
+  const symbols = finnhubSymbols();
+  if (symbols.length === 0) return 0;
+
+  const requestedMultiple = symbols.length > 1;
+  const data = await fetchTimeSeriesBatch(symbols, twelveInterval, outputsize, startDate);
   if (!data) return 0;
 
   let stored = 0;
-  for (const symbol of cfg.symbols) {
+  for (const symbol of symbols) {
     const values = extractSymbolValues(data, symbol, requestedMultiple);
     if (!values || values.length === 0) {
       // Явный лог отсутствия данных на символ — если тариф молча режет
@@ -284,7 +362,7 @@ async function fetchAndStoreBatch(interval, outputsize, startDate) {
       console.log(`[fx/td] ${symbol} ${interval}: получено ${values.length} баров (${oldest} … ${newest}), запрошено с ${startDate}`);
     }
   }
-  if (stored > 0) console.log(`[fx/td] ${interval}: +${stored} свечей (${cfg.symbols.length} пар за 1 запрос)`);
+  if (stored > 0) console.log(`[fx/td] ${interval}: +${stored} свечей (${symbols.length} пар за 1 запрос)`);
   return stored;
 }
 
@@ -309,9 +387,12 @@ async function backfillAll() {
     backfillDone = true;
     return;
   }
-  console.log(`[fx/td] backfill: начинаем для ${cfg.symbols.length} символов, ${CANDLE_INTERVALS.length} таймфреймов (батч по символам)`);
+  console.log(`[fx/td] backfill: начинаем для ${finnhubSymbols().length} символов, ${Object.keys(TF_MAP).length} таймфреймов (батч по символам)`);
 
   for (const interval of CANDLE_INTERVALS) {
+    // 1m у Twelve Data не запрашиваем совсем (см. TF_MAP) — им занимается
+    // Dukascopy в backfillM1FromDukascopy().
+    if (!TF_MAP[interval]) continue;
     const depthDays = BACKFILL_DEPTH_DAYS[interval];
     try {
       // Проверяем ГЛУБИНУ (возраст самой старой свечи), а не count(*) — свечей
@@ -352,7 +433,7 @@ async function backfillAll() {
 // Батч по символам, редкий (fallbackIntervalSec) — не расходует лимит впустую.
 async function fallbackCatchUp() {
   if (!forexEnabled || !cfg.twelveDataApiKey) return;
-  for (const interval of CANDLE_INTERVALS) {
+  for (const interval of Object.keys(TF_MAP)) {
     const outputsize = interval === "5m" || interval === "15m" ? 20 : 5;
     await fetchAndStoreBatch(interval, outputsize);
   }
@@ -362,7 +443,13 @@ async function fallbackCatchUp() {
 // Бэкафилл истории для ОДНОГО символа (добавлен из админки после старта) —
 // не батчим с остальными, чтобы не пересчитывать общий cfg.symbols на лету.
 async function backfillOneSymbol(symbol) {
-  if (!forexEnabled || !cfg.twelveDataApiKey) return;
+  if (!forexEnabled) return;
+  // Металлы Twelve Data не отдаёт — у них своя история, из Dukascopy.
+  if (isDukascopySymbol(symbol)) {
+    await backfillDukascopySymbol(symbol);
+    return;
+  }
+  if (!cfg.twelveDataApiKey) return;
   console.log(`[fx/td] backfill нового символа ${symbol}…`);
   for (const interval of CANDLE_INTERVALS) {
     const twelveInterval = TF_MAP[interval];
@@ -375,6 +462,240 @@ async function backfillOneSymbol(symbol) {
     const rows = values.map(v => toCandleRow(v, symbol, interval));
     const stored = await storeCandleRows(rows);
     if (stored > 0) console.log(`[fx/td] ${symbol} ${interval}: +${stored} свечей`);
+  }
+}
+
+// ─── Dukascopy: свечи по металлам + история 1m ────────────────────────────
+//
+// Здесь берутся ГОТОВЫЕ бары, а не тики: у тиков Dukascopy объём в другой
+// шкале, чем у свечей, и смешивать их в одном ряду нельзя (получились бы
+// скачки объёма на стыке «история / реальное время»).
+//
+// 4h собирается агрегацией из 1h, а не запрашивается напрямую: у Dukascopy
+// четырёхчасовые бары выровнены по UTC-полуночи, а у нас сетка сдвинута на час
+// (bucketStart, наследие Twelve Data). Прямой запрос дал бы для золота другую
+// сетку, чем у остальных пар.
+
+let dukasCalls = 0;
+let dukasErrors = 0;
+let lastDukasOkAt = 0;
+
+// Сколько баров тянем при первом заполнении.
+//
+// Глубина согласована с retention (FX_CANDLE_RETENTION_DAYS / FX_M1_RETENTION_DAYS):
+// просить больше бессмысленно — pruneOld удалит лишнее в ближайший проход, а
+// на следующем старте бэкафилл увидит «истории нет» и скачает всё заново. На
+// 1d/1w это особенно заметно: Dukascopy отдаёт бары с 2015 года, из которых
+// переживает чистку только последний год.
+const DUKAS_BACKFILL_LIMIT = { "1m": 20000, "5m": 5000, "15m": 2000, "1h": 5000, "1d": 400, "1w": 60 };
+
+// Достаточная глубина ряда (дней): если самая старая свеча старше — бэкафилл
+// пропускаем. Считаем по ВОЗРАСТУ, а не по числу строк: после чистки строк
+// всегда меньше, чем было скачано, и проверка по count заставляла бы качать
+// историю заново при каждом перезапуске контейнера.
+const DUKAS_ENOUGH_DEPTH_DAYS = { "1m": 10, "5m": 12, "15m": 15, "1h": 240, "1d": 330, "1w": 330 };
+
+// Сколько баров просим при периодическом опросе. Больше одного — чтобы
+// закрыть возможный пропуск (сеть моргнула, контейнер перезапустился) и
+// перезаписать ещё не закрытый бар актуальными значениями.
+const DUKAS_POLL_LIMIT = { "1m": 5, "5m": 4, "15m": 3, "1h": 8, "1d": 3, "1w": 2 };
+
+function dukasRowsToCandleRows(symbol, interval, candles) {
+  return candles.map(c => ({
+    symbol,
+    exchange: cfg.exchange,
+    interval,
+    t: new Date(c.t),
+    o: c.o, h: c.h, l: c.l, c: c.c, v: c.v ?? 0,
+  }));
+}
+
+// Схлопывает свечи меньшего таймфрейма в больший по нашей сетке (bucketStart).
+function aggregateToInterval(candles, interval) {
+  const buckets = new Map();
+  for (const c of [...candles].sort((a, b) => a.t - b.t)) {
+    const b = bucketStart(c.t, interval);
+    const cur = buckets.get(b);
+    if (!cur) {
+      buckets.set(b, { t: b, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v ?? 0 });
+    } else {
+      cur.h = Math.max(cur.h, c.h);
+      cur.l = Math.min(cur.l, c.l);
+      cur.c = c.c;
+      cur.v += c.v ?? 0;
+    }
+  }
+  return Array.from(buckets.values()).sort((a, b) => a.t - b.t);
+}
+
+// Один запрос к Dukascopy + запись в БД. Ошибку не пробрасываем: недоступность
+// Dukascopy не должна ронять сбор по остальным парам.
+async function fetchAndStoreDukascopy(symbol, interval, limit) {
+  if (!forexEnabled) return 0;
+  try {
+    dukasCalls++;
+    const candles = await dukasFetchCandles(symbol, interval, limit);
+    if (candles.length === 0) return 0;
+    lastDukasOkAt = Date.now();
+
+    let stored = await storeCandleRows(dukasRowsToCandleRows(symbol, interval, candles));
+
+    // 4h нет у Dukascopy в нашей сетке — собираем его из только что
+    // полученных часовых баров тем же запросом, без лишнего обращения к API.
+    if (interval === "1h") {
+      const h4 = aggregateToInterval(candles, "4h");
+      // Первый бакет почти всегда неполный (окно запроса началось в его
+      // середине) — он затёр бы корректный бар в БД частичными O/H/L/V.
+      const complete = h4.slice(1);
+      if (complete.length > 0) stored += await storeCandleRows(dukasRowsToCandleRows(symbol, "4h", complete));
+    }
+    return stored;
+  } catch (err) {
+    dukasErrors++;
+    console.error(`[fx/dukas] ${symbol} ${interval}: ${err.message}`);
+    return 0;
+  }
+}
+
+// Достраивает ТЕКУЩИЙ (ещё не закрытый) бар старшего таймфрейма из минуток,
+// уже лежащих в БД.
+//
+// Зачем: Dukascopy отдаёт по 1HOUR/1DAY/1WEEK только ЗАКРЫТЫЕ бары — текущего
+// часа в ответе просто нет (проверено: в 20:43 UTC последний часовой бар был
+// 19:00). Без этой достройки дневная свеча золота появлялась бы на графике
+// только назавтра, а часовая — в начале следующего часа.
+//
+// Считает Postgres: это один индексный range-scan и одна строка в ответ,
+// дешевле, чем тащить минутки в Node и складывать их там.
+async function refreshFormingBucket(symbol, interval) {
+  const span = INTERVAL_MS[interval];
+  if (!span) return 0;
+  const from = bucketStart(Date.now(), interval);
+  const to = from + span;
+
+  try {
+    const r = await pool.query(
+      `SELECT (array_agg("o" ORDER BY "t"))[1] AS o,
+              MAX("h") AS h,
+              MIN("l") AS l,
+              (array_agg("c" ORDER BY "t" DESC))[1] AS c,
+              SUM("v") AS v,
+              COUNT(*)::int AS n
+         FROM "FxCandle"
+        WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"='1m' AND "t" >= $3 AND "t" < $4`,
+      [symbol, cfg.exchange, new Date(from), new Date(to)],
+    );
+    const row = r.rows[0];
+    if (!row || row.n === 0) return 0;
+    return await storeCandleRows([{
+      symbol,
+      exchange: cfg.exchange,
+      interval,
+      t: new Date(from),
+      o: Number(row.o), h: Number(row.h), l: Number(row.l), c: Number(row.c), v: Number(row.v ?? 0),
+    }]);
+  } catch (err) {
+    console.error(`[fx/dukas] достройка ${symbol} ${interval}: ${err.message}`);
+    return 0;
+  }
+}
+
+// Есть ли уже в БД история нужной глубины (чтобы не тянуть её при каждом
+// перезапуске контейнера).
+async function hasHistoryDepth(symbol, interval, depthDays) {
+  try {
+    const r = await pool.query(
+      `SELECT MIN("t") AS min_t FROM "FxCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+      [symbol, cfg.exchange, interval],
+    );
+    const minT = r.rows[0]?.min_t;
+    if (!minT) return false;
+    return (Date.now() - new Date(minT).getTime()) / 86_400_000 >= depthDays;
+  } catch {
+    return false; // таблицы ещё нет — считаем, что истории нет
+  }
+}
+
+// Полный бэкафилл одного инструмента Dukascopy (все таймфреймы).
+async function backfillDukascopySymbol(symbol) {
+  console.log(`[fx/dukas] backfill ${symbol}…`);
+  for (const interval of Object.keys(DUKAS_INTERVAL)) {
+    const limit = DUKAS_BACKFILL_LIMIT[interval] ?? 1000;
+    const depthDays = DUKAS_ENOUGH_DEPTH_DAYS[interval] ?? 1;
+    if (await hasHistoryDepth(symbol, interval, depthDays)) {
+      console.log(`[fx/dukas] ${symbol} ${interval}: история глубже ${depthDays}д уже есть, пропускаем`);
+      continue;
+    }
+    const stored = await fetchAndStoreDukascopy(symbol, interval, limit);
+    if (stored > 0) console.log(`[fx/dukas] ${symbol} ${interval}: +${stored} свечей`);
+    // Вежливая пауза: эндпоинт недокументированный, на пачке частых запросов
+    // он отвечает 503.
+    await new Promise(r => setTimeout(r, 1500));
+  }
+
+  // Сразу после бэкафилла достраиваем текущие бары старших таймфреймов —
+  // иначе до первого срабатывания их тика в pollDukascopy график показывал бы
+  // историю без «сегодня».
+  for (const interval of ["5m", "15m", "1h", "4h", "1d", "1w"]) {
+    await refreshFormingBucket(symbol, interval);
+  }
+}
+
+// История 1m для пар, которые в реальном времени идут через Finnhub. Без неё
+// новый таймфрейм был бы пустым до тех пор, пока не накопятся тики.
+async function backfillM1ForFinnhubSymbols() {
+  for (const symbol of finnhubSymbols()) {
+    // 3 дня (~5000 минуток торговли) — этого хватает, чтобы таймфрейм открылся
+    // не пустым; дальше ряд наращивают тики Finnhub.
+    if (await hasHistoryDepth(symbol, "1m", 3)) continue;
+    const stored = await fetchAndStoreDukascopy(symbol, "1m", 5000);
+    if (stored > 0) console.log(`[fx/dukas] ${symbol} 1m: +${stored} свечей (история)`);
+    await new Promise(r => setTimeout(r, 1500));
+  }
+}
+
+async function backfillDukascopyAll() {
+  if (!forexEnabled) return;
+  for (const symbol of dukascopySymbols()) {
+    await backfillDukascopySymbol(symbol);
+  }
+  await backfillM1ForFinnhubSymbols();
+  console.log(`[fx/dukas] backfill завершён (запросов: ${dukasCalls}, ошибок: ${dukasErrors})`);
+}
+
+// Периодический опрос. Тики Dukascopy отдаёт с задержкой 0.5–3с, но нам нужны
+// свечи, поэтому «живость» определяется шагом опроса: 1m обновляется каждые
+// dukascopyPollSec, старшие таймфреймы — кратно реже (им чаще и не нужно).
+let dukasPollTick = 0;
+
+async function pollDukascopy() {
+  if (!forexEnabled) return;
+  const symbols = dukascopySymbols();
+  if (symbols.length === 0) return;
+
+  const n = dukasPollTick++;
+  const stepsPerMinute = Math.max(1, Math.round(60 / cfg.dukascopyPollSec));
+
+  // Что тянем из Dukascopy (закрытые бары — они точные и дают глубину).
+  const fetchIntervals = ["1m"];
+  if (n % stepsPerMinute === 0) fetchIntervals.push("5m", "15m");
+  if (n % (stepsPerMinute * 5) === 0) fetchIntervals.push("1h"); // + 4h агрегацией
+  if (n % (stepsPerMinute * 15) === 0) fetchIntervals.push("1d", "1w");
+
+  // Что достраиваем из минуток (текущий незакрытый бар — его Dukascopy не
+  // отдаёт). Младшие — каждый тик, старшие — реже: чем больше бакет, тем
+  // больше минуток приходится сканировать, а меняется он не так заметно.
+  const formingIntervals = ["5m", "15m"];
+  if (n % stepsPerMinute === 0) formingIntervals.push("1h", "4h");
+  if (n % (stepsPerMinute * 5) === 0) formingIntervals.push("1d", "1w");
+
+  for (const symbol of symbols) {
+    for (const interval of fetchIntervals) {
+      await fetchAndStoreDukascopy(symbol, interval, DUKAS_POLL_LIMIT[interval] ?? 3);
+    }
+    for (const interval of formingIntervals) {
+      await refreshFormingBucket(symbol, interval);
+    }
   }
 }
 
@@ -450,6 +771,11 @@ const WS_STABLE_MS = 30_000;
 
 function connectFinnhub() {
   if (!forexEnabled) return;
+  if (!cfg.finnhubApiKey) return; // конфигурация «только Dukascopy» — подключаться некуда
+  if (finnhubSymbols().length === 0) {
+    console.log("[fx/ws] валютных пар в списке нет — Finnhub не нужен");
+    return;
+  }
   const url = `${cfg.finnhubWsUrl}?token=${cfg.finnhubApiKey}`;
   console.log(`[fx/ws] подключение к Finnhub WS…`);
 
@@ -464,8 +790,9 @@ function connectFinnhub() {
   ws.onopen = () => {
     wsConnected = true;
     wsOpenedAt = Date.now();
-    console.log(`[fx/ws] подключено, подписываемся на ${cfg.symbols.length} пар`);
-    for (const symbol of cfg.symbols) {
+    const symbols = finnhubSymbols();
+    console.log(`[fx/ws] подключено, подписываемся на ${symbols.length} пар`);
+    for (const symbol of symbols) {
       ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) }));
     }
   };
@@ -526,12 +853,26 @@ function scheduleReconnect() {
 async function pruneOld() {
   try {
     const r = await pool.query(
-      `DELETE FROM "FxCandle" WHERE "exchange"=$1 AND "t" < NOW() - ($2 || ' days')::interval`,
+      `DELETE FROM "FxCandle"
+        WHERE "exchange"=$1 AND "interval" <> '1m' AND "t" < NOW() - ($2 || ' days')::interval`,
       [cfg.exchange, String(cfg.candleRetentionDays)],
     );
     if (r.rowCount > 0) console.log(`[fx/prune] FxCandle: удалено ${r.rowCount} строк`);
   } catch (err) {
     console.error(`[fx/prune] FxCandle: ${err.message}`);
+  }
+
+  // 1m — отдельным запросом и с более коротким сроком: ряд растёт в 5 раз
+  // быстрее 5m, а глубже месяца минутка на графике не нужна.
+  try {
+    const r = await pool.query(
+      `DELETE FROM "FxCandle"
+        WHERE "exchange"=$1 AND "interval"='1m' AND "t" < NOW() - ($2 || ' days')::interval`,
+      [cfg.exchange, String(cfg.m1RetentionDays)],
+    );
+    if (r.rowCount > 0) console.log(`[fx/prune] FxCandle 1m: удалено ${r.rowCount} строк`);
+  } catch (err) {
+    console.error(`[fx/prune] FxCandle 1m: ${err.message}`);
   }
 }
 
@@ -570,7 +911,8 @@ async function syncSymbolsFromConfig() {
   console.log(`[fx/config] изменение списка пар: +[${added.join(",")}] -[${removed.join(",")}]`);
 
   for (const symbol of removed) {
-    if (wsConnected && ws) {
+    // Металлы на Finnhub не подписаны — отписываться не от чего.
+    if (wsConnected && ws && !isDukascopySymbol(symbol)) {
       try { ws.send(JSON.stringify({ type: "unsubscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
     }
     liveCandles.delete(symbol);
@@ -580,7 +922,7 @@ async function syncSymbolsFromConfig() {
   cfg.symbols.push(...target);
 
   for (const symbol of added) {
-    if (wsConnected && ws) {
+    if (wsConnected && ws && !isDukascopySymbol(symbol)) {
       try { ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
     }
     backfillOneSymbol(symbol).catch(err => console.error(`[fx/config] backfill ${symbol}: ${err.message}`));
@@ -641,6 +983,13 @@ const server = http.createServer(async (req, res) => {
         totalCalls: totalTwelveDataCalls,
         fallbackIntervalSec: cfg.fallbackIntervalSec,
       },
+      dukascopy: {
+        symbols: dukascopySymbols(),
+        pollSec: cfg.dukascopyPollSec,
+        totalCalls: dukasCalls,
+        errors: dukasErrors,
+        lastOkAt: lastDukasOkAt ? new Date(lastDukasOkAt).toISOString() : null,
+      },
       errors: writeErrors,
       lastWriteOkAt: lastWriteOkAt ? new Date(lastWriteOkAt).toISOString() : null,
       exchange: cfg.exchange,
@@ -672,7 +1021,12 @@ async function start() {
   // 1. Бэкафилл истории через Twelve Data (если задан ключ).
   backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
 
-  // 2. Основной источник реального времени — Finnhub WS.
+  // 2. Бэкафилл через Dukascopy: металлы целиком + история 1m для всех пар.
+  //    Отдельной цепочкой от Twelve Data — они не мешают друг другу и не
+  //    делят лимиты.
+  backfillDukascopyAll().catch(err => console.error(`[fx/dukas] fatal: ${err.message}`));
+
+  // 3. Основной источник реального времени — Finnhub WS.
   connectFinnhub();
 }
 start().catch(err => console.error(`[fx/start] fatal: ${err.message}`));
@@ -681,6 +1035,11 @@ start().catch(err => console.error(`[fx/start] fatal: ${err.message}`));
 const flushTimer = setInterval(() => {
   flushLiveCandles().catch(err => console.error(`[fx/flush] fatal: ${err.message}`));
 }, cfg.flushIntervalSec * 1000);
+
+// 3.1. Опрос Dukascopy — «живые» свечи по металлам.
+const dukascopyTimer = setInterval(() => {
+  pollDukascopy().catch(err => console.error(`[fx/dukas] fatal: ${err.message}`));
+}, cfg.dukascopyPollSec * 1000);
 
 // 4. Периодический fallback-догон через Twelve Data (подстраховка).
 const fallbackTimer = setInterval(() => {
@@ -706,12 +1065,13 @@ const toggleTimer = setInterval(() => {
 
 // Статус — раз в 10 минут.
 setInterval(() => {
-  console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}`);
+  console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}, Dukascopy calls=${dukasCalls} (ошибок ${dukasErrors})`);
 }, 600_000);
 
 async function shutdown() {
   console.log("[fx] shutdown…");
   clearInterval(flushTimer);
+  clearInterval(dukascopyTimer);
   clearInterval(fallbackTimer);
   clearInterval(pruneTimer);
   clearInterval(configSyncTimer);

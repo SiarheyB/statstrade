@@ -51,8 +51,8 @@ type FxResp = {
   timezone: string;
 };
 
-const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"];
-const VISIBLE_CANDLES: Record<string, number> = { "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
+const RANGES = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"];
+const VISIBLE_CANDLES: Record<string, number> = { "1m": 480, "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
 const DEFAULT_VISIBLE = 360;
 // Верхняя граница памяти для догруженной истории (historyRef) — см.
 // LAZY_HISTORY_PLAN.md и аналогичную константу на /dashboard/orderflow.

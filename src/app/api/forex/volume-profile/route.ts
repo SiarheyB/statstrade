@@ -11,8 +11,9 @@ export const maxDuration = 20;
 // Аппроксимация: распределяем объём каждой свечи пропорционально её диапазону.
 // Без данных стакана (depth) — это приблизительный VP, но лучше, чем ничего.
 
-const PERIODS = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
+const PERIODS = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 const PERIOD_MS: Record<string, number> = {
+  "1m": 60 * 60_000,
   "5m": 60 * 60_000,
   "15m": 4 * 60 * 60_000,
   "1h": 60 * 60_000,
@@ -53,12 +54,14 @@ export async function GET(req: Request) {
         const toMs = Date.now();
         const fromMs = toMs - windowMs;
 
-        // Берём свечи за период (используем 5m или 15m для детализации)
+        // Берём свечи за период. Для минутного окна — минутки: на часовом
+        // отрезке 5m-свечей всего 12, профиль по ним получился бы из десятка
+        // грубых уровней.
         const candles = await prisma.fxCandle.findMany({
           where: {
             symbol,
             exchange: "finnhub",
-            interval: "5m",
+            interval: period === "1m" ? "1m" : "5m",
             t: { gte: new Date(fromMs), lte: new Date(toMs) },
           },
           orderBy: { t: "asc" },

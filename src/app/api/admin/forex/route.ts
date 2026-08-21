@@ -16,7 +16,7 @@ export const maxDuration = 30;
 // ObSnapshot у крипты, поэтому агрегаты считаются обычным GROUP BY без
 // отдельного тяжёлого кэша.
 
-const INTERVALS = ["5m", "15m", "1h", "4h", "1d", "1w"] as const;
+const INTERVALS = ["1m", "5m", "15m", "1h", "4h", "1d", "1w"] as const;
 
 type CandleRow = { symbol: string; interval: string; count: number; last_t: Date | null; oldest_t: Date | null };
 

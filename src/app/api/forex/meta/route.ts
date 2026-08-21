@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized } from "@/lib/api";
 import { forexAccessError } from "@/lib/forexAccess";
+import { prisma } from "@/lib/db";
 
 // Карта известных валютных пар для генерации label.
 const KNOWN_PAIRS: Record<string, { base: string; quote: string; label: string }> = {
@@ -12,15 +13,40 @@ const KNOWN_PAIRS: Record<string, { base: string; quote: string; label: string }
   "NZD/USD": { base: "NZD", quote: "USD", label: "New Zealand Dollar / US Dollar" },
   "EUR/JPY": { base: "EUR", quote: "JPY", label: "Euro / Japanese Yen" },
   "GBP/JPY": { base: "GBP", quote: "JPY", label: "British Pound / Japanese Yen" },
+  // Металлы: формально не валютные пары, но торгуются и отображаются так же.
+  // Данные по ним идут из Dukascopy (см. collector/forex/dukascopy.mjs).
+  "XAU/USD": { base: "XAU", quote: "USD", label: "Gold / US Dollar" },
+  "XAG/USD": { base: "XAG", quote: "USD", label: "Silver / US Dollar" },
 };
 
-/**
- * Получить список пар из FX_SYMBOLS (тот же env, что и для коллектора).
- * Если не задан — используется дефолтный набор мажоров.
- */
-function getPairs() {
-  const symbols = (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD")
+/** Список пар из ENV FX_SYMBOLS (фоллбек, если в БД ничего не настроено). */
+function envSymbols() {
+  return (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,XAU/USD")
     .split(",").map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Источник истины тот же, что у коллектора: включённые пары из
+ * FxCollectorConfig, а если таблица пуста — ENV FX_SYMBOLS
+ * (см. collector/forex/index.mjs, syncSymbolsFromConfig).
+ *
+ * Раньше список брался только из ENV, и пара, добавленная через админку
+ * (/admin/forex), собиралась коллектором, но в выпадающем списке на графике не
+ * появлялась — до передеплоя с новым FX_SYMBOLS.
+ */
+async function getPairs() {
+  let symbols: string[] = [];
+  try {
+    const rows = await prisma.fxCollectorConfig.findMany({
+      where: { enabled: true },
+      orderBy: { symbol: "asc" },
+      select: { symbol: true },
+    });
+    symbols = rows.map(r => r.symbol);
+  } catch {
+    // БД недоступна — не роняем график, отдаём то, что знаем из ENV.
+  }
+  if (symbols.length === 0) symbols = envSymbols();
 
   return symbols.map(sym => {
     const known = KNOWN_PAIRS[sym];
@@ -49,7 +75,7 @@ export async function GET(req: Request) {
     return NextResponse.json(cache.data);
   }
 
-  const data = { pairs: getPairs() };
+  const data = { pairs: await getPairs() };
   cache = { at: Date.now(), data };
   return NextResponse.json(data);
 }

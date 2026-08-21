@@ -8,7 +8,7 @@ import { createRouteCache } from "@/lib/routeCache";
 
 export const maxDuration = 20;
 
-const PERIODS = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
+const PERIODS = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 
 // Imbalance из свечей: отношение "активности" (proxy объёма — см.
 // lib/forexActivity.ts, Twelve Data не отдаёт реальный volume для форекс)
