@@ -41,6 +41,22 @@ import { fetchCandles as dukasFetchCandles, DUKAS_INTERVAL } from "./dukascopy.m
 
 // ─── Конфигурация из ENV ──────────────────────────────────────────────────
 
+// Ключи из окружения: пустая строка = «не настроен».
+//
+// Значение, не похожее на ключ, тоже считается ненастроенным — иначе сервис
+// уходит подключаться с мусорным токеном и бесконечно ловит обрыв WS, а причина
+// («ключ закомментирован в .env») в логе никак не видна. Практический случай:
+// ключ, выключенный префиксом //.
+function readApiKey(envName) {
+  const raw = (process.env[envName] ?? "").trim();
+  if (raw === "") return "";
+  if (!/^[A-Za-z0-9_-]{8,}$/.test(raw)) {
+    console.log(`[fx] ${envName} задан, но не похож на ключ — считаем ненастроенным`);
+    return "";
+  }
+  return raw;
+}
+
 const cfg = {
   symbols: (process.env.FX_SYMBOLS ?? "EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY,XAU/USD")
     .split(",").map(s => s.trim()).filter(Boolean),
@@ -56,10 +72,10 @@ const cfg = {
   // пишут под одним exchange — это один логический ряд для приложения).
   exchange: "finnhub",
 
-  twelveDataApiKey: process.env.TWELVEDATA_API_KEY ?? "",
+  twelveDataApiKey: readApiKey("TWELVEDATA_API_KEY"),
   twelveDataApiBase: process.env.TWELVEDATA_API_BASE ?? "https://api.twelvedata.com",
 
-  finnhubApiKey: process.env.FINNHUB_API_KEY ?? "",
+  finnhubApiKey: readApiKey("FINNHUB_API_KEY"),
   finnhubWsUrl: process.env.FINNHUB_WS_URL ?? "wss://ws.finnhub.io",
 
   // Как часто Twelve Data досогласовывает историю (fallback-догон), сек.
@@ -92,16 +108,21 @@ if (!cfg.databaseUrl) {
   process.exit(1);
 }
 
-// Ключ Finnhub нужен только для валютных пар. Инструменты из
-// FX_DUKASCOPY_SYMBOLS (металлы) собираются без единого ключа, поэтому
-// конфигурация «только золото» — валидная, и падать на старте в ней нельзя.
+// Ключ Finnhub нужен только для валютных пар: инструменты из
+// FX_DUKASCOPY_SYMBOLS (металлы) собираются вообще без ключей.
+//
+// Отсутствие ключа НЕ фатально, и проверять здесь список пар бессмысленно:
+// на этот момент известен только ENV FX_SYMBOLS, а настоящий список приходит
+// из FxCollectorConfig уже после старта (syncSymbolsFromConfig). Прежний
+// process.exit(1) на этой проверке загонял контейнер в цикл
+// «упал — рестарт — упал» даже тогда, когда в БД была настроена пара,
+// которую коллектор прекрасно собрал бы без всякого Finnhub.
+//
+// Чем это грозит вместо падения: валютные пары не обновляются в реальном
+// времени. Видно и в логе при старте, и в /health (finnhub.apiKeySet), и в
+// /admin/forex по лагу свечей.
 if (!cfg.finnhubApiKey) {
-  const needsFinnhub = cfg.symbols.some(s => !cfg.dukascopySymbols.includes(s));
-  if (needsFinnhub) {
-    console.error("[fx] FATAL: FINNHUB_API_KEY не задан, а в FX_SYMBOLS есть валютные пары");
-    process.exit(1);
-  }
-  console.log("[fx] FINNHUB_API_KEY не задан — работаем только по инструментам Dukascopy");
+  console.error("[fx] ВНИМАНИЕ: FINNHUB_API_KEY не задан — валютные пары не будут обновляться в реальном времени (металлы из FX_DUKASCOPY_SYMBOLS собираются без ключа)");
 }
 
 // ─── Postgres ──────────────────────────────────────────────────────────────
@@ -884,6 +905,14 @@ async function pruneOld() {
 
 const envDefaultSymbols = [...cfg.symbols];
 
+// Первая синхронизация с БД происходит ДО общего бэкафилла в start(). Если
+// список в FxCollectorConfig отличается от ENV FX_SYMBOLS (обычное дело —
+// пары настраивают в админке), она видит все пары как «добавленные» и тянет
+// историю по каждой, а следом то же самое делает общий бэкафилл. Второй
+// проход безвреден (проверка глубины его отсекает), но на пустой БД это
+// двойной расход запросов — а кредиты Twelve Data и так в дефиците.
+let initialSyncDone = false;
+
 async function loadEnabledSymbolsFromDb() {
   try {
     const r = await pool.query(`SELECT symbol FROM "FxCollectorConfig" WHERE enabled = true ORDER BY symbol`);
@@ -925,6 +954,9 @@ async function syncSymbolsFromConfig() {
     if (wsConnected && ws && !isDukascopySymbol(symbol)) {
       try { ws.send(JSON.stringify({ type: "subscribe", symbol: toFinnhubSymbol(symbol) })); } catch { /* noop */ }
     }
+    // На старте историю тянет общий бэкафилл — здесь только пары, добавленные
+    // из админки в уже работающем коллекторе.
+    if (!initialSyncDone) continue;
     backfillOneSymbol(symbol).catch(err => console.error(`[fx/config] backfill ${symbol}: ${err.message}`));
   }
 }
@@ -973,6 +1005,7 @@ const server = http.createServer(async (req, res) => {
       symbols: cfg.symbols,
       backfillDone,
       ws: {
+        apiKeySet: cfg.finnhubApiKey.length > 0,
         connected: wsConnected,
         reconnects: wsReconnects,
         totalTrades,
@@ -1015,8 +1048,13 @@ async function start() {
   // 0. Список пар из админки (FxCollectorConfig), если настроен — иначе
   //    остаётся дефолт из ENV FX_SYMBOLS (envDefaultSymbols).
   await syncSymbolsFromConfig();
+  initialSyncDone = true;
 
   console.log(`[fx/start] symbols=${cfg.symbols.join(",")} exchange=${cfg.exchange} forexEnabled=${forexEnabled}`);
+  // Список пар только что пришёл из БД — теперь видно, что реально соберётся.
+  const dukas = dukascopySymbols();
+  const viaFinnhub = finnhubSymbols();
+  console.log(`[fx/start] Dukascopy: ${dukas.length ? dukas.join(",") : "—"} | Finnhub: ${viaFinnhub.length ? viaFinnhub.join(",") : "—"}${!cfg.finnhubApiKey && viaFinnhub.length ? " (без ключа — только история)" : ""}`);
 
   // 1. Бэкафилл истории через Twelve Data (если задан ключ).
   backfillAll().catch(err => console.error(`[fx/backfill] fatal: ${err.message}`));
