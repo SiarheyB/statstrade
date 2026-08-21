@@ -30,6 +30,9 @@ import {
   fmtDateDM,
   fmtTimeHM,
   CHART_COLORS,
+  buildTimeAxis,
+  makeTimeProjection,
+  type TimeAxis,
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
 
@@ -121,6 +124,24 @@ export default function ForexView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [tailCandles, historyVersion],
   );
+
+  // Ось времени со сжатием выходных: форекс не торгуется с вечера пятницы до
+  // утра понедельника, и на линейной оси каждые выходные — пустая полоса
+  // шириной в треть недели (см. buildTimeAxis).
+  //
+  // Считается лениво и кэшируется по идентичности массива свечей: строить её
+  // заново на каждый кадр пана/зума незачем, а держать в useMemo нельзя —
+  // candles сами выведены из historyRef, и обращение к ним в теле рендера
+  // ловит react-hooks/refs.
+  const axisCacheRef = useRef<{ candles: Candle[]; axis: TimeAxis } | null>(null);
+  const getTimeAxis = useCallback((): TimeAxis => {
+    const cached = axisCacheRef.current;
+    if (cached && cached.candles === candles) return cached.axis;
+    const step = candles.length > 1 ? candles[1].t - candles[0].t : 0;
+    const axis = buildTimeAxis(candles, step);
+    axisCacheRef.current = { candles, axis };
+    return axis;
+  }, [candles]);
 
   const loadMoreHistory = useCallback(async () => {
     if (loadingHistoryRef.current || !hasMoreHistoryRef.current || !data) return;
@@ -270,6 +291,7 @@ export default function ForexView() {
   } = useChartInteractions({
     canvasRef: candleCanvasRef,
     getCandles: () => candles,
+    getTimeAxis,
     getDrawings: () => drawings,
     showDrawings,
     magnet,
@@ -498,6 +520,7 @@ export default function ForexView() {
     const layout = computePlotLayout(W, H);
     const { plotX, plotW, plotH } = layout;
     layoutRef.current = { plotX, plotW, plotH };
+    const timeAxis = getTimeAxis();
 
     // fullT0 расширяется влево по мере догрузки истории (historyRef) — иначе
     // pan/zoom клэмпились бы по исходному окну data.from (см. LAZY_HISTORY_PLAN.md).
@@ -513,17 +536,18 @@ export default function ForexView() {
     boundsRef.current = { t0: fullT0, t1: fullT1, y0: fYMin, y1: fYMax, step: candleStep };
     if (!viewRef.current) {
       const visible = VISIBLE_CANDLES[range] ?? DEFAULT_VISIBLE;
-      viewRef.current = computeInitialView(candles, fullT0, fullT1, visible);
+      viewRef.current = computeInitialView(candles, fullT0, fullT1, visible, timeAxis);
     }
     const v = viewRef.current;
     const { t0, t1, y0: yMin, y1: yMax } = v;
-    const xspan = t1 - t0 || 1;
-    const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
+    // xspan здесь — ширина окна в «торговом» времени: её ждут и drawCandlesticks
+    // (считает ширину тела свечи), и обратный пересчёт X → время под курсором.
+    const { sx, invX, cspan: xspan } = makeTimeProjection(timeAxis, t0, t1, plotX, plotW);
     const yspan = yMax - yMin || 1;
     const sy = (p: number) => plotH - ((p - yMin) / yspan) * plotH;
 
     drawPriceGrid(ctx, layout, yMin, yMax, sy);
-    drawTimeGrid(ctx, layout, t0, t1, timezone, sx);
+    drawTimeGrid(ctx, layout, t0, t1, timezone, sx, timeAxis);
 
     ctx.save();
     ctx.beginPath();
@@ -623,7 +647,7 @@ export default function ForexView() {
         ctx.lineWidth = 1;
       }
 
-      const ms = t0 + ((cx - plotX) / plotW) * xspan;
+      const ms = invX(cx);
       const priceH = yMin + (1 - cy / plotH) * yspan;
       drawPriceCrosshairTag(ctx, priceH, cy, layout);
 
@@ -641,7 +665,7 @@ export default function ForexView() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, range, timezone, t, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, t, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
@@ -665,8 +689,9 @@ export default function ForexView() {
       delta: data.delta?.map((d) => d.delta) ?? [],
       cvd: data.cvd?.map((c) => c.cvd) ?? null,
       emptyText: t("fx.noDelta"),
+      axis: getTimeAxis(),
     });
-  }, [data, t, viewRef]);
+  }, [data, t, viewRef, getTimeAxis]);
 
   // ─── Draw B/A spread — same two-line renderer as /dashboard/orderflow ─
 
@@ -697,8 +722,9 @@ export default function ForexView() {
       title: "B/A",
       emptyText: t("fx.noBa"),
       fillBand: true,
+      axis: getTimeAxis(),
     });
-  }, [data, t, viewRef]);
+  }, [data, t, viewRef, getTimeAxis]);
 
   const redrawAll = useCallback(() => {
     draw();

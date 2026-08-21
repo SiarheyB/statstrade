@@ -18,6 +18,9 @@ import {
   drawTimeCrosshairTag,
   drawTooltipBox,
   computeInitialView,
+  buildTimeAxis,
+  makeTimeProjection,
+  LINEAR_TIME_AXIS,
   drawDeltaCvdChart,
   drawTwoLineSeries,
   CHART_COLORS,
@@ -133,6 +136,104 @@ describe("pure helpers", () => {
     const view = computeInitialView(candles, 0, 10, 40);
     expect(Number.isFinite(view.y0)).toBe(true);
     expect(Number.isFinite(view.y1)).toBe(true);
+  });
+});
+
+// Сжатие неторговых промежутков: без него график форекса рвётся пустыми
+// полосами на каждых выходных (см. TimeAxis в candlestickChart.ts).
+describe("buildTimeAxis", () => {
+  const H = 3_600_000;
+  // Пн-Пт по часу, потом «выходные» (пропуск 48 часов), потом снова часы.
+  const withWeekendGap = (): Candle[] => {
+    const out: Candle[] = [];
+    for (let i = 0; i < 5; i++) out.push({ t: i * H, o: 1, h: 2, l: 0, c: 1 });
+    for (let i = 0; i < 5; i++) out.push({ t: 5 * H + 48 * H + i * H, o: 1, h: 2, l: 0, c: 1 });
+    return out;
+  };
+
+  it("оставляет ось линейной, когда пропусков нет", () => {
+    const candles: Candle[] = [0, H, 2 * H, 3 * H].map((t) => ({ t, o: 1, h: 2, l: 0, c: 1 }));
+    const axis = buildTimeAxis(candles, H);
+    expect(axis).toBe(LINEAR_TIME_AXIS);
+  });
+
+  it("вырезает промежуток без свечей", () => {
+    const axis = buildTimeAxis(withWeekendGap(), H);
+    const beforeGap = 4 * H;   // последняя свеча пятницы
+    const afterGap = 53 * H;   // первая свеча понедельника
+    // В реальном времени между ними 49 часов, в торговом — один шаг.
+    expect(afterGap - beforeGap).toBe(49 * H);
+    expect(axis.compress(afterGap) - axis.compress(beforeGap)).toBe(H);
+  });
+
+  it("не трогает время до первого пропуска", () => {
+    const axis = buildTimeAxis(withWeekendGap(), H);
+    expect(axis.compress(2 * H)).toBe(2 * H);
+  });
+
+  it("схлопывает точку внутри пропуска на его начало", () => {
+    const axis = buildTimeAxis(withWeekendGap(), H);
+    const gapStart = 5 * H;
+    const middleOfGap = 20 * H;
+    expect(axis.compress(middleOfGap)).toBe(axis.compress(gapStart));
+  });
+
+  it("expand возвращает исходное время для точек вне пропусков", () => {
+    const axis = buildTimeAxis(withWeekendGap(), H);
+    for (const t of [0, 2 * H, 4 * H, 53 * H, 57 * H]) {
+      expect(axis.expand(axis.compress(t))).toBe(t);
+    }
+  });
+
+  it("схлопывает даже одну пропущенную свечу", () => {
+    // На форексе пропуск свечи = не было ни одного тика (обычное дело ночью),
+    // а не потеря данных — держать под него пустое место незачем.
+    const candles: Candle[] = [0, H, 3 * H, 4 * H].map((t) => ({ t, o: 1, h: 2, l: 0, c: 1 }));
+    const axis = buildTimeAxis(candles, H);
+    expect(axis.compress(3 * H) - axis.compress(H)).toBe(H);
+  });
+
+  it("справляется с несколькими пропусками подряд", () => {
+    const candles: Candle[] = [0, H, 50 * H, 51 * H, 100 * H, 101 * H]
+      .map((t) => ({ t, o: 1, h: 2, l: 0, c: 1 }));
+    const axis = buildTimeAxis(candles, H);
+    // Реально 101 час, в торговом времени — 5 шагов между шестью свечами.
+    expect(axis.compress(101 * H) - axis.compress(0)).toBe(5 * H);
+    expect(axis.expand(axis.compress(100 * H))).toBe(100 * H);
+  });
+});
+
+describe("makeTimeProjection", () => {
+  const H = 3_600_000;
+  const candles: Candle[] = [0, H, 2 * H, 50 * H, 51 * H].map((t) => ({ t, o: 1, h: 2, l: 0, c: 1 }));
+
+  it("растягивает окно на всю ширину области графика", () => {
+    const axis = buildTimeAxis(candles, H);
+    const { sx } = makeTimeProjection(axis, 0, 51 * H, 100, 400);
+    expect(sx(0)).toBe(100);
+    expect(sx(51 * H)).toBeCloseTo(500, 6);
+  });
+
+  it("свечи по краям пропуска стоят на соседних позициях", () => {
+    const axis = buildTimeAxis(candles, H);
+    const { sx } = makeTimeProjection(axis, 0, 51 * H, 0, 400);
+    // Четыре шага торгового времени на 400px — по 100px на шаг, включая стык
+    // «до выходных / после выходных».
+    expect(sx(2 * H)).toBeCloseTo(200, 6);
+    expect(sx(50 * H)).toBeCloseTo(300, 6);
+  });
+
+  it("invX обратна sx", () => {
+    const axis = buildTimeAxis(candles, H);
+    const { sx, invX } = makeTimeProjection(axis, 0, 51 * H, 40, 400);
+    for (const t of [0, H, 2 * H, 50 * H, 51 * H]) {
+      expect(invX(sx(t))).toBe(t);
+    }
+  });
+
+  it("на линейной оси ведёт себя как раньше", () => {
+    const { sx } = makeTimeProjection(LINEAR_TIME_AXIS, 0, 1000, 0, 100);
+    expect(sx(500)).toBeCloseTo(50, 6);
   });
 });
 

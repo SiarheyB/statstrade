@@ -9,7 +9,7 @@ import { useCallback, useEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { findDrawingAt } from "@/components/DrawingOverlay";
 import type { DrawingRow, DrawingToolType, DrawingPoint } from "@/lib/drawings";
-import type { Candle } from "@/lib/candlestickChart";
+import { LINEAR_TIME_AXIS, makeTimeProjection, type Candle, type TimeAxis } from "@/lib/candlestickChart";
 
 export type ChartView = { t0: number; t1: number; y0: number; y1: number };
 export type ChartBounds = { t0: number; t1: number; y0: number; y1: number; step: number };
@@ -94,6 +94,11 @@ export interface ChartInteractionsOptions {
   onDrawingMoved?: (id: string, previousPoints: DrawingPoint[]) => void;
   /** Delete/Backspace на клавиатуре при выбранном рисунке (если !locked). */
   onDeleteSelected?: () => void;
+  /** Ось времени графика. Для форекса она сжимает выходные (см. buildTimeAxis),
+   * поэтому ВСЕ пересчёты «пиксель ↔ время» здесь обязаны идти через неё:
+   * иначе курсор, перетаскивание и зум промахиваются мимо свечей ровно на
+   * ширину схлопнутых промежутков. По умолчанию — линейная (крипта, 24/7). */
+  getTimeAxis?: () => TimeAxis;
 }
 
 // Доля видимого окна от левого края загруженных данных, при приближении к
@@ -110,6 +115,11 @@ const EDGE_PADDING_FRACTION = 0.1;
 export function useChartInteractions(opts: ChartInteractionsOptions) {
   const optsRef = useRef(opts);
   optsRef.current = opts;
+
+  // Ось и проекция окна на пиксели — единая точка пересчёта для всего хука.
+  const axisOf = useCallback(() => optsRef.current.getTimeAxis?.() ?? LINEAR_TIME_AXIS, []);
+  const projOf = useCallback((view: ChartView, lay: ChartLayout) =>
+    makeTimeProjection(axisOf(), view.t0, view.t1, lay.plotX, lay.plotW), [axisOf]);
 
   const viewRef = useRef<ChartView | null>(null);
   const layoutRef = useRef<ChartLayout | null>(null);
@@ -138,13 +148,17 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     if (!o.onNeedHistory || !o.getHasMoreHistory?.()) return;
     const b = boundsRef.current;
     if (!b) return;
-    const span = view.t1 - view.t0 || 1;
-    if (view.t0 - b.t0 > span * HISTORY_TRIGGER_FRACTION) return;
+    // Ширину окна и расстояние до края данных меряем в «торговом» времени:
+    // на линейной оси попавшие в окно выходные раздували бы span, и догрузка
+    // истории срабатывала бы раньше времени.
+    const axis = axisOf();
+    const span = axis.compress(view.t1) - axis.compress(view.t0) || 1;
+    if (axis.compress(view.t0) - axis.compress(b.t0) > span * HISTORY_TRIGGER_FRACTION) return;
     const now = Date.now();
     if (now - lastHistoryTriggerRef.current < HISTORY_TRIGGER_THROTTLE_MS) return;
     lastHistoryTriggerRef.current = now;
     o.onNeedHistory();
-  }, []);
+  }, [axisOf]);
 
   // Не даёт панорамировать/зумить левее реально загруженных данных
   // (boundsRef.t0) — иначе пользователь утаскивает окно в пустоту раньше
@@ -161,12 +175,17 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     if (!b) return view;
     const o = optsRef.current;
     const atRealEdge = o.getHasMoreHistory ? !o.getHasMoreHistory() : false;
-    const span = view.t1 - view.t0 || 1;
-    const minT0 = atRealEdge ? b.t0 - span * EDGE_PADDING_FRACTION : b.t0;
-    if (view.t0 >= minT0) return view;
-    const shift = minT0 - view.t0;
-    return { ...view, t0: view.t0 + shift, t1: view.t1 + shift };
-  }, []);
+    const axis = axisOf();
+    const c0 = axis.compress(view.t0);
+    const c1 = axis.compress(view.t1);
+    const span = c1 - c0 || 1;
+    const minC0 = axis.compress(b.t0) - (atRealEdge ? span * EDGE_PADDING_FRACTION : 0);
+    if (c0 >= minC0) return view;
+    // Сдвигаем окно в сжатом времени и разворачиваем обратно — иначе одинаковая
+    // добавка в реальных мс давала бы разный сдвиг слева и справа от выходных.
+    const shift = minC0 - c0;
+    return { ...view, t0: axis.expand(c0 + shift), t1: axis.expand(c1 + shift) };
+  }, [axisOf]);
 
   const onMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const o = optsRef.current;
@@ -184,9 +203,8 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       if (cv) cv.style.cursor = "crosshair";
       const v = viewRef.current;
       if (v && candles.length) {
-        const xspan = v.t1 - v.t0 || 1;
         const yspan = v.y1 - v.y0 || 1;
-        const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+        const t = projOf(v, lay).invX(mx);
         const price = v.y1 - (my / lay.plotH) * yspan;
         snappedRef.current = snapToCandle(t, price, candles, magnet);
       } else {
@@ -200,11 +218,11 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       if (drag.drawingId) {
         const v = viewRef.current;
         if (v) {
-          const xspan = v.t1 - v.t0 || 1;
+          const proj = projOf(v, lay);
           const yspan = v.y1 - v.y0 || 1;
           const cv = o.canvasRef.current;
           if (drawingResizeRef.current) {
-            let tChart = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+            let tChart = proj.invX(mx);
             let priceChart = v.y1 - (my / lay.plotH) * yspan;
             if (magnet && candles.length) {
               const snapped = snapToCandle(tChart, priceChart, candles, true);
@@ -241,7 +259,13 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
             scheduleRedraw();
             return;
           }
-          const dx = ((mx - drag.mx) / lay.plotW) * xspan;
+          // Горизонтальный сдвиг считаем в «торговом» времени и переводим в
+          // реальные мс по якорной точке: на сжатой оси одинаковый сдвиг в
+          // пикселях — это разное число реальных мс до и после выходных.
+          const anchorT = drag.originalPoints?.[0]?.t ?? drag.view.t0;
+          const axis = axisOf();
+          const cdx = ((mx - drag.mx) / lay.plotW) * proj.cspan;
+          const dx = axis.expand(axis.compress(anchorT) + cdx) - anchorT;
           const dy = ((my - drag.my) / lay.plotH) * yspan;
           if (magnet && candles.length && drag.originalPoints?.length) {
             const anchor = drag.originalPoints[0];
@@ -278,19 +302,29 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         viewRef.current = { ...drag.view, y0: cy - span / 2, y1: cy + span / 2 };
       } else if (drag.mode === "zoomX") {
         const f = Math.exp(-(mx - drag.mx) * 0.006);
-        const cx = (drag.view.t0 + drag.view.t1) / 2;
+        const axis = axisOf();
+        const c0 = axis.compress(drag.view.t0);
+        const c1 = axis.compress(drag.view.t1);
+        const cx = (c0 + c1) / 2;
         const b = boundsRef.current;
         const minT = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
-        const maxT = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
-        const span = Math.min(maxT, Math.max(minT, (drag.view.t1 - drag.view.t0) * f));
-        viewRef.current = clampToBounds({ ...drag.view, t0: cx - span / 2, t1: cx + span / 2 });
+        const maxT = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * ZOOM_OUT_LIMIT : Infinity;
+        const span = Math.min(maxT, Math.max(minT, (c1 - c0) * f));
+        viewRef.current = clampToBounds({
+          ...drag.view,
+          t0: axis.expand(cx - span / 2),
+          t1: axis.expand(cx + span / 2),
+        });
         maybeTriggerHistory(viewRef.current);
       } else {
-        const dt = ((mx - drag.mx) / lay.plotW) * (drag.view.t1 - drag.view.t0);
+        const axis = axisOf();
+        const c0 = axis.compress(drag.view.t0);
+        const c1 = axis.compress(drag.view.t1);
+        const dt = ((mx - drag.mx) / lay.plotW) * (c1 - c0);
         const dp = ((my - drag.my) / lay.plotH) * (drag.view.y1 - drag.view.y0);
         viewRef.current = clampToBounds({
-          t0: drag.view.t0 - dt,
-          t1: drag.view.t1 - dt,
+          t0: axis.expand(c0 - dt),
+          t1: axis.expand(c1 - dt),
           y0: drag.view.y0 + dp,
           y1: drag.view.y1 + dp,
         });
@@ -304,9 +338,8 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         if (!o.activeTool && o.showDrawings && drawings.length > 0) {
           const v = viewRef.current;
           if (v) {
-            const xspan = v.t1 - v.t0 || 1;
             const yspan = v.y1 - v.y0 || 1;
-            const sxLocal = (ms: number) => lay.plotX + ((ms - v.t0) / xspan) * lay.plotW;
+            const sxLocal = projOf(v, lay).sx;
             const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
             const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
             if (hit) {
@@ -346,9 +379,8 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     if (o.activeTool && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
       const v = viewRef.current;
       if (!v) return;
-      const xspan = v.t1 - v.t0 || 1;
       const yspan = v.y1 - v.y0 || 1;
-      const t = v.t0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+      const t = projOf(v, lay).invX(mx);
       const price = v.y1 - (my / lay.plotH) * yspan;
       const candles = o.getCandles();
       const snapped = snapToCandle(t, price, candles, o.magnet);
@@ -373,9 +405,8 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     if (!o.locked && !o.activeTool && o.showDrawings && drawings.length > 0 && mx >= lay.plotX && mx <= lay.plotX + lay.plotW && my >= 0 && my <= lay.plotH) {
       const v = viewRef.current;
       if (v) {
-        const xspan = v.t1 - v.t0 || 1;
         const yspan = v.y1 - v.y0 || 1;
-        const sxLocal = (ms: number) => lay.plotX + ((ms - v.t0) / xspan) * lay.plotW;
+        const sxLocal = projOf(v, lay).sx;
         const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
         const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
         if (hit) {
@@ -471,15 +502,20 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       const fx = Math.min(1, Math.max(0, (mx - plotX) / plotW));
       const fy = Math.min(1, Math.max(0, my / plotH));
       const b = boundsRef.current;
-      const maxTSpan = b ? (b.t1 - b.t0) * ZOOM_OUT_LIMIT : Infinity;
+      const axis = axisOf();
+      const maxTSpan = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * ZOOM_OUT_LIMIT : Infinity;
       const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
       const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
       const minPSpan = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
       const clamp = (val: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, val));
 
-      const tcur = v.t0 + fx * (v.t1 - v.t0);
-      const tspan = clamp((v.t1 - v.t0) * factor, minTSpan, maxTSpan);
-      let next = { ...v, t0: tcur - fx * tspan, t1: tcur + (1 - fx) * tspan };
+      // Зум держит под курсором ту же точку графика — считаем это в «торговом»
+      // времени, иначе при наведении рядом с выходными окно уезжает вбок.
+      const cv0 = axis.compress(v.t0);
+      const cv1 = axis.compress(v.t1);
+      const tcur = cv0 + fx * (cv1 - cv0);
+      const tspan = clamp((cv1 - cv0) * factor, minTSpan, maxTSpan);
+      let next = { ...v, t0: axis.expand(tcur - fx * tspan), t1: axis.expand(tcur + (1 - fx) * tspan) };
       if (!e.shiftKey) {
         const pcur = v.y1 - fy * (v.y1 - v.y0);
         const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);

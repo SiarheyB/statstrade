@@ -30,6 +30,113 @@ export const PRICE_AXIS_W = 76;
 
 export type PlotLayout = { plotX: number; plotW: number; plotH: number; W: number; H: number };
 
+// ─── Ось времени со сжатием неторговых промежутков ────────────────────────
+//
+// Крипта торгуется 24/7, а форекс — нет: с вечера пятницы до утра понедельника
+// свечей просто не существует. Если откладывать время по оси линейно, каждые
+// выходные превращаются в пустую вертикальную полосу шириной в треть недели, и
+// график недели за неделей рвётся на куски.
+//
+// Поэтому ось работает в «торговом времени»: промежутки, где свечей нет,
+// схлопываются в ноль — ровно так же ведут себя биржевые терминалы. Все
+// координатные функции (свечи, сетка, рисунки, метки дивергенций, курсор)
+// ходят через одну и ту же пару compress/expand, иначе слои разъедутся.
+//
+// Для 24/7-инструментов список пропусков пуст, compress/expand становятся
+// тождественными, и поведение графика не меняется вообще (см. LINEAR_TIME_AXIS).
+export type TimeAxis = {
+  /** Реальное время → «торговое» (без неторговых промежутков). */
+  compress: (ms: number) => number;
+  /** Обратно: «торговое» время → реальное. */
+  expand: (compressed: number) => number;
+};
+
+export const LINEAR_TIME_AXIS: TimeAxis = { compress: (ms) => ms, expand: (c) => c };
+
+// Во сколько раз разрыв между соседними свечами должен превышать таймфрейм,
+// чтобы считаться неторговым промежутком. 1.5 = схлопывается любая дырка от
+// одной пропущенной свечи и больше.
+//
+// Почему так агрессивно: на форексе отсутствие свечи означает «не было ни
+// одного тика», а не потерю данных — ночью по золоту таких минут десятки за
+// сессию. Оставлять под них пустое место незачем, биржевые терминалы этого и
+// не делают: там ось вообще нумерует бары, а не время.
+const GAP_THRESHOLD_RATIO = 1.5;
+
+/**
+ * Строит ось по фактическому ряду свечей: всё, что между ними пропущено
+ * дольше полутора таймфреймов, считается неторговым временем.
+ */
+export function buildTimeAxis(candles: Candle[], stepMs: number): TimeAxis {
+  if (candles.length < 2 || !Number.isFinite(stepMs) || stepMs <= 0) return LINEAR_TIME_AXIS;
+
+  // starts/ends — границы пропусков в реальном времени, cumulative[i] — сколько
+  // времени вырезано ДО i-го пропуска (префиксные суммы, чтобы compress не
+  // бегал по всему списку на каждый вызов: за кадр их десятки тысяч).
+  const starts: number[] = [];
+  const ends: number[] = [];
+  const cumulative: number[] = [];
+  let removed = 0;
+  for (let i = 1; i < candles.length; i++) {
+    const prevEnd = candles[i - 1].t + stepMs;
+    const next = candles[i].t;
+    if (next - candles[i - 1].t <= stepMs * GAP_THRESHOLD_RATIO) continue;
+    starts.push(prevEnd);
+    ends.push(next);
+    cumulative.push(removed);
+    removed += next - prevEnd;
+  }
+  if (starts.length === 0) return LINEAR_TIME_AXIS;
+
+  // Сжатые координаты начал пропусков — для обратного преобразования.
+  const compressedStarts = starts.map((s, i) => s - cumulative[i]);
+
+  /** Индекс последнего пропуска, начавшегося не позже value (или -1). */
+  const lastIndexAtOrBefore = (arr: number[], value: number) => {
+    let lo = 0;
+    let hi = arr.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (arr[mid] <= value) { found = mid; lo = mid + 1; } else { hi = mid - 1; }
+    }
+    return found;
+  };
+
+  return {
+    compress(ms: number) {
+      const i = lastIndexAtOrBefore(starts, ms);
+      if (i < 0) return ms;
+      // Точка внутри пропуска схлопывается на его начало — иначе курсор и
+      // рисунки, попавшие на выходные, «уезжали» бы вправо на ширину разрыва.
+      const inside = ms < ends[i];
+      const cut = cumulative[i] + (inside ? ms - starts[i] : ends[i] - starts[i]);
+      return ms - cut;
+    },
+    expand(compressed: number) {
+      const i = lastIndexAtOrBefore(compressedStarts, compressed);
+      if (i < 0) return compressed;
+      return compressed + cumulative[i] + (ends[i] - starts[i]);
+    },
+  };
+}
+
+/**
+ * Проекция «время → X» и обратная к ней для окна [t0, t1] на ширине plotW.
+ * Обе стороны обязаны строиться отсюда: рассинхрон прямого и обратного
+ * преобразования проявляется как курсор, который не попадает в свечу.
+ */
+export function makeTimeProjection(axis: TimeAxis, t0: number, t1: number, plotX: number, plotW: number) {
+  const c0 = axis.compress(t0);
+  const cspan = axis.compress(t1) - c0 || 1;
+  return {
+    /** Ширина окна в «торговом» времени — её же ждёт drawCandlesticks. */
+    cspan,
+    sx: (ms: number) => plotX + ((axis.compress(ms) - c0) / cspan) * plotW,
+    invX: (x: number) => axis.expand(c0 + ((x - plotX) / plotW) * cspan),
+  };
+}
+
 export function computePlotLayout(W: number, H: number, padBottom = PADB): PlotLayout {
   const plotX = PADL + PRICE_AXIS_W;
   const plotW = W - plotX - PADR;
@@ -122,14 +229,21 @@ export function drawTimeGrid(
   t1: number,
   timezone: TimezoneId,
   sx: (ms: number) => number,
+  axis: TimeAxis = LINEAR_TIME_AXIS,
 ) {
   const { plotX, plotW, plotH, H } = layout;
-  const xspan = t1 - t0 || 1;
+  // Шаг сетки берётся в «торговом» времени и там же откладывается: иначе на
+  // сжатой оси линии сгущались бы к выходным, а внутри схлопнутого промежутка
+  // несколько подписей легли бы друг на друга в одной точке.
+  const c0 = axis.compress(t0);
+  const c1 = axis.compress(t1);
+  const xspan = c1 - c0 || 1;
   const timeStep = niceTimeStep(xspan);
-  const timeStart = Math.ceil(t0 / timeStep) * timeStep;
+  const timeStart = Math.ceil(c0 / timeStep) * timeStep;
   ctx.textAlign = "center";
   let lastDay: number | null = null;
-  for (let ms = timeStart; ms <= t1; ms += timeStep) {
+  for (let cms = timeStart; cms <= c1; cms += timeStep) {
+    const ms = axis.expand(cms);
     const x = sx(ms);
     if (x < plotX || x > plotX + plotW) continue;
     ctx.strokeStyle = CHART_COLORS.gridWeak;
@@ -317,9 +431,18 @@ export function drawTooltipBox(
 }
 
 /** Initial (t0..t1, y0..y1) view window: last `visibleCount` candles, padded 4% vertically. */
-export function computeInitialView(candles: Candle[], from: number, to: number, visibleCount: number) {
+export function computeInitialView(
+  candles: Candle[],
+  from: number,
+  to: number,
+  visibleCount: number,
+  axis: TimeAxis = LINEAR_TIME_AXIS,
+) {
   const step = candles.length > 1 ? candles[1].t - candles[0].t : (to - from) / 40 || 60000;
-  const t0 = Math.max(from, to - visibleCount * step);
+  // Отступаем назад в «торговом» времени: на линейной оси окно шириной
+  // visibleCount * step вмещало бы меньше свечей, чем просили, ровно на
+  // длину попавших в него выходных.
+  const t0 = Math.max(from, axis.expand(axis.compress(to) - visibleCount * step));
   let vy0 = Infinity;
   let vy1 = -Infinity;
   for (const k of candles) {
@@ -347,9 +470,11 @@ export function drawDeltaCvdChart(
     delta: number[];
     cvd?: number[] | null;
     emptyText: string;
+    /** Та же ось, что у основного графика — иначе панель разъедется с ним по X. */
+    axis?: TimeAxis;
   },
 ) {
-  const { W, H, t0, t1, times, delta, cvd, emptyText } = opts;
+  const { W, H, t0, t1, times, delta, cvd, emptyText, axis = LINEAR_TIME_AXIS } = opts;
   ctx.fillStyle = CHART_COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -361,8 +486,7 @@ export function drawDeltaCvdChart(
     ctx.fillText(emptyText, plotX, H / 2);
     return;
   }
-  const xspan = t1 - t0 || 1;
-  const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
+  const { sx } = makeTimeProjection(axis, t0, t1, plotX, plotW);
 
   const n = delta.length;
   const maxAbs = Math.max(1, ...delta.map((v) => Math.abs(v)));
@@ -428,9 +552,11 @@ export function drawTwoLineSeries(
     emptyText: string;
     yDomain?: [number, number];
     fillBand?: boolean;
+    /** Та же ось, что у основного графика — иначе панель разъедется с ним по X. */
+    axis?: TimeAxis;
   },
 ) {
-  const { W, H, t0, t1, times, a, b, colorA, colorB, labelA, labelB, title, emptyText, fillBand } = opts;
+  const { W, H, t0, t1, times, a, b, colorA, colorB, labelA, labelB, title, emptyText, fillBand, axis = LINEAR_TIME_AXIS } = opts;
   ctx.fillStyle = CHART_COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -442,8 +568,7 @@ export function drawTwoLineSeries(
     ctx.fillText(emptyText, plotX, H / 2);
     return;
   }
-  const xspan = t1 - t0 || 1;
-  const sx = (ms: number) => plotX + ((ms - t0) / xspan) * plotW;
+  const { sx } = makeTimeProjection(axis, t0, t1, plotX, plotW);
 
   const [yMin, yMax] = opts.yDomain ?? (() => {
     const all = [...a, ...b];
