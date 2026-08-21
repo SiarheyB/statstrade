@@ -9,7 +9,7 @@ function status(progress: Progress, overrides: Record<string, unknown> = {}) {
   return {
     total: 12,
     symbolsCovered: 3,
-    byBias: { breakout: 7, false_breakout: 5 },
+    byBias: { breakout: 7, false_breakout: 5, false_breakout_2b: 3 },
     byDirection: { long: 8, short: 4 },
     lastComputedAt: "2026-08-13T12:00:00.000Z",
     lastCandlesTo: "2026-08-12T00:00:00.000Z",
@@ -71,6 +71,10 @@ describe("AdminRecommendations", () => {
     expect(await screen.findByText("Лонг: 8")).toBeInTheDocument();
     expect(screen.getByText("Шорт: 4")).toBeInTheDocument();
     expect(screen.getByText("Пробой: 7")).toBeInTheDocument();
+    // Все три сетапа из выдачи, включая ЛП2Б — иначе сумма по типам не
+    // сходится с «Уровней» и часть картины дня не видна.
+    expect(screen.getByText("Ложный пробой: 5")).toBeInTheDocument();
+    expect(screen.getByText("ЛП2Б: 3")).toBeInTheDocument();
     expect(screen.queryByText(/Нейтрально:/)).not.toBeInTheDocument();
   });
 

@@ -401,6 +401,7 @@ export default function AdminRecommendations() {
 
   const breakout = status?.byBias.breakout ?? 0;
   const falseBreakout = status?.byBias.false_breakout ?? 0;
+  const falseBreakout2b = status?.byBias.false_breakout_2b ?? 0;
   const longs = status?.byDirection?.long ?? 0;
   const shorts = status?.byDirection?.short ?? 0;
 
@@ -446,6 +447,7 @@ export default function AdminRecommendations() {
           </span>
           <span className="text-muted">Пробой: {breakout}</span>
           <span className="text-muted">Ложный пробой: {falseBreakout}</span>
+          <span className="text-muted">ЛП2Б: {falseBreakout2b}</span>
           <span className="flex items-center gap-1 text-profit">
             <TrendingUp size={14} /> Лонг: {longs}
           </span>
