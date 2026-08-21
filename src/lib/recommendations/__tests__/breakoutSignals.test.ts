@@ -200,6 +200,23 @@ describe("biasDirection", () => {
     expect(biasDirection("breakout", 80, 100, "up")).toBe("long");
     expect(biasDirection("false_breakout", 80, 100, "up")).toBe("short");
   });
+
+  // «Свежий пробой» ищется только с БСУ: до него линии не существовало, и
+  // переход цены через ту же цену пробоем ЭТОГО уровня не был.
+  it("ignores a break that happened before the level was formed", () => {
+    const candles: DailyCandle[] = [];
+    // Цена под 90, затем импульсный бар перебрасывает её наверх.
+    for (let i = 0; i < 8; i++) candles.push(candle(i, 80, 82, 78, 80));
+    candles.push(candle(8, 80, 105, 79, 100)); // рывок через 90
+    // Дальше — консолидация сверху; её лоу и становится уровнем (БСУ = бар 11).
+    for (let i = 9; i < 14; i++) candles.push(candle(i, 100, 102, 96, 99));
+    const level = 96;
+
+    // Без БСУ виден «свежий пробой вверх» через 96 на баре 8 → ЛП читается в шорт.
+    expect(computeBreakoutSignals(candles, level, 4).direction).toBe("short");
+    // С БСУ бара 11 того перехода в окне нет: уровень под ценой, ЛП = отбой вверх.
+    expect(computeBreakoutSignals(candles, level, 4, "local_stop", candles[11].t).direction).toBe("long");
+  });
 });
 
 describe("detectPastFalseBreakouts", () => {

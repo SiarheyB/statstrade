@@ -632,15 +632,35 @@ export function detectLevels(candles: DailyCandle[], opts: DetectLevelsOptions =
 
 // Уровни в пределах `maxDistanceAtr` от текущей цены — "картинка для
 // торговли сегодня". Сортировка: сначала ближе к цене, при равенстве — сильнее.
+//
+// «Близость» меряется от БЛИЖАЙШЕЙ границы последнего закрытого бара (хай для
+// уровня сверху, лоу для уровня снизу), а не от цены закрытия: подход к
+// уровню — это то, докуда бар дотянулся, и весь остальной разбор (approachGap
+// в quality.ts, касания, проколы) считает именно так. По закрытию уровень
+// уезжал «далеко» ровно на длину последней свечи: у WENUSDT хай паранормального
+// бара 12.08 (9.33) оказывался в 1.97×ATR от закрытия 8.77 и выпадал из
+// разбора, хотя вчерашний бар не дотянул до него 1.27×ATR — и вместо
+// параБАРа сетап строился по местной опоре силы 2.
+//
+// lastBar опционален: без него меряем по-старому, от цены закрытия.
 export function filterLevelsNearPrice(
   levels: DetectedLevel[],
   currentPrice: number,
   atr: number,
   maxDistanceAtr = 1.5,
+  lastBar?: DailyCandle,
 ): DetectedLevel[] {
   if (atr <= 0) return [];
+  // Бар, уже проколовший уровень, даёт отрицательный разрыв — считаем его
+  // нулевым: ближе, чем «дотянулись», не бывает.
+  const approachGap = (levelPrice: number): number => {
+    if (!lastBar) return Math.abs(levelPrice - currentPrice);
+    return levelPrice >= currentPrice
+      ? Math.max(0, levelPrice - lastBar.h)
+      : Math.max(0, lastBar.l - levelPrice);
+  };
   return levels
-    .map((l) => ({ level: l, distanceAtr: Math.abs(l.price - currentPrice) / atr }))
+    .map((l) => ({ level: l, distanceAtr: approachGap(l.price) / atr }))
     .filter((x) => x.distanceAtr <= maxDistanceAtr)
     .sort((a, b) => a.distanceAtr - b.distanceAtr || b.level.strength - a.level.strength)
     .map((x) => x.level);

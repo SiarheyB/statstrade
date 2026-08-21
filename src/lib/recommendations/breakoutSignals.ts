@@ -140,6 +140,8 @@ export function computeBreakoutSignals(
   levelPrice: number,
   atr: number,
   levelType?: string,
+  /** Время БСУ: раньше него уровня не существовало (см. freshBreakDirection). */
+  levelFormedAt?: number,
 ): BreakoutSignals {
   const forFactors: string[] = [];
   const againstFactors: string[] = [];
@@ -147,6 +149,12 @@ export function computeBreakoutSignals(
 
   const last = candles[candles.length - 1];
   const history = candles.slice(0, -1); // без сегодняшнего бара — для поиска прошлых касаний/ЛП
+  // Бары, в которых уровень уже существовал. Без БСУ — вся история, как раньше.
+  const sinceLevel =
+    levelFormedAt == null ? candles : candles.filter((c) => c.t >= levelFormedAt);
+  // Пустым не бывает (БСУ всегда из этих же свечей), но одного бара хватает:
+  // freshBreakDirection на нём просто вернёт null — пробоя ещё не было.
+  const freshBreakBars = sinceLevel.length > 0 ? sinceLevel : candles.slice(-1);
 
   // Подход: размер последних баров относительно ATR ("на малых/больших барах").
   const approach3 = candles.slice(-3);
@@ -256,6 +264,12 @@ export function computeBreakoutSignals(
     for: displayFor,
     against: againstFactors,
     bias,
-    direction: biasDirection(bias, levelPrice, last.c, freshBreakDirection(candles, levelPrice, atr * 0.1)),
+    // Свежий пробой ищем только с БСУ и позже: до этого бара линии не
+    // существовало, и переход цены через ту же ЦЕНУ пробоем этого уровня не
+    // был. Иначе местная опора, образованная на откате после импульса,
+    // читалась как «уровень только что пробит в сторону импульса», и ЛП от
+    // неё разворачивался наизнанку (WENUSDT: опора 8.36 от 18.08 против
+    // рывка 12.08 — ЛП давал шорт там, где геометрия просит лонг).
+    direction: biasDirection(bias, levelPrice, last.c, freshBreakDirection(freshBreakBars, levelPrice, atr * 0.1)),
   };
 }

@@ -314,6 +314,30 @@ describe("filterLevelsNearPrice", () => {
     const near = filterLevelsNearPrice(levels, currentPrice, atr, 1.5); // <=15 away
     expect(near.map((l) => l.price)).toEqual([100, 110]);
   });
+
+  // Близость — это докуда бар ДОТЯНУЛСЯ, а не где закрылся: длинная свеча
+  // иначе уводит уровень «далеко» ровно на свою длину (WENUSDT, хай параБАРа
+  // в 1.97×ATR от закрытия при 1.27×ATR от хая того же бара).
+  it("measures the distance from the last bar's high/low, not from its close", () => {
+    const levels: DetectedLevel[] = [
+      { price: 120, type: "parabar", strength: 5, touches: [], formedAt: 0, lastTouchedAt: 0 },
+      { price: 80, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 },
+    ];
+    const atr = 10;
+    const last = candle(0, 100, 112, 88, 100); // закрылись на 100, дотянулись до 112 и 88
+    // От закрытия оба уровня в 2×ATR — вне окна.
+    expect(filterLevelsNearPrice(levels, 100, atr, 1.5)).toHaveLength(0);
+    // От границ бара — 0.8×ATR, оба в окне.
+    expect(filterLevelsNearPrice(levels, 100, atr, 1.5, last).map((l) => l.price)).toEqual([120, 80]);
+  });
+
+  it("treats a level the last bar already pierced as touching distance", () => {
+    const levels: DetectedLevel[] = [
+      { price: 105, type: "parabar", strength: 5, touches: [], formedAt: 0, lastTouchedAt: 0 },
+    ];
+    const last = candle(0, 100, 130, 95, 100); // хай ушёл далеко ЗА уровень
+    expect(filterLevelsNearPrice(levels, 100, 10, 1.5, last)).toHaveLength(1);
+  });
 });
 
 // Плавный линейный снос цены от startPrice к endPrice за `count` баров, с

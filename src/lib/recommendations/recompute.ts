@@ -157,7 +157,9 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
     const candlesTo = new Date(candles[candles.length - 1].t);
 
     const levels = detectLevels(candles);
-    const nearby = filterLevelsNearPrice(levels, currentPrice, atr, maxDistanceAtr);
+    // Последний закрытый бар — точка отсчёта «близости»: важно, докуда цена
+    // дотянулась вчера, а не где закрылась (см. filterLevelsNearPrice).
+    const nearby = filterLevelsNearPrice(levels, currentPrice, atr, maxDistanceAtr, candles[candles.length - 1]);
     const trend = detectTrend(candles);
 
     // Запас хода считаем только до ЗНАЧИМЫХ уровней: детектор находит их
@@ -189,7 +191,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
             bias: "false_breakout_2b" as const,
             direction: setup2b.direction,
           }
-        : computeBreakoutSignals(candles, level.price, atr, level.type);
+        : computeBreakoutSignals(candles, level.price, atr, level.type, level.formedAt);
       // Нейтральные сетапы (факторов "за" и "против" поровну) не сохраняем:
       // торговать по ним нечего, а в списке они только шумят.
       if (signals.bias === "neutral" || !signals.direction) {
