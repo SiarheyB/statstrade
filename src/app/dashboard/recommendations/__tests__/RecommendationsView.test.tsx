@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import RecommendationsPage from "../RecommendationsView";
 import { setFormatLocale, setFormatTimezone } from "@/lib/format";
@@ -99,20 +99,37 @@ describe("RecommendationsPage", () => {
   it("offers no neutral filter", async () => {
     render(<RecommendationsPage />);
     await screen.findByText(/Пробой · лонг/);
-    expect(screen.queryByRole("button", { name: "Нейтрально" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Лонг" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Шорт" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Нейтрально/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Лонг/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Шорт/ })).toBeInTheDocument();
+  });
+
+  // Счётчик на кнопке — сколько карточек останется после клика ПО НЕЙ при
+  // текущем фильтре другой строки, а не общее число сетапов этого типа.
+  it("shows how many setups each filter button will leave", async () => {
+    render(<RecommendationsPage />);
+    await screen.findByText(/Пробой · лонг/);
+
+    expect(screen.getByRole("button", { name: /^Все сетапы/ })).toHaveTextContent("Все сетапы 2");
+    expect(screen.getByRole("button", { name: /^Пробой/ })).toHaveTextContent("Пробой 1");
+    expect(screen.getByRole("button", { name: /^Лонг/ })).toHaveTextContent("Лонг 2");
+    expect(screen.getByRole("button", { name: /^Шорт/ })).toHaveTextContent("Шорт 0");
+
+    // Оба сетапа в фикстуре — лонги, поэтому после выбора «Пробой» на кнопке
+    // «Лонг» остаётся один, а не два.
+    await userEvent.click(screen.getByRole("button", { name: /^Пробой/ }));
+    expect(screen.getByRole("button", { name: /^Лонг/ })).toHaveTextContent("Лонг 1");
   });
 
   it("filters by trade side", async () => {
     render(<RecommendationsPage />);
     await screen.findByText(/Пробой · лонг/);
 
-    await userEvent.click(screen.getByRole("button", { name: "Шорт" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Шорт/ }));
     expect(screen.queryByText("BTCUSDT")).not.toBeInTheDocument();
     expect(screen.queryByText("ETHUSDT")).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "Лонг" }));
+    await userEvent.click(screen.getByRole("button", { name: /^Лонг/ }));
     expect(screen.getByText("BTCUSDT")).toBeInTheDocument();
     expect(screen.getByText("ETHUSDT")).toBeInTheDocument();
   });
@@ -284,8 +301,9 @@ describe("ATR panel", () => {
     expect(await screen.findByText(/нужен ход 2\.08×ATR/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByText("ETHUSDT"));
-    expect(await screen.findByText("ATR — средний дневной ход")).toBeInTheDocument();
-    expect(screen.getByText("2")).toBeInTheDocument();
+    const atrPanel = (await screen.findByText("ATR — средний дневной ход")).parentElement!;
+    // Именно внутри панели ATR: снаружи «2» есть ещё и на счётчике фильтра.
+    expect(within(atrPanel).getByText("2")).toBeInTheDocument();
     expect(screen.getByText("Чтобы ложный пробой состоялся сегодня")).toBeInTheDocument();
     expect(screen.getByText("2.08×ATR")).toBeInTheDocument();
     // Разбор пути: до уровня + прокол, одним баром.
@@ -399,7 +417,7 @@ describe("ЛП2Б card", () => {
     vi.stubGlobal("fetch", mock2b());
     render(<RecommendationsPage />);
     await screen.findByText(/ЛП2Б · шорт/);
-    expect(screen.getByRole("button", { name: "ЛП2Б" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^ЛП2Б/ })).toBeInTheDocument();
   });
 });
 

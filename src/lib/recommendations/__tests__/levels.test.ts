@@ -354,3 +354,53 @@ describe("detectTrend", () => {
     expect(detectTrend(driftSeries(10, 200, 140))).toBe("range");
   });
 });
+
+// Окно свежести: уровень образца прошлого года формально набирает касания и
+// силу, но торгуем мы то, что рынок помнит — БСУ должен лежать в последних
+// FRESH_LEVEL_BARS барах (по умолчанию полгода).
+describe("detectLevels — окно свежести БСУ", () => {
+  // Старый пивот на 200 (бар 15), затем длинный ровный участок и свежий
+  // пивот на 130 в самом конце ряда.
+  function agedSeries(tailLength: number): DailyCandle[] {
+    const rows: DailyCandle[] = [];
+    for (let i = 0; i < 15; i++) rows.push(candle(i, 100 + i, 101 + i, 99 + i, 100 + i));
+    rows.push(candle(15, 115, 200, 114, 116)); // старый пивот-хай 200
+    for (let i = 16; i < 16 + tailLength; i++) rows.push(candle(i, 100, 102, 98, 100));
+    const n = rows.length;
+    rows.push(candle(n, 100, 130, 99, 101)); // свежий пивот-хай 130
+    for (let i = 1; i <= 6; i++) rows.push(candle(n + i, 100, 102, 98, 100));
+    return rows;
+  }
+
+  it("drops levels whose BSU is older than the freshness window", () => {
+    const candles = agedSeries(200);
+    const levels = detectLevels(candles);
+    expect(levels.find((l) => Math.abs(l.price - 200) < 0.01)).toBeUndefined();
+    expect(levels.find((l) => Math.abs(l.price - 130) < 0.01)).toBeDefined();
+  });
+
+  it("keeps the same old level while it still fits into the window", () => {
+    const levels = detectLevels(agedSeries(100));
+    expect(levels.find((l) => Math.abs(l.price - 200) < 0.01)).toBeDefined();
+  });
+
+  it("does not let an out-of-window pivot lend its age and strength to a fresh level nearby", () => {
+    // Старый и свежий пивоты на почти одной цене: без фильтра ДО merge они
+    // схлопнулись бы в один уровень с БСУ годичной давности.
+    const rows: DailyCandle[] = [];
+    for (let i = 0; i < 15; i++) rows.push(candle(i, 100 + i, 101 + i, 99 + i, 100 + i));
+    rows.push(candle(15, 115, 130.2, 114, 116)); // старый пивот 130.2
+    for (let i = 16; i < 216; i++) rows.push(candle(i, 100, 102, 98, 100));
+    rows.push(candle(216, 100, 130, 99, 101)); // свежий пивот 130
+    for (let i = 217; i <= 222; i++) rows.push(candle(i, 100, 102, 98, 100));
+
+    const level = detectLevels(rows).find((l) => Math.abs(l.price - 130) < 0.5);
+    expect(level).toBeDefined();
+    expect(level!.formedAt).toBe(rows[216].t);
+  });
+
+  it("freshnessBars: 0 turns the window off", () => {
+    const levels = detectLevels(agedSeries(200), { freshnessBars: 0 });
+    expect(levels.find((l) => Math.abs(l.price - 200) < 0.01)).toBeDefined();
+  });
+});

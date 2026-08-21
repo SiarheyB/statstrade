@@ -27,6 +27,9 @@
  *                      (шорт) / 2 дня (лонг) подтверждения рядом с ней без
  *                      глубокого пробоя. Не требует структурной истории —
  *                      только последние ~20 баров.
+ *
+ * Все уровни ограничены окном свежести: бар, образовавший уровень (БСУ),
+ * должен лежать в последних FRESH_LEVEL_BARS барах — см. filterFreshLevels.
  */
 
 export interface DailyCandle {
@@ -571,6 +574,18 @@ function reclassifyMirrorHistorical(level: DetectedLevel, candles: DailyCandle[]
   return level;
 }
 
+/**
+ * Оставляет уровни, чей БСУ попал в последние `bars` баров. Возраст меряем
+ * барами, а не календарём: у истории может быть дыра (пара листнута позже,
+ * биржа не отдала день), и «180 дней назад» тогда указывало бы не туда.
+ * `bars <= 0` — фильтр выключен (нужно тестам и разбору старых картин).
+ */
+export function filterFreshLevels(levels: DetectedLevel[], candles: DailyCandle[], bars: number): DetectedLevel[] {
+  if (bars <= 0 || candles.length === 0) return levels;
+  const cutoff = candles[Math.max(0, candles.length - bars)].t;
+  return levels.filter((l) => l.formedAt >= cutoff);
+}
+
 export interface DetectLevelsOptions {
   pivotWing?: number;
   atrLookback?: number;
@@ -578,10 +593,27 @@ export interface DetectLevelsOptions {
   /** Сколько баров после отката сканировать в поисках 2 касаний каждой
    *  границы диапазона, прежде чем сдаться (см. detectRangeBorders). */
   rangeBorderWindow?: number;
+  /** Окно свежести БСУ, баров (см. FRESH_LEVEL_BARS). 0 — не ограничивать. */
+  freshnessBars?: number;
 }
 
-// Главная точка входа: считает ATR, находит все типы уровней, схлопывает
-// близкие и переклассифицирует в mirror/historical по истории касаний.
+// Окно свежести: бар, образовавший уровень (БСУ), должен лежать в последних
+// FRESH_LEVEL_BARS барах — полгода календарных дней, крипта торгуется без
+// выходных. Торгуем то, что рынок помнит: линия годичной давности формально
+// набирает касания и силу, но к сегодняшнему дню это уже история, а не
+// рабочий уровень.
+//
+// Фильтр стоит ДО mergeLevels намеренно. После merge у кластера formedAt —
+// самый ранний БСУ среди слитых уровней, поэтому свежий уровень, у которого
+// когда-то давно рядом был пивот, выглядел бы «уровнем годичной давности» и
+// тащил бы за собой чужую силу: так у ONGUSDT линия 0.087 набрала силу 23 из
+// 14 касаний за девять месяцев и БСУ 21.11.2025, перебив по score свежие
+// апрельские откаты рядом с ценой.
+const FRESH_LEVEL_BARS = 180;
+
+// Главная точка входа: считает ATR, находит все типы уровней, отбрасывает
+// несвежие, схлопывает близкие и переклассифицирует в mirror/historical по
+// истории касаний.
 export function detectLevels(candles: DailyCandle[], opts: DetectLevelsOptions = {}): DetectedLevel[] {
   if (candles.length < 20) return [];
   const atr = computeAtr(candles, opts.atrLookback ?? 5);
@@ -592,7 +624,8 @@ export function detectLevels(candles: DailyCandle[], opts: DetectLevelsOptions =
     ...detectRangeBorders(candles, atr, opts.rangeBorderWindow ?? 60, opts.pivotWing ?? 3),
     ...detectLocalStops(candles, atr),
   ];
-  const merged = mergeLevels(raw, atr, opts.mergeToleranceAtrFrac ?? 0.15);
+  const fresh = filterFreshLevels(raw, candles, opts.freshnessBars ?? FRESH_LEVEL_BARS);
+  const merged = mergeLevels(fresh, atr, opts.mergeToleranceAtrFrac ?? 0.15);
   const nowMs = candles[candles.length - 1].t;
   return merged.map((l) => reclassifyMirrorHistorical(l, candles, nowMs));
 }

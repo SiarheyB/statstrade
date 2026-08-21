@@ -230,6 +230,13 @@ const DIRECTION_FILTERS: { key: Direction | "all"; label: string }[] = [
   { key: "short", label: "Шорт" },
 ];
 
+// Число сетапов под фильтром — приглушённое, чтобы не спорить с подписью
+// кнопки. Табличные цифры: счётчики не должны прыгать по ширине при смене
+// фильтра.
+function FilterCount({ value, active }: { value: number; active: boolean }) {
+  return <span className={clsx("tabular-nums", active ? "text-accent/70" : "text-faint")}>{value}</span>;
+}
+
 const BIAS_LABELS: Record<Bias, string> = {
   breakout: "Пробой",
   false_breakout: "Ложный пробой",
@@ -946,6 +953,24 @@ export default function RecommendationsView() {
     (s) => (filter === "all" || s.bias === filter) && (directionFilter === "all" || s.direction === directionFilter),
   );
 
+  // Счётчик на кнопке — сколько карточек останется, если её нажать СЕЙЧАС,
+  // то есть с учётом фильтра другой строки. Иначе «Шорт 40» рядом с
+  // «ЛП2Б», где шортов всего три, обещал бы не то, что покажет клик.
+  const countBias = (key: Bias | "all") =>
+    setups.filter(
+      (s) => (key === "all" || s.bias === key) && (directionFilter === "all" || s.direction === directionFilter),
+    ).length;
+  const countDirection = (key: Direction | "all") =>
+    setups.filter((s) => (filter === "all" || s.bias === filter) && (key === "all" || s.direction === key)).length;
+  const biasCounts = Object.fromEntries(BIAS_FILTERS.map((f) => [f.key, countBias(f.key)])) as Record<
+    Bias | "all",
+    number
+  >;
+  const directionCounts = Object.fromEntries(DIRECTION_FILTERS.map((f) => [f.key, countDirection(f.key)])) as Record<
+    Direction | "all",
+    number
+  >;
+
   return (
     <div className="p-4 md:p-6 space-y-4 max-w-4xl mx-auto">
       <div>
@@ -954,7 +979,7 @@ export default function RecommendationsView() {
           Инструменты, готовые к торговле сегодня: из всех бессрочных USDT-контрактов Binance — крипта плюс
           золото, серебро и акции — остаются только те, где
           вчерашний день закрылся вплотную к уровню, слева нет распила и глубоких ложных пробоев, а за
-          уровнем пусто. На инструмент — один, самый сильный сетап. Не сигнал «покупай/продавай» — только
+          уровнем пусто. Уровни берём только свежие — образованные за последние полгода. На инструмент — один, самый сильный сетап. Не сигнал «покупай/продавай» — только
           подготовка к торговому дню, решение за вами.
         </p>
       </div>
@@ -967,9 +992,10 @@ export default function RecommendationsView() {
             className={clsx(
               "px-3 py-1.5 rounded-lg text-sm transition",
               filter === f.key ? "bg-accent/15 text-accent" : "text-muted hover:bg-surface-2",
+              biasCounts[f.key] === 0 && filter !== f.key && "opacity-50",
             )}
           >
-            {f.label}
+            {f.label} <FilterCount value={biasCounts[f.key]} active={filter === f.key} />
           </button>
         ))}
       </div>
@@ -982,9 +1008,10 @@ export default function RecommendationsView() {
             className={clsx(
               "px-3 py-1.5 rounded-lg text-sm transition",
               directionFilter === f.key ? "bg-accent/15 text-accent" : "text-muted hover:bg-surface-2",
+              directionCounts[f.key] === 0 && directionFilter !== f.key && "opacity-50",
             )}
           >
-            {f.label}
+            {f.label} <FilterCount value={directionCounts[f.key]} active={directionFilter === f.key} />
           </button>
         ))}
       </div>
