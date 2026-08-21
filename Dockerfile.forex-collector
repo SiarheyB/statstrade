@@ -1,4 +1,5 @@
-# Forex collector service — fetches OHLCV candles from Twelve Data API and writes to Postgres.
+# Forex collector service — тики Finnhub + история Twelve Data + свечи Dukascopy
+# (металлы и таймфрейм 1m) → Postgres. Контекст сборки — ./collector/forex.
 FROM node:24-alpine
 
 WORKDIR /app
@@ -7,8 +8,11 @@ WORKDIR /app
 COPY package.json ./
 RUN npm install --omit=dev
 
-# Исходники collector.
-COPY index.mjs ./
+# Исходники collector — маской, а не пофайлово: при пофайловом COPY новый
+# модуль (dukascopy.mjs) не попал в образ, и контейнер падал на старте с
+# ERR_MODULE_NOT_FOUND, хотя локально всё работало. Тесты лежат в __tests__/
+# и под маску не подпадают.
+COPY *.mjs ./
 
 ENV NODE_ENV=production
 ENV PORT=8081
