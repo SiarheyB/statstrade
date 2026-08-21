@@ -69,6 +69,17 @@ export interface LevelQuality {
    * баров случайно крупнее обычного.
    */
   approachNetMoveAtr: number;
+  /**
+   * Насколько последний закрытый бар ОТДАЛИЛСЯ от уровня по сравнению с
+   * предыдущим, в ATR (0 и меньше — подход продолжался). Меряется по той
+   * границе бара, которой он идёт к уровню: лоу для уровня снизу, хай для
+   * уровня сверху.
+   *
+   * Для ЛП это признак «подход прерван»: цена летела к уровню, но вчера
+   * развернулась и пошла обратно — дальше вероятнее накопление, а не рывок
+   * до уровня с проколом и возвратом за один сегодняшний бар.
+   */
+  turnAwayAtr: number;
 }
 
 export interface QualityThresholds {
@@ -112,6 +123,11 @@ export interface QualityThresholds {
    * maxCloseDistanceAtr (который про пробой: там нужно закрытие ВПЛОТНУЮ).
    */
   minFalseBreakoutApproachGapAtr: number;
+  /**
+   * Для ЛП: насколько последний бар может отойти от уровня относительно
+   * предыдущего (см. turnAwayAtr), прежде чем подход считается прерванным.
+   */
+  maxTurnAwayAtr: number;
   /** Подход «на малых барах» — средний диапазон не больше этого × ATR. */
   smallBarsRatio: number;
   /** Подход «на больших барах» — средний диапазон не меньше этого × ATR. */
@@ -177,6 +193,9 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // ОТ уровня, целый ATR, чтобы сегодняшний бар делал весь путь + прокол +
   // возврат за один день (а не просто чуть доставал до уровня).
   minFalseBreakoutApproachGapAtr: 1,
+  // Отскок в четверть ATR — ещё дрожание внутри подхода; больше — цена уже
+  // развернулась от уровня. Тот же допуск, что у «касания» уровня.
+  maxTurnAwayAtr: 0.25,
   smallBarsRatio: 0.8,
   bigBarsRatio: 1.2,
   // Разделяет реальный "довгий безвідкатний рух" от многодневного пологого
@@ -405,6 +424,10 @@ export function assessLevelQuality(
   const lastBarPierce = candles.length >= 2 ? findPierces(candles.slice(-2), levelPrice, atr, th.minPierceAtr) : { deepestAtr: 0 };
   const approach3 = candles.slice(-3);
   const touchDistance = side === "above" ? levelPrice - last.h : last.l - levelPrice;
+  // Тот же разрыв, но у предыдущего бара — разница показывает, продолжал ли
+  // вчерашний день идти к уровню или уже отвернул от него.
+  const prev = candles.length >= 2 ? candles[candles.length - 2] : null;
+  const prevTouchDistance = prev ? (side === "above" ? levelPrice - prev.h : prev.l - levelPrice) : touchDistance;
 
   return {
     side,
@@ -421,6 +444,7 @@ export function assessLevelQuality(
     approachRatio: mean(approach3.map((c) => c.h - c.l)) / atr,
     gapApproach: hasGapApproach(candles, levelPrice, atr),
     approachNetMoveAtr: netMoveAtr(candles, atr, th.fastApproachWindow),
+    turnAwayAtr: (touchDistance - prevTouchDistance) / atr,
   };
 }
 
@@ -448,6 +472,7 @@ export type RejectReason =
   | "no_runway"
   | "no_breakout_preconditions"
   | "no_false_breakout_preconditions"
+  | "turned_away_from_level"
   | "no_2b_preconditions";
 
 export interface GateResult {
@@ -525,6 +550,13 @@ export function passesQualityGate(
     // смещение за весь подход, а не шум последних баров).
     const fastApproach = q.approachNetMoveAtr >= th.minFastApproachNetMoveAtr || q.gapApproach;
     if (!fastApproach) rejectedBy.push("no_false_breakout_preconditions");
+    // Подход должен быть ЖИВЫМ: цена, которая вчера отвернула от уровня,
+    // сегодня скорее уйдёт в накопление, чем сделает весь путь до уровня с
+    // проколом и возвратом. netMove этого не ловит — он смотрит весь путь и
+    // остаётся большим по инерции падения/роста, даже когда последние бары
+    // уже развернулись (JCTUSDT: слив на 5×ATR, а последние два дня — отскок
+    // вверх от дна, до уровня стало дальше на 0.63×ATR).
+    if (q.turnAwayAtr > th.maxTurnAwayAtr) rejectedBy.push("turned_away_from_level");
   }
 
   return { ok: rejectedBy.length === 0, rejectedBy };

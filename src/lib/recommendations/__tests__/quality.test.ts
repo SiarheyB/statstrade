@@ -212,6 +212,7 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     approachRatio: 0.5,
     gapApproach: false,
     approachNetMoveAtr: 0.3,
+    turnAwayAtr: 0,
     ...overrides,
   };
 }
@@ -322,5 +323,38 @@ describe("passesQualityGate for ЛП2Б", () => {
     const near = qualityScore(clean2b, 5, "false_breakout_2b", 0.12);
     const far = qualityScore(clean2b, 5, "false_breakout_2b", 0.42);
     expect(near).toBeGreaterThan(far);
+  });
+});
+
+
+// «Подход прерван»: цена летела к уровню, но последний закрытый бар развернулся
+// и ушёл обратно — дальше вероятнее накопление, чем рывок до уровня с проколом
+// и возвратом за один день (JCTUSDT 21.08.2026).
+describe("passesQualityGate — развернувшийся подход", () => {
+  const FAST = { for: [], against: ["big_bars_approach"] };
+
+  it("rejects a false breakout when the last bar bounced away from the level", () => {
+    const q = quality({ approachGapAtr: 1.04, approachNetMoveAtr: 4.8, turnAwayAtr: 0.63, touched: false });
+    const res = passesQualityGate(q, "false_breakout", FAST);
+    expect(res.ok).toBe(false);
+    expect(res.rejectedBy).toContain("turned_away_from_level");
+  });
+
+  it("keeps a false breakout while the bar only jitters within the approach", () => {
+    const q = quality({ approachGapAtr: 1.04, approachNetMoveAtr: 4.8, turnAwayAtr: 0.1, touched: false });
+    expect(passesQualityGate(q, "false_breakout", FAST).ok).toBe(true);
+  });
+
+  it("does not apply the rule to breakouts — there the price is already at the level", () => {
+    const q = quality({ turnAwayAtr: 1.5 });
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).not.toContain("turned_away_from_level");
+  });
+
+  it("measures the turn from the bar's own approach side", () => {
+    // Уровень 120 сверху: позавчера хай 119 (0.25×ATR до уровня), вчера 116 —
+    // бар не дотянулся на 1×ATR, до уровня стало дальше на 0.75×ATR.
+    const candles = [...background(40), candle(40, 117, 119, 116, 118), candle(41, 117, 116, 113, 114)];
+    const q = assessLevelQuality(candles, 120, ATR, 114, []);
+    expect(q.turnAwayAtr).toBeCloseTo(0.75, 2);
   });
 });
