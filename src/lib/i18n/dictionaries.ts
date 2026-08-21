@@ -1123,7 +1123,7 @@ const en: Dict = {
   "admin.collector.subtitle": "Limit-order heatmap filling: collector service status and writes into Postgres.",
 
   "admin.forex.title": "Forex",
-  "admin.forex.subtitle": "forex-collector status (Finnhub WS + Twelve Data), pairs, and FxCandle write stats.",
+  "admin.forex.subtitle": "forex-collector status (Finnhub WS, Twelve Data, Dukascopy), pairs, and FxCandle write stats.",
   "admin.collector.staleBanner": "{n} of {total} feed(s) not filling for over {sec}s",
   "admin.collector.status": "Collector:",
   "admin.collector.online": "online",
@@ -2433,7 +2433,7 @@ const ru: Dict = {
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",
 
   "admin.forex.title": "Форекс",
-  "admin.forex.subtitle": "Статус forex-collector (Finnhub WS + Twelve Data), пары и факт записи в FxCandle.",
+  "admin.forex.subtitle": "Статус forex-collector (Finnhub WS, Twelve Data, Dukascopy), пары и факт записи в FxCandle.",
   "admin.collector.staleBanner": "{n} из {total} фид(ов) не наполняются дольше {sec} с",
   "admin.collector.status": "Collector:",
   "admin.collector.online": "онлайн",

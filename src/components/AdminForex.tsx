@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CircleCheck, CircleX, AlertTriangle, Wifi, WifiOff, HelpCircle } from "lucide-react";
+import { CircleCheck, CircleX, AlertTriangle, Wifi, WifiOff, HelpCircle, CalendarClock } from "lucide-react";
 import clsx from "clsx";
+import { isForexMarketClosed } from "@/lib/forexMarket";
 
 function Hint({ text }: { text: string }) {
   return (
@@ -13,8 +14,8 @@ function Hint({ text }: { text: string }) {
 }
 
 // Раздел «Форекс» админ-панели. Опрашивает /api/admin/forex раз в несколько
-// секунд: статус forex-collector (Finnhub WS + Twelve Data) и факт записи
-// в FxCandle по каждой паре/таймфрейму.
+// секунд: статус forex-collector (три источника — Finnhub WS, Twelve Data,
+// Dukascopy) и факт записи в FxCandle по каждой паре/таймфрейму.
 
 const POLL_MS = 5000;
 // Свежесть свечи таймфрейма X считается нормальной, если last_t не старше
@@ -35,8 +36,18 @@ type HealthData = {
   instruments: number;
   symbols?: string[];
   backfillDone: boolean;
-  ws: { connected: boolean; reconnects: number; totalTrades: number; lastTradeAt: string | null };
+  ws: { apiKeySet?: boolean; connected: boolean; reconnects: number; totalTrades: number; lastTradeAt: string | null };
   twelveData: { apiKeySet: boolean; totalCalls: number; fallbackIntervalSec: number };
+  // Появился вместе с золотом: металлы и история 1m идут из Dukascopy, ключа
+  // он не требует (см. collector/forex/dukascopy.mjs). У коллекторов старой
+  // версии этого блока в /health нет — отсюда необязательность.
+  dukascopy?: {
+    symbols: string[];
+    pollSec: number;
+    totalCalls: number;
+    errors: number;
+    lastOkAt: string | null;
+  };
   errors: number;
   lastWriteOkAt: string | null;
   exchange: string;
@@ -114,7 +125,13 @@ export default function AdminForex() {
 
   // Пары, у которых свежая свеча самого мелкого таймфрейма (5m) сильно
   // отстаёт — вероятный признак проблемы с этой конкретной парой.
-  const staleSymbols = data
+  //
+  // На закрытом рынке проверка отключается: с вечера пятницы до вечера
+  // воскресенья свечей нет ни у одного источника, и раньше админка каждые
+  // выходные показывала красное «N из N пар не обновляются». Предупреждение,
+  // которое горит по расписанию, перестают читать.
+  const marketClosed = isForexMarketClosed(now);
+  const staleSymbols = data && !marketClosed
     ? data.symbols.filter((s) => {
         const cell = data.bySymbol[s]?.["5m"];
         if (!cell?.lastT) return true;
@@ -126,6 +143,16 @@ export default function AdminForex() {
     <div className="mt-6 space-y-6">
       {error && (
         <div className="card p-4 border-loss/40 text-sm text-loss">Ошибка загрузки: {error}</div>
+      )}
+
+      {marketClosed && (
+        <div className="card p-4 border-border-strong/60 flex items-start gap-3 text-sm text-muted">
+          <CalendarClock size={18} className="text-faint shrink-0 mt-0.5" />
+          <div className="flex items-center gap-1.5">
+            Валютный рынок закрыт — новых свечей не будет до вечера воскресенья
+            <Hint text="Форекс торгуется с вечера воскресенья по вечер пятницы (UTC). На выходных отсутствие свежих свечей — норма, а не сбой, поэтому проверка отставания пар на это время отключена." />
+          </div>
+        </div>
       )}
 
       {staleSymbols.length > 0 && (
@@ -161,9 +188,9 @@ export default function AdminForex() {
             </span>
             <span className="flex items-center gap-1.5 text-muted">
               {wsOk ? <Wifi size={14} className="text-profit" /> : <WifiOff size={14} className="text-loss" />}
-              Finnhub WS: {wsOk ? "подключён" : "отключён"}
+              Finnhub WS: {h.data.ws.apiKeySet === false ? "ключ не задан" : wsOk ? "подключён" : "отключён"}
               {h.data.ws.reconnects > 0 && ` (реконнектов: ${h.data.ws.reconnects})`}
-              <Hint text="Finnhub WebSocket — основной источник тиков (сделок) в реальном времени. «Отключён» или частые реконнекты — тики не приходят живьём, свежие свечи не наполняются, но история дозагружается через Twelve Data." />
+              <Hint text="Finnhub WebSocket — источник тиков (сделок) в реальном времени по ВАЛЮТНЫМ парам. «Отключён» или частые реконнекты — тики не приходят живьём, свежие свечи по парам не наполняются, но история дозагружается через Twelve Data. «Ключ не задан» — FINNHUB_API_KEY пуст или не похож на ключ; металлы это не затрагивает, они идут из Dukascopy." />
             </span>
             <span className="text-muted flex items-center gap-1">
               тиков: {h.data.ws.totalTrades.toLocaleString("ru-RU")}
@@ -177,9 +204,24 @@ export default function AdminForex() {
               Twelve Data: {h.data.twelveData.apiKeySet ? `${h.data.twelveData.totalCalls} запросов` : "ключ не задан"}
               <Hint text="Twelve Data — резервный REST-источник: докачивает историю (бэкафилл) и подстраховывает, если WS не даёт свежих тиков. Число — сколько запросов к его API сделано с запуска." />
             </span>
+            {h.data.dukascopy && (
+              <span className={clsx("flex items-center gap-1", h.data.dukascopy.errors > 0 ? "text-loss" : "text-muted")}>
+                Dukascopy: {h.data.dukascopy.symbols.length > 0
+                  ? `${h.data.dukascopy.symbols.join(", ")} · ${h.data.dukascopy.totalCalls} запросов`
+                  : "инструменты не заданы"}
+                {h.data.dukascopy.errors > 0 && ` · ошибок: ${h.data.dukascopy.errors}`}
+                <Hint text="Dukascopy — источник металлов (золото XAU/USD, серебро) и истории таймфрейма 1m для всех пар. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось." />
+              </span>
+            )}
+            {h.data.dukascopy && (
+              <span className="text-muted flex items-center gap-1">
+                последний ответ Dukascopy: {agoLabel(h.data.dukascopy.lastOkAt, now).text}
+                <Hint text="Когда Dukascopy в последний раз отдал данные. На закрытом рынке (выходные) время растёт — это норма: новых свечей нет." />
+              </span>
+            )}
             <span className="text-muted flex items-center gap-1">
               бэкафилл: {h.data.backfillDone ? "завершён" : "идёт…"}
-              <Hint text="Первоначальная догрузка исторических свечей через Twelve Data при старте коллектора. Пока «идёт…» — таблица свечей ниже может быть неполной." />
+              <Hint text="Первоначальная догрузка исторической части свечей при старте коллектора (Twelve Data по валютным парам, Dukascopy по металлам и 1m). Пока «идёт…» — таблица свечей ниже может быть неполной." />
             </span>
             {h.data.errors > 0 && (
               <span className="text-loss flex items-center gap-1">
