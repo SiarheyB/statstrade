@@ -752,6 +752,46 @@ const LEVEL_FALLBACK: Record<RollupLevel, RollupLevel[]> = {
   minute: ["minute", "hour", "day"],
 };
 
+/**
+ * Сколько колонок карты покрывает ОДИН бакет уровня.
+ *
+ * Колонка сетки и бакет rollup — разные величины, и бакет бывает шире. Тогда
+ * его старт попадает в одну колонку, а соседние остаются пустыми, и карта
+ * рисуется вертикальными полосами через пропуск.
+ *
+ * Так было видно на 4h: окно там 133 дня (TF_MS × CANDLES_IN_WINDOW), колонка
+ * ≈13 часов, и если часовой уровень окно не покрывает и чтение уходит на
+ * дневной, один суточный бакет приходится примерно на две колонки — вторая
+ * оставалась пустой. На 1h этого нет: там колонка ≈3.3 часа при часовом
+ * бакете, то есть в каждую колонку попадает несколько бакетов.
+ */
+export function bucketSpanCols(levelMs: number, fromMs: number, toMs: number, cols: number): number {
+  const colMs = (toMs - fromMs) / Math.max(1, cols);
+  if (!Number.isFinite(colMs) || colMs <= 0) return 1;
+  return Math.max(1, Math.ceil(levelMs / colMs));
+}
+
+/**
+ * Достраивает колонки, оставшиеся пустыми из-за того, что бакет шире колонки:
+ * пустая колонка получает содержимое предыдущей заполненной, но не дальше чем
+ * на ширину бакета (spanCols − 1 колонок).
+ *
+ * Это не «размазывание» данных, а восстановление их реальной длительности:
+ * дневной бакет описывает стакан за целые сутки, а не за один их момент.
+ * Ограничение по spanCols важно: настоящие дыры в данных (коллектор стоял)
+ * шире бакета и остаются видимыми, как и должны.
+ */
+export function fillCoarseBucketGaps(grid: number[][], spanCols: number): void {
+  if (spanCols <= 1) return;
+  const isEmpty = (col: number[]) => !col.some((v) => v !== 0);
+  let lastFilled = -1;
+  for (let c = 0; c < grid.length; c++) {
+    if (!isEmpty(grid[c])) { lastFilled = c; continue; }
+    if (lastFilled < 0 || c - lastFilled >= spanCols) continue;
+    grid[c] = grid[lastFilled].slice();
+  }
+}
+
 // Длительность бакета уровня — допуск при проверке покрытия.
 const LEVEL_MS: Record<RollupLevel, number> = {
   minute: 60_000,
@@ -898,6 +938,9 @@ export async function computeOrderflow(
   for (const cell of cells) {
     grid[clampCol(cell.col)][binOf(cell.price)] += cell.vol * (kByCol.get(cell.col) ?? 0);
   }
+  // Бакет прочитанного уровня может быть шире колонки — тогда между колонками
+  // остаются пустоты, которых в данных нет (см. fillCoarseBucketGaps).
+  fillCoarseBucketGaps(grid, bucketSpanCols(LEVEL_MS[usedLevel ?? "minute"], fromMs, toMs, cols));
   let maxVal = 0;
   for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
   const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));

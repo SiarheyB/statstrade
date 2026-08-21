@@ -29,6 +29,8 @@ import {
   computeBigTrades,
   computeOrderflow,
   rollupLevelFor,
+  bucketSpanCols,
+  fillCoarseBucketGaps,
   CANDLES_IN_WINDOW,
   TF_MS,
 } from "@/lib/orderflow";
@@ -318,6 +320,81 @@ describe("rollupLevelFor", () => {
       const colMs = (to - from) / 240;
       expect(bucketMs[levelForRange(range)]).toBeLessThanOrEqual(colMs);
     }
+  });
+});
+
+// Пропуски в карте лимитных ордеров: бакет прочитанного уровня бывает шире
+// колонки сетки, и тогда карта рисуется полосами через одну (было видно на 4h).
+describe("bucketSpanCols", () => {
+  const spanForRange = (range: string, levelMs: number) => {
+    const to = Date.now();
+    const from = to - TF_MS[range] * CANDLES_IN_WINDOW[range];
+    return bucketSpanCols(levelMs, from, to, 240);
+  };
+
+  it("бакет уже колонки укладывается в одну колонку", () => {
+    // 1h: колонка ≈3.3 часа при часовом бакете — то, что у пользователя и
+    // выглядело правильно.
+    expect(spanForRange("1h", 3600_000)).toBe(1);
+    expect(spanForRange("5m", 60_000)).toBe(1);
+    expect(spanForRange("15m", 60_000)).toBe(1);
+  });
+
+  it("дневной бакет на 4h занимает больше одной колонки", () => {
+    // Ровно случай из бага: окно 133 дня, колонка ≈13 часов, сутки не влезают.
+    expect(spanForRange("4h", 86_400_000)).toBeGreaterThan(1);
+  });
+
+  it("на старших таймфреймах дневной бакет снова умещается в колонку", () => {
+    for (const range of ["12h", "1d", "1w"]) {
+      expect(spanForRange(range, 86_400_000)).toBe(1);
+    }
+  });
+
+  it("не делит на ноль на вырожденном окне", () => {
+    expect(bucketSpanCols(60_000, 100, 100, 240)).toBe(1);
+    expect(bucketSpanCols(60_000, 0, 1000, 0)).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe("fillCoarseBucketGaps", () => {
+  const col = (v: number) => [v, 0, v];
+
+  it("ничего не трогает, когда бакет умещается в колонку", () => {
+    const grid = [col(1), [0, 0, 0], col(2)];
+    fillCoarseBucketGaps(grid, 1);
+    expect(grid[1]).toEqual([0, 0, 0]);
+  });
+
+  it("продлевает колонку на ширину бакета", () => {
+    const grid = [col(1), [0, 0, 0], col(2), [0, 0, 0]];
+    fillCoarseBucketGaps(grid, 2);
+    expect(grid[1]).toEqual(col(1));
+    expect(grid[3]).toEqual(col(2));
+  });
+
+  it("не затягивает настоящие провалы в данных", () => {
+    // Три пустые колонки подряд при бакете шириной в две — это простой сбора,
+    // а не следствие грубого бакета: такую дыру видеть надо.
+    const grid = [col(1), [0, 0, 0], [0, 0, 0], [0, 0, 0], col(2)];
+    fillCoarseBucketGaps(grid, 2);
+    expect(grid[1]).toEqual(col(1));
+    expect(grid[2]).toEqual([0, 0, 0]);
+    expect(grid[3]).toEqual([0, 0, 0]);
+  });
+
+  it("не выдумывает данные перед первой заполненной колонкой", () => {
+    const grid = [[0, 0, 0], [0, 0, 0], col(5)];
+    fillCoarseBucketGaps(grid, 3);
+    expect(grid[0]).toEqual([0, 0, 0]);
+    expect(grid[1]).toEqual([0, 0, 0]);
+  });
+
+  it("копирует значения, а не ссылку на колонку", () => {
+    const grid = [col(1), [0, 0, 0]];
+    fillCoarseBucketGaps(grid, 2);
+    grid[1][0] = 99;
+    expect(grid[0][0]).toBe(1);
   });
 });
 
