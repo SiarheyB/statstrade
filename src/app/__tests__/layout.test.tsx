@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { getLocale, getTimezone } from "@/lib/i18n/server";
 import RootLayout, { generateMetadata } from "../layout";
+import { SEO_PAGES } from "@/lib/seo";
 
 // RootLayout renders <html>/<body>, which RTL cannot mount inside a container
 // (jsdom's document already has its own <html>/<body>). Instead of calling
@@ -14,6 +15,12 @@ vi.mock("@/lib/i18n/server", () => ({
 
 vi.mock("@/lib/i18n/provider", () => ({
   I18nProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
+// siteUrl() читает заголовки запроса (для canonical и Open Graph) — вне
+// запроса их нет, поэтому подставляем прод-хост.
+vi.mock("next/headers", () => ({
+  headers: async () => ({ get: (k: string) => (k.toLowerCase() === "host" ? "tradingstat.ru" : null) }),
 }));
 
 // next/font/google requires network access to fetch real font files at build
@@ -40,12 +47,22 @@ describe("RootLayout", () => {
   it("generateMetadata returns Russian title for ru locale", async () => {
     (getLocale as any).mockResolvedValue("ru");
     const meta = await generateMetadata();
-    expect(meta.title).toBe("TradeStats — статистика трейдера");
+    expect(meta.title).toBe(SEO_PAGES.home.title.ru);
   });
 
   it("generateMetadata returns English title for en locale", async () => {
     (getLocale as any).mockResolvedValue("en");
     const meta = await generateMetadata();
-    expect(meta.title).toBe("TradeStats — trader statistics");
+    expect(meta.title).toBe(SEO_PAGES.home.title.en);
+  });
+
+  // Без canonical и Open Graph страница выглядит в выдаче безымянной, а ссылка
+  // в мессенджере разворачивается голой.
+  it("generateMetadata carries an absolute canonical and Open Graph over https", async () => {
+    (getLocale as any).mockResolvedValue("ru");
+    const meta = await generateMetadata();
+    expect(meta.alternates?.canonical).toBe("https://tradingstat.ru");
+    expect(meta.openGraph?.url).toBe("https://tradingstat.ru");
+    expect(meta.openGraph?.title).toBe(SEO_PAGES.home.title.ru);
   });
 });
