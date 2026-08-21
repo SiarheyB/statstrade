@@ -166,9 +166,17 @@ export function computeBreakoutSignals(
   // Накопление перед уровнем (узкий диапазон последних 5 баров) vs длинное
   // безоткатное движение БЕЗ накопления — см. комментарий в шапке файла:
   // "нет отката" сам по себе неоднозначен в доке, разрешаем через накопление.
+  //
+  // Второй признак — узкий разброс ЗАКРЫТИЙ последних трёх баров. После
+  // импульсного бара цена часто стоит телами на одном месте, продолжая
+  // пилить хвостами: по хай-лоу такая пауза выглядит размахом в несколько
+  // ATR, хотя на графике это очевидное поджатие к уровню (ZHIPUUSDT 18-20.08:
+  // закрытия 132.04 / 131.45 / 131.73 при размахе окна в 2×ATR).
   const window5 = candles.slice(-5);
   const windowRange = Math.max(...window5.map((c) => c.h)) - Math.min(...window5.map((c) => c.l));
-  const accumulating = windowRange <= atr * 1.0;
+  const closes3 = candles.slice(-3).map((c) => c.c);
+  const closesRange = Math.max(...closes3) - Math.min(...closes3);
+  const accumulating = windowRange <= atr * 1.0 || closesRange <= atr * 0.25;
   if (accumulating) {
     forFactors.push("accumulation_before_level");
   } else {

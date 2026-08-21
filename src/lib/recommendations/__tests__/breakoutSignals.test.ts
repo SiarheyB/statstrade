@@ -182,6 +182,32 @@ describe("computeBreakoutSignals — paranormal_no_pullback", () => {
   });
 });
 
+// Поджатие к уровню после импульсного бара: тела стоят на месте, хвосты
+// продолжают пилить. По хай-лоу окна это выглядит размахом в пару ATR, хотя
+// на графике — очевидное накопление (ZHIPUUSDT 18-20.08.2026).
+describe("computeBreakoutSignals — накопление по закрытиям", () => {
+  it("sees accumulation when closes cluster, even if the bars have long wicks", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 150, 152, 148, 150));
+    candles.push(candle(10, 150, 151, 126, 132)); // импульсный слив к уровню
+    candles.push(candle(11, 132, 136, 126, 131.5));
+    candles.push(candle(12, 131.5, 137, 126.5, 131.7));
+
+    const signals = computeBreakoutSignals(candles, 126.5, 13.6);
+    expect(signals.for).toContain("accumulation_before_level");
+    expect(signals.against).not.toContain("long_move_no_accumulation");
+  });
+
+  it("still calls a running move a move — spread-out closes are not accumulation", () => {
+    const candles: DailyCandle[] = [];
+    for (let i = 0; i < 10; i++) candles.push(candle(i, 150, 152, 148, 150));
+    for (let i = 10; i < 15; i++) candles.push(candle(i, 150 - (i - 10) * 8, 152 - (i - 10) * 8, 146 - (i - 10) * 8, 148 - (i - 10) * 8));
+
+    const signals = computeBreakoutSignals(candles, 100, 13.6);
+    expect(signals.for).not.toContain("accumulation_before_level");
+  });
+});
+
 describe("biasDirection", () => {
   it("maps bias + level position to a trade side", () => {
     expect(biasDirection("breakout", 120, 100)).toBe("long");

@@ -92,6 +92,14 @@ export interface LevelQuality {
    * 0.2912 от 22.05 перекрыт закрытиями 30-31.05, рабочий уровень — 0.3132).
    */
   breachedAfterFormedAtr: number;
+  /**
+   * Сколько ЗНАЧИМЫХ уровней стоит между вчерашним закрытием и этим уровнем.
+   * Для ЛП это про реализуемость пути: сегодняшний бар должен дойти до
+   * уровня одним махом, а каждый уровень по дороге — место, где цена
+   * тормозит или разворачивается (ZHIPUUSDT: до отката 107.05 идти сквозь
+   * местную опору 126.50 и слом 111.95).
+   */
+  blockingLevels: number;
 }
 
 export interface QualityThresholds {
@@ -148,6 +156,8 @@ export interface QualityThresholds {
   maxBreachAfterFormedAtr: number;
   /** Хвост баров, в котором закрытие за уровнем ещё не «уровень снят». */
   breachFreshBars: number;
+  /** Для ЛП: сколько значимых уровней допускается на пути до уровня. */
+  maxBlockingLevels: number;
   /** Подход «на малых барах» — средний диапазон не больше этого × ATR. */
   smallBarsRatio: number;
   /** Подход «на больших барах» — средний диапазон не меньше этого × ATR. */
@@ -220,6 +230,9 @@ export const DEFAULT_THRESHOLDS: QualityThresholds = {
   // Столько же баров, сколько freshBreakDirection в breakoutSignals считает
   // пробой свежим: вчерашний уход за уровень — это сетап, а не история.
   breachFreshBars: 10,
+  // Ни одного: путь до уровня должен быть свободен. Уровень по дороге — это
+  // место, где сегодняшний бар с большой вероятностью и остановится.
+  maxBlockingLevels: 0,
   smallBarsRatio: 0.8,
   bigBarsRatio: 1.2,
   // Разделяет реальный "довгий безвідкатний рух" от многодневного пологого
@@ -243,6 +256,17 @@ export const LOCAL_THRESHOLDS: QualityThresholds = {
   ...DEFAULT_THRESHOLDS,
   window: 10,
   contaminationWindow: 15,
+  // Линия местной опоры проведена ПО ЛОУ (или хаю) соседнего бара, поэтому
+  // хвосты рядом с ней заходят за уровень на доли ATR просто по построению.
+  // С общим порогом серии (0.02×ATR) любое поджатие к такому уровню читалось
+  // как распил: у ZHIPUUSDT проколы 0.03 и 0.06×ATR давали «два подряд».
+  // Считаем серией только настоящие проколы.
+  consecutivePierceAtr: DEFAULT_THRESHOLDS.minPierceAtr,
+  // И то же смягчение для «закрылись вплотную»: у местной опоры закрытия
+  // стоят в середине диапазона накопления, а не на самой линии. Берём тот же
+  // порог, по которому фактор close_near_level считает закрытие близким —
+  // иначе карточка сама себе противоречит: фактор «за», а гейт отклоняет.
+  maxCloseDistanceAtr: 0.5,
 };
 
 function mean(xs: number[]): number {
@@ -422,6 +446,22 @@ function hasGapApproach(candles: DailyCandle[], levelPrice: number, atr: number,
   return false;
 }
 
+// Значимые уровни, стоящие между ценой и целевым уровнем. Допуск в четверть
+// ATR у обеих границ: уровень, слипшийся с целевым или стоящий прямо под
+// текущей ценой, дорогу не перегораживает.
+function countBlockingLevels(
+  levelPrice: number,
+  currentPrice: number,
+  significantLevels: number[],
+  atr: number,
+): number {
+  if (atr <= 0) return 0;
+  const gap = atr * 0.25;
+  const lo = Math.min(levelPrice, currentPrice) + gap;
+  const hi = Math.max(levelPrice, currentPrice) - gap;
+  return significantLevels.filter((p) => p >= lo && p <= hi).length;
+}
+
 // Самый глубокий уход ЗАКРЫТИЕМ за уровень после его образования, в ATR.
 // Хвост в `freshBars` баров не смотрим: свежий пробой — это сегодняшняя
 // ситуация (в том числе заготовка ЛП2Б), а не свидетельство, что уровень
@@ -496,6 +536,7 @@ export function assessLevelQuality(
     approachNetMoveAtr: netMoveAtr(candles, atr, th.fastApproachWindow),
     turnAwayAtr: (touchDistance - prevTouchDistance) / atr,
     breachedAfterFormedAtr: breachAfterFormed(candles, levelPrice, atr, side, levelFormedAt, th.breachFreshBars),
+    blockingLevels: countBlockingLevels(levelPrice, last.c, significantLevels, atr),
   };
 }
 
@@ -525,6 +566,7 @@ export type RejectReason =
   | "no_false_breakout_preconditions"
   | "turned_away_from_level"
   | "level_already_taken"
+  | "blocked_path"
   | "no_2b_preconditions";
 
 export interface GateResult {
@@ -613,6 +655,9 @@ export function passesQualityGate(
     // откат поглощён следующим движением, и ждать от него разворота нечего —
     // рабочей осталась следующая, ещё не пройденная точка структуры.
     if (q.breachedAfterFormedAtr > th.maxBreachAfterFormedAtr) rejectedBy.push("level_already_taken");
+    // Дорога до уровня перегорожена другим уровнем — сегодняшний бар скорее
+    // остановится там, чем дойдёт до цели, проколет её и вернётся.
+    if (q.blockingLevels > th.maxBlockingLevels) rejectedBy.push("blocked_path");
   }
 
   return { ok: rejectedBy.length === 0, rejectedBy };

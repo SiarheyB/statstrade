@@ -9,6 +9,7 @@ import {
   qualityScore,
   runwayAtr,
   DEFAULT_THRESHOLDS,
+  LOCAL_THRESHOLDS,
   type LevelQuality,
 } from "../quality";
 import type { DailyCandle } from "../levels";
@@ -214,6 +215,7 @@ function quality(overrides: Partial<LevelQuality> = {}): LevelQuality {
     approachNetMoveAtr: 0.3,
     turnAwayAtr: 0,
     breachedAfterFormedAtr: 0,
+    blockingLevels: 0,
     ...overrides,
   };
 }
@@ -394,5 +396,49 @@ describe("passesQualityGate — снятый уровень", () => {
     const candles = [...background(20), candle(20, 121, 124, 120, 123), ...background(15, 21)];
     const q = assessLevelQuality(candles, 120, ATR, 100, [], DEFAULT_THRESHOLDS, candles[0].t);
     expect(q.breachedAfterFormedAtr).toBeCloseTo(0.75, 2);
+  });
+});
+
+
+// Путь до уровня: сегодняшний бар должен пройти его одним махом, а каждый
+// уровень по дороге — место, где цена скорее остановится (ZHIPUUSDT: до отката
+// 107.05 идти сквозь опору 126.50 и слом 111.95).
+describe("passesQualityGate — перегороженный путь", () => {
+  const FAST = { for: [], against: ["big_bars_approach"] };
+
+  it("rejects a false breakout when a significant level stands in the way", () => {
+    const q = quality({ approachGapAtr: 1.2, approachNetMoveAtr: 3, touched: false, blockingLevels: 2 });
+    const res = passesQualityGate(q, "false_breakout", FAST);
+    expect(res.ok).toBe(false);
+    expect(res.rejectedBy).toContain("blocked_path");
+  });
+
+  it("counts only levels strictly between the close and the target", () => {
+    const candles = [...background(40)]; // закрытие 100
+    // Уровень 120 сверху; 110 стоит на пути, 130 — за уровнем, 100.5 — вплотную
+    // к цене (внутри допуска в четверть ATR).
+    const q = assessLevelQuality(candles, 120, ATR, 100, [110, 130, 100.5]);
+    expect(q.blockingLevels).toBe(1);
+  });
+
+  it("does not apply the rule to breakouts — the price is already at the level", () => {
+    expect(passesQualityGate(quality({ blockingLevels: 3 }), "breakout", CALM).rejectedBy).not.toContain("blocked_path");
+  });
+});
+
+// Местная опора — линия по лоу/хаю соседнего бара, поэтому у неё свои допуски:
+// хвосты поджатия задевают её по построению, а закрытия стоят в середине
+// диапазона накопления, а не на самой линии.
+describe("LOCAL_THRESHOLDS", () => {
+  it("counts only real pierces as a streak, not wick noise", () => {
+    expect(LOCAL_THRESHOLDS.consecutivePierceAtr).toBe(DEFAULT_THRESHOLDS.minPierceAtr);
+    const q = quality({ consecutiveFalseBreakouts: 2 });
+    expect(passesQualityGate(q, "breakout", CALM, DEFAULT_THRESHOLDS).rejectedBy).toContain("consecutive_false_breakouts");
+  });
+
+  it("accepts a close that the close_near_level factor already calls near", () => {
+    const q = quality({ closeDistanceAtr: 0.38 });
+    expect(passesQualityGate(q, "breakout", CALM, DEFAULT_THRESHOLDS).rejectedBy).toContain("close_far_from_level");
+    expect(passesQualityGate(q, "breakout", CALM, LOCAL_THRESHOLDS).ok).toBe(true);
   });
 });
