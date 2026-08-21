@@ -381,6 +381,14 @@ describe("passesQualityGate — снятый уровень", () => {
     expect(passesQualityGate(q, "false_breakout", FAST).ok).toBe(true);
   });
 
+  it("applies to every setup type, not just ЛП — a taken level is taken", () => {
+    const q = quality({ breachedAfterFormedAtr: 1.35 });
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("level_already_taken");
+    expect(
+      passesQualityGate(q, "false_breakout_2b", { for: ["false_breakout_2b"], against: [] }).rejectedBy,
+    ).toContain("level_already_taken");
+  });
+
   it("ignores a fresh break — that is the ЛП2Б setup, not an old level", () => {
     // Бар за уровнем стоит внутри хвоста breachFreshBars, поэтому в метрику
     // он не попадает вовсе: считаем её от БСУ и до length-1-breachFreshBars.

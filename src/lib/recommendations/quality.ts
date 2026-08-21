@@ -612,6 +612,12 @@ export function passesQualityGate(
     if (q.contamination > th.maxContamination) rejectedBy.push("contaminated_zone");
     if (q.runwayAtr < th.minRunwayAtr) rejectedBy.push("no_runway");
   }
+  // Уровень уже сняли: после образования цена закрывалась за ним и осталась
+  // там надолго (свежий хвост в breachFreshBars баров не в счёт — там уход за
+  // уровень это сегодняшняя ситуация, в том числе заготовка ЛП2Б). Работаем
+  // только по уровням, которые ещё держат: откаты и сломы, не пробитые и не
+  // распиленные.
+  if (q.breachedAfterFormedAtr > th.maxBreachAfterFormedAtr) rejectedBy.push("level_already_taken");
 
   if (bias === "false_breakout_2b") {
     // Всё специфичное для 2Б (свежесть пробоя, закрытие впритык за уровнем,
@@ -651,10 +657,6 @@ export function passesQualityGate(
     // уже развернулись (JCTUSDT: слив на 5×ATR, а последние два дня — отскок
     // вверх от дна, до уровня стало дальше на 0.63×ATR).
     if (q.turnAwayAtr > th.maxTurnAwayAtr) rejectedBy.push("turned_away_from_level");
-    // Уровень уже сняли: после образования цена закрывалась за ним. Такой
-    // откат поглощён следующим движением, и ждать от него разворота нечего —
-    // рабочей осталась следующая, ещё не пройденная точка структуры.
-    if (q.breachedAfterFormedAtr > th.maxBreachAfterFormedAtr) rejectedBy.push("level_already_taken");
     // Дорога до уровня перегорожена другим уровнем — сегодняшний бар скорее
     // остановится там, чем дойдёт до цели, проколет её и вернётся.
     if (q.blockingLevels > th.maxBlockingLevels) rejectedBy.push("blocked_path");

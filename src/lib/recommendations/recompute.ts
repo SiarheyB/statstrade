@@ -37,7 +37,10 @@ const SIGNIFICANT_LEVEL_STRENGTH = 3;
 // разница между расчётным и реальным исполнением съедает весь сетап.
 const MIN_DAILY_VOLUME_USD = 1_000_000;
 // Типы уровней, от которых имеет смысл ЛП2Б (см. комментарий у suitable2bLevel).
-const LEVEL_TYPES_2B = new Set(["retracement", "structure_break", "break_point", "mirror", "historical"]);
+// "historical" из списка убран намеренно: это метка «старый уровень, ещё не
+// переподтверждённый» — работаем только по уровням, которые рынок уважает
+// сейчас.
+const LEVEL_TYPES_2B = new Set(["retracement", "structure_break", "break_point", "mirror"]);
 
 export interface RecomputeResult {
   symbolsScanned: number;
