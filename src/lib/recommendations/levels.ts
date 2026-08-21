@@ -63,7 +63,14 @@ export interface DetectedLevel {
   type: LevelType;
   strength: number;
   touches: LevelTouch[];
+  /**
+   * БСУ — бар, образовавший уровень в его нынешнем виде. У схлопнутого
+   * кластера это начало ПОСЛЕДНЕЙ серии образований, а не самое первое
+   * появление цены в истории (см. mergeLevels).
+   */
   formedAt: number;
+  /** Самое первое появление уровня среди схлопнутых — «сколько он тут стоит». */
+  firstFormedAt: number;
   lastTouchedAt: number;
 }
 
@@ -171,6 +178,7 @@ function detectBreakPoints(candles: DailyCandle[], atr: number, wing = 3): Detec
       strength,
       touches: [{ barIndex: p.barIndex, t: bar.t, side: p.kind === "high" ? "resistance" : "support" }],
       formedAt: bar.t,
+      firstFormedAt: bar.t,
       lastTouchedAt: bar.t,
     });
   }
@@ -259,6 +267,7 @@ function detectStructureLevels(candles: DailyCandle[], atr: number, wing = 3): D
       strength: 3,
       touches: [{ barIndex: p.barIndex, t: bar.t, side: p.kind === "high" ? "resistance" : "support" }],
       formedAt: bar.t,
+      firstFormedAt: bar.t,
       lastTouchedAt: candles[breakBarIndex].t,
     });
 
@@ -277,6 +286,7 @@ function detectStructureLevels(candles: DailyCandle[], atr: number, wing = 3): D
         strength: 3,
         touches: [{ barIndex: next.barIndex, t: retBar.t, side: next.kind === "high" ? "resistance" : "support" }],
         formedAt: retBar.t,
+        firstFormedAt: retBar.t,
         lastTouchedAt: retBar.t,
       });
     }
@@ -302,8 +312,9 @@ function detectGaps(candles: DailyCandle[], atr: number, minGapAtrFrac = 0.3): D
       t: candles[i].t,
       side: gap > 0 ? "support" : "resistance",
     };
-    levels.push({ price: top, type: "gap", strength: 1, touches: [touch], formedAt: candles[i].t, lastTouchedAt: candles[i].t });
-    levels.push({ price: bottom, type: "gap", strength: 1, touches: [touch], formedAt: candles[i].t, lastTouchedAt: candles[i].t });
+    const at = candles[i].t;
+    levels.push({ price: top, type: "gap", strength: 1, touches: [touch], formedAt: at, firstFormedAt: at, lastTouchedAt: at });
+    levels.push({ price: bottom, type: "gap", strength: 1, touches: [touch], formedAt: at, firstFormedAt: at, lastTouchedAt: at });
   }
   return levels;
 }
@@ -363,6 +374,7 @@ function detectRangeBorders(candles: DailyCandle[], atr: number, maxScanBars = 6
       strength: 3,
       touches: topTouches,
       formedAt: (brk.kind === "high" ? brkBar : retBar).t,
+      firstFormedAt: (brk.kind === "high" ? brkBar : retBar).t,
       lastTouchedAt: lastBar.t,
     });
     levels.push({
@@ -371,6 +383,7 @@ function detectRangeBorders(candles: DailyCandle[], atr: number, maxScanBars = 6
       strength: 3,
       touches: bottomTouches,
       formedAt: (brk.kind === "high" ? retBar : brkBar).t,
+      firstFormedAt: (brk.kind === "high" ? retBar : brkBar).t,
       lastTouchedAt: lastBar.t,
     });
   }
@@ -466,6 +479,7 @@ function checkLocalStop(
     strength: 2,
     touches,
     formedAt: anchor.t,
+    firstFormedAt: anchor.t,
     lastTouchedAt: lastBar.t,
   };
 }
@@ -498,6 +512,11 @@ function detectLocalStops(candles: DailyCandle[], atr: number, lookbackBars = LO
 // mirror/historical сюда не попадают физически (их назначает только
 // reclassifyMirrorHistorical ПОСЛЕ merge) — их место в таблице формальность
 // ради exhaustiveness Record<LevelType, …>.
+// Разрыв между образованиями одной и той же линии, после которого это уже
+// новый эпизод, а не продолжение прежнего: те же 10 баров, которыми меряется
+// «свежесть» пробоя в breakoutSignals.
+const REGROUP_GAP_BARS = 10;
+
 const TYPE_PRIORITY: Record<LevelType, number> = {
   retracement: 9,
   structure_break: 8,
@@ -510,7 +529,12 @@ const TYPE_PRIORITY: Record<LevelType, number> = {
   break_point: 1,
 };
 
-export function mergeLevels(rawLevels: DetectedLevel[], atr: number, toleranceAtrFrac = 0.15): DetectedLevel[] {
+export function mergeLevels(
+  rawLevels: DetectedLevel[],
+  atr: number,
+  toleranceAtrFrac = 0.15,
+  regroupGapBars = REGROUP_GAP_BARS,
+): DetectedLevel[] {
   if (rawLevels.length === 0) return [];
   const tolerance = atr > 0 ? atr * toleranceAtrFrac : Math.abs(mean(rawLevels.map((l) => l.price))) * 0.001;
   const sorted = [...rawLevels].sort((a, b) => a.price - b.price);
@@ -531,9 +555,23 @@ export function mergeLevels(rawLevels: DetectedLevel[], atr: number, toleranceAt
     const touches = bucket.flatMap((l) => l.touches);
     const type = bucket.reduce((best, l) => (TYPE_PRIORITY[l.type] > TYPE_PRIORITY[best] ? l.type : best), bucket[0].type);
     const strength = bucket.reduce((sum, l) => sum + l.strength, 0);
-    const formedAt = Math.min(...bucket.map((l) => l.formedAt));
+    // БСУ — начало ПОСЛЕДНЕЙ серии образований в кластере, а не самое раннее
+    // из них. Одна и та же цена может отработать несколькими эпизодами,
+    // разнесёнными на недели: у ZHIPUUSDT опора 126.50 сложилась 06.08, потом
+    // цена ушла на 181 и вернулась — опору 18-20.08 трейдер считает от 18.08,
+    // а не от августовского эпизода двухнедельной давности. Серию рвёт
+    // разрыв больше `regroupGapBars` баров между образованиями.
+    const byBar = [...bucket].sort((a, b) => (a.touches[0]?.barIndex ?? 0) - (b.touches[0]?.barIndex ?? 0));
+    let seriesStart = byBar.length - 1;
+    while (seriesStart > 0) {
+      const gap = (byBar[seriesStart].touches[0]?.barIndex ?? 0) - (byBar[seriesStart - 1].touches[0]?.barIndex ?? 0);
+      if (gap > regroupGapBars) break;
+      seriesStart -= 1;
+    }
+    const formedAt = Math.min(...byBar.slice(seriesStart).map((l) => l.formedAt));
+    const firstFormedAt = Math.min(...bucket.map((l) => l.firstFormedAt ?? l.formedAt));
     const lastTouchedAt = Math.max(...bucket.map((l) => l.lastTouchedAt));
-    merged.push({ price, type, strength, touches, formedAt, lastTouchedAt });
+    merged.push({ price, type, strength, touches, formedAt, firstFormedAt, lastTouchedAt });
   };
   for (let i = 1; i < sorted.length; i++) {
     const prevPrice = bucket[bucket.length - 1].price;

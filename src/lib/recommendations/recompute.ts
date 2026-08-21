@@ -261,7 +261,10 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         currentPrice,
         significantLevels.filter((p) => p !== level.price),
         thresholds,
-        level.formedAt,
+        // Именно firstFormedAt: «уровень уже сняли» меряется от самого первого
+        // появления линии, иначе свежая переотработка той же цены обнуляла бы
+        // память о том, что цена за неё уже уходила.
+        level.firstFormedAt,
       );
       const gate = passesQualityGate(quality, signals.bias, { for: signals.for, against: signals.against }, thresholds);
       if (!gate.ok) {

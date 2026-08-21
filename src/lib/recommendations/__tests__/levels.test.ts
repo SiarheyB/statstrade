@@ -286,8 +286,8 @@ describe("detectLevels — local_stop", () => {
 
 describe("mergeLevels", () => {
   it("merges levels within tolerance into one with combined strength", () => {
-    const a: DetectedLevel = { price: 100, type: "break_point", strength: 1, touches: [{ barIndex: 0, t: 0, side: "resistance" }], formedAt: 0, lastTouchedAt: 0 };
-    const b: DetectedLevel = { price: 100.5, type: "break_point", strength: 2, touches: [{ barIndex: 1, t: 1, side: "support" }], formedAt: 1, lastTouchedAt: 1 };
+    const a: DetectedLevel = { price: 100, type: "break_point", strength: 1, touches: [{ barIndex: 0, t: 0, side: "resistance" }], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 };
+    const b: DetectedLevel = { price: 100.5, type: "break_point", strength: 2, touches: [{ barIndex: 1, t: 1, side: "support" }], formedAt: 1, firstFormedAt: 1, lastTouchedAt: 1 };
     const merged = mergeLevels([a, b], 10, 0.15); // tolerance = 1.5, diff = 0.5 -> merges
     expect(merged.length).toBe(1);
     expect(merged[0].strength).toBe(3);
@@ -295,8 +295,8 @@ describe("mergeLevels", () => {
   });
 
   it("keeps far-apart levels separate", () => {
-    const a: DetectedLevel = { price: 100, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 };
-    const b: DetectedLevel = { price: 200, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 };
+    const a: DetectedLevel = { price: 100, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 };
+    const b: DetectedLevel = { price: 200, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 };
     const merged = mergeLevels([a, b], 10, 0.15);
     expect(merged.length).toBe(2);
   });
@@ -305,9 +305,9 @@ describe("mergeLevels", () => {
 describe("filterLevelsNearPrice", () => {
   it("keeps only levels within maxDistanceAtr, sorted by distance", () => {
     const levels: DetectedLevel[] = [
-      { price: 100, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 },
-      { price: 110, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 },
-      { price: 200, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 },
+      { price: 100, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
+      { price: 110, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
+      { price: 200, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
     ];
     const atr = 10;
     const currentPrice = 105;
@@ -320,8 +320,8 @@ describe("filterLevelsNearPrice", () => {
   // в 1.97×ATR от закрытия при 1.27×ATR от хая того же бара).
   it("measures the distance from the last bar's high/low, not from its close", () => {
     const levels: DetectedLevel[] = [
-      { price: 120, type: "parabar", strength: 5, touches: [], formedAt: 0, lastTouchedAt: 0 },
-      { price: 80, type: "break_point", strength: 1, touches: [], formedAt: 0, lastTouchedAt: 0 },
+      { price: 120, type: "parabar", strength: 5, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
+      { price: 80, type: "break_point", strength: 1, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
     ];
     const atr = 10;
     const last = candle(0, 100, 112, 88, 100); // закрылись на 100, дотянулись до 112 и 88
@@ -333,7 +333,7 @@ describe("filterLevelsNearPrice", () => {
 
   it("treats a level the last bar already pierced as touching distance", () => {
     const levels: DetectedLevel[] = [
-      { price: 105, type: "parabar", strength: 5, touches: [], formedAt: 0, lastTouchedAt: 0 },
+      { price: 105, type: "parabar", strength: 5, touches: [], formedAt: 0, firstFormedAt: 0, lastTouchedAt: 0 },
     ];
     const last = candle(0, 100, 130, 95, 100); // хай ушёл далеко ЗА уровень
     expect(filterLevelsNearPrice(levels, 100, 10, 1.5, last)).toHaveLength(1);
@@ -426,5 +426,40 @@ describe("detectLevels — окно свежести БСУ", () => {
   it("freshnessBars: 0 turns the window off", () => {
     const levels = detectLevels(agedSeries(200), { freshnessBars: 0 });
     expect(levels.find((l) => Math.abs(l.price - 200) < 0.01)).toBeDefined();
+  });
+});
+
+
+// БСУ схлопнутого уровня — начало ПОСЛЕДНЕЙ серии образований: одна и та же
+// цена может отработать несколькими эпизодами, разнесёнными на недели, и
+// стрелка на графике должна указывать на актуальный из них (ZHIPUUSDT: опора
+// 126.50 от 06.08 и она же от 18-20.08 — трейдер считает её от 18.08).
+describe("mergeLevels — БСУ последней серии", () => {
+  function lvl(barIndex: number, price: number): DetectedLevel {
+    const t = START + barIndex * DAY_MS;
+    return {
+      price,
+      type: "local_stop",
+      strength: 2,
+      touches: [{ barIndex, t, side: "support" }],
+      formedAt: t,
+      firstFormedAt: t,
+      lastTouchedAt: t,
+    };
+  }
+
+  it("dates the level by the latest episode, not the first one", () => {
+    // Эпизод на баре 5 и эпизод на барах 30-32 — между ними 25 баров пустоты.
+    const merged = mergeLevels([lvl(5, 100), lvl(30, 100.2), lvl(31, 99.9), lvl(32, 100.1)], 10, 0.15);
+    expect(merged).toHaveLength(1);
+    expect(merged[0].formedAt).toBe(START + 30 * DAY_MS);
+    // Память о первом появлении сохраняется отдельно.
+    expect(merged[0].firstFormedAt).toBe(START + 5 * DAY_MS);
+    expect(merged[0].strength).toBe(8); // сила по-прежнему суммарная
+  });
+
+  it("keeps one series together when the gaps are small", () => {
+    const merged = mergeLevels([lvl(20, 100), lvl(26, 100.2), lvl(30, 99.9)], 10, 0.15);
+    expect(merged[0].formedAt).toBe(START + 20 * DAY_MS);
   });
 });
