@@ -9,6 +9,8 @@ import DivergenceHistory from "@/components/DivergenceHistory";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import { drawDrawings } from "@/components/DrawingOverlay";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
+import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
+import { profileFromCandles } from "@/lib/visibleVolumeProfile";
 import type { Imbalance, DivergenceSignal, VolumeProfile as VP } from "@/lib/orderflow";
 import type { DrawingRow, DrawingToolType, DrawingPoint } from "@/lib/drawings";
 import {
@@ -54,6 +56,9 @@ type FxResp = {
   timezone: string;
 };
 
+/** Свеча графика + объём: нужен профилю объёма по видимому окну. */
+type FxCandle = Candle & { v: number };
+
 const RANGES = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"];
 const VISIBLE_CANDLES: Record<string, number> = { "1m": 480, "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
 const DEFAULT_VISIBLE = 360;
@@ -83,6 +88,33 @@ export default function ForexView() {
   const [imbLoading, setImbLoading] = useState(false);
   const [imbError, setImbError] = useState<string | null>(null);
   const [divSignals, setDivSignals] = useState<DivergenceSignal[]>([]);
+  // Профиль объёма поверх свечей (VPVR). Выключен по умолчанию: наложение
+  // затемняет правый край, где стоят самые свежие свечи, — это осознанный
+  // выбор пользователя, а не то, что должно включаться само.
+  //
+  // Запоминается в localStorage, как переключатели на /dashboard/orderflow:
+  // иначе его пришлось бы включать заново после каждой перезагрузки страницы.
+  const [showVpOverlay, setShowVpOverlay] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("forex.showVpOverlay");
+      // Читаем именно в эффекте, а не ленивым useState: компонент рендерится и
+      // на сервере, где localStorage нет, — инициализатор упал бы на SSR.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      if (saved !== null) setShowVpOverlay(saved === "1");
+    } catch {
+      // приватный режим/заблокированное хранилище — просто дефолт
+    }
+  }, []);
+
+  const toggleVpOverlay = useCallback(() => {
+    setShowVpOverlay((v) => {
+      const next = !v;
+      try { localStorage.setItem("forex.showVpOverlay", next ? "1" : "0"); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
   const [divLoading, setDivLoading] = useState(false);
   const [divError, setDivError] = useState<string | null>(null);
 
@@ -103,21 +135,24 @@ export default function ForexView() {
   const deltaCanvasRef = useRef<HTMLCanvasElement>(null);
   const baCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  const tailCandles: Candle[] = useMemo(
-    () => (data?.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c })),
+  // Общий Candle из candlestickChart намеренно без объёма — графику он не
+  // нужен. Здесь объём нужен профилю по видимому окну, поэтому носим его
+  // рядом: drawCandlesticks такой массив принимает как обычный Candle[].
+  const tailCandles: FxCandle[] = useMemo(
+    () => (data?.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v ?? 0 })),
     [data],
   );
 
   // Дозагрузка истории свечей "влево" (см. LAZY_HISTORY_PLAN.md, тот же
   // паттерн, что и на /dashboard/orderflow). historyRef — старые свечи,
   // догруженные через /api/forex/history, всегда старше tailCandles[0].t.
-  const historyRef = useRef<Candle[]>([]);
+  const historyRef = useRef<FxCandle[]>([]);
   const hasMoreHistoryRef = useRef(true);
   const loadingHistoryRef = useRef(false);
   const [historyVersion, setHistoryVersion] = useState(0);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
-  const candles: Candle[] = useMemo(
+  const candles: FxCandle[] = useMemo(
     () => (historyRef.current.length ? [...historyRef.current, ...tailCandles] : tailCandles),
     // historyVersion — не читается напрямую, нужен как повод пересчитать
     // при догрузке истории (historyRef мутируется в ref, без ре-рендера).
@@ -133,7 +168,7 @@ export default function ForexView() {
   // заново на каждый кадр пана/зума незачем, а держать в useMemo нельзя —
   // candles сами выведены из historyRef, и обращение к ним в теле рендера
   // ловит react-hooks/refs.
-  const axisCacheRef = useRef<{ candles: Candle[]; axis: TimeAxis } | null>(null);
+  const axisCacheRef = useRef<{ candles: FxCandle[]; axis: TimeAxis } | null>(null);
   const getTimeAxis = useCallback((): TimeAxis => {
     const cached = axisCacheRef.current;
     if (cached && cached.candles === candles) return cached.axis;
@@ -153,10 +188,10 @@ export default function ForexView() {
       const res = await fetch(`/api/forex/history?${p}`);
       if (!res.ok) { hasMoreHistoryRef.current = false; return; }
       const d = await res.json() as {
-        candles: { t: string; o: number; h: number; l: number; c: number }[];
+        candles: { t: string; o: number; h: number; l: number; c: number; v?: number }[];
         hasMore: boolean;
       };
-      const newCandles = (d.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c }));
+      const newCandles = (d.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v ?? 0 }));
       if (newCandles.length === 0) { hasMoreHistoryRef.current = false; return; }
       let merged = [...newCandles, ...historyRef.current];
       if (merged.length > MAX_HISTORY_CANDLES) {
@@ -359,6 +394,27 @@ export default function ForexView() {
 
   // ─── Load volume profile ─────────────────────────────────────────────
 
+/**
+ * Шаг ценового бина: /api/forex/volume-profile его не отдаёт, а наложению на
+ * график он нужен — из него считается высота столбика.
+ *
+ * Берём минимальное расстояние между соседними уровнями: бины лежат на
+ * равномерной сетке, и пропуски дают кратные значения, поэтому минимум и есть
+ * шаг. Раньше здесь стояла константа 0.0001 (пункт EUR/USD) — для золота с
+ * шагом около доллара столбики выходили в тысячи раз тоньше нужного.
+ */
+function inferBinSize(levels: { price: number }[]): number {
+  if (levels.length < 2) return levels.length === 1 ? Math.max(levels[0].price * 1e-4, 1e-8) : 1e-4;
+  const prices = levels.map((l) => l.price).sort((a, b) => a - b);
+  let min = Infinity;
+  for (let i = 1; i < prices.length; i++) {
+    const d = prices[i] - prices[i - 1];
+    if (d > 0 && d < min) min = d;
+  }
+  return Number.isFinite(min) ? min : Math.max(prices[0] * 1e-4, 1e-8);
+}
+
+
   // background=true — фоновый live-опрос (см. интервал ниже): не дёргаем
   // индикатор loading/skeleton, иначе карточка "мигает"/"прыгает" каждые
   // 15с даже когда данные почти не изменились.
@@ -370,24 +426,26 @@ export default function ForexView() {
       const d = r.ok ? await r.json() : null;
       if (!alive()) return;
       if (!d) { setVpError(t("fx.vpFailed")); return; }
+      const rawLevels = (d.levels ?? []) as { price: number; volume: number }[];
       setVpData({
         poc: d.poc?.price ?? 0,
         vah: d.valueArea?.high ?? 0,
         val: d.valueArea?.low ?? 0,
-        levels: (d.levels ?? []).map((l: { price: number; volume: number }) => ({
+        levels: rawLevels.map((l) => ({
           price: l.price,
           volume: l.volume,
           isPoc: d.poc?.price === l.price,
           isVa: l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0),
           pct: d.poc?.volume ? (l.volume / d.poc.volume) * 100 : 0,
         })),
-        totalVolume: (d.levels ?? []).reduce((s: number, l: { volume: number }) => s + l.volume, 0),
+        totalVolume: rawLevels.reduce((s, l) => s + l.volume, 0),
         pocVolume: d.poc?.volume ?? 0,
-        valueAreaVolume: (d.levels ?? [])
-          .filter((l: { price: number }) => l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0))
-          .reduce((s: number, l: { volume: number }) => s + l.volume, 0),
-        valueAreaPct: 70,
-        binSize: 0.0001,
+        valueAreaVolume: rawLevels
+          .filter((l) => l.price >= (d.valueArea?.low ?? 0) && l.price <= (d.valueArea?.high ?? 0))
+          .reduce((s, l) => s + l.volume, 0),
+        // Доля, а не проценты: панель домножает на 100 (было 70 → «7000%»).
+        valueAreaPct: 0.7,
+        binSize: inferBinSize(rawLevels),
       });
       setVpError(null);
     } catch {
@@ -553,6 +611,13 @@ export default function ForexView() {
     ctx.beginPath();
     ctx.rect(plotX, 0, plotW, plotH);
     ctx.clip();
+    // Профиль объёма — ПОД свечами: это фон с уровнями, свечи поверх него
+    // должны читаться без напряжения. Считается по видимому окну (t0..t1), а
+    // не берётся из панели: панель показывает фиксированный период, и на
+    // графике её профиль означал бы не то, что видит пользователь.
+    if (showVpOverlay) {
+      drawVolumeProfileOverlay(ctx, sy, plotX, plotW, plotH, profileFromCandles(candles, t0, t1));
+    }
     drawCandlesticks(ctx, candles, sx, sy, plotX, plotW, xspan, { bodyRatio: 0.4 });
     if (!hasMoreHistoryRef.current && candles.length) {
       drawHistoryStartBoundary(ctx, sx(candles[0].t), layout, t("fx.historyStart"));
@@ -665,7 +730,7 @@ export default function ForexView() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, getTimeAxis, range, timezone, t, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, t, showVpOverlay, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
@@ -800,6 +865,14 @@ export default function ForexView() {
           >
             {RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          <button
+            onClick={toggleVpOverlay}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 px-2 text-xs transition ${showVpOverlay ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
+            title={t("of.hintVpOverlay")}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showVpOverlay ? "bg-accent border-accent" : "border-border-strong"}`} />
+            {t("of.vpOverlay")}
+          </button>
           <button
             onClick={load}
             disabled={loading}

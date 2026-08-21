@@ -25,6 +25,8 @@ import {
 } from "@/lib/timezone";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
+import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
+import { profileFromFootprint } from "@/lib/visibleVolumeProfile";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawAbsorptionMarkers } from "@/components/AbsorptionOverlay";
 import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
@@ -231,6 +233,10 @@ export default function OrderflowPage() {
   const [divLoading, setDivLoading] = useState(false);
   const [divError, setDivError] = useState<string | null>(null);
   const [showDivergence, setShowDivergence] = useState(true);
+  // Профиль объёма поверх свечей (VPVR). По умолчанию выключен: он затемняет
+  // правый край, где стоят самые свежие свечи — это осознанный выбор
+  // пользователя, а не то, что должно включаться само.
+  const [showVpOverlay, setShowVpOverlay] = useState(false);
   const [imbalanceData, setImbalanceData] = useState<Imbalance | null>(null);
   const [speedData, setSpeedData] = useState<SpeedOfTape | null>(null);
   const [imbalanceLoading, setImbalanceLoading] = useState(false);
@@ -594,6 +600,7 @@ export default function OrderflowPage() {
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
       if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
+      if (typeof s.showVpOverlay === "boolean") setShowVpOverlay(s.showVpOverlay);
       if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
       if (typeof s.showDrawings === "boolean") setShowDrawings(s.showDrawings);
     } catch {
@@ -607,12 +614,12 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showAbsorption, showDrawings }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showAbsorption, showDrawings]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showVpOverlay, showAbsorption, showDrawings]);
 
   useEffect(() => {
     (async () => {
@@ -1031,6 +1038,16 @@ export default function OrderflowPage() {
     ctx.clip();
 
     const fp = mergedFootprint;
+
+    // Профиль объёма — ПОД свечами и кластерами: это фон с уровнями, поверх
+    // него всё остальное должно читаться. Считается по видимому окну из
+    // footprint (реальный объём по каждой цене), а не берётся из панели:
+    // панель показывает фиксированный период, не связанный с тем, что на
+    // экране после зума/панорамы.
+    if (showVpOverlay && fp) {
+      drawVolumeProfileOverlay(ctx, sy, plotX, plotW, plotH, profileFromFootprint(fp.candles, t0, t1));
+    }
+
     const colW = fp ? (fp.interval / xspan) * plotW : 0;
     if (clusters && fp && fp.maxVol > 0 && fp.candles.length) {
       const rowPx = colW >= 80 ? 12 : colW >= 50 ? 10 : colW >= 32 ? 8 : 6;
@@ -1238,7 +1255,7 @@ export default function OrderflowPage() {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, minT, gamma, clusters, showLiq, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet, getMergedCandles, mergedFootprint, historyVersion]);
+  }, [data, minT, gamma, clusters, showLiq, showVpOverlay, showDivergence, divergenceSignals, showAbsorption, absorptionSignals, showDrawings, drawings, selectedDrawingId, t, range, timezone, locale, activeTool, drawingPoints, magnet, getMergedCandles, mergedFootprint, historyVersion]);
 
   const drawDelta = useCallback(() => {
     const cv = deltaRef.current;
@@ -1381,6 +1398,17 @@ export default function OrderflowPage() {
             <span className={`h-3 w-3 rounded-sm border ${showDivergence ? "bg-accent border-accent" : "border-border-strong"}`} />
             {t("of.divergence")}
             <span title={t("of.hintDivergence") || "Divergence Scanner — detects discrepancies between price movement and delta/CVD"} className="inline-flex cursor-help">
+              <HelpCircle size={12} className="text-faint shrink-0" />
+            </span>
+          </button>
+          <button
+            onClick={() => setShowVpOverlay((v) => !v)}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showVpOverlay ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
+            title={t("of.hintVpOverlay")}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showVpOverlay ? "bg-accent border-accent" : "border-border-strong"}`} />
+            {t("of.vpOverlay")}
+            <span title={t("of.hintVpOverlay")} className="inline-flex cursor-help">
               <HelpCircle size={12} className="text-faint shrink-0" />
             </span>
           </button>
