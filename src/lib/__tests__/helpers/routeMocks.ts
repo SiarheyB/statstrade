@@ -215,6 +215,8 @@ export const mockPrisma = {
   // Used by /api/orderflow/history (via lib/orderflow.ts fetchOrderflowCandlesBefore)
   obCandle: {
     findMany: vi.fn().mockResolvedValue([]),
+    // Список символов берётся через GROUP BY, а не выгрузкой всех свечей.
+    groupBy: vi.fn().mockResolvedValue([]),
   },
   levelSetup: {
     findMany: vi.fn().mockResolvedValue([]),

@@ -399,6 +399,8 @@ model ObCandle {
   @@index([symbol, exchange, interval, t])
   // Для подсчёта числа инструментов на главной: DISTINCT symbol по интервалу.
   @@index([interval, symbol])
+  // Поиск самой старой свечи при бэкафилле: MIN(t) по всей таблице.
+  @@index([t])
 }
 
 // Сторожевые метки ретеншна для коллектора. Каждая запись хранит момент
@@ -836,6 +838,8 @@ model FxCandle {
 
   @@id([symbol, exchange, interval, t])
   @@index([symbol, exchange, interval, t])
+  // Коллектор проверяет глубину истории таймфрейма без привязки к символу.
+  @@index([exchange, interval, t])
 }
 
 // Bid/ask quotes from Twelve Data quote API.

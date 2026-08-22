@@ -108,10 +108,13 @@ export async function rebuildTradeHourlyForTrade(accountId: string, exitTime: Da
 // запуск после миграции). Тот же паттерн, что backfillMissingRR: после первого
 // прогона запрос ничего не находит, поэтому вызывать на каждый старт безопасно.
 export async function backfillMissingTradeHourly(): Promise<{ accounts: number }> {
+  // groupBy вместо distinct: последний дедуплицирует в памяти приложения, то
+  // есть выгружает accountId ВСЕХ сделок ради списка из нескольких аккаунтов.
+  // Функция вызывается при каждом старте контейнера.
   const [crypto, imported, existing] = await Promise.all([
-    prisma.trade.findMany({ select: { accountId: true }, distinct: ["accountId"] }),
-    prisma.importedTrade.findMany({ select: { accountId: true }, distinct: ["accountId"] }),
-    prisma.tradeHourly.findMany({ select: { accountId: true }, distinct: ["accountId"] }),
+    prisma.trade.groupBy({ by: ["accountId"] }),
+    prisma.importedTrade.groupBy({ by: ["accountId"] }),
+    prisma.tradeHourly.groupBy({ by: ["accountId"] }),
   ]);
   const done = new Set(existing.map((r) => r.accountId));
   const todo = new Set(

@@ -174,9 +174,12 @@ const TZ_SLACK_MS = DAY_MS;
 async function loadStats(from: Date, now: number): Promise<LandingStats> {
   const [setups, symbols, events, news] = await Promise.all([
     prisma.levelSetup.count(),
-    prisma.obCandle
-      .findMany({ where: { interval: "1d" }, distinct: ["symbol"], select: { symbol: true } })
-      .then((rows) => rows.length),
+    // Нужно ровно одно число, поэтому считаем его в базе. Prisma-шный distinct
+    // тянул бы все дневные свечи в память (почти 200 тысяч строк) ради того же
+    // результата — 322 мс против единиц миллисекунд.
+    prisma.$queryRaw<{ n: number }[]>`
+      SELECT count(DISTINCT "symbol")::int AS n FROM "ObCandle" WHERE "interval" = '1d'
+    `.then((rows) => rows[0]?.n ?? 0),
     prisma.economicEvent.count({ where: { time: { gte: from, lt: new Date(from.getTime() + DAY_MS) } } }),
     prisma.newsItem.count({ where: { publishedAt: { gte: new Date(now - DAY_MS) } } }),
   ]);

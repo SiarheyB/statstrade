@@ -326,10 +326,11 @@ async function buildPlan(
   // Per-symbol exchanges (Binance, MEXC): enumerate candidate pairs per kind.
   const tradedByKind = new Map<MarketKind, Set<string>>();
   if (phase === "incremental") {
-    const fills = await prisma.fill.findMany({
+    // groupBy вместо distinct: у активного аккаунта исполнений десятки тысяч,
+    // а нужен лишь список символов — пусть их сводит база.
+    const fills = await prisma.fill.groupBy({
+      by: ["symbol", "market"],
       where: { accountId },
-      select: { symbol: true, market: true },
-      distinct: ["symbol"],
     });
     for (const f of fills) {
       const kind: MarketKind = f.market === "spot" ? "spot" : "swap";

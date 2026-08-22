@@ -78,10 +78,12 @@ export function pickStrongestPerSymbol<T extends { symbol: string; score: number
 
 // Все символы, по которым в ObCandle есть хотя бы одна 1d-свеча на этой бирже.
 async function listCandidateSymbols(): Promise<string[]> {
-  const rows = await prisma.obCandle.findMany({
+  // groupBy, а не distinct: Prisma-шный distinct дедуплицирует в памяти, то
+  // есть тянет из базы все дневные свечи (сотни тысяч строк) ради списка из
+  // нескольких сотен символов.
+  const rows = await prisma.obCandle.groupBy({
+    by: ["symbol"],
     where: { exchange: EXCHANGE, interval: INTERVAL },
-    distinct: ["symbol"],
-    select: { symbol: true },
   });
   return rows.map((r) => r.symbol);
 }

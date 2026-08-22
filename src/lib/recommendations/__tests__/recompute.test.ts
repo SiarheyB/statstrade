@@ -69,14 +69,14 @@ describe("recomputeRecommendations", () => {
   });
 
   it("loads the NEWEST candles, not the oldest ones", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "BTCUSDT" }])
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()));
 
     await recomputeRecommendations();
     // Второй вызов — загрузка свечей инструмента. С `asc` + `take` база
     // вернула бы самые старые бары, и анализ шёл бы по позапрошлым месяцам.
-    const candlesQuery = mockPrisma.obCandle.findMany.mock.calls[1][0];
+    const candlesQuery = mockPrisma.obCandle.findMany.mock.calls[0][0];
     expect(candlesQuery.orderBy).toEqual({ t: "desc" });
     expect(candlesQuery.take).toBeGreaterThanOrEqual(130); // хватает на «экстремум за 6 мес.»
   });
@@ -84,8 +84,8 @@ describe("recomputeRecommendations", () => {
   it("analyses the latest bar — currentPrice is the most recent close", async () => {
     const series = seriesWithPivot();
     const lastClose = series[series.length - 1].c;
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "BTCUSDT" }])
       .mockResolvedValueOnce(asDbRows(series));
 
     await recomputeRecommendations();
@@ -101,7 +101,8 @@ describe("recomputeRecommendations", () => {
   // сетап, поэтому такие пары не анализируются вовсе.
   it("skips thin instruments before analysing them", async () => {
     const thin = seriesWithPivot().map((r) => ({ ...r, v: 100 })); // 100 × ~110 = $11k
-    mockPrisma.obCandle.findMany.mockResolvedValueOnce([{ symbol: "THINUSDT" }]).mockResolvedValueOnce(asDbRows(thin));
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "THINUSDT" }]);
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(thin));
 
     const result = await recomputeRecommendations();
     expect(result.levelsWritten).toBe(0);
@@ -110,9 +111,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("skips symbols with too few candles", async () => {
-    mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "SHORTUSDT" }])
-      .mockResolvedValueOnce(Array.from({ length: 5 }, (_, i) => row(i, 100, 101, 99, 100)));
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "SHORTUSDT" }]);
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce(Array.from({ length: 5 }, (_, i) => row(i, 100, 101, 99, 100)));
 
     const result = await recomputeRecommendations();
     expect(result.symbolsScanned).toBe(1);
@@ -121,8 +121,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("truncates and refills LevelSetup with detected levels near price", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "BTCUSDT" }])
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()));
 
     const result = await recomputeRecommendations();
@@ -136,9 +136,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("drops levels the quality gate rejects — a chopped level never reaches the DB", async () => {
-    mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "CHOPUSDT" }])
-      .mockResolvedValueOnce(asDbRows(choppedSeries()));
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "CHOPUSDT" }]);
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(choppedSeries()));
 
     const result = await recomputeRecommendations();
     expect(result.levelsWritten).toBe(0);
@@ -148,9 +147,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("drops counter-trend setups — no breakout long while the market falls", async () => {
-    mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "FALLUSDT" }])
-      .mockResolvedValueOnce(asDbRows(downtrendUnderPivotHigh()));
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "FALLUSDT" }]);
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(downtrendUnderPivotHigh()));
 
     const result = await recomputeRecommendations();
     expect(result.rejected.counter_trend).toBeGreaterThan(0);
@@ -159,8 +157,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("writes one setup per symbol — never the same instrument twice", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "AAAUSDT" }, { symbol: "BBBUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "AAAUSDT" }, { symbol: "BBBUSDT" }])
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()))
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()));
 
@@ -174,7 +172,7 @@ describe("recomputeRecommendations", () => {
 
   it("does not cap the list — every symbol that passes the gate is written", async () => {
     const symbols = Array.from({ length: 25 }, (_, i) => ({ symbol: `SYM${i}USDT` }));
-    mockPrisma.obCandle.findMany.mockResolvedValueOnce(symbols);
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce(symbols);
     for (let i = 0; i < symbols.length; i++) {
       mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(seriesWithPivot()));
     }
@@ -184,8 +182,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("stores a trade direction and never stores neutral setups", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "BTCUSDT" }])
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()));
 
     await recomputeRecommendations();
@@ -206,8 +204,8 @@ describe("recomputeRecommendations", () => {
   });
 
   it("reports progress through the callbacks", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
     mockPrisma.obCandle.findMany
-      .mockResolvedValueOnce([{ symbol: "BTCUSDT" }])
       .mockResolvedValueOnce(asDbRows(seriesWithPivot()));
 
     const listed: number[] = [];

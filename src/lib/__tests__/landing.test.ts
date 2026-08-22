@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const levelSetupFindFirst = vi.fn();
 const levelSetupCount = vi.fn();
 const obCandleFindMany = vi.fn();
+// Число инструментов считается в базе (count(DISTINCT symbol)), а не выгрузкой
+// всех свечей — мок отдаёт готовое число.
+const queryRaw = vi.fn(async () => [{ n: 2 }]);
 const economicEventCount = vi.fn();
 const newsItemCount = vi.fn();
 const getCalendar = vi.fn();
@@ -14,6 +17,7 @@ vi.mock("@/lib/db", () => ({
     obCandle: { findMany: obCandleFindMany },
     economicEvent: { count: economicEventCount },
     newsItem: { count: newsItemCount },
+    $queryRaw: queryRaw,
   },
 }));
 
