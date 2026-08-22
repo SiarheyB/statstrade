@@ -14,22 +14,30 @@ services:
     image: postgres:16-alpine
     container_name: tradestats-db
     restart: unless-stopped
-    # Лимиты памяти: на слабом боксе (8 ГБ, делят два прод-стека) без потолка один
-    # процесс может утащить всю RAM в своп и подвесить машину (как случилось при
-    # тяжёлом orderflow). mem_limit = жёсткий потолок: при превышении ядро убивает
-    # процесс в контейнере, и docker его перезапускает (restart: unless-stopped) —
-    # вместо фриза всей машины. У БД потолок щедрый: ей нужна память под агрегации
-    # (rollup-бэкафилл) и кэш; при упоре ядро прибьёт лишь backend-соединение
-    # (запрос упадёт, приложение переподключится), а не весь Postgres.
+    # Лимиты памяти: без потолка один процесс может утащить всю RAM в своп и
+    # подвесить машину (как случилось при тяжёлом orderflow). mem_limit = жёсткий
+    # потолок: при превышении ядро убивает процесс в контейнере, и docker его
+    # перезапускает (restart: unless-stopped) — вместо фриза всей машины. У БД
+    # потолок щедрый: ей нужна память под агрегации (rollup-бэкафилл) и кэш; при
+    # упоре ядро прибьёт лишь backend-соединение (запрос упадёт, приложение
+    # переподключится), а не весь Postgres.
+    #
+    # 2026-08-22: сервер больше не делится со вторым прод-стеком — все 8 ГБ и
+    # 4 ядра наши. Потолок БД при этом НЕ подняли: освободившееся отдано app
+    # (там был реальный OOM), а Postgres выигрывает не от потолка, а от тюнинга
+    # внутри него — shared_buffers удвоен, параллелизм поднят. Worst case
+    # укладывается: 1 ГБ shared_buffers + 20 соединений × 20 МБ work_mem × ~2
+    # узла плана ≈ 2.4 ГБ < 2560.
     mem_limit: 2560m
     mem_reservation: 1g
-    # shared_buffers=512MB требует большой /dev/shm. По умолчанию Docker даёт 64M —
-    # мало. 1G хватает для shared_buffers + прочих структур общей памяти.
-    shm_size: '1g'
-    # Слабый 4-ядерный сервер делят db+app+collector. Без ограничения одна
-    # агрегация карты ордеров поднимала параллельные воркеры и выжирала все ядра
-    # (db до ~550% CPU), подтормаживая коллектор и приложение. Ограничиваем число
-    # параллельных воркеров на запрос, чтобы машина оставалась отзывчивой.
+    # /dev/shm должен вмещать shared_buffers (1 ГБ) плюс прочие структуры общей
+    # памяти. По умолчанию Docker даёт 64M — мало.
+    shm_size: '1536m'
+    # Параллелизм: 4 ядра теперь целиком наши, поэтому запросу разрешено два
+    # воркера вместо одного (агрегации карты ордеров — самое тяжёлое, что тут
+    # есть). Полностью снимать ограничение всё равно нельзя: без него одна
+    # агрегация поднимала воркеров до ~550% CPU и подтормаживала коллектор с
+    # приложением.
     #
     # Тюнинг памяти под mem_limit=2560m (дефолты alpine консервативны — 128MB
     # shared_buffers, 4MB work_mem). Значения умеренные, чтобы при connection_limit
@@ -43,17 +51,17 @@ services:
     command:
       - postgres
       - -c
-      - max_parallel_workers_per_gather=1
+      - max_parallel_workers_per_gather=2
       - -c
-      - max_parallel_workers=2
+      - max_parallel_workers=4
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=1GB
       - -c
-      - effective_cache_size=1536MB
+      - effective_cache_size=4GB
       - -c
-      - work_mem=16MB
+      - work_mem=20MB
       - -c
-      - maintenance_work_mem=256MB
+      - maintenance_work_mem=384MB
       - -c
       - random_page_cost=1.1
       - -c
@@ -77,10 +85,16 @@ services:
     container_name: tradestats-app
     restart: unless-stopped
     # Главный «виновник» прошлого OOM (next-server раздувался до ~6.6 ГБ на тяжёлом
-    # orderflow). Увеличили до 3 ГБ: импорт отчётов (парсинг HTML + тысячи сделок)
-    # требует дополнительной памяти; без этого контейнер убивается OOM и nginx
-    # отдаёт offline.html — «Сервер временно недоступен».
-    mem_limit: 3072m
+    # orderflow). Импорт отчётов (парсинг HTML + тысячи сделок) требует
+    # дополнительной памяти; без запаса контейнер убивается OOM и nginx отдаёт
+    # offline.html — «Сервер временно недоступен».
+    #
+    # Лимит здесь влияет не только на потолок: Node берёт размер JS-кучи ИМЕННО
+    # из лимита контейнера (замерено: 3072m → heap 1728 МБ, 3584m → 1984 МБ),
+    # а os.totalmem() при этом врёт и показывает всю память хоста. То есть
+    # поднятый mem_limit — это напрямую больше кучи под тяжёлые страницы, а не
+    # просто «пусть будет».
+    mem_limit: 3584m
     mem_reservation: 512m
     depends_on:
       db:
@@ -138,7 +152,8 @@ services:
     container_name: tradestats-collector
     restart: unless-stopped
     # Лёгкий long-running процесс (стаканы + минутный rollup-накопитель в памяти).
-    # Реальное потребление ~0.1–0.2 ГБ; потолок с запасом.
+    # Реальное потребление ~0.1–0.2 ГБ (замерено) — тройного запаса хватает и
+    # на бэкафилл каскада, где в памяти собираются часовые и дневные агрегаты.
     mem_limit: 512m
     mem_reservation: 128m
     depends_on:
@@ -197,7 +212,10 @@ services:
     image: ghcr.io/siarheyb/statstrade-forex-collector:latest
     container_name: tradestats-forex-collector
     restart: unless-stopped
-    mem_limit: 256m
+    # Самый скромный из сервисов: HTTP-опрос + запись в Postgres, замерено ~32 МБ.
+    # Потолок поднят не под текущую нагрузку, а под бэкафилл: при добавлении
+    # новой пары он тянет 20 000 минуток разом.
+    mem_limit: 320m
     mem_reservation: 64m
     depends_on:
       db:
@@ -243,8 +261,10 @@ services:
     image: containrrr/watchtower
     container_name: tradestats-watchtower
     restart: unless-stopped
-    mem_limit: 256m
-    mem_reservation: 64m
+    # Дёргает GHCR раз в 120с и ничего не держит в памяти — 256m ему было
+    # выделено «на глаз»; освободившееся отдано БД и приложению.
+    mem_limit: 128m
+    mem_reservation: 32m
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Креды для приватного GHCR (создаются `docker login ghcr.io`).
