@@ -116,13 +116,13 @@ export default async function AdminTrafficPage({ searchParams }: { searchParams:
       <TrafficLive initial={r.live} />
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat icon={<Users size={16} />} label={t("admin.traffic.kpi.visitors")} value={num(r.totals.humanVisitors)}
+        <Stat icon={<Users size={16} />} label={t("admin.traffic.kpi.visitors")} value={num(r.scoped.visitors)}
           delta={r.deltas.visitors} hint={t("admin.traffic.kpi.visitorsHint", { n: num(r.sessions.newVisitors) })}
           was={was(r.previous.visitors)} />
         <Stat icon={<MousePointerClick size={16} />} label={t("admin.traffic.kpi.sessions")} value={num(r.sessions.sessions)}
           delta={r.deltas.sessions} hint={t("admin.traffic.kpi.sessionsHint", { n: pct(r.sessions.bounceRate) })}
           was={was(r.previous.sessions)} />
-        <Stat icon={<Eye size={16} />} label={t("admin.traffic.kpi.views")} value={num(r.totals.humanViews)}
+        <Stat icon={<Eye size={16} />} label={t("admin.traffic.kpi.views")} value={num(r.scoped.views)}
           delta={r.deltas.views} hint={t("admin.traffic.kpi.viewsHint", { n: r.sessions.viewsPerSession.toFixed(1) })}
           was={was(r.previous.views)} />
         <Stat icon={<Timer size={16} />} label={t("admin.traffic.kpi.duration")} value={mmss(r.sessions.avgDurationSec)}

@@ -14,7 +14,9 @@ vi.mock("@/components/admin/TrafficLive", () => ({
 
 const report = (over: Partial<TrafficReport> = {}): TrafficReport => ({
   range: { from: "2026-08-12T00:00:00.000Z", to: "2026-08-19T10:00:00.000Z", bucket: "day" },
-  totals: { views: 120, sessions: 40, visitors: 30, botViews: 20, botSessions: 8, humanViews: 100, humanVisitors: 25 },
+  totals: { views: 120, sessions: 40, visitors: 30, botViews: 20, botSessions: 8, humanViews: 100, humanVisitors: 25, botVisitors: 5 },
+  // Срез под выбранную аудиторию — именно его показывают карточки.
+  scoped: { views: 100, visitors: 25 },
   sessions: {
     sessions: 32, bounces: 8, bounceRate: 0.25, avgDurationSec: 95, viewsPerSession: 3.1,
     registered: 2, loggedIn: 5, jsConfirmed: 28, newVisitors: 18,

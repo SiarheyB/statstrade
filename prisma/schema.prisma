@@ -1105,6 +1105,8 @@ model PageView {
   @@index([isBot, ts])
   @@index([path, ts])
   @@index([sessionId])
+  // Для подсчёта новых посетителей: «был ли этот visitorId раньше».
+  @@index([visitorId, ts])
 }
 
 // Визит: цепочка просмотров одного посетителя без 30-минутных пауз. Отсюда

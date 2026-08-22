@@ -40,6 +40,7 @@ export type Totals = {
   botSessions: number;
   humanViews: number;
   humanVisitors: number;
+  botVisitors: number;
 };
 
 export async function getTotals(r: TrafficRange): Promise<Totals> {
@@ -52,6 +53,7 @@ export async function getTotals(r: TrafficRange): Promise<Totals> {
       bot_sessions: number;
       human_views: number;
       human_visitors: number;
+      bot_visitors: number;
     }[]
   >`
     SELECT count(*)::int AS views,
@@ -60,7 +62,8 @@ export async function getTotals(r: TrafficRange): Promise<Totals> {
            count(*) FILTER (WHERE "isBot")::int AS bot_views,
            count(DISTINCT "sessionId") FILTER (WHERE "isBot")::int AS bot_sessions,
            count(*) FILTER (WHERE NOT "isBot")::int AS human_views,
-           count(DISTINCT "visitorId") FILTER (WHERE NOT "isBot")::int AS human_visitors
+           count(DISTINCT "visitorId") FILTER (WHERE NOT "isBot")::int AS human_visitors,
+           count(DISTINCT "visitorId") FILTER (WHERE "isBot")::int AS bot_visitors
     FROM "PageView"
     WHERE "ts" >= ${r.from} AND "ts" < ${r.to}
   `;
@@ -73,6 +76,7 @@ export async function getTotals(r: TrafficRange): Promise<Totals> {
     botSessions: x?.bot_sessions ?? 0,
     humanViews: x?.human_views ?? 0,
     humanVisitors: x?.human_visitors ?? 0,
+    botVisitors: x?.bot_visitors ?? 0,
   };
 }
 
@@ -115,15 +119,28 @@ export async function getSessionStats(r: TrafficRange): Promise<SessionStats> {
     FROM "VisitSession"
     WHERE "startedAt" >= ${r.from} AND "startedAt" < ${r.to} ${botFilter(r.audience)}
   `;
-  // Новые посетители: те, кто до начала периода не появлялся ни разу.
+  // Новые посетители: те, у кого до начала периода не было ни одного просмотра.
+  //
+  // Считаем по PageView и в том же срезе, который выбран переключателем
+  // аудитории, — ровно как число «Посетители» в карточке. Раньше здесь были
+  // сессии и всегда все подряд, включая роботов, поэтому «из них впервые»
+  // выходило больше, чем самих посетителей.
+  //
+  // Проверка «не появлялся раньше» — это NOT EXISTS по всей истории: прошлый
+  // вариант брал min("startedAt") среди строк, уже отфильтрованных по началу
+  // периода, так что условие выполнялось всегда и новыми считались вообще все.
+  // Колонка "isBot" одинаково называется и в PageView, и в VisitSession.
+  const audienceFilter = botFilter(r.audience);
   const newRows = await prisma.$queryRaw<{ n: number }[]>`
     SELECT count(*)::int AS n FROM (
-      SELECT "visitorId"
-      FROM "VisitSession"
-      WHERE "startedAt" >= ${r.from} AND "startedAt" < ${r.to} ${botFilter(r.audience)}
-      GROUP BY "visitorId"
-      HAVING min("startedAt") >= ${r.from}
+      SELECT DISTINCT "visitorId"
+      FROM "PageView"
+      WHERE "ts" >= ${r.from} AND "ts" < ${r.to} ${audienceFilter}
     ) t
+    WHERE NOT EXISTS (
+      SELECT 1 FROM "PageView" p
+      WHERE p."visitorId" = t."visitorId" AND p."ts" < ${r.from} ${audienceFilter}
+    )
   `;
   const x = rows[0];
   const sessions = x?.sessions ?? 0;

@@ -17,6 +17,7 @@ vi.mock("@/lib/traffic/query", () => ({
 
 const totals = (humanViews: number, humanVisitors: number) => ({
   views: humanViews, sessions: 0, visitors: humanVisitors, botViews: 0, botSessions: 0, humanViews, humanVisitors,
+  botVisitors: 0,
 });
 const sessions = (n: number) => ({
   sessions: n, bounces: 0, bounceRate: 0, avgDurationSec: 0, viewsPerSession: 0,

@@ -11,9 +11,18 @@ import {
   type SeriesPoint, type SessionStats, type SourceRow, type Totals, type TrafficRange, type VisitRow,
 } from "./query";
 
+/** Просмотры и посетители в том срезе, который выбран переключателем. */
+function scopeTotals(t: Totals, audience: Audience): { views: number; visitors: number } {
+  if (audience === "human") return { views: t.humanViews, visitors: t.humanVisitors };
+  if (audience === "bot") return { views: t.botViews, visitors: t.botVisitors };
+  return { views: t.views, visitors: t.visitors };
+}
+
 export type TrafficReport = {
   range: { from: string; to: string; bucket: "day" | "hour" };
   totals: Totals;
+  /** Просмотры и посетители в выбранном срезе — то, что показывают карточки. */
+  scoped: { views: number; visitors: number };
   sessions: SessionStats;
   /** Изменение к предыдущему периоду той же длины: null — сравнивать не с чем. */
   deltas: { views: number | null; visitors: number | null; sessions: number | null };
@@ -66,18 +75,26 @@ export async function getTrafficReport(
     getLive(),
   ]);
 
+  // Карточки показывают выбранный срез: при «Люди» — людей, при «Роботы» —
+  // роботов, при «Все» — всех. Раньше они всегда брали human*, из-за чего
+  // переключатель на них не действовал: визиты менялись, а посетители и
+  // просмотры — нет.
+  const scoped = scopeTotals(totals, audience);
+  const prevScoped = scopeTotals(prevTotals, audience);
+
   return {
     range: { from: b.from.toISOString(), to: b.to.toISOString(), bucket: b.bucket },
     totals,
+    scoped,
     sessions,
     deltas: {
-      views: delta(totals.humanViews, prevTotals.humanViews),
-      visitors: delta(totals.humanVisitors, prevTotals.humanVisitors),
+      views: delta(scoped.views, prevScoped.views),
+      visitors: delta(scoped.visitors, prevScoped.visitors),
       sessions: delta(sessions.sessions, prevSessions.sessions),
     },
     previous: {
-      views: prevTotals.humanViews,
-      visitors: prevTotals.humanVisitors,
+      views: prevScoped.views,
+      visitors: prevScoped.visitors,
       sessions: prevSessions.sessions,
       registered: prevSessions.registered,
     },
