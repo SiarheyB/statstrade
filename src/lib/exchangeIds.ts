@@ -49,7 +49,11 @@ export const SUPPORTED_EXCHANGES: Record<ExchangeId, ExchangeMeta> = {
     docsUrl: "https://www.bitget.com/account/newapi",
   },
   gate: {
-    id: "gate", name: "Gate.io", needsPassphrase: false, supportsDemo: false,
+    // У Gate.io в ccxt есть полноценный testnet (api-testnet.gateapi.io), и
+    // setSandboxMode корректно переключает на него адреса. У Kraken, KuCoin,
+    // MEXC и HTX адреса песочницы нет вовсе, а у Bitget sandbox подставляет
+    // тот же боевой хост — поэтому там демо и выключено.
+    id: "gate", name: "Gate.io", needsPassphrase: false, supportsDemo: true,
     docsUrl: "https://www.gate.io/myaccount/apiv4keys",
   },
   mexc: {

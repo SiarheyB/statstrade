@@ -61,6 +61,7 @@ vi.mock("ccxt", () => {
       bybit: ctorFor("bybit"),
       okx: ctorFor("okx"),
       kraken: ctorFor("kraken"),
+      gate: ctorFor("gate"),
       NetworkError,
       RequestTimeout,
       ExchangeNotAvailable,
@@ -280,6 +281,15 @@ describe("exchanges - createExchange", () => {
     expect(ex.urls.api.private).toBe("https://api-demo.test");
     // Правим копию: сам справочник демо-адресов должен остаться цел.
     expect(ex.urls.demotrading.public).toBe("https://api-demo.test");
+  });
+
+  it("Gate.io в демо уходит в песочницу общим механизмом ccxt", () => {
+    const creds = { apiKey: "key", apiSecret: "secret" };
+    createExchange("gate", creds, "spot", true);
+    // У Gate.io своя testnet-среда, но переключает её тот же setSandboxMode,
+    // что и у остальных бирж, — отдельного кода под неё не нужно.
+    expect(shared.created[0].setSandboxMode).toHaveBeenCalledWith(true);
+    expect(shared.created[0].enableDemoTrading).not.toHaveBeenCalled();
   });
 
   it("в боевом режиме адреса Bybit не трогает", () => {
