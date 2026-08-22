@@ -65,6 +65,33 @@ export type ExchangeCredentials = {
 // market kind controls which CCXT defaultType is used for a request pass.
 export type MarketKind = "spot" | "swap";
 
+/**
+ * Демо-режим Bybit: рыночные справочники — с боевого хоста.
+ *
+ * enableDemoTrading переводит на api-demo.bybit.com ВСЕ запросы, включая
+ * публичные (см. urls.demotrading в ccxt). Но демо-хост живёт торговлей, а
+ * рыночные данные отдаёт заметно менее надёжно: loadMarkets регулярно падал
+ * с «fetch failed» на /v5/market/instruments-info, причём все три попытки
+ * подряд — и синк демо-аккаунта не проходил вовсе.
+ *
+ * Инструменты в демо те же, что в бою (демо-торговля идёт по боевым
+ * контрактам), поэтому публичные запросы возвращаем на боевой хост.
+ * Приватные (ордера, сделки, баланс) остаются на демо — иначе демо-ключи
+ * просто не подойдут.
+ */
+function keepBybitMarketDataOnLiveHost(exchange: Exchange): void {
+  const ex = exchange as unknown as {
+    urls: Record<string, Record<string, string> | undefined>;
+  };
+  // enableDemoTrading сложил боевые адреса сюда, в urls.api — демовые.
+  const live = ex.urls?.apiBackupDemoTrading;
+  const demoUrls = ex.urls?.api;
+  if (!live?.public || !demoUrls) return;
+  // Новый объект, а не мутация: urls.api после enableDemoTrading — это тот же
+  // объект, что и urls.demotrading, и правка на месте испортила бы и его.
+  ex.urls.api = { ...demoUrls, public: live.public };
+}
+
 export function createExchange(
   id: ExchangeId,
   creds: ExchangeCredentials,
@@ -91,6 +118,7 @@ export function createExchange(
     };
     if (id === "bybit" && typeof ex.enableDemoTrading === "function") {
       ex.enableDemoTrading(true);
+      keepBybitMarketDataOnLiveHost(exchange);
     } else if (typeof ex.setSandboxMode === "function") {
       ex.setSandboxMode(true);
     }

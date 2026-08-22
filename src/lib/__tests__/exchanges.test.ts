@@ -28,7 +28,17 @@ vi.mock("ccxt", () => {
       close: vi.fn().mockResolvedValue(undefined),
       fetchBalance: vi.fn().mockImplementation(async () => shared.nextBalance),
       setSandboxMode: vi.fn(),
-      enableDemoTrading: vi.fn(),
+      // Повторяет то, что делает ccxt: демо-хост подменяет ВСЕ адреса, и
+      // urls.api после этого — тот же объект, что urls.demotrading.
+      urls: {
+        api: { public: "https://api.test", private: "https://api.test" },
+        demotrading: { public: "https://api-demo.test", private: "https://api-demo.test" },
+      } as Record<string, Record<string, string>>,
+      enableDemoTrading: vi.fn().mockImplementation((on: boolean) => {
+        if (!on) return;
+        instance.urls.apiBackupDemoTrading = instance.urls.api;
+        instance.urls.api = instance.urls.demotrading;
+      }),
     };
     return instance;
   };
@@ -257,6 +267,27 @@ describe("exchanges - createExchange", () => {
     const creds = { apiKey: "key", apiSecret: "secret" };
     createExchange("bybit", creds, "spot", true);
     expect(shared.created[0].enableDemoTrading).toHaveBeenCalledWith(true);
+  });
+
+  it("в демо Bybit рыночные данные берёт с боевого хоста, а торговлю — с демо", () => {
+    const creds = { apiKey: "key", apiSecret: "secret" };
+    createExchange("bybit", creds, "spot", true);
+    const ex = shared.created[0];
+    // Демо-хост Bybit отдаёт справочник инструментов ненадёжно — loadMarkets
+    // на нём падал с «fetch failed», а инструменты там те же, что в бою.
+    expect(ex.urls.api.public).toBe("https://api.test");
+    // Приватное остаётся на демо: боевой хост демо-ключи не примет.
+    expect(ex.urls.api.private).toBe("https://api-demo.test");
+    // Правим копию: сам справочник демо-адресов должен остаться цел.
+    expect(ex.urls.demotrading.public).toBe("https://api-demo.test");
+  });
+
+  it("в боевом режиме адреса Bybit не трогает", () => {
+    const creds = { apiKey: "key", apiSecret: "secret" };
+    createExchange("bybit", creds, "spot", false);
+    const ex = shared.created[0];
+    expect(ex.urls.api.public).toBe("https://api.test");
+    expect(ex.urls.api.private).toBe("https://api.test");
   });
 
   it("handles undefined passphrase", () => {
