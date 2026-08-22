@@ -20,7 +20,6 @@ vi.mock("@/components/GoogleLinkSettings", () => ({ default: () => <div data-tes
 vi.mock("@/components/CloudStorageSettings", () => ({ default: () => <div data-testid="cloud-storage" /> }));
 vi.mock("@/components/YandexDiskSettings", () => ({ default: () => <div data-testid="yandex-disk" /> }));
 vi.mock("@/components/DeleteAccount", () => ({ default: () => <div data-testid="delete-account" /> }));
-vi.mock("@/components/MentorShareSettings", () => ({ default: () => <div data-testid="mentor-share" /> }));
 
 describe("GeneralSettingsPage", () => {
   it("renders heading and all settings sections", () => {
@@ -34,6 +33,7 @@ describe("GeneralSettingsPage", () => {
     expect(screen.getByTestId("cloud-storage")).toBeInTheDocument();
     expect(screen.getByTestId("yandex-disk")).toBeInTheDocument();
     expect(screen.getByTestId("delete-account")).toBeInTheDocument();
-    expect(screen.getByTestId("mentor-share")).toBeInTheDocument();
+    // Режим ментора переехал в свой раздел настроек (/dashboard/settings/mentor).
+    expect(screen.queryByTestId("mentor-share")).not.toBeInTheDocument();
   });
 });

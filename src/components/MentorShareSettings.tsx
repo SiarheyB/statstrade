@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Share2, Copy, Trash2, Check, AlertTriangle } from "lucide-react";
+import { Copy, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
 type Link = {
@@ -165,12 +165,7 @@ export default function MentorShareSettings() {
 
   return (
     <div className="card p-5 mb-5">
-      <h3 className="font-medium text-sm flex items-center gap-1.5">
-        <Share2 size={15} className="text-accent" /> {t("mentor.title")}
-      </h3>
-      <p className="text-xs text-faint mt-0.5">{t("mentor.hint")}</p>
-
-      <p className="text-xs text-faint mt-2">{t("mentor.whatIsShown")}</p>
+      <p className="text-xs text-faint">{t("mentor.whatIsShown")}</p>
 
       <div className="flex items-start gap-2 rounded-lg border border-warn/30 bg-warn/10 px-3 py-2.5 mt-3 mb-4 text-xs text-muted">
         <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />

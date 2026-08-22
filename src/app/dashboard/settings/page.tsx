@@ -9,7 +9,6 @@ import GoogleLinkSettings from "@/components/GoogleLinkSettings";
 import CloudStorageSettings from "@/components/CloudStorageSettings";
 import YandexDiskSettings from "@/components/YandexDiskSettings";
 import DeleteAccount from "@/components/DeleteAccount";
-import MentorShareSettings from "@/components/MentorShareSettings";
 import { useI18n } from "@/lib/i18n/provider";
 
 export default function GeneralSettingsPage() {
@@ -37,8 +36,6 @@ export default function GeneralSettingsPage() {
         </div>
         <TimezoneMenu />
       </div>
-
-      <MentorShareSettings />
 
       <ChangePassword />
       <GoogleLinkSettings />

@@ -172,4 +172,37 @@ describe("DashboardNav", () => {
     });
     expect(screen.getByText("nav.settings")).toBeInTheDocument();
   });
+
+  // Раздел «Настройки» раскрыт, когда мы уже внутри него, — а он раскрывается
+  // по текущему пути, поэтому мок пути должен встать ДО импорта компонента.
+  it("внутри настроек показывает пункт режима ментора", async () => {
+    vi.resetModules();
+    vi.doMock("next/navigation", () => ({
+      usePathname: () => "/dashboard/settings",
+      useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
+    }));
+    vi.doMock("@/lib/i18n/provider", () => ({
+      useI18n: () => ({ t: (k: string) => k, setLocale: vi.fn(), locale: "en", timezone: "auto", setTimezone: vi.fn() }),
+      I18nProvider: ({ children }: { children: React.ReactNode }) => children,
+    }));
+    vi.doMock("@/lib/sidebar/provider", () => ({
+      useSidebar: () => ({ collapsed: false, toggle: vi.fn() }),
+      SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
+    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ value: { enabled: true } }) }),
+    );
+
+    const { default: Nav } = await import("@/components/DashboardNav");
+    await act(async () => {
+      render(<Nav email="user@example.com" />);
+    });
+
+    const hrefs = [...document.querySelectorAll("a")].map((a) => a.getAttribute("href"));
+    // Режим ментора живёт своим разделом, а не блоком на общей странице.
+    expect(hrefs).toContain("/dashboard/settings/mentor");
+    // И соседствует с остальными подпунктами настроек.
+    expect(hrefs).toContain("/dashboard/settings/trades");
+  });
 });

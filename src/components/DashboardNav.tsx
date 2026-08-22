@@ -20,6 +20,7 @@ import {
   Wrench,
   SlidersHorizontal,
   Tags,
+  Share2,
   ShieldAlert,
   ChevronDown,
   Menu,
@@ -90,6 +91,7 @@ const SETTINGS_CHILDREN = [
   { href: "/dashboard/settings", key: "nav.general", icon: SlidersHorizontal },
   { href: "/dashboard/accounts", key: "nav.exchanges", icon: Plug },
   { href: "/dashboard/settings/trades", key: "nav.tradeSettings", icon: Tags },
+  { href: "/dashboard/settings/mentor", key: "nav.mentor", icon: Share2 },
 ];
 
 // featureKey — пункт скрыт для ВСЕХ (включая админа), когда та фича

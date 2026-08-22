@@ -60,7 +60,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    expect(await screen.findByText("mentor.title")).toBeInTheDocument();
+    expect(await screen.findByText("mentor.whatIsShown")).toBeInTheDocument();
     expect(screen.getByText("mentor.empty")).toBeInTheDocument();
   });
 
@@ -69,7 +69,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     // After creation, load() is called again returning a link
     fetchMock.mockImplementation((url: string) => {
@@ -128,7 +128,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     // Первый выпадающий список — счета, второй — период.
     const accountSelect = screen.getAllByRole("combobox")[0];
@@ -147,7 +147,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "a2" } });
     await act(async () => {
@@ -185,7 +185,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     const from = screen.getByLabelText("mentor.periodFrom");
     const to = screen.getByLabelText("mentor.periodTo");
@@ -211,7 +211,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     fireEvent.change(screen.getByLabelText("mentor.periodFrom"), { target: { value: "2026-06-01" } });
     fireEvent.click(screen.getByTitle("mentor.periodClear"));
@@ -223,7 +223,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     await act(async () => {
       fireEvent.click(screen.getByText("mentor.create"));
@@ -238,7 +238,7 @@ describe("MentorShareSettings", () => {
     await act(async () => {
       render(<MentorShareSettings />);
     });
-    await screen.findByText("mentor.title");
+    await screen.findByText("mentor.whatIsShown");
 
     // Переключаемся на дни и ставим 102 — срок задаётся любым числом, не пресетом.
     fireEvent.click(screen.getByText("mentor.ttl.days"));
