@@ -75,14 +75,18 @@ describe("getLandingData", () => {
     expect(data.signal?.total).toBe(9);
   });
 
-  it("в будний день календарь запрашивается от полуночи текущих суток на три дня", async () => {
+  // Сутки календаря считаются в UTC, а раскладывает события по дням браузер —
+  // в поясе пользователя. Поэтому окно берётся с запасом в сутки с каждой
+  // стороны: иначе релиз в 23:00 UTC пятницы, который для Москвы приходится на
+  // субботу, в выборку не попадал.
+  it("в будний день календарь запрашивается от полуночи суток на три дня, с запасом на пояса", async () => {
     setupMocks(FULL_SETUP);
     const getLandingData = await freshModule();
     await getLandingData("en", Date.parse("2026-08-17T12:00:00Z")); // понедельник
 
     const args = getCalendar.mock.calls[0][0];
-    expect(args.from.toISOString()).toBe("2026-08-17T00:00:00.000Z");
-    expect(args.to.toISOString()).toBe("2026-08-20T00:00:00.000Z");
+    expect(args.from.toISOString()).toBe("2026-08-16T00:00:00.000Z");
+    expect(args.to.toISOString()).toBe("2026-08-21T00:00:00.000Z");
   });
 
   // В воскресенье блок на главной показывает пару «суббота + воскресенье»
@@ -93,8 +97,8 @@ describe("getLandingData", () => {
     await getLandingData("en", NOW); // 16.08.2026 — воскресенье
 
     const args = getCalendar.mock.calls[0][0];
-    expect(args.from.toISOString()).toBe("2026-08-15T00:00:00.000Z");
-    expect(args.to.toISOString()).toBe("2026-08-19T00:00:00.000Z");
+    expect(args.from.toISOString()).toBe("2026-08-14T00:00:00.000Z");
+    expect(args.to.toISOString()).toBe("2026-08-20T00:00:00.000Z");
   });
 
   it("переживает старую запись quality без части метрик", async () => {
@@ -128,7 +132,7 @@ describe("getLandingData", () => {
     const data = await getLandingData("ru", NOW);
     const ids = data.events.map((e) => e.id);
 
-    expect(ids).not.toContain("low"); // impact=low не показываем вовсе
+    expect(ids).not.toContain("low"); // пока в сутках есть high/medium, low не берём
     expect(ids.filter((id) => id !== "next-day")).toHaveLength(3); // лимит на сутки
     expect(ids).toContain("h1"); // high приоритетнее medium
     expect(ids).toContain("h2");
@@ -136,6 +140,25 @@ describe("getLandingData", () => {
     // Внутри блока порядок хронологический, а не по важности.
     const times = data.events.map((e) => Date.parse(e.time));
     expect(times).toEqual([...times].sort((a, b) => a - b));
+  });
+
+  // Выходные: событий мало, и отбор по важности оставлял день пустым — на
+  // главной это читается как «рынки закрыты», хотя релиз был.
+  it("показывает единственное событие дня, даже если оно не из важных", async () => {
+    setupMocks(FULL_SETUP);
+    getCalendar.mockResolvedValue({
+      events: [
+        { id: "sat", time: new Date(Date.UTC(2026, 7, 15, 21)), impact: "low", currency: "USD", country: "US", title: "Выступление", forecast: null, previous: null, actual: null },
+      ],
+      currencies: [],
+      categories: [],
+      refreshed: [],
+    });
+
+    const getLandingData = await freshModule();
+    const data = await getLandingData("ru", NOW);
+
+    expect(data.events.map((e) => e.id)).toEqual(["sat"]);
   });
 
   it("отдаёт signal: null, когда отбор не дал ни одного сетапа", async () => {

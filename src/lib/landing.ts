@@ -24,6 +24,9 @@ export const CALENDAR_DAYS = 3;
  */
 export const EVENTS_PER_DAY = 3;
 const IMPORTANT_IMPACTS = new Set(["high", "medium"]);
+// Порядок важности для сортировки внутри суток; неизвестное значение уходит
+// в конец (indexOf вернёт -1 → сравнение отправит его вниз само).
+const IMPACT_RANK = ["high", "medium", "low", "holiday"];
 /** Сколько дневных свечей рисуем фоном карточки сигнала. */
 export const SIGNAL_CANDLES = 20;
 /** Сколько новостей показываем карточками. */
@@ -115,7 +118,6 @@ export type LandingData = {
 function pickImportant<T extends { time: Date; impact: string }>(events: T[]): T[] {
   const byDay = new Map<string, T[]>();
   for (const e of events) {
-    if (!IMPORTANT_IMPACTS.has(e.impact)) continue;
     const key = e.time.toISOString().slice(0, 10);
     const list = byDay.get(key);
     if (list) list.push(e);
@@ -124,8 +126,12 @@ function pickImportant<T extends { time: Date; impact: string }>(events: T[]): T
 
   const out: T[] = [];
   for (const list of byDay.values()) {
-    const ranked = [...list].sort((a, b) => {
-      if (a.impact !== b.impact) return a.impact === "high" ? -1 : 1;
+    const important = list.filter((e) => IMPORTANT_IMPACTS.has(e.impact));
+    // Значимых за день нет — показываем что есть. Пустой день на главной
+    // читается как «рынки закрыты» (в выходные там прямо так и написано), а
+    // это неправда, когда релиз в этот день был — пусть и одна звезда.
+    const ranked = [...(important.length ? important : list)].sort((a, b) => {
+      if (a.impact !== b.impact) return IMPACT_RANK.indexOf(a.impact) - IMPACT_RANK.indexOf(b.impact);
       return a.time.getTime() - b.time.getTime();
     });
     out.push(...ranked.slice(0, EVENTS_PER_DAY));
@@ -148,6 +154,18 @@ function calendarFrom(now: number): Date {
   const today = startOfToday(now);
   return today.getUTCDay() === 0 ? new Date(today.getTime() - DAY_MS) : today;
 }
+
+/**
+ * Запас к границам окна на разницу часовых поясов.
+ *
+ * Сутки здесь считаются в UTC, а по дням события раскладывает уже браузер — в
+ * поясе пользователя (см. dayKey в LandingCalendar). Без запаса всё, что
+ * попадает в этот зазор, терялось: выступление Трампа в пятницу 23:00 UTC для
+ * Москвы — суббота, 02:00, но в окно «с полуночи субботы UTC» оно не входило,
+ * и главная показывала «выходной — рынки закрыты» в день, когда релиз был.
+ * Пояса живут в диапазоне UTC-12…UTC+14, суток с каждой стороны хватает.
+ */
+const TZ_SLACK_MS = DAY_MS;
 
 async function loadStats(from: Date, now: number): Promise<LandingStats> {
   const [setups, symbols, events, news] = await Promise.all([
@@ -206,8 +224,8 @@ async function loadSignal(): Promise<LandingSignal | null> {
 export async function getLandingData(lang: Lang | string | null = null, now = Date.now()): Promise<LandingData> {
   const locale = asLang(typeof lang === "string" ? lang : null);
   return cache.fetch(`landing:${locale}`, async () => {
-    const from = calendarFrom(now);
-    const to = new Date(startOfToday(now).getTime() + CALENDAR_DAYS * DAY_MS);
+    const from = new Date(calendarFrom(now).getTime() - TZ_SLACK_MS);
+    const to = new Date(startOfToday(now).getTime() + CALENDAR_DAYS * DAY_MS + TZ_SLACK_MS);
 
     const [stats, calendar, signal, news] = await Promise.all([
       loadStats(startOfToday(now), now),
