@@ -39,6 +39,9 @@ export default async function PublicShell({
           <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.calendar")}
           </Link>
+          <Link href="/pricing" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("pricing.nav")}
+          </Link>
           <LocaleMenu />
           {session ? (
             <Link href="/dashboard" className="px-3 sm:px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">

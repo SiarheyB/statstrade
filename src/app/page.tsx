@@ -11,6 +11,7 @@ import LandingCalendar from "@/components/landing/LandingCalendar";
 import LandingSignal from "@/components/landing/LandingSignal";
 import LandingNews from "@/components/landing/LandingNews";
 import LandingFeatures from "@/components/landing/LandingFeatures";
+import LandingPricing from "@/components/landing/LandingPricing";
 import { BarChart3 } from "lucide-react";
 
 // Год запуска проекта — левая граница в «© 2026–20XX» футера. Когда текущий год
@@ -54,6 +55,9 @@ export default async function Home() {
           </Link>
           <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.calendar")}
+          </Link>
+          <Link href="/pricing" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+            {t("pricing.nav")}
           </Link>
           <LocaleMenu />
           <form action="/api/demo" method="post" className="hidden sm:block">
@@ -144,6 +148,10 @@ export default async function Home() {
           exchanges={exchangeNames}
           t={t}
         />
+
+        {/* Цена — последним блоком: человек только что прочитал, что сервис
+            умеет, и первый вопрос у него именно про деньги. */}
+        <LandingPricing t={t} exchangeCount={exchangeNames.length} />
 
       </main>
 

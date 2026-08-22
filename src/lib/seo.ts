@@ -53,6 +53,17 @@ export const SEO_PAGES = {
       en: "Economic calendar: events by day, importance and market impact. No sign-up required.",
     },
   },
+  pricing: {
+    path: "/pricing",
+    title: {
+      ru: "Тарифы TradeStats — сейчас бесплатно",
+      en: "TradeStats pricing — free for now",
+    },
+    description: {
+      ru: "Один тариф и он бесплатный: статистика сделок, разбор уровней, карта ордеров и риск-менеджер. Без карты и пробного периода.",
+      en: "One plan and it is free: trade statistics, level scans, order flow and a risk manager. No card, no trial period.",
+    },
+  },
 } satisfies Record<string, SeoPage>;
 
 /**
