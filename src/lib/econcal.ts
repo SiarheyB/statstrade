@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { investingImpact, resolveImpact } from "./econcalImpact";
 
 // Economic calendar from the free ForexFactory / faireconomy weekly JSON feeds
 // (no API key). We pull last/this/next week, normalize, and upsert so the
@@ -63,15 +64,8 @@ function normImpact(raw: unknown): string {
   return "low";
 }
 
-// The feed marks some genuinely market-moving releases (Final CPI reprints,
-// weekly Crude Oil Inventories) as "low" — bump those to "high" regardless
-// of the feed's own label.
-const HIGH_IMPACT_OVERRIDES: RegExp[] = [/\bcpi\b/i, /crude oil inventories/i];
-
-function applyImpactOverride(title: string, impact: string): string {
-  if (impact === "holiday") return impact;
-  return HIGH_IMPACT_OVERRIDES.some((re) => re.test(title)) ? "high" : impact;
-}
+// Важность события берём не из фида, а по шкале investing.com — фид метит
+// её заметно иначе (см. src/lib/econcalImpact.ts).
 
 type FeedItem = {
   title?: string;
@@ -118,7 +112,7 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
       currency,
       country: countryFor(currency),
       title,
-      impact: applyImpactOverride(title, normImpact(it.impact)),
+      impact: resolveImpact(title, currency, normImpact(it.impact)),
       category: categoryFor(title),
       forecast: clean(it.forecast),
       previous: clean(it.previous),
@@ -154,6 +148,30 @@ export async function pruneOldEvents(now: Date = new Date()): Promise<number> {
   return count;
 }
 
+// Фид переставляет время публикации (ForexFactory поправил минуту — в таблице
+// остаётся и старая строка, и новая), и осиротевшая запись живёт до конца
+// недели с той важностью, с какой её когда-то сохранили. Проходим по всему,
+// что лежит в календаре, и выравниваем важность по шкале investing —
+// события, которых в нашей таблице нет, не трогаем.
+async function alignStoredImpacts(): Promise<number> {
+  const stored = await prisma.economicEvent.findMany({ select: { id: true, title: true, currency: true, impact: true } });
+  const byImpact = new Map<string, string[]>();
+  for (const e of stored) {
+    if (e.impact === "holiday") continue;
+    const want = investingImpact(e.title, e.currency);
+    if (!want || want === e.impact) continue;
+    const ids = byImpact.get(want) ?? [];
+    ids.push(e.id);
+    byImpact.set(want, ids);
+  }
+  let updated = 0;
+  for (const [impact, ids] of byImpact) {
+    const { count } = await prisma.economicEvent.updateMany({ where: { id: { in: ids } }, data: { impact } });
+    updated += count;
+  }
+  return updated;
+}
+
 export async function refreshCalendar(): Promise<RefreshResult[]> {
   const results = await Promise.all(
     FEEDS.map(async (url) => {
@@ -176,6 +194,7 @@ export async function refreshCalendar(): Promise<RefreshResult[]> {
     }),
   );
   await pruneOldEvents();
+  await alignStoredImpacts();
   return results;
 }
 
@@ -206,7 +225,6 @@ export async function getCalendar(filters: CalendarFilters = {}) {
   const where: {
     time?: { gte?: Date; lte?: Date };
     currency?: { in: string[] };
-    impact?: { in: string[] };
     category?: string;
   } = {};
   if (filters.from || filters.to) {
@@ -215,10 +233,20 @@ export async function getCalendar(filters: CalendarFilters = {}) {
     if (filters.to) where.time.lte = filters.to;
   }
   if (filters.currencies?.length) where.currency = { in: filters.currencies };
-  if (filters.impacts?.length) where.impact = { in: filters.impacts };
   if (filters.category) where.category = filters.category;
 
-  const events = await prisma.economicEvent.findMany({ where, orderBy: { time: "asc" }, take: 500 });
+  // Важность накладываем на чтении, а не берём из колонки: правка таблицы в
+  // econcalImpact.ts видна сразу, не дожидаясь ближайшего обхода фида. В базе
+  // значение тоже обновится — при следующем refreshCalendar().
+  //
+  // Поэтому и фильтр по важности здесь, а не в SQL: в колонке может лежать
+  // ещё старое значение, и запрос отобрал бы не те строки. Событий в
+  // календаре — сотни, лишней работы это не создаёт.
+  const rows = await prisma.economicEvent.findMany({ where, orderBy: { time: "asc" }, take: 500 });
+  const wanted = filters.impacts?.length ? new Set(filters.impacts) : null;
+  const events = rows
+    .map((e) => ({ ...e, impact: resolveImpact(e.title, e.currency, e.impact) }))
+    .filter((e) => !wanted || wanted.has(e.impact));
 
   // Facets for the filter UI (distinct currencies / categories present).
   // groupBy, а не выгрузка всей таблицы в память: строк тут немного, но

@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   findManyMock: vi.fn().mockResolvedValue([]),
   groupByMock: vi.fn().mockResolvedValue([]),
   deleteManyMock: vi.fn().mockResolvedValue({ count: 0 }),
+  updateManyMock: vi.fn().mockResolvedValue({ count: 0 }),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -17,6 +18,7 @@ vi.mock('@/lib/db', () => ({
       findMany: mocks.findManyMock,
       groupBy: mocks.groupByMock,
       deleteMany: mocks.deleteManyMock,
+      updateMany: mocks.updateManyMock,
     },
   },
 }));
@@ -64,6 +66,7 @@ describe('econcal module', () => {
     mocks.upsertMock.mockResolvedValue({ id: 'test-id' });
     mocks.groupByMock.mockResolvedValue([]);
     mocks.deleteManyMock.mockResolvedValue({ count: 0 });
+    mocks.updateManyMock.mockResolvedValue({ count: 0 });
   });
 
   describe('countryFor', () => {
@@ -158,7 +161,7 @@ describe('econcal module', () => {
       ]);
     });
 
-    it('bumps CPI and Crude Oil Inventories to high impact regardless of feed label', async () => {
+    it('replaces the feed impact with the investing.com scale', async () => {
       feedOf([
         { title: 'German Final CPI m/m', country: 'EUR', date: '2026-01-15T14:00:00Z', impact: 'Low' },
         { title: 'Crude Oil Inventories', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Low' },
@@ -166,7 +169,25 @@ describe('econcal module', () => {
         { title: 'Bank Holiday', country: 'USD', date: '2026-01-15T14:00:00Z', impact: 'Holiday' },
       ]);
       await refreshCalendar();
-      expect(upserted().map((e) => e.impact)).toEqual(['high', 'high', 'high', 'holiday']);
+      expect(upserted().map((e) => e.impact)).toEqual(['medium', 'high', 'high', 'holiday']);
+    });
+
+    it('realigns events that the feed no longer sends', async () => {
+      feedOf([]);
+      mocks.findManyMock.mockResolvedValueOnce([
+        { id: '1', title: 'Core CPI m/m', currency: 'CAD', impact: 'high' },
+        { id: '2', title: 'Flash Services PMI', currency: 'USD', impact: 'low' },
+        { id: '3', title: 'Unemployment Claims', currency: 'USD', impact: 'high' },
+        { id: '4', title: 'GDT Price Index', currency: 'NZD', impact: 'low' },
+        { id: '5', title: 'Bank Holiday', currency: 'USD', impact: 'holiday' },
+      ]);
+      await refreshCalendar();
+      const calls = mocks.updateManyMock.mock.calls.map((c) => c[0]);
+      // Совпадающие (3) и незнакомые (4, 5) события не переписываем.
+      expect(calls).toEqual([
+        { where: { id: { in: ['1'] } }, data: { impact: 'medium' } },
+        { where: { id: { in: ['2'] } }, data: { impact: 'high' } },
+      ]);
     });
 
     it('derives a category from the title and falls back to Other', async () => {
@@ -242,12 +263,31 @@ describe('econcal module', () => {
         category: 'Inflation',
       });
       const { where } = mocks.findManyMock.mock.calls[0][0];
+      // Важности в запросе нет: она накладывается на чтении, фильтр — уже по ней.
       expect(where).toEqual({
         time: { gte: from, lte: to },
         currency: { in: ['USD', 'EUR'] },
-        impact: { in: ['high'] },
         category: 'Inflation',
       });
+    });
+
+    it('отдаёт важность по шкале investing, а не ту, что лежит в колонке', async () => {
+      mocks.findManyMock.mockResolvedValueOnce([
+        { id: '1', title: 'Flash Services PMI', currency: 'USD', impact: 'low', time: new Date() },
+        { id: '2', title: 'CPI m/m', currency: 'CAD', impact: 'high', time: new Date() },
+        { id: '3', title: 'GDT Price Index', currency: 'NZD', impact: 'low', time: new Date() },
+      ]);
+      const { events } = await getCalendar({});
+      expect(events.map((e) => e.impact)).toEqual(['high', 'medium', 'low']);
+    });
+
+    it('фильтрует по важности после наложения шкалы', async () => {
+      mocks.findManyMock.mockResolvedValueOnce([
+        { id: '1', title: 'Flash Services PMI', currency: 'USD', impact: 'low', time: new Date() },
+        { id: '2', title: 'CPI m/m', currency: 'CAD', impact: 'high', time: new Date() },
+      ]);
+      const { events } = await getCalendar({ impacts: ['high'] });
+      expect(events.map((e) => e.title)).toEqual(['Flash Services PMI']);
     });
 
     it('leaves the where clause empty when no filters are set', async () => {
