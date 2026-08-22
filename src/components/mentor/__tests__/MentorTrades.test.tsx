@@ -219,4 +219,25 @@ describe("MentorTrades", () => {
     expect(panel.textContent).not.toContain("Ранний вход");
     expect(panel.textContent).not.toContain("Ретест");
   });
+
+  it("помечает сделки, где убыток превысил 1R", () => {
+    const risky: PublicAccountTrades[] = [
+      {
+        accountId: "a1",
+        label: "Основной",
+        exchange: "bybit",
+        trades: [
+          trade({ id: "r1", symbol: "BTC/USDT", rr: -1.09 }), // риск превышен
+          trade({ id: "r2", symbol: "ETH/USDT", rr: -0.9 }), // в пределах риска
+          trade({ id: "r3", symbol: "SOL/USDT", rr: null }), // стопа не было
+        ],
+      },
+    ];
+    render(<MentorTrades accounts={risky} />);
+
+    // Значок с подсказкой — только у первой сделки.
+    const marks = screen.getAllByTitle("trades.riskWarning");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].closest("td")?.textContent).toContain("BTCUSDT");
+  });
 });

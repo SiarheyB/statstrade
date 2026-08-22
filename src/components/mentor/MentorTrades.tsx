@@ -11,7 +11,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ImageIcon, Filter, X, StickyNote } from "lucide-react";
+import { AlertTriangle, ChevronDown, ImageIcon, Filter, X, StickyNote } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtPct, fmtDuration, fmtPrice, fmtSymbol } from "@/lib/format";
@@ -219,7 +219,19 @@ function TradeRow({ trade, onPreview }: { trade: PublicTrade; onPreview: (tradeI
         )}
       >
         <Td>
-          <span className="font-medium">{fmtSymbol(trade.symbol)}</span>
+          <span className="inline-flex items-center gap-1.5">
+            {/* Убыток больше запланированного 1R — тот же знак, что в журнале
+                сделок (/dashboard/trades): ментору это первое, что нужно видеть. */}
+            {trade.rr !== null && trade.rr < -1 && (
+              <span className="group relative inline-flex shrink-0" title={t("trades.riskWarning")}>
+                <AlertTriangle size={14} className="text-loss" />
+                <span className="pointer-events-none absolute left-0 top-full z-30 mt-1 hidden w-56 whitespace-normal rounded-md border border-loss/40 bg-bg px-2.5 py-1.5 text-xs text-loss shadow-lg group-hover:block">
+                  {t("trades.riskWarning")}
+                </span>
+              </span>
+            )}
+            <span className="font-medium">{fmtSymbol(trade.symbol)}</span>
+          </span>
         </Td>
         <Td>
           <span className={trade.side === "long" ? "text-profit" : "text-loss"}>
