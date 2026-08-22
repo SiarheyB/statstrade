@@ -147,6 +147,10 @@ const en: Dict = {
   "of.sideSell": "Sell",
   "of.onlyBigLimits": "Showing only limit orders ≥ {n} {coin}",
   "of.zoomHint": "wheel/swipe = zoom both axes · shift+wheel = time only · drag = pan · dblclick = reset",
+
+  // chart (общее для графиков форекса, карты ордеров и карты ликвидаций)
+  "chart.fullscreen": "Fullscreen",
+  "chart.exitFullscreen": "Exit fullscreen (Esc)",
   "of.hintSymbol": "Trading pair shown on the heatmap.",
   "of.hintExchange": "Exchange whose order book is shown. “All exchanges” aggregates liquidity across venues.",
   "of.hintTimeframe": "Candle timeframe. The window holds ~100 candles of this size, so 15m draws 15-minute candles, 1h — hourly, etc.",
@@ -1466,6 +1470,10 @@ const ru: Dict = {
   "of.sideSell": "Продажа",
   "of.onlyBigLimits": "Показаны только лимитные заявки от {n} {coin}",
   "of.zoomHint": "колесо/свайп = зум обеих осей · shift+колесо = только по времени · перетаскивание = сдвиг · двойной клик = сброс",
+
+  // chart
+  "chart.fullscreen": "Развернуть на весь экран",
+  "chart.exitFullscreen": "Свернуть (Esc)",
   "of.hintSymbol": "Торговая пара, отображаемая на карте.",
   "of.hintExchange": "Биржа, чей стакан показан. «Все биржи» — агрегированная ликвидность по всем площадкам.",
   "of.hintTimeframe": "Таймфрейм свечи. В окне помещается ~100 свечей этого размера: 15m рисует 15-минутные свечи, 1h — часовые и т.д.",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
 import {
   Layers,
   RefreshCw,
@@ -33,6 +34,7 @@ import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import AbsorptionPanel from "@/components/AbsorptionPanel";
 import DrawingToolbar from "@/components/DrawingToolbar";
+import FullscreenButton from "@/components/FullscreenButton";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import type {
   DivergenceSignal,
@@ -67,6 +69,7 @@ import {
   PRICE_AXIS_W,
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
+import { useFullscreen } from "@/lib/useFullscreen";
 
 type ObHeatmap = {
   priceMin: number;
@@ -257,6 +260,9 @@ export default function OrderflowPage() {
   const [drawingsLocked, setDrawingsLocked] = useState(false);
   const [canUndoMove, setCanUndoMove] = useState(false);
   const lastMovedDrawingRef = useRef<{ id: string; points: DrawingPoint[] } | null>(null);
+
+  // Разворот карточки с графиком (свечи + дельта) на весь экран.
+  const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -1485,7 +1491,14 @@ export default function OrderflowPage() {
         <div className="card p-10 text-center text-muted">{t("of.empty")}</div>
       ) : (
         <>
-          <div className="card p-2 relative" style={{ background: "#0a0b10" }}>
+          <div
+            ref={fsRef}
+            className={clsx(
+              "card p-2 relative",
+              fsActive && "fixed inset-0 z-50 flex flex-col rounded-none",
+            )}
+            style={{ background: "#0a0b10" }}
+          >
             {showDrawingEditor && selectedDrawingId && (() => {
               const d = drawings.find(dd => dd.id === selectedDrawingId);
               if (!d) return null;
@@ -1557,13 +1570,18 @@ export default function OrderflowPage() {
                 </div>
               );
             })()}
-            <div className="flex gap-2 items-start">
+            <div className={clsx("flex gap-2", fsActive ? "flex-1 min-h-0 items-stretch" : "items-start")}>
               <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} locked={drawingsLocked} onToggleLocked={() => setDrawingsLocked(v => !v)} canUndoMove={canUndoMove} onUndoMove={handleUndoMove} />
               <div className="flex-1 min-w-0 relative">
+                <FullscreenButton
+                  active={fsActive}
+                  onToggle={fsToggle}
+                  className="absolute top-1 right-1 z-10"
+                />
                 <canvas
                   ref={canvasRef}
-                  className="w-full"
-                  style={{ height: "min(72vh, 720px)" }}
+                  className={clsx("w-full", fsActive && "h-full")}
+                  style={fsActive ? undefined : { height: "min(72vh, 720px)" }}
                   onMouseMove={onMove}
                   onMouseLeave={onLeave}
                   onMouseDown={onDown}

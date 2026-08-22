@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import clsx from "clsx";
 import { TrendingUp, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import VolumeProfile from "@/components/VolumeProfile";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import DrawingToolbar from "@/components/DrawingToolbar";
+import FullscreenButton from "@/components/FullscreenButton";
 import { drawDrawings } from "@/components/DrawingOverlay";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
@@ -37,6 +39,7 @@ import {
   type TimeAxis,
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
+import { useFullscreen } from "@/lib/useFullscreen";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -129,6 +132,10 @@ export default function ForexView() {
   const [drawingsLocked, setDrawingsLocked] = useState(false);
   const [canUndoMove, setCanUndoMove] = useState(false);
   const lastMovedDrawingRef = useRef<{ id: string; points: DrawingPoint[] } | null>(null);
+
+  // Разворот свечного графика на весь экран (та же кнопка на /dashboard/orderflow
+  // и /dashboard/liqmap).
+  const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
 
   // Canvas refs — identical rendering pipeline to /dashboard/orderflow (src/lib/candlestickChart.ts)
   const candleCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -952,7 +959,10 @@ function inferBinSize(levels: { price: number }[]): number {
             </div>
           );
         })()}
-        <div className="relative">
+        <div
+          ref={fsRef}
+          className={clsx("relative", fsActive && "fixed inset-0 z-50 bg-bg p-2")}
+        >
           <DrawingToolbar
             overlay
             activeTool={activeTool}
@@ -966,10 +976,15 @@ function inferBinSize(levels: { price: number }[]): number {
             canUndoMove={canUndoMove}
             onUndoMove={handleUndoMove}
           />
+          <FullscreenButton
+            active={fsActive}
+            onToggle={fsToggle}
+            className="absolute top-1 right-1 z-10"
+          />
           <canvas
             ref={candleCanvasRef}
             className="w-full cursor-crosshair"
-            style={{ height: "min(72vh, 720px)" }}
+            style={{ height: fsActive ? "100%" : "min(72vh, 720px)" }}
             onMouseMove={onMove}
             onMouseLeave={onLeave}
             onMouseDown={onDown}

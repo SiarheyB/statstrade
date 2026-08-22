@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
+import FullscreenButton from "@/components/FullscreenButton";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, type TimezoneId } from "@/lib/timezone";
+import { useFullscreen } from "@/lib/useFullscreen";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Heatmap = {
@@ -110,6 +113,10 @@ export default function LiqMapPage() {
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [favLoading, setFavLoading] = useState(false);
+  // Разворот карты на весь экран (та же кнопка на /dashboard/forex и
+  // /dashboard/orderflow).
+  const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ x0: 0, x1: 1, y0: 0, y1: 1 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
@@ -601,7 +608,19 @@ export default function LiqMapPage() {
       {error ? (
         <div className="card p-10 text-center text-loss">{error}</div>
       ) : (
-        <div className="relative flex-1 min-h-0 rounded-xl overflow-hidden border border-border" style={{ background: "#08080d" }}>
+        <div
+          ref={fsRef}
+          className={clsx(
+            "relative flex-1 min-h-0 overflow-hidden border border-border",
+            fsActive ? "fixed inset-0 z-50 rounded-none" : "rounded-xl",
+          )}
+          style={{ background: "#08080d" }}
+        >
+          <FullscreenButton
+            active={fsActive}
+            onToggle={fsToggle}
+            className="absolute top-1 right-1 z-10"
+          />
           <canvas
             ref={canvasRef}
             className="w-full h-full block touch-none cursor-crosshair"
