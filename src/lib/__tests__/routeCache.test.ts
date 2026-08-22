@@ -70,4 +70,62 @@ describe("createRouteCache", () => {
     expect(await c.fetch("k", compute)).toBe("ok");
     expect(compute).toHaveBeenCalledTimes(2);
   });
+
+  describe("окно простоя (stale-while-revalidate)", () => {
+    it("отдаёт протухшее сразу и обновляет в фоне", async () => {
+      const compute = vi.fn().mockResolvedValue("свежее");
+      const c = createRouteCache(1000, 200, { staleMs: 10_000 });
+      c.set("k", "старое");
+
+      vi.advanceTimersByTime(1500); // TTL вышел, окно простоя ещё нет
+      // Ответ мгновенный — тем, что уже лежит.
+      await expect(c.fetch("k", compute)).resolves.toBe("старое");
+      // Но пересчёт запущен.
+      expect(compute).toHaveBeenCalledTimes(1);
+
+      // Когда фоновый пересчёт закончился, дальше отдаётся свежее.
+      await vi.runAllTimersAsync();
+      await expect(c.fetch("k", compute)).resolves.toBe("свежее");
+      expect(compute).toHaveBeenCalledTimes(1);
+    });
+
+    it("за пределами окна ждёт пересчёт — отдавать нечего", async () => {
+      const compute = vi.fn().mockResolvedValue("свежее");
+      const c = createRouteCache(1000, 200, { staleMs: 5000 });
+      c.set("k", "старое");
+
+      vi.advanceTimersByTime(7000);
+      await expect(c.fetch("k", compute)).resolves.toBe("свежее");
+      expect(compute).toHaveBeenCalledTimes(1);
+      // Совсем протухшая запись в памяти не остаётся.
+      expect(c.get("k")).toBe("свежее");
+    });
+
+    it("без окна простоя ведёт себя как раньше", async () => {
+      const compute = vi.fn().mockResolvedValue("свежее");
+      const c = createRouteCache(1000);
+      c.set("k", "старое");
+
+      vi.advanceTimersByTime(1500);
+      // Никакого «отдать старое»: ждём пересчёт.
+      await expect(c.fetch("k", compute)).resolves.toBe("свежее");
+    });
+
+    it("параллельные запросы в окне простоя не ждут пересчёта", async () => {
+      const compute = vi.fn().mockResolvedValue("свежее");
+      const c = createRouteCache(1000, 200, { staleMs: 10_000 });
+      c.set("k", "старое");
+      vi.advanceTimersByTime(1500);
+
+      const [a, b, d] = await Promise.all([
+        c.fetch("k", compute),
+        c.fetch("k", compute),
+        c.fetch("k", compute),
+      ]);
+
+      expect([a, b, d]).toEqual(["старое", "старое", "старое"]);
+      // И пересчёт при этом один на всех.
+      expect(compute).toHaveBeenCalledTimes(1);
+    });
+  });
 });

@@ -33,7 +33,11 @@ export const SIGNAL_CANDLES = 20;
 export const NEWS_LIMIT = 3;
 
 const TTL_MS = 5 * 60 * 1000;
-const cache = createRouteCache(TTL_MS, 8);
+// Час запаса поверх TTL: протухшие данные отдаются мгновенно, а свежие
+// считаются в фоне. Иначе каждые пять минут кому-то одному доставался полный
+// пересчёт — пять запросов в базу вместо ответа из памяти.
+const STALE_MS = 60 * 60 * 1000;
+const cache = createRouteCache(TTL_MS, 8, { staleMs: STALE_MS });
 
 const DAY_MS = 86_400_000;
 

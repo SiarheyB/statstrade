@@ -22,7 +22,25 @@ export type RouteCache = {
   size(): number;
 };
 
-export function createRouteCache(ttlMs: number, maxEntries = 200): RouteCache {
+export type RouteCacheOptions = {
+  /**
+   * Сколько ещё держать протухшую запись, отдавая её сразу и пересчитывая в
+   * фоне (stale-while-revalidate).
+   *
+   * Без этого каждый TTL-й запрос платит за полный пересчёт: на главной это
+   * пять запросов в базу, и человек, которому «не повезло», ждал их вместо
+   * мгновенного ответа. С окном простоя ждёт только первый заход после старта
+   * процесса — дальше страница всегда отдаётся из памяти.
+   */
+  staleMs?: number;
+};
+
+export function createRouteCache(
+  ttlMs: number,
+  maxEntries = 200,
+  options: RouteCacheOptions = {},
+): RouteCache {
+  const staleMs = options.staleMs ?? 0;
   const store = new Map<string, Entry>();
   const inflight = new Map<string, Promise<unknown>>();
 
@@ -30,10 +48,18 @@ export function createRouteCache(ttlMs: number, maxEntries = 200): RouteCache {
     const hit = store.get(key);
     if (!hit) return undefined;
     if (Date.now() - hit.at >= ttlMs) {
-      store.delete(key);
+      // В окне простоя запись остаётся: её отдаст fetch, пока считает свежую.
+      if (Date.now() - hit.at >= ttlMs + staleMs) store.delete(key);
       return undefined;
     }
     return hit.value as T;
+  }
+
+  /** Протухшее, но ещё пригодное значение — только для fetch. */
+  function getStale<T>(key: string): T | undefined {
+    const hit = store.get(key);
+    if (!hit || staleMs <= 0) return undefined;
+    return Date.now() - hit.at < ttlMs + staleMs ? (hit.value as T) : undefined;
   }
 
   function set(key: string, value: unknown): void {
@@ -53,8 +79,25 @@ export function createRouteCache(ttlMs: number, maxEntries = 200): RouteCache {
     if (hit !== undefined) return hit;
 
     const running = inflight.get(key) as Promise<T> | undefined;
-    if (running) return running;
+    if (running) {
+      // Пересчёт уже идёт: если есть чем ответить прямо сейчас — отвечаем, а не
+      // становимся в очередь за свежими данными.
+      const stale = getStale<T>(key);
+      if (stale !== undefined) return stale;
+      return running;
+    }
 
+    // Данные просрочены, но ещё годны: отдаём их и обновляем в фоне.
+    const stale = getStale<T>(key);
+    if (stale !== undefined) {
+      void startCompute(key, compute).catch(() => undefined);
+      return stale;
+    }
+
+    return startCompute(key, compute);
+  }
+
+  function startCompute<T>(key: string, compute: () => Promise<T>): Promise<T> {
     const p = compute()
       .then((value) => {
         set(key, value);
