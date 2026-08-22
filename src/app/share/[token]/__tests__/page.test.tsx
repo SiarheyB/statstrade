@@ -26,10 +26,11 @@ vi.mock("@/lib/i18n/provider", () => ({
     timezone: "auto",
   }),
 }));
-vi.mock("@/lib/mentorShare", () => ({
+vi.mock("@/lib/mentorShare", async (importOriginal) => ({
+  // isExpired и formatRangeDate — чистые функции без базы, берём настоящие.
+  ...(await importOriginal<typeof import("@/lib/mentorShare")>()),
   computePublicSummary: vi.fn(),
   computePublicTrades: vi.fn(),
-  PUBLIC_TRADES_LIMIT: 500,
 }));
 
 import { prisma } from "@/lib/db";
@@ -104,6 +105,42 @@ describe("SharePage (share/[token])", () => {
     });
     await renderSharePage();
     expect(screen.getByText("mentorPage.unavailable")).toBeInTheDocument();
+  });
+
+  it("не открывает ссылку, у которой вышел срок", async () => {
+    mockedGetFeatureConfig.mockResolvedValue({ enabled: true });
+    mockedFindUnique.mockResolvedValue({
+      id: "link1",
+      userId: "u1",
+      token: "tok123",
+      revokedAt: null,
+      label: "Просроченная",
+      expiresAt: new Date(Date.now() - 60_000),
+    });
+
+    await renderSharePage();
+
+    // Для гостя истёкшая ссылка выглядит так же, как отозванная.
+    expect(screen.getByText("mentorPage.unavailable")).toBeInTheDocument();
+  });
+
+  it("открывает ссылку, срок которой ещё не вышел", async () => {
+    mockedGetFeatureConfig.mockResolvedValue({ enabled: true });
+    mockedFindUnique.mockResolvedValue({
+      id: "link1",
+      userId: "u1",
+      token: "tok123",
+      revokedAt: null,
+      label: "Живая",
+      expiresAt: new Date(Date.now() + 3_600_000),
+    });
+    mockedComputePublicSummary.mockResolvedValue({
+      totalTrades: 1, firstTradeAt: null, lastTradeAt: null, netPnl: 0,
+      winRate: 50, profitFactor: 1, maxDrawdownPct: 0, equityCurve: [],
+    });
+
+    await renderSharePage();
+    expect(screen.getByText("Живая")).toBeInTheDocument();
   });
 
   it("renders the public summary when link is valid", async () => {

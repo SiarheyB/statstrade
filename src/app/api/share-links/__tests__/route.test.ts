@@ -248,4 +248,46 @@ describe("POST /api/share-links — выбор счёта", () => {
     expect(mockPrisma.shareLink.create).not.toHaveBeenCalled();
   });
 
+  it("сохраняет срок жизни ссылки", async () => {
+    asUser();
+    const before = Date.now();
+
+    await POST(
+      new Request("http://x/api/share-links", {
+        method: "POST",
+        body: JSON.stringify({ ttlUnit: "days", ttlValue: 102 }),
+      }),
+    );
+
+    const { data } = mockPrisma.shareLink.create.mock.calls[0][0];
+    const expected = before + 102 * 86_400_000;
+    // Момент истечения считается от «сейчас», поэтому сверяем с допуском.
+    expect(Math.abs((data.expiresAt as Date).getTime() - expected)).toBeLessThan(5_000);
+  });
+
+  it("без срока создаёт бессрочную ссылку", async () => {
+    asUser();
+
+    await POST(new Request("http://x/api/share-links", { method: "POST", body: JSON.stringify({}) }));
+
+    expect(mockPrisma.shareLink.create.mock.calls[0][0].data.expiresAt).toBeNull();
+  });
+
+  it("отклоняет срок без числа и число вне допустимого", async () => {
+    asUser();
+
+    const noValue = await POST(
+      new Request("http://x/api/share-links", { method: "POST", body: JSON.stringify({ ttlUnit: "hours" }) }),
+    );
+    expect(noValue.status).toBe(400);
+
+    const zero = await POST(
+      new Request("http://x/api/share-links", {
+        method: "POST",
+        body: JSON.stringify({ ttlUnit: "days", ttlValue: 0 }),
+      }),
+    );
+    expect(zero.status).toBe(400);
+    expect(mockPrisma.shareLink.create).not.toHaveBeenCalled();
+  });
 });

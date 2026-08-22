@@ -85,7 +85,7 @@ describe("MentorShareSettings", () => {
       if (url.includes("/api/share-links") && !url.includes("?")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ links: [{ id: "l1", token: "tok1", label: "My mentor", createdAt: "", lastViewedAt: null, accountId: null }] }),
+          json: () => Promise.resolve({ links: [{ id: "l1", token: "tok1", label: "My mentor", createdAt: "", lastViewedAt: null, accountId: null, expiresAt: null }] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -100,7 +100,7 @@ describe("MentorShareSettings", () => {
   });
 
   it("copies the link to clipboard", async () => {
-    mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null }]);
+    mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null, expiresAt: null }]);
     await act(async () => {
       render(<MentorShareSettings />);
     });
@@ -112,7 +112,7 @@ describe("MentorShareSettings", () => {
   });
 
   it("revokes a link after confirmation", async () => {
-    const fetchMock = mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null }]);
+    const fetchMock = mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null, expiresAt: null }]);
     await act(async () => {
       render(<MentorShareSettings />);
     });
@@ -160,12 +160,13 @@ describe("MentorShareSettings", () => {
 
   it("показывает у ссылки, чей это счёт, и помечает удалённый", async () => {
     mockFetch(true, [
-      { id: "l1", token: "t1", label: "На bybit", createdAt: "", lastViewedAt: null, accountId: "a1", periodFrom: null, periodTo: null },
+      { id: "l1", token: "t1", label: "На bybit", createdAt: "", lastViewedAt: null, accountId: "a1", periodFrom: null, periodTo: null, expiresAt: null },
       {
         id: "l2", token: "t2", label: "На всё", createdAt: "", lastViewedAt: null, accountId: null,
         periodFrom: "2026-06-01T00:00:00.000Z", periodTo: "2026-07-01T00:00:00.000Z",
+        expiresAt: null,
       },
-      { id: "l3", token: "t3", label: "Осиротевшая", createdAt: "", lastViewedAt: null, accountId: "gone", periodFrom: null, periodTo: null },
+      { id: "l3", token: "t3", label: "Осиротевшая", createdAt: "", lastViewedAt: null, accountId: "gone", periodFrom: null, periodTo: null, expiresAt: null },
     ]);
     await act(async () => {
       render(<MentorShareSettings />);
@@ -217,4 +218,57 @@ describe("MentorShareSettings", () => {
     expect(screen.getByLabelText("mentor.periodFrom")).toHaveValue("");
   });
 
+  it("по умолчанию ссылка бессрочная и срок в запрос не уходит", async () => {
+    const fetchMock = mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("mentor.create"));
+    });
+
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === "POST");
+    expect(JSON.parse(post![1].body as string)).toEqual({});
+  });
+
+  it("отправляет выбранный срок жизни", async () => {
+    const fetchMock = mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    // Переключаемся на дни и ставим 102 — срок задаётся любым числом, не пресетом.
+    fireEvent.click(screen.getByText("mentor.ttl.days"));
+    fireEvent.change(screen.getByLabelText("mentor.ttl.days"), { target: { value: "102" } });
+    await act(async () => {
+      fireEvent.click(screen.getByText("mentor.create"));
+    });
+
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === "POST");
+    expect(JSON.parse(post![1].body as string)).toEqual({ ttlUnit: "days", ttlValue: 102 });
+  });
+
+  it("показывает у ссылки, когда она истекает или уже истекла", async () => {
+    mockFetch(true, [
+      {
+        id: "l1", token: "t1", label: "Живая", createdAt: "", lastViewedAt: null,
+        accountId: null, periodFrom: null, periodTo: null,
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      },
+      {
+        id: "l2", token: "t2", label: "Просроченная", createdAt: "", lastViewedAt: null,
+        accountId: null, periodFrom: null, periodTo: null,
+        expiresAt: new Date(Date.now() - 86_400_000).toISOString(),
+      },
+    ]);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+
+    expect(await screen.findByText(/mentor\.expiresAt/)).toBeInTheDocument();
+    expect(screen.getByText(/mentor\.expiredAt/)).toBeInTheDocument();
+  });
 });

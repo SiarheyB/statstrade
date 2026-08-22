@@ -983,11 +983,16 @@ model ShareLink {
   // попасть в выборку.
   periodFrom   DateTime?
   periodTo     DateTime?
+  // Когда ссылка перестаёт открываться. NULL = бессрочная.
+  // Хранится момент истечения, а не срок: так проверка — это сравнение с now(),
+  // и срок не продлевается сам при каждом открытии.
+  expiresAt    DateTime?
   createdAt    DateTime  @default(now())
   lastViewedAt DateTime?
   revokedAt    DateTime?
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
 model Announcement {

@@ -31,6 +31,8 @@ vi.mock('@/lib/analytics/metrics', () => ({
 
 import {
   computePublicSummary,
+  expiryFrom,
+  isExpired,
   computePublicTrades,
   formatRangeDate,
   generateShareToken,
@@ -341,6 +343,38 @@ describe('mentorShare module', () => {
       expect(formatRangeDate(new Date('2026-07-01T00:00:00.000Z'), 'to')).toBe('2026-06-30');
       expect(formatRangeDate(new Date('2026-06-01T00:00:00.000Z'), 'from')).toBe('2026-06-01');
       expect(formatRangeDate(null, 'from')).toBe('');
+    });
+  });
+
+  describe('срок жизни ссылки', () => {
+    const now = Date.parse('2026-08-22T12:00:00Z');
+
+    it('часы и дни считаются от «сейчас»', () => {
+      expect(expiryFrom('hours', 48, now)).toEqual(new Date('2026-08-24T12:00:00Z'));
+      // Дней может быть сколько угодно — и 2, и 102.
+      expect(expiryFrom('days', 102, now)).toEqual(new Date('2026-12-02T12:00:00Z'));
+      expect(expiryFrom('days', 2, now)).toEqual(new Date('2026-08-24T12:00:00Z'));
+    });
+
+    it('бессрочная ссылка и мусор на входе дают null', () => {
+      expect(expiryFrom('forever', 10, now)).toBeNull();
+      expect(expiryFrom(null, null, now)).toBeNull();
+      expect(expiryFrom('days', 0, now)).toBeNull();
+      expect(expiryFrom('days', -5, now)).toBeNull();
+    });
+
+    it('срок упирается в потолок — защита от опечатки', () => {
+      // 10 000 дней превращаются в 3650: столько же, сколько «десять лет».
+      expect(expiryFrom('days', 10_000, now)).toEqual(expiryFrom('days', 3650, now));
+      expect(expiryFrom('hours', 99_999, now)).toEqual(expiryFrom('hours', 8760, now));
+    });
+
+    it('истёкшей считается ссылка, у которой срок уже наступил', () => {
+      expect(isExpired(new Date(now - 1), now)).toBe(true);
+      expect(isExpired(new Date(now), now)).toBe(true);
+      expect(isExpired(new Date(now + 1), now)).toBe(false);
+      // Бессрочная не истекает никогда.
+      expect(isExpired(null, now)).toBe(false);
     });
   });
 });

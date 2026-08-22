@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Share2, Copy, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -15,6 +15,8 @@ type Link = {
   // Границы периода в ISO; null с любой стороны = граница не задана.
   periodFrom: string | null;
   periodTo: string | null;
+  // Когда ссылка перестанет открываться; null = бессрочная.
+  expiresAt: string | null;
 };
 type FeatureValue = { enabled: boolean; maxLinksPerUser: number };
 type Account = { id: string; label: string; exchange: string };
@@ -22,6 +24,10 @@ type Account = { id: string; label: string; exchange: string };
 // Значение пункта «все биржи» в выпадающем списке: пустая строка, а не null —
 // у <select> значения всегда строки.
 const ALL_ACCOUNTS = "";
+
+// Единицы срока жизни ссылки (см. TTL_UNITS в lib/mentorShare.ts).
+const TTL_UNITS = ["forever", "hours", "days"] as const;
+type TtlUnit = (typeof TTL_UNITS)[number];
 
 
 export default function MentorShareSettings() {
@@ -32,6 +38,18 @@ export default function MentorShareSettings() {
   const [accountId, setAccountId] = useState(ALL_ACCOUNTS);
   const [periodFrom, setPeriodFrom] = useState("");
   const [periodTo, setPeriodTo] = useState("");
+  const [ttlUnit, setTtlUnit] = useState<TtlUnit>("forever");
+  // Значение держим строкой: пустое поле в процессе ввода — это нормально.
+  const [ttlValue, setTtlValue] = useState("24");
+  // «Сейчас» берём после монтирования, а не в рендере: на сервере время своё,
+  // и предпросмотр даты разошёлся бы с клиентским при гидратации. Раз в минуту
+  // обновляем, чтобы «истекает» вовремя сменилось на «истекла».
+  const [now, setNow] = useState<number | null>(null);
+  useEffect(() => {
+    setNow(Date.now());
+    const id = setInterval(() => setNow(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -50,6 +68,24 @@ export default function MentorShareSettings() {
       const data = await accountsRes.json();
       setAccounts(Array.isArray(data) ? data : []);
     }
+  }
+
+  // Когда истечёт ссылка, если создать её прямо сейчас, — показываем сразу,
+  // чтобы «102 дня» не пришлось считать в уме.
+  const expiryPreview = useMemo(() => {
+    const n = Number(ttlValue);
+    if (now === null || !Number.isFinite(n) || n < 1) return "—";
+    const ms = ttlUnit === "hours" ? n * 3_600_000 : n * 86_400_000;
+    return new Date(now + ms).toLocaleString();
+  }, [now, ttlUnit, ttlValue]);
+
+  const expired = (l: Link) => l.expiresAt !== null && now !== null && new Date(l.expiresAt).getTime() <= now;
+
+  // Подпись срока жизни в списке: «бессрочная», «истекает …» или «истекла …».
+  function expiryLabel(l: Link): string {
+    if (!l.expiresAt) return t("mentor.ttl.forever");
+    const at = new Date(l.expiresAt);
+    return t(expired(l) ? "mentor.expiredAt" : "mentor.expiresAt", { date: at.toLocaleString() });
   }
 
   // Подпись периода: «01.06.2026 — 30.06.2026», «с 01.06.2026», «по 30.06.2026»
@@ -89,6 +125,7 @@ export default function MentorShareSettings() {
           accountId: accountId || undefined,
           periodFrom: periodFrom || undefined,
           periodTo: periodTo || undefined,
+          ...(ttlUnit === "forever" ? {} : { ttlUnit, ttlValue: Number(ttlValue) }),
         }),
       });
       if (res.ok) {
@@ -96,6 +133,8 @@ export default function MentorShareSettings() {
         setAccountId(ALL_ACCOUNTS);
         setPeriodFrom("");
         setPeriodTo("");
+        setTtlUnit("forever");
+        setTtlValue("24");
         await load();
       } else {
         alert((await res.json()).error ?? t("mentor.error"));
@@ -189,6 +228,40 @@ export default function MentorShareSettings() {
       </div>
       <p className="text-xs text-faint mb-3">{t("mentor.periodFieldHint")}</p>
 
+      <label className="text-xs text-faint block mb-1">{t("mentor.ttlFieldLabel")}</label>
+      <div className="flex flex-wrap items-center gap-2 mb-1">
+        {/* Сегментированный переключатель: три режима видны сразу, без
+            раскрывающегося списка — выбор из трёх пунктов прятать незачем. */}
+        <div className="inline-flex rounded-lg border border-border p-0.5">
+          {TTL_UNITS.map((unit) => (
+            <button
+              key={unit}
+              type="button"
+              onClick={() => setTtlUnit(unit)}
+              className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                ttlUnit === unit ? "bg-accent/15 text-accent" : "text-muted hover:text-fg"
+              }`}
+            >
+              {t(`mentor.ttl.${unit}`)}
+            </button>
+          ))}
+        </div>
+        {ttlUnit !== "forever" && (
+          <input
+            type="number"
+            min={1}
+            max={ttlUnit === "hours" ? 8760 : 3650}
+            value={ttlValue}
+            onChange={(e) => setTtlValue(e.target.value)}
+            aria-label={t(`mentor.ttl.${ttlUnit}`)}
+            className="input-base w-24 px-3 py-1.5 text-sm"
+          />
+        )}
+      </div>
+      <p className="text-xs text-faint mb-3">
+        {ttlUnit === "forever" ? t("mentor.ttlHintForever") : t("mentor.ttlPreview", { date: expiryPreview })}
+      </p>
+
       <label className="text-xs text-faint block mb-1">{t("mentor.labelFieldLabel")}</label>
       <div className="flex items-center gap-2 mb-1">
         <input
@@ -219,6 +292,9 @@ export default function MentorShareSettings() {
               <div className="truncate">{l.label || t("mentor.unlabeled")}</div>
               <div className="text-xs text-faint truncate">
                 {accountLabel(l.accountId)} · {periodLabel(l)}
+              </div>
+              <div className={`text-xs truncate ${expired(l) ? "text-loss" : "text-faint"}`}>
+                {expiryLabel(l)}
               </div>
               <div className="text-xs text-faint">
                 {l.lastViewedAt ? t("mentor.lastViewed", { date: new Date(l.lastViewedAt).toLocaleString() }) : t("mentor.neverViewed")}

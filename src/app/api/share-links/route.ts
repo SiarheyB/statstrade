@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { generateShareToken, parseRangeDate } from "@/lib/mentorShare";
+import { expiryFrom, generateShareToken, isExpired, parseRangeDate, TTL_MAX, TTL_UNITS } from "@/lib/mentorShare";
 
 function featureDisabled() {
   return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
@@ -33,6 +33,9 @@ const schema = z.object({
   // стороны = граница не задана.
   periodFrom: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
   periodTo: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  // Срок жизни ссылки: "forever" (или поля нет) — бессрочная.
+  ttlUnit: z.enum(TTL_UNITS).optional(),
+  ttlValue: z.coerce.number().int().min(1).max(Math.max(TTL_MAX.hours, TTL_MAX.days)).optional(),
 });
 
 export async function POST(req: Request) {
@@ -76,6 +79,13 @@ export async function POST(req: Request) {
       return badRequest("Начало периода позже его конца");
     }
 
+    const { ttlUnit, ttlValue } = parsed.data;
+    // Значение без единицы (или наоборот) — не срок, а недозаполненная форма.
+    if ((ttlUnit === "hours" || ttlUnit === "days") && !ttlValue) {
+      return badRequest("Укажите, на сколько выдать ссылку");
+    }
+    const expiresAt = expiryFrom(ttlUnit, ttlValue);
+
     const link = await prisma.shareLink.create({
       data: {
         userId: user.userId,
@@ -84,6 +94,7 @@ export async function POST(req: Request) {
         accountId,
         periodFrom,
         periodTo,
+        expiresAt,
       },
     });
     return NextResponse.json({ link });

@@ -10,6 +10,7 @@ import {
   computePublicSummary,
   computePublicTrades,
   formatRangeDate,
+  isExpired,
   PUBLIC_TRADES_LIMIT,
 } from "@/lib/mentorShare";
 
@@ -32,7 +33,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   if (!feature.enabled) return <Unavailable t={t} />;
 
   const link = await prisma.shareLink.findUnique({ where: { token } });
-  if (!link || link.revokedAt) return <Unavailable t={t} />;
+  // Истёкшая ссылка выглядит для гостя так же, как отозванная: по чужой ссылке
+  // незачем понимать, была она когда-то живой или её вовсе не существовало.
+  if (!link || link.revokedAt || isExpired(link.expiresAt)) return <Unavailable t={t} />;
 
   prisma.shareLink.update({ where: { id: link.id }, data: { lastViewedAt: new Date() } }).catch(() => {});
 

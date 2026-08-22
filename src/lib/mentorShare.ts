@@ -133,6 +133,44 @@ export async function computePublicSummary(
 }
 
 
+
+// ─── Срок жизни ссылки ──────────────────────────────────────────────────────
+
+/** Единицы, в которых задаётся срок при создании ссылки. */
+export const TTL_UNITS = ["forever", "hours", "days"] as const;
+export type TtlUnit = (typeof TTL_UNITS)[number];
+
+/**
+ * Разумные потолки: год в часах и десять лет в днях.
+ *
+ * Не про безопасность, а против опечаток — «10000 дней» почти наверняка промах
+ * по клавише, а не намерение.
+ */
+export const TTL_MAX = { hours: 8760, days: 3650 } as const;
+
+/**
+ * Момент истечения ссылки или null для бессрочной.
+ *
+ * Часы и дни считаются от «сейчас»: ссылка на 48 часов живёт двое суток с
+ * момента создания, а не до конца вторых суток.
+ */
+export function expiryFrom(
+  unit: string | null | undefined,
+  value: number | null | undefined,
+  now = Date.now(),
+): Date | null {
+  if (unit !== "hours" && unit !== "days") return null;
+  if (!value || !Number.isFinite(value) || value < 1) return null;
+  const capped = Math.min(Math.floor(value), TTL_MAX[unit]);
+  const ms = unit === "hours" ? capped * 3_600_000 : capped * 86_400_000;
+  return new Date(now + ms);
+}
+
+/** Истекла ли ссылка. Бессрочная — никогда. */
+export function isExpired(expiresAt: Date | null | undefined, now = Date.now()): boolean {
+  return !!expiresAt && expiresAt.getTime() <= now;
+}
+
 // ─── Период отбора ──────────────────────────────────────────────────────────
 
 /** Границы периода менторской ссылки; null с любой стороны = без границы. */
