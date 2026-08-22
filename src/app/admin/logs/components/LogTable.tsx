@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-interface LogRow {
+export interface LogRow {
   id: string;
   module: string;
   accountId: string | null;

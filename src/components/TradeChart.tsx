@@ -242,7 +242,6 @@ export function TradeChart({ trade }: { trade: SerializedTrade }) {
 
   const candles = real && data ? data : schematic;
   const sl = trade.stopLoss ?? null;
-  const exitColor = trade.netPnl >= 0 ? PROFIT : LOSS;
   // MFE/MAE only makes sense against real market candles — on the schematic
   // fallback the wicks are fabricated, so "best exit" would be meaningless.
   const exitAnalysis =

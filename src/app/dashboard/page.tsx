@@ -90,12 +90,18 @@ export default function DashboardPage() {
     return set.length ? set.reduce((s, a) => s + (a.capital ?? 0), 0) : 10000;
   }, [accountsBal, filters.accountId]);
 
-  // Keep the input synced to the selected account's saved capital.
-  useEffect(() => {
-    if (!capEditable) return;
-    const a = accountsBal.find((x) => x.id === filters.accountId);
-    setCapitalDraft(a?.capital != null ? String(a.capital) : "");
-  }, [filters.accountId, accountsBal, capEditable]);
+  // Поле капитала следует за сохранённым значением выбранного счёта. Сравнение
+  // с предыдущим прямо в рендере — штатная замена «эффекту ради setState»
+  // (https://react.dev/learn/you-might-not-need-an-effect). Побочный плюс: пока
+  // значение на сервере не изменилось, набранный текст больше не затирается
+  // очередным обновлением балансов.
+  const savedCapital = accountsBal.find((x) => x.id === filters.accountId)?.capital ?? null;
+  const capitalKey = `${filters.accountId}|${savedCapital}`;
+  const [prevCapitalKey, setPrevCapitalKey] = useState(capitalKey);
+  if (capEditable && prevCapitalKey !== capitalKey) {
+    setPrevCapitalKey(capitalKey);
+    setCapitalDraft(savedCapital != null ? String(savedCapital) : "");
+  }
 
   async function saveCapital() {
     if (!capEditable) return;

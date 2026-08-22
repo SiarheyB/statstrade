@@ -99,8 +99,8 @@ export default function AdminExchanges() {
         return next;
       });
       setGuideSuccess(`Гайд для ${SUPPORTED_EXCHANGES[id as ExchangeId]?.name ?? id} сохранён`);
-    } catch (err: any) {
-      setGuideError(err.message || "Не удалось сохранить гайд");
+    } catch (err) {
+      setGuideError((err as Error).message || "Не удалось сохранить гайд");
     } finally {
       setSaving(null);
     }
@@ -127,8 +127,8 @@ export default function AdminExchanges() {
         });
         setGuideSuccess(`Гайд для ${SUPPORTED_EXCHANGES[id as ExchangeId]?.name ?? id} сброшен к умолчанию`);
       }
-    } catch (err: any) {
-      setGuideError(err.message || "Не удалось сбросить гайд");
+    } catch (err) {
+      setGuideError((err as Error).message || "Не удалось сбросить гайд");
     } finally {
       setSaving(null);
     }

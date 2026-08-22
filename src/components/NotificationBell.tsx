@@ -26,7 +26,7 @@ function fmtAge(iso: string, t: (k: string) => string): string {
   return t("announcements.daysAgo").replace("{n}", String(days));
 }
 
-export default function NotificationBell({ collapsed }: { collapsed?: boolean }) {
+export default function NotificationBell({ collapsed: _collapsed }: { collapsed?: boolean }) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 
 vi.mock('@/lib/i18n/provider', () => ({
   useI18n: () => ({ t: (key: string) => key }),

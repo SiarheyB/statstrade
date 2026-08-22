@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSession, type SessionPayload } from "./auth";
 import { prisma } from "./db";
-import { logError } from "./errorLog";
 
 // Global admin emails list - configurable via environment variable (no DB migration needed)
 function adminEmails(): string[] {

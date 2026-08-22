@@ -15,7 +15,6 @@ export const DeleteModal: React.FC<DeleteModalProps> = ({
   onConfirm,
   deletingIds,
   deleteAll,
-  totalCount,
   error,
   success,
 }) => {

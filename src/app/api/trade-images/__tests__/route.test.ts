@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   asUser,
   asGuest,
@@ -56,7 +56,7 @@ import {
   getOrCreateNestedFolders,
   GoogleDriveError,
 } from "@/lib/integrations/googleDrive";
-import { uploadFile, publishResource, getPublicUrl, YandexDiskError } from "@/lib/integrations/yandexDisk";
+import { uploadFile, publishResource, getPublicUrl } from "@/lib/integrations/yandexDisk";
 import { detectImageType } from "@/lib/imageValidation";
 
 const base = "https://example.com/api/trade-images";

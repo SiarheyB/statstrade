@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AccountsPage from "../page";
 
 vi.mock("@/lib/i18n/provider", () => ({
@@ -195,7 +195,6 @@ describe("AccountsPage", () => {
     syncState.notice = "Some notice";
     render(<AccountsPage />);
     expect(await screen.findByText("Some notice")).toBeInTheDocument();
-    const closeButtons = document.querySelectorAll("button");
     // find the X button next to the notice (first button with no text content near notice)
     const noticeBox = screen.getByText("Some notice").closest("div");
     const btn = noticeBox?.querySelector("button");

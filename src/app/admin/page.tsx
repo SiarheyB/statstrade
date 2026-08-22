@@ -49,6 +49,9 @@ function Stat({
 export default async function AdminOverviewPage() {
   const { t, locale } = await getServerT();
   const nf = locale === "ru" ? "ru-RU" : "en-US";
+  // Серверный компонент: Date.now() выполняется на сервере при каждом запросе,
+  // никакой гидратации тут нет — правило React Compiler бьёт мимо.
+  /* eslint-disable react-hooks/purity -- server component, no hydration */
   const weekAgo = new Date(Date.now() - 7 * 86400_000);
   const monthAgo = new Date(Date.now() - 30 * 86400_000);
 

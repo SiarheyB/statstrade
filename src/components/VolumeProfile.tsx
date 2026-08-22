@@ -64,7 +64,7 @@ function fmtP(p: number): string {
 
 // ─── Custom Tooltip ───────────────────────────────────────────────────────
 
-function VPTooltip({ active, payload, label }: { active?: boolean; payload?: { payload: VolumeProfileLevel }[]; label?: string }) {
+function VPTooltip({ active, payload }: { active?: boolean; payload?: { payload: VolumeProfileLevel }[]; label?: string }) {
   if (!active || !payload || !payload.length) return null;
   const d = payload[0].payload;
   const tags: string[] = [];
@@ -160,7 +160,7 @@ export default memo(VolumeProfileComponent);
 // ─── Chart (separate component to keep re-renders contained) ──────────────
 
 function VolumeProfileChart({ data }: { data: VolumeProfile }) {
-  const { t, timezone } = useI18n();
+  const { t } = useI18n();
 
   // Sort levels by price ascending (Y axis).
   const chartData = useMemo(() => {

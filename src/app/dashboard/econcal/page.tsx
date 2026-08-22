@@ -119,6 +119,10 @@ export default function EconCalPage() {
     return `${zp.y}-${zp.mo}-${zp.d}`;
   }, [timezone]);
   const { todayId, tomorrowId } = useMemo(() => {
+    // День «сегодня» зависит от пояса пользователя, поэтому считается на
+    // клиенте. Значение уходит только в фильтр списка, в разметку не
+    // попадает — на гидратацию не влияет.
+    // eslint-disable-next-line react-hooks/purity -- client-only day filter
     const now = Date.now();
     return { todayId: localDayId(new Date(now)), tomorrowId: localDayId(new Date(now + 86400000)) };
   }, [localDayId]);

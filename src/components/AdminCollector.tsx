@@ -138,6 +138,9 @@ export default function AdminCollector() {
     };
   }, [load]);
 
+  // Пока данные не пришли, «сейчас» берём локальное — оно нужно лишь для
+  // подписи «обновлено N секунд назад» и сменится первым же ответом.
+  // eslint-disable-next-line react-hooks/purity -- fallback until data arrives
   const now = data ? Date.parse(data.now) : Date.now();
   const collectorFeeds = data?.collector.data?.feeds ?? [];
   const cFeedMap = useMemo(() => {

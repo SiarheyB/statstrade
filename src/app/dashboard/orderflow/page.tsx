@@ -7,22 +7,11 @@ import {
   RefreshCw,
   HelpCircle,
   Filter,
-  AlertTriangle,
-  Pencil,
-  ArrowUp,
-  ArrowDown,
-  ArrowRight,
-  TrendingUp,
-  Square,
-  Minus,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import {
-  zonedParts,
   shiftedMs,
   type TimezoneId,
-  normalizeTimezone,
-  getTimezoneFromCookie,
 } from "@/lib/timezone";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
@@ -30,7 +19,7 @@ import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
 import { profileFromFootprint } from "@/lib/visibleVolumeProfile";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawAbsorptionMarkers } from "@/components/AbsorptionOverlay";
-import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
+import { drawDrawings } from "@/components/DrawingOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import AbsorptionPanel from "@/components/AbsorptionPanel";
 import DrawingToolbar from "@/components/DrawingToolbar";
@@ -64,7 +53,6 @@ import {
   fmtValLabel as fmtVal,
   fmtTimeHM as fmtTime,
   PADL,
-  PADR,
   PADB,
   PRICE_AXIS_W,
 } from "@/lib/candlestickChart";
@@ -139,11 +127,6 @@ function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
     timeZone: 'UTC',
   });
   return f.format(d);
-}
-function fmtDateTime(ms: number, tz: TimezoneId): string {
-  const { d, mo, h, mi } = zonedParts(ms, tz);
-  const p = (z: number) => String(z).padStart(2, "0");
-  return `${p(d)}.${p(mo + 1)} ${p(h)}:${p(mi)}`;
 }
 function baseAsset(symbol: string): string {
   return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
@@ -241,7 +224,9 @@ export default function OrderflowPage() {
   // пользователя, а не то, что должно включаться само.
   const [showVpOverlay, setShowVpOverlay] = useState(false);
   const [imbalanceData, setImbalanceData] = useState<Imbalance | null>(null);
-  const [speedData, setSpeedData] = useState<SpeedOfTape | null>(null);
+  // Значение нигде не читается — лента скорости рисуется из data напрямую;
+  // сеттер оставлен, чтобы не потерять сброс при смене инструмента.
+  const [, setSpeedData] = useState<SpeedOfTape | null>(null);
   const [imbalanceLoading, setImbalanceLoading] = useState(false);
   const [imbalanceError, setImbalanceError] = useState<string | null>(null);
   const [absorptionSignals, setAbsorptionSignals] = useState<AbsorptionSignal[]>([]);
@@ -249,8 +234,8 @@ export default function OrderflowPage() {
   const [absorptionError, setAbsorptionError] = useState<string | null>(null);
   const [showAbsorption, setShowAbsorption] = useState(true);
   const [drawings, setDrawings] = useState<DrawingRow[]>([]);
-  const [drawingsLoading, setDrawingsLoading] = useState(false);
-  const [drawingsError, setDrawingsError] = useState<string | null>(null);
+  const [, setDrawingsLoading] = useState(false);
+  const [, setDrawingsError] = useState<string | null>(null);
   const [showDrawings, setShowDrawings] = useState(true);
   const [activeTool, setActiveTool] = useState<DrawingToolType | null>(null);
   const [drawingPoints, setDrawingPoints] = useState<DrawingPoint[]>([]);
@@ -314,6 +299,9 @@ export default function OrderflowPage() {
   // сравнивает fp по ссылке (fpCache.fp === fp).
   const mergedFootprint = useMemo<Footprint | null>(() => {
     const live = data?.footprint ?? null;
+    // Как и на форексе: сегменты истории лежат в ref, чтобы их догрузка не
+    // перерисовывала график целиком (см. historyVersion).
+    // eslint-disable-next-line react-hooks/refs -- history is intentionally out of state
     const segs = historySegmentsRef.current.filter((sg) => sg.footprint && sg.footprint.candles.length);
     if (!segs.length) return live;
     const byT = new Map<number, { t: number; levels: FootprintLevel[] }>();
@@ -1563,6 +1551,7 @@ export default function OrderflowPage() {
                   </label>
                   <button
                     className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
+                    // eslint-disable-next-line react-hooks/refs -- вызывается по клику, не в рендере
                     onClick={() => void deleteDrawingById(d.id)}
                   >
                     {t("of.delete")}

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { prisma } from "@/lib/db";
-import { getFeedFreshness, ONLINE_THRESHOLD_MS } from "@/lib/admin";
+import { getFeedFreshness } from "@/lib/admin";
 import AdminOverviewPage from "../page";
 
 vi.mock("@/lib/i18n/server", () => ({

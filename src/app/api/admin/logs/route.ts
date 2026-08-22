@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/admin";
-import { LogService } from "@/lib/log.service";
+import { LogService, type LogFilters, type LogLevel } from "@/lib/log.service";
 import { logError } from "@/lib/errorLog";
 
 // Simple in-memory rate limiter for DELETE endpoint
@@ -59,20 +59,26 @@ export async function GET(req: Request) {
   if (result instanceof Response) {
     return result;
   }
-  const session = result as any;
 
   // Parse and validate query parameters
   const url = new URL(req.url);
   const page = Math.max(1, parseInt(url.searchParams.get("page") ?? "1"));
   const limit = Math.min(100, parseInt(url.searchParams.get("limit") ?? "20"));
-  const filters: any = {
-    module: url.searchParams.get("module"),
-    accountId: url.searchParams.get("accountId"),
-    eventType: url.searchParams.get("eventType"),
-    level: url.searchParams.get("level") as "info" | "warn" | "error" | undefined,
-    search: url.searchParams.get("search"),
-    startDate: url.searchParams.get("startDate") ? new Date(url.searchParams.get("startDate") ?? "") : undefined,
-    endDate: url.searchParams.get("endDate") ? new Date(url.searchParams.get("endDate") ?? "") : undefined,
+  // searchParams.get отдаёт null для отсутствующего параметра, а фильтры ждут
+  // undefined — иначе «нет фильтра» превратилось бы в «поле равно null».
+  const param = (name: string) => url.searchParams.get(name) ?? undefined;
+  const date = (name: string) => {
+    const raw = param(name);
+    return raw ? new Date(raw) : undefined;
+  };
+  const filters: LogFilters = {
+    module: param("module"),
+    accountId: param("accountId"),
+    eventType: param("eventType"),
+    level: param("level") as LogLevel | undefined,
+    search: param("search"),
+    startDate: date("startDate"),
+    endDate: date("endDate"),
   };
 
   try {

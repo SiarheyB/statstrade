@@ -1,22 +1,14 @@
 import { useState } from 'react';
-import { LogLevel } from '@/lib/log.service';
+import type { LogFilters as LogFilterValues, LogLevel } from '@/lib/log.service';
 
 export const LogFilters: React.FC<{
-  filters: {
-    module?: string;
-    accountId?: string;
-    eventType?: string;
-    level?: LogLevel;
-    search?: string;
-    startDate?: Date;
-    endDate?: Date;
-  };
-  onChange: (newFilters: any) => void;
+  filters: LogFilterValues;
+  onChange: (newFilters: LogFilterValues) => void;
 }> = ({ filters, onChange }) => {
   const [module, setModule] = useState(filters.module || '');
   const [accountId, setAccountId] = useState(filters.accountId || '');
   const [eventType, setEventType] = useState(filters.eventType || '');
-  const [level, setLevel] = useState(filters.level || '');
+  const [level, setLevel] = useState<LogLevel | ''>(filters.level ?? '');
   const [search, setSearch] = useState(filters.search || '');
   const [startDate, setStartDate] = useState(filters.startDate ? new Date(filters.startDate) : null);
   const [endDate, setEndDate] = useState(filters.endDate ? new Date(filters.endDate) : null);
@@ -77,7 +69,7 @@ export const LogFilters: React.FC<{
           <label className="block text-sm font-medium mb-1 text-muted">Уровень лога</label>
           <select
             value={level}
-            onChange={(e) => setLevel(e.target.value)}
+            onChange={(e) => setLevel(e.target.value as LogLevel | '')}
             className="input-base w-full"
           >
             <option value="">Все уровни</option>

@@ -99,14 +99,6 @@ function SymbolsConfig() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    const [cfgRes, statusRes] = await Promise.all([
-      fetch("/api/admin/forex/config"),
-      fetch("/api/admin/forex"),
-    ]);
-    if (cfgRes.ok) setItems((await cfgRes.json()).items ?? []);
-    if (statusRes.ok) setEnvSymbols((await statusRes.json()).envSymbols ?? []);
-  }, []);
 
   useEffect(() => {
     let alive = true;

@@ -6,7 +6,7 @@ import { Pagination } from '@/components/Pagination';
 // Mock scrollIntoView which may not be fully implemented in JSDOM
 beforeEach(() => {
   vi.clearAllMocks();
-  // @ts-ignore - mocking existing method
+  // @ts-expect-error — подменяем метод DOM, которого в JSDOM нет
   Element.prototype.scrollIntoView = vi.fn();
 });
 

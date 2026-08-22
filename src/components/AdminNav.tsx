@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { LucideIcon } from "lucide-react";
 import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
@@ -11,7 +12,13 @@ import NotificationBell from "@/components/NotificationBell";
 
 // Навигация админ-панели. Раздел отделён от пользовательского дашборда: своя
 // шапка, доступ только администраторам (см. admin/layout.tsx).
-const LINKS = [
+//
+// Пункт меню — либо ссылка, либо раскрывающаяся группа со вложенными ссылками.
+type NavLink = { href: string; key: string; icon: LucideIcon; exact?: boolean };
+type NavGroup = { key: string; icon: LucideIcon; children: NavLink[] };
+type NavItem = NavLink | NavGroup;
+
+const LINKS: NavItem[] = [
   { href: "/admin", key: "admin.nav.overview", icon: LayoutDashboard, exact: true },
   { href: "/admin/collector", key: "admin.nav.collector", icon: Layers },
   { href: "/admin/forex", key: "admin.nav.forex", icon: TrendingUp },
@@ -84,8 +91,8 @@ export default function AdminNav({ email }: { email: string }) {
 
   const isGroupOpen = (key: string) => expanded.has(key);
 
-  const hasChildren = (item: (typeof LINKS)[number]) =>
-    "children" in item && (item as any).children?.length > 0;
+  const hasChildren = (item: NavItem): item is NavGroup =>
+    "children" in item && item.children.length > 0;
 
   const body = (onNavigate: () => void) => (
     <>
@@ -123,7 +130,7 @@ export default function AdminNav({ email }: { email: string }) {
       <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3")}>
         {LINKS.map((l) => {
           if (hasChildren(l)) {
-            const item = l as { children: typeof LINKS; key: string; icon: any };
+            const item = l;
             return (
               <div key={item.key}>
                 <button
@@ -141,7 +148,7 @@ export default function AdminNav({ email }: { email: string }) {
                 {isGroupOpen(item.key) && (
                   <div className={clsx("mt-1 space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-2 border-l border-border")}>
                     {item.children.map((c) => {
-                      const link = c as { href: string; key: string; icon: any; exact?: boolean };
+                      const link = c;
                       return (
                         <Link
                           key={link.href}
@@ -168,7 +175,7 @@ export default function AdminNav({ email }: { email: string }) {
           }
 
           // Regular Link
-          const link = l as { href: string; key: string; icon: any; exact?: boolean };
+          const link = l;
           return (
             <Link
               key={link.href}

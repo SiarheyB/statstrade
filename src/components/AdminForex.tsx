@@ -123,6 +123,8 @@ export default function AdminForex() {
     return <div className="mt-6 text-sm text-muted">Загрузка…</div>;
   }
 
+  // То же, что в AdminCollector: локальное «сейчас» только до первого ответа.
+  // eslint-disable-next-line react-hooks/purity -- fallback until data arrives
   const now = data ? Date.parse(data.now) : Date.now();
   const h = data?.health;
   const online = h?.ok && h.data?.healthy;

@@ -65,7 +65,7 @@ async function getPairs() {
 const TTL_MS = 60_000;
 let cache: { at: number; data: unknown } | null = null;
 
-export async function GET(req: Request) {
+export async function GET(_req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   const denied = await forexAccessError(user);

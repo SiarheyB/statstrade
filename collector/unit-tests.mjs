@@ -4,7 +4,7 @@
 // Запуск: DATABASE_URL="postgresql://..." node collector/unit-tests.mjs
 // Не требует БД/Докера — чистые функции.
 
-import { binSide, rowsForFeed, accumulateRollup, flushRollup, minCoinsFor as collectorMinCoinsFor, FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS } from "./index.mjs";
+import { binSide } from "./index.mjs";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers

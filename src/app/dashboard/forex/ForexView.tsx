@@ -160,6 +160,10 @@ export default function ForexView() {
   const [loadingHistory, setLoadingHistory] = useState(false);
 
   const candles: FxCandle[] = useMemo(
+    // Догруженная история живёт в ref намеренно: она приходит пачками при
+    // прокрутке влево и держать её в state — это ре-рендер всего графика на
+    // каждую пачку. Перерисовку заказывает historyVersion ниже.
+    // eslint-disable-next-line react-hooks/refs -- history is intentionally out of state
     () => (historyRef.current.length ? [...historyRef.current, ...tailCandles] : tailCandles),
     // historyVersion — не читается напрямую, нужен как повод пересчитать
     // при догрузке истории (historyRef мутируется в ref, без ре-рендера).
@@ -952,7 +956,8 @@ function inferBinSize(levels: { price: number }[]): number {
               </label>
               <button
                 className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
-                onClick={() => void deleteDrawingById(d.id)}
+                // eslint-disable-next-line react-hooks/refs -- вызывается по клику, не в рендере
+                    onClick={() => void deleteDrawingById(d.id)}
               >
                 {t("of.delete")}
               </button>

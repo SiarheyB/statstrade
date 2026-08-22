@@ -1,4 +1,4 @@
-import { LogService, LogLevel } from "./log.service";
+import { LogService, type LogDetails } from "./log.service";
 
 /**
  * Logger helper for use across the application.
@@ -19,16 +19,29 @@ import { LogService, LogLevel } from "./log.service";
  * logger.error("collector", null, "CONNECTION_FAILED", "Failed to connect", { error: e.message, stack: e.stack });
  * ```
  */
-function normalizeArgs(args: any[]) {
+// Две формы вызова (см. примеры выше), поэтому разбираем позиционно, а не по
+// именованным параметрам.
+type LogArgs = [module: string, accountId: string | null, ...rest: unknown[]];
+
+type NormalizedLog = {
+  module: string;
+  accountId: string | null;
+  eventType: string;
+  message: string;
+  details?: LogDetails;
+  error?: Error;
+};
+
+function normalizeArgs(args: LogArgs): NormalizedLog {
   const [module, accountId, ...rest] = args;
 
   if (rest.length === 2) {
     // Legacy: [message, details]
-    const [message, details] = rest;
+    const [message, details] = rest as [string, LogDetails];
     return { module, accountId, eventType: message, message, details };
   } else if (rest.length >= 3) {
     // New: [eventType, message, details?, error?]
-    const [eventType, message, details = {}, error] = rest;
+    const [eventType, message, details = {}, error] = rest as [string, string, LogDetails?, Error?];
     return { module, accountId, eventType, message, details, error };
   }
 
@@ -37,17 +50,17 @@ function normalizeArgs(args: any[]) {
 }
 function createLogger() {
   return {
-    info: (...args: any[]) => {
+    info: (...args: LogArgs) => {
       const { module, accountId, eventType, message, details } = normalizeArgs(args);
       return LogService.record(module, accountId, eventType, message, details, "info");
     },
 
-    warn: (...args: any[]) => {
+    warn: (...args: LogArgs) => {
       const { module, accountId, eventType, message, details } = normalizeArgs(args);
       return LogService.record(module, accountId, eventType, message, details, "warn");
     },
 
-    error: (...args: any[]) => {
+    error: (...args: LogArgs) => {
       const { module, accountId, eventType, message, details, error } = normalizeArgs(args);
       const mergedDetails = error
         ? { ...details, error: error.message, stack: error.stack }
@@ -65,11 +78,11 @@ export const logger = createLogger();
  */
 export function createScopedLogger(module: string, accountId: string | null) {
   return {
-    info: (message: string, details?: Record<string, any>) =>
+    info: (message: string, details?: LogDetails) =>
       logger.info(module, accountId, message, details),
-    warn: (message: string, details?: Record<string, any>) =>
+    warn: (message: string, details?: LogDetails) =>
       logger.warn(module, accountId, message, details),
-    error: (message: string, details?: Record<string, any>, error?: Error) =>
+    error: (message: string, details?: LogDetails, error?: Error) =>
       logger.error(module, accountId, message, details, error),
   };
 }

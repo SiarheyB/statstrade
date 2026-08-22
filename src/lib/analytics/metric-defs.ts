@@ -1,5 +1,5 @@
 import type { Metrics } from "./metrics";
-import { fmtUsd, fmtPct, fmtRatio, fmtNum, numLocale } from "../format";
+import { fmtPct, fmtRatio, fmtNum, numLocale } from "../format";
 import { translate, type Locale } from "../i18n/core";
 
 // Numeric-only keys of Metrics (excludes arrays / breakdown objects).

@@ -67,13 +67,21 @@ export default function NewsPage() {
     load();
   }, [load]);
 
-  // Reset filter + page when the language changes; reset page when filtering.
-  useEffect(() => {
+  // Сброс фильтра и страницы при смене языка (и страницы — при смене фильтра).
+  // Штатный для React способ «сбросить состояние при изменении значения»:
+  // сравнить с предыдущим прямо в рендере, а не гонять лишний проход через
+  // эффект (https://react.dev/learn/you-might-not-need-an-effect).
+  const [prevLocale, setPrevLocale] = useState(locale);
+  if (prevLocale !== locale) {
+    setPrevLocale(locale);
     setActive("all");
-  }, [locale]);
-  useEffect(() => {
     setPage(1);
-  }, [active, locale]);
+  }
+  const [prevActive, setPrevActive] = useState(active);
+  if (prevActive !== active) {
+    setPrevActive(active);
+    setPage(1);
+  }
 
   const nameFor = (id: string) => sources.find((s) => s.id === id)?.name ?? id;
   const styleFor = (id: string) => {

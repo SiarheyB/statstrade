@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { scopeLabel } from "../scopeLabel";
 import type { AccountSummary, SerializedTrade } from "@/lib/types";
 

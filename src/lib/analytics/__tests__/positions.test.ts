@@ -1,6 +1,6 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { reconstructTrades } from "../positions";
-import type { FillInput, RoundTripTrade } from "../types";
+import type { FillInput } from "../types";
 
 describe("Positions Reconstruction", () => {
   describe("reconstructTrades", () => {

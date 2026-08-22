@@ -143,7 +143,7 @@ function formatCCXTError(err: unknown): string {
   if (response?.status) msg += ` | HTTP ${response.status}`;
   if (response?.statusText) msg += ` ${response.statusText}`;
   // Some CCXT errors have a .text with the raw API response body
-  const text = response?.text ?? (e as any).body;
+  const text = response?.text ?? (e as { body?: unknown }).body;
   if (text && typeof text === "string" && text.length < 500) msg += ` | body: ${text}`;
   return msg;
 }
@@ -157,7 +157,7 @@ async function fetchTrades(
   sinceFloor: number,
   exchangeId: ExchangeId,
   kind: MarketKind,
-  accountId: string,
+  _accountId: string,
 ): Promise<NormalizedFill[]> {
   const cap = MAX_LOOKBACK_DAYS[exchangeId];
   if (cap) sinceFloor = Math.max(sinceFloor, Date.now() - cap * 86_400_000);
@@ -467,7 +467,6 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
           await withNetworkRetry(() => created.loadMarkets());
           exchanges.set(kind, ex);
         }
-        const label = symbol || kind;
         const fills = await fetchTrades(ex, symbol || undefined, floor ?? baseSince, exchangeId, kind, accountId);
         const count = await persistFills(accountId, account.exchange, fills);
         imported += count;

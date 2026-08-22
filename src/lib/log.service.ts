@@ -1,7 +1,21 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 
 export type LogLevel = "info" | "warn" | "error";
 export type EventType = string;
+/** Произвольная полезная нагрузка лога — уезжает в JSON-колонку как есть. */
+export type LogDetails = Record<string, unknown>;
+
+/** Отбор для списка логов: и в API, и в админке одна форма. */
+export type LogFilters = {
+  module?: string;
+  accountId?: string;
+  eventType?: string;
+  startDate?: Date;
+  endDate?: Date;
+  search?: string;
+  level?: LogLevel;
+};
 
 export class LogService {
   static async record(
@@ -9,7 +23,7 @@ export class LogService {
     accountId: string | null,
     eventType: EventType,
     message: string,
-    details: Record<string, any> = {},
+    details: LogDetails = {},
     level: LogLevel = "info",
   ): Promise<void> {
     // Check if logging is enabled via environment variable
@@ -24,7 +38,7 @@ export class LogService {
           accountId,
           eventType,
           message,
-          details: details as any,
+          details: details as Prisma.InputJsonObject,
           level,
         },
       });
@@ -34,21 +48,9 @@ export class LogService {
     }
   }
 
-  static async fetchPage(
-    page: number = 1,
-    limit: number = 20,
-    filters: {
-      module?: string;
-      accountId?: string;
-      eventType?: string;
-      startDate?: Date;
-      endDate?: Date;
-      search?: string;
-      level?: LogLevel;
-    } = {},
-  ) {
+  static async fetchPage(page: number = 1, limit: number = 20, filters: LogFilters = {}) {
     const skip = (page - 1) * limit;
-    const where: any = {};
+    const where: Prisma.ImportLogWhereInput = {};
 
     if (filters.module) where.module = filters.module;
     if (filters.accountId) where.accountId = filters.accountId;

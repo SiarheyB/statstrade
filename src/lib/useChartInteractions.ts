@@ -114,6 +114,11 @@ const EDGE_PADDING_FRACTION = 0.1;
 
 export function useChartInteractions(opts: ChartInteractionsOptions) {
   const optsRef = useRef(opts);
+  // «Последние пропсы» для обработчиков мыши: колбэки создаются один раз
+  // (пустые зависимости ниже), а данные графика меняются на каждый кадр.
+  // Через useEffect значение отставало бы на рендер — курсор ловил бы старую
+  // свечу.
+  // eslint-disable-next-line react-hooks/refs -- latest-props ref for stable handlers
   optsRef.current = opts;
 
   // Ось и проекция окна на пиксели — единая точка пересчёта для всего хука.

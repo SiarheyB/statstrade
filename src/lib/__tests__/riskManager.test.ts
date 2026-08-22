@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
 // Mock all external dependencies upfront
 const mockPrisma = vi.hoisted(() => ({
@@ -25,7 +25,7 @@ vi.mock("@/lib/risk", () => ({
   riskPerTradeAmount: mockRiskPerTradeAmount,
 }));
 
-import { calculateNetStopsFromTrades, getNetStopsCount, checkRiskLimits } from "@/lib/riskManager";
+import { calculateNetStopsFromTrades, getNetStopsCount } from "@/lib/riskManager";
 
 // --- Tests for calculateNetStopsFromTrades ---
 describe("calculateNetStopsFromTrades", () => {

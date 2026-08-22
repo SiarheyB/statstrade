@@ -21,11 +21,6 @@ const mockAdminSession = {
   email: 'admin@test.com',
 };
 
-const mockNonAdminSession = {
-  userId: 'user1',
-  email: 'user@test.com',
-};
-
 const mockLogsResponse = {
   data: [
     {

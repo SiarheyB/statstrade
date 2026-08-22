@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { computeExitAnalysis } from "../exitAnalysis";
-import type { RoundTripTrade } from "../types";
+import type {} from "../types";
 
 describe("Exit Analysis", () => {
   it("computes correct MFE/MAE for winning trade", () => {

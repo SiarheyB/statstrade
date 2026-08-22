@@ -10,7 +10,7 @@ import {
   TIMEZONE_COOKIE,
   TIMEZONES,
 } from "./timezone";
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 
 describe("normalizeTimezone", () => {
   it("возвращает 'auto' для пустых/невалидных значений", () => {

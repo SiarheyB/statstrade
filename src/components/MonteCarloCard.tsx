@@ -7,7 +7,7 @@ import type { ScopeAccount } from "@/lib/analytics/metrics";
 import { useI18n } from "@/lib/i18n/provider";
 import { Term } from "@/components/Term";
 import { fmtPct } from "@/lib/format";
-import { runMonteCarlo, type MonteCarloResult } from "@/lib/analytics/monteCarlo";
+import { type MonteCarloResult } from "@/lib/analytics/monteCarlo";
 import { scopeLabel } from "@/lib/analytics/scopeLabel";
 
 type FeatureValue = {

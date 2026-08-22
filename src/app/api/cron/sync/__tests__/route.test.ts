@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   mockGetAuthUser,
-  mockPrisma,
 } from "@/lib/__tests__/helpers/routeMocks";
 import { GET, POST } from "@/app/api/cron/sync/route";
 

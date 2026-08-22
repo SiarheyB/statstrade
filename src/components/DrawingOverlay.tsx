@@ -191,7 +191,7 @@ export function findDrawingAt(
   sy: (price: number) => number,
   plotX: number,
   plotW: number,
-  plotH: number,
+  _plotH: number,
 ): { id: string; pointIdx: number } | null {
   // Идём в обратном порядке — верхний рисунок (последний созданный) выбирается первым
   for (let i = drawings.length - 1; i >= 0; i--) {

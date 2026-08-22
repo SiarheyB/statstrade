@@ -27,6 +27,9 @@ export default async function AdminUsersPage() {
     email: u.email,
     name: u.name,
     createdAt: u.createdAt.toISOString(),
+  // Серверный компонент: Date.now() выполняется на сервере при каждом запросе,
+  // никакой гидратации тут нет — правило React Compiler бьёт мимо.
+  /* eslint-disable react-hooks/purity -- server component, no hydration */
     online: !!u.lastSeenAt && Date.now() - u.lastSeenAt.getTime() < ONLINE_THRESHOLD_MS,
     lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
     twoFactorEnabled: u.twoFactorEnabled,

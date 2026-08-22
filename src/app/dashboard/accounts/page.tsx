@@ -779,7 +779,6 @@ function PermissionErrorBanner({
   exchange: string;
   isMt: boolean;
 }) {
-  const { t } = useI18n();
   const isPerm = !isMt && isPermissionError(error);
 
   if (!isPerm) {

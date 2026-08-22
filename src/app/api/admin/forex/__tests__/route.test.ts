@@ -2,7 +2,6 @@ import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { asAdmin, asNonAdmin, mockGetAdminSession, mockPrisma } from "@/lib/__tests__/helpers/routeMocks";
 import { GET } from "@/app/api/admin/forex/route";
 
-const base = "https://example.com/api/admin/forex";
 
 describe("GET /api/admin/forex", () => {
   beforeEach(() => {

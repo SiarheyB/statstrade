@@ -28,7 +28,6 @@ function makeReq(url: string): Request {
 }
 
 // Helper: sleep for cache TTL.
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // Must import after mocks are set up.
 const { GET } = await import("../route");

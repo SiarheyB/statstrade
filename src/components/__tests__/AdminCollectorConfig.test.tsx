@@ -167,7 +167,6 @@ describe("AdminCollectorConfig", () => {
     setupFetch();
     render(<AdminCollectorConfig />);
     await waitFor(() => expect(screen.getByText("Полная очистка")).toBeInTheDocument());
-    const before = mockFetch.mock.calls.length;
     fireEvent.click(screen.getByText("Полная очистка"));
     expect(global.confirm).toHaveBeenCalled();
     // no truncate POST call added

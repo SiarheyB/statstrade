@@ -21,7 +21,6 @@ vi.mock("@/lib/db", () => ({
 import {
   rebuildTradeHourly,
   rebuildTradeHourlyForTrade,
-  backfillMissingTradeHourly,
 } from "@/lib/analytics/hourly";
 
 // Значения, подставленные в шаблоны $executeRaw (tagged template: первый

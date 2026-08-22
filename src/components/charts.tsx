@@ -159,7 +159,7 @@ export function DailyPnlChart({
   return (
     <div className="min-h-[64px] min-w-[300px] w-full h-full">
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData as any} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
+        <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="date"
@@ -303,11 +303,14 @@ export function BreakdownChart({
 // Drawdown-over-time area (always ≤ 0), derived from the equity curve.
 export function DrawdownChart({ data }: { data: EquityPoint[] }) {
   if (data.length === 0) return <Empty />;
+  // Обычный цикл, а не map: просадка считается от бегущего максимума, а его
+  // накопление внутри колбэка — мутация внешней переменной.
+  const pts: { t: number; dd: number }[] = [];
   let peak = -Infinity;
-  const pts = data.map((p) => {
+  for (const p of data) {
     peak = Math.max(peak, p.equity);
-    return { t: p.t, dd: peak > 0 ? ((p.equity - peak) / peak) * 100 : 0 };
-  });
+    pts.push({ t: p.t, dd: peak > 0 ? ((p.equity - peak) / peak) * 100 : 0 });
+  }
   return (
     <div className="min-h-[200px] min-w-[300px] w-full">
       <ResponsiveContainer width="100%" height={200}>

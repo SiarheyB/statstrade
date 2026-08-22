@@ -9,12 +9,6 @@ import { zonedParts, type TimezoneId } from "@/lib/timezone";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-function fmtVal(v: number): string {
-  if (v >= 1e9) return `${(v / 1e9).toFixed(2)}B`;
-  if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
-  if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
-  return v.toFixed(0);
-}
 
 // Всегда показываем дату + время (а не только HH:MM) и в выбранном
 // пользователем часовом поясе (zonedParts, как в остальных графиках проекта) —

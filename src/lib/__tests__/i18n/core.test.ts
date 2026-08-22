@@ -6,7 +6,7 @@ import {
   DEFAULT_LOCALE,
   LOCALE_COOKIE,
 } from "../../i18n/core";
-import type { Locale } from "../../i18n/core";
+import type {} from "../../i18n/core";
 
 describe("i18n core exports and basic functions", () => {
   it("exports DEFAULT_LOCALE", () => {

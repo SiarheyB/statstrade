@@ -112,7 +112,7 @@ export default function LiqMapPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [favorites, setFavorites] = useState<string[]>([]);
-  const [favLoading, setFavLoading] = useState(false);
+  const [, setFavLoading] = useState(false);
   // Разворот карты на весь экран (та же кнопка на /dashboard/forex и
   // /dashboard/orderflow).
   const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();

@@ -9,7 +9,7 @@
 // Опционально: можно указать DATABASE_URL для подключения к существующей БД
 //   DATABASE_URL=postgresql://... node collector/prune-integration.mjs
 
-import { execSync, spawn } from "node:child_process";
+import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";

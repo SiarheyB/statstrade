@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
-import { useI18n } from '@/lib/i18n/provider';
+import { useI18n, type T } from '@/lib/i18n/provider';
 import {
   Database, Download, Upload, FileText, Clock, CheckCircle, AlertTriangle,
   Folder, File, Trash2, RefreshCw, PlayCircle, HardDrive, X,
@@ -74,6 +74,38 @@ const OP_ICONS: Record<OpType, typeof Database> = {
   create_basic_dump: HardDrive,
 };
 
+// Компонент вынесен из страницы: объявленный внутри, он пересоздавался бы на
+// каждый рендер (и React считал бы его каждый раз новым типом). Перевод
+// приходит пропсом — хука внутри уже не будет.
+function BackupCard(props: {
+  type: OpType;
+  onClick: () => void;
+  tone: string;
+  disabled?: boolean;
+  t: T;
+}) {
+  const Icon = OP_ICONS[props.type];
+  return (
+    <button
+      onClick={props.onClick}
+      disabled={props.disabled}
+      className={clsx(
+        'card p-5 text-left hover:scale-[1.02] transition-all duration-200',
+        props.tone,
+        props.disabled && 'opacity-50 cursor-not-allowed',
+      )}
+    >
+      <div className='flex items-start gap-4'>
+        <Icon size={22} className='mt-0.5' />
+        <div className='flex-1'>
+          <div className='font-semibold'>{props.t(OP_TITLE_KEY[props.type])}</div>
+          <div className='mt-1 text-sm text-muted'>{props.t(OP_DESC_KEY[props.type])}</div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export default function AdminBackupPage() {
   const { t } = useI18n();
   const [files, setFiles] = useState<BackupFile[]>([]);
@@ -83,7 +115,6 @@ export default function AdminBackupPage() {
   const [busy, setBusy] = useState(false);
   const [filesLoading, setFilesLoading] = useState(false);
   const [progress, setProgress] = useState<string | null>(null);
-  const [showSuccess, setShowSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const polls = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -112,29 +143,6 @@ export default function AdminBackupPage() {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [operations]);
 
-  function startPoll(opId: string) {
-    const iv = setInterval(async () => {
-      try {
-        const res = await fetch(`/api/admin/backup?operationId=${opId}`);
-        const data = await res.json();
-        setOperations((prev) =>
-          prev.map((op) =>
-            op.id === opId
-              ? { ...op, logs: data.logs || [], status: data.status }
-              : op,
-          ),
-        );
-        if (data.status === 'success' || data.status === 'error' || data.status === 'canceled') {
-          clearInterval(iv);
-          delete polls.current[opId];
-          setProgress(null);
-        }
-      } catch {
-        /* ignore */
-      }
-    }, 1500);
-    polls.current[opId] = iv;
-  }
 
   async function startOperation(type: OpType, file?: string) {
     if (busy) return;
@@ -286,33 +294,6 @@ export default function AdminBackupPage() {
     );
   }
 
-  function BackupCard(props: {
-    type: OpType;
-    onClick: () => void;
-    tone: string;
-    disabled?: boolean;
-  }) {
-    const Icon = OP_ICONS[props.type];
-    return (
-      <button
-        onClick={props.onClick}
-        disabled={props.disabled}
-        className={clsx(
-          'card p-5 text-left hover:scale-[1.02] transition-all duration-200',
-          props.tone,
-          props.disabled && 'opacity-50 cursor-not-allowed',
-        )}
-      >
-        <div className='flex items-start gap-4'>
-          <Icon size={22} className='mt-0.5' />
-          <div className='flex-1'>
-            <div className='font-semibold'>{t(OP_TITLE_KEY[props.type])}</div>
-            <div className='mt-1 text-sm text-muted'>{t(OP_DESC_KEY[props.type])}</div>
-          </div>
-        </div>
-      </button>
-    );
-  }
 
   return (
     <div className='p-6 md:p-8 max-w-6xl'>
@@ -357,18 +338,21 @@ export default function AdminBackupPage() {
       <h2 className='mt-8 text-lg font-semibold'>{t('admin.backup.exportSection')}</h2>
       <div className='mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <BackupCard
+          t={t}
           type='export_full'
           onClick={() => startOperation('export_full')}
           tone='border-accent/30 bg-accent/5 hover:border-accent/50'
           disabled={busy}
         />
         <BackupCard
+          t={t}
           type='export_data_only'
           onClick={() => startOperation('export_data_only')}
           tone='border-profit/30 bg-profit/5 hover:border-profit/50'
           disabled={busy}
         />
         <BackupCard
+          t={t}
           type='export_analytics'
           onClick={() => startOperation('export_analytics')}
           tone='border-info/30 bg-info/5 hover:border-info/50'
@@ -379,6 +363,7 @@ export default function AdminBackupPage() {
       <h2 className='mt-8 text-lg font-semibold'>{t('admin.backup.importSection')}</h2>
       <div className='mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <BackupCard
+          t={t}
           type='import_with_dedup'
           onClick={() => {
             const f = selectedFile || files[0]?.name;
@@ -389,6 +374,7 @@ export default function AdminBackupPage() {
           disabled={busy}
         />
         <BackupCard
+          t={t}
           type='import_clean'
           onClick={() => {
             const f = selectedFile || files[0]?.name;
@@ -400,6 +386,7 @@ export default function AdminBackupPage() {
           disabled={busy}
         />
         <BackupCard
+          t={t}
           type='create_basic_dump'
           onClick={() => startOperation('create_basic_dump')}
           tone='border-info/30 bg-info/5 hover:border-info/50'

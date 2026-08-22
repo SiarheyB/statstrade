@@ -1,6 +1,6 @@
 "use strict";
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { calculateNetStopsFromTrades } from "./riskManager";
 
 describe("calculateNetStopsFromTrades", () => {

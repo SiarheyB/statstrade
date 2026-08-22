@@ -12,7 +12,6 @@ mockPrisma.supportMessage = {
   count: vi.fn().mockResolvedValue(0),
 };
 
-const base = "https://example.com/api/support/unread";
 
 describe("GET /api/support/unread", () => {
   beforeEach(() => {

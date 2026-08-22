@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   asUser,
-  asGuest,
   mockGetAuthUser,
   mockPrisma,
 } from "@/lib/__tests__/helpers/routeMocks";

@@ -26,7 +26,6 @@ const PERIOD_MS: Record<string, number> = {
 const TTL_MS = 5000;
 const cache = createRouteCache(TTL_MS);
 
-type CandleRow = { t: Date; o: number; h: number; l: number; c: number; v: number };
 
 export async function GET(req: Request) {
   const user = await getAuthUser();
@@ -152,7 +151,7 @@ export async function GET(req: Request) {
         };
     });
     return NextResponse.json(data);
-  } catch (err) {
+  } catch {
     return NextResponse.json(
       { symbol, period, poc: null, valueArea: null, levels: [] },
       { status: 200 },

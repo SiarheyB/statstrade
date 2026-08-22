@@ -60,6 +60,13 @@ const TYPE_LABEL_KEY: Record<string, string> = {
 
 // ─── Component ────────────────────────────────────────────────────────────
 
+// Вынесен из компонента: объявленный внутри, он пересоздавался бы на каждый
+// рендер, и React считал бы стрелку каждый раз новым типом узла.
+function SortIcon({ k, sortKey, sortDir }: { k: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  if (sortKey !== k) return null;
+  return sortDir === "desc" ? <ArrowDown size={10} className="inline ml-0.5" /> : <ArrowUp size={10} className="inline ml-0.5" />;
+}
+
 function DivergenceHistory({
   signals,
   loading,
@@ -107,11 +114,6 @@ function DivergenceHistory({
     });
     return copy;
   }, [signals, sortKey, sortDir]);
-
-  const SortIcon = ({ k }: { k: SortKey }) => {
-    if (sortKey !== k) return null;
-    return sortDir === "desc" ? <ArrowDown size={10} className="inline ml-0.5" /> : <ArrowUp size={10} className="inline ml-0.5" />;
-  };
 
   const thClass = "font-medium py-1 pr-3 cursor-pointer hover:text-fg transition select-none";
   const thRight = `${thClass} text-right`;
@@ -183,17 +185,17 @@ function DivergenceHistory({
                 <th className={thClass} onClick={() => toggleSort("t")}>
                   <span className="inline-flex items-center gap-1" title={t("of.thTimeHint") || "Candle timestamp when the divergence was detected"}>
                     {t("of.thTime")} <HelpCircle size={10} className="text-faint shrink-0" />
-                  </span> <SortIcon k="t" />
+                  </span> <SortIcon sortKey={sortKey} sortDir={sortDir} k="t" />
                 </th>
                 <th className={thClass} onClick={() => toggleSort("type")}>
                   <span className="inline-flex items-center gap-1" title={t("of.thTypeHint") || "Divergence type: Regular Bearish, Regular Bullish, Hidden Bearish, Hidden Bullish"}>
                     {t("of.thType") || "Type"} <HelpCircle size={10} className="text-faint shrink-0" />
-                  </span> <SortIcon k="type" />
+                  </span> <SortIcon sortKey={sortKey} sortDir={sortDir} k="type" />
                 </th>
                 <th className={thRight} onClick={() => toggleSort("strength")}>
                   <span className="inline-flex items-center gap-1" title={t("of.thStrengthHint") || "Divergence strength: 1 (weak) to 5 (very strong). Based on the deviation between price and delta."}>
                     {t("of.thStrength") || "Str"} <HelpCircle size={10} className="text-faint shrink-0" />
-                  </span> <SortIcon k="strength" />
+                  </span> <SortIcon sortKey={sortKey} sortDir={sortDir} k="strength" />
                 </th>
                 <th className={thRight}>
                   <span className="inline-flex items-center gap-1" title={t("of.thPriceHint") || "Price range: the peak price and trough price that define the divergence structure"}>
@@ -208,7 +210,7 @@ function DivergenceHistory({
                 <th className={thRight} onClick={() => toggleSort("bars")}>
                   <span className="inline-flex items-center gap-1" title={t("of.thBarsHint") || "How many candles the divergence pattern spans from start to confirmation"}>
                     {t("of.thBars") || "Bars"} <HelpCircle size={10} className="text-faint shrink-0" />
-                  </span> <SortIcon k="bars" />
+                  </span> <SortIcon sortKey={sortKey} sortDir={sortDir} k="bars" />
                 </th>
                 <th className={thClass}>
                   <span className="inline-flex items-center gap-1" title={t("of.thStatusHint") || "Confirmed = the divergence has resolved (price moved in the expected direction). Pending = divergence detected but not yet confirmed."}>

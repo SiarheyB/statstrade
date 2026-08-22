@@ -1,7 +1,8 @@
 'use client';
 
 import { LogFilters } from './components/LogFilters';
-import { LogTable } from './components/LogTable';
+import type { LogFilters as LogFilterValues } from '@/lib/log.service';
+import { LogTable, type LogRow } from './components/LogTable';
 import { Pagination } from './components/Pagination';
 import { DeleteModal } from './components/DeleteModal';
 import AdminErrors from '@/components/AdminErrors';
@@ -12,7 +13,7 @@ import { Trash2 } from 'lucide-react';
 type Tab = 'logs' | 'errors';
 
 // Собираем query-string из page/limit/filters, отбрасывая пустые значения.
-function buildQuery(page: number, limit: number, filters: Record<string, any>): string {
+function buildQuery(page: number, limit: number, filters: LogFilterValues): string {
   const params = new URLSearchParams();
   params.set('page', String(page));
   params.set('limit', String(limit));
@@ -34,11 +35,11 @@ const TABS: { key: Tab; label: string }[] = [
 
 export default function LogsPage() {
   const [tab, setTab] = useState<Tab>('logs');
-  const [logs, setLogs] = useState<any[]>([]);
+  const [logs, setLogs] = useState<LogRow[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
-  const [filters, setFilters] = useState<Record<string, any>>({});
+  const [filters, setFilters] = useState<LogFilterValues>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
@@ -58,8 +59,8 @@ export default function LogsPage() {
       const result = await res.json();
       setLogs(result.data ?? []);
       setTotal(result.total ?? 0);
-    } catch (err: any) {
-      setError(err.message || 'Не удалось загрузить логи');
+    } catch (err) {
+      setError((err as Error).message || 'Не удалось загрузить логи');
       console.error('Error fetching logs:', err);
     } finally {
       setLoading(false);
@@ -79,7 +80,7 @@ export default function LogsPage() {
     setPage(1); // сброс на первую страницу при смене лимита
   };
 
-  const handleFiltersChange = (newFilters: Record<string, any>) => {
+  const handleFiltersChange = (newFilters: LogFilterValues) => {
     setFilters(newFilters);
     setPage(1); // сброс на первую страницу при смене фильтров
   };
@@ -118,8 +119,8 @@ export default function LogsPage() {
       setDeleteModalOpen(false);
       setDeleteIds([]);
       setDeleteAll(false);
-    } catch (err: any) {
-      setDeleteError(err.message || 'Не удалось удалить логи');
+    } catch (err) {
+      setDeleteError((err as Error).message || 'Не удалось удалить логи');
       console.error('Error deleting logs:', err);
     }
   };

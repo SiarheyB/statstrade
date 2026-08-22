@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runMonteCarlo, type MonteCarloResult } from "../monteCarlo";
+import { runMonteCarlo } from "../monteCarlo";
 
 describe("runMonteCarlo", () => {
   it("returns null for empty returns array", () => {
