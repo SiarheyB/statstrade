@@ -229,6 +229,39 @@ describe('econcal module', () => {
   });
 
   describe('getCalendar', () => {
+    // Рендер страницы не должен ждать сеть: обход фида в критическом пути
+    // ставил главную на десятки секунд, когда фид отвечал медленно.
+    const stubFeed = (items: unknown) =>
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(items) }));
+
+    it('не ждёт обход фида, если данные просто устарели', async () => {
+      mocks.findFirstMock.mockResolvedValue({ updatedAt: new Date(Date.now() - 60 * 60 * 1000) });
+      mocks.findManyMock.mockResolvedValue([]);
+      stubFeed([]);
+
+      await getCalendar({});
+
+      // Данные отдаются из базы, upsert'ы фида в этот запрос не попадают.
+      expect(mocks.upsertMock).not.toHaveBeenCalled();
+    });
+
+    it('ждёт обход фида, когда показывать нечего', async () => {
+      // Троттлинг живёт в модульной переменной, а предыдущий тест её уже
+      // тронул — берём свежую копию модуля.
+      vi.resetModules();
+      const { getCalendar: freshGetCalendar } = await import('@/lib/econcal');
+      // Пустая таблица: тут выбора нет — либо ждём, либо отдаём пустой календарь.
+      mocks.findFirstMock.mockResolvedValue(null);
+      mocks.findManyMock.mockResolvedValue([]);
+      stubFeed([
+        { title: 'CPI m/m', country: 'USD', date: '2026-08-20T12:30:00-04:00', impact: 'High' },
+      ]);
+
+      await freshGetCalendar({});
+
+      expect(mocks.upsertMock).toHaveBeenCalled();
+    });
+
     it('fetches events when stale', async () => {
       const results = await getCalendar({ force: true });
       expect(results.events).toHaveLength(0);

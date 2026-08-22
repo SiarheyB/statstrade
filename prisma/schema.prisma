@@ -397,6 +397,8 @@ model ObCandle {
 
   @@id([symbol, exchange, interval, t])
   @@index([symbol, exchange, interval, t])
+  // Для подсчёта числа инструментов на главной: DISTINCT symbol по интервалу.
+  @@index([interval, symbol])
 }
 
 // Сторожевые метки ретеншна для коллектора. Каждая запись хранит момент

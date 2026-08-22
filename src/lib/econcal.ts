@@ -200,6 +200,22 @@ export async function refreshCalendar(): Promise<RefreshResult[]> {
 
 let lastFetchAttempt = 0;
 
+// Обход фида, уже идущий в этом процессе: параллельные запросы не должны
+// запускать его повторно (как в lib/news.ts).
+let inFlight: Promise<unknown> | null = null;
+
+function refreshInBackground(): void {
+  if (inFlight) return;
+  inFlight = refreshCalendar()
+    .catch(() => {
+      // Фоновое обновление не должно ронять запрос пользователя: следующий
+      // заход попробует снова.
+    })
+    .finally(() => {
+      inFlight = null;
+    });
+}
+
 export type CalendarFilters = {
   from?: Date;
   to?: Date;
@@ -217,9 +233,19 @@ export async function getCalendar(filters: CalendarFilters = {}) {
   const stale = !newest || Date.now() - newest.updatedAt.getTime() > REFRESH_MS;
   const throttled = Date.now() - lastFetchAttempt < FETCH_THROTTLE_MS;
   let refreshed: RefreshResult[] = [];
-  if (filters.force || (!throttled && stale)) {
+
+  // Ждём обход фида только там, где иначе показывать нечего: ручное
+  // «обновить» и пустая таблица. Иначе страница вставала на десятки секунд —
+  // фид отвечает не мгновенно (таймаут 15 с), а следом идёт сотня upsert'ов,
+  // и всё это происходило прямо в рендере главной. Устаревшие данные обновляем
+  // в фоне: показать календарь получасовой давности лучше, чем держать
+  // человека перед пустым экраном.
+  if (filters.force || (!throttled && !newest)) {
     lastFetchAttempt = Date.now();
     refreshed = await refreshCalendar();
+  } else if (!throttled && stale) {
+    lastFetchAttempt = Date.now();
+    refreshInBackground();
   }
 
   const where: {
