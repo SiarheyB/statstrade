@@ -27,11 +27,35 @@ vi.mock("@/components/SyncProvider", () => ({
 vi.mock("@/components/charts.lazy", () => ({
   TradeChart: () => <div>mocked-trade-chart</div>,
 }));
+// Ячейка со скриншотом: кнопка «посмотреть» есть только там, где картинка
+// реально загружена (как и в настоящем компоненте).
 vi.mock("@/components/TradeImageCell", () => ({
-  default: () => <div>mocked-trade-image-cell</div>,
+  default: ({ imageUrl, onPreview }: { imageUrl: string | null; onPreview: (url: string) => void }) =>
+    imageUrl ? (
+      <button onClick={() => onPreview(imageUrl)}>смотреть {imageUrl}</button>
+    ) : (
+      <div>mocked-trade-image-cell</div>
+    ),
 }));
 vi.mock("@/components/ImagePreviewModal", () => ({
-  default: () => <div>mocked-image-preview</div>,
+  default: ({
+    url,
+    position,
+    onNext,
+    onPrev,
+  }: {
+    url: string;
+    position?: { index: number; total: number };
+    onNext?: () => void;
+    onPrev?: () => void;
+  }) => (
+    <div data-testid="preview">
+      <span data-testid="preview-url">{url}</span>
+      <span data-testid="preview-pos">{position ? `${position.index}/${position.total}` : "нет"}</span>
+      <button onClick={onPrev}>prev</button>
+      <button onClick={onNext}>next</button>
+    </div>
+  ),
 }));
 
 function makeTrade(overrides: Partial<SerializedTrade> = {}): SerializedTrade {
@@ -233,5 +257,47 @@ describe("TradesPage", () => {
         .find((u) => u.startsWith("/api/trades") && u.includes("all=1"));
       expect(exportCall).toBeTruthy();
     });
+  });
+
+  // Скриншоты листаются прямо в просмотрщике — в пределах открытой страницы
+  // таблицы (следующая порция сделок ещё не загружена).
+  it("листает скриншоты сделок, не закрывая просмотр", async () => {
+    installFetch(() => [
+      makeTrade({ id: "t1", symbol: "AAA", imageUrl: "https://img/1" }),
+      makeTrade({ id: "t2", symbol: "BBB", imageUrl: null }),
+      makeTrade({ id: "t3", symbol: "CCC", imageUrl: "https://img/3" }),
+    ]);
+    render(<TradesPage />);
+    await screen.findByText("AAA");
+
+    // Ячейка со скриншотом живёт в подробностях сделки; раскрыта всегда одна
+    // строка — на листание это не влияет, галерея собирается по всей странице.
+    fireEvent.click(screen.getByText("AAA"));
+    expect(screen.queryByTestId("preview")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/смотреть https:\/\/img\/1/));
+    expect(screen.getByTestId("preview-url")).toHaveTextContent("https://img/1");
+    // Сделка без картинки в счёт не идёт.
+    expect(screen.getByTestId("preview-pos")).toHaveTextContent("1/2");
+
+    fireEvent.click(screen.getByText("next"));
+    expect(screen.getByTestId("preview-url")).toHaveTextContent("https://img/3");
+    // По кругу: с последнего снова на первый.
+    fireEvent.click(screen.getByText("next"));
+    expect(screen.getByTestId("preview-url")).toHaveTextContent("https://img/1");
+  });
+
+  it("не показывает стрелки, когда скриншот всего один", async () => {
+    installFetch(() => [
+      makeTrade({ id: "t1", symbol: "AAA", imageUrl: "https://img/1" }),
+      makeTrade({ id: "t2", symbol: "BBB", imageUrl: null }),
+    ]);
+    render(<TradesPage />);
+    await screen.findByText("AAA");
+
+    fireEvent.click(screen.getByText("AAA"));
+    fireEvent.click(screen.getByText(/смотреть/));
+
+    expect(screen.getByTestId("preview-pos")).toHaveTextContent("1/1");
   });
 });

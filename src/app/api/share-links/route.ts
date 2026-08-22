@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { generateShareToken } from "@/lib/mentorShare";
+import { generateShareToken, parseRangeDate } from "@/lib/mentorShare";
 
 function featureDisabled() {
   return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
@@ -25,7 +25,15 @@ export async function GET() {
   }
 }
 
-const schema = z.object({ label: z.string().trim().max(80).optional() });
+const schema = z.object({
+  label: z.string().trim().max(80).optional(),
+  // Счёт, сделки которого покажет ссылка. Пусто/нет поля = все счета.
+  accountId: z.string().trim().max(64).optional(),
+  // Период отбора сделок — даты из календаря (YYYY-MM-DD). Пусто с любой
+  // стороны = граница не задана.
+  periodFrom: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+  periodTo: z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal("")),
+});
 
 export async function POST(req: Request) {
   const user = await getAuthUser();
@@ -49,8 +57,34 @@ export async function POST(req: Request) {
       return badRequest(`Достигнут лимит активных ссылок (${feature.maxLinksPerUser}). Отзовите одну, чтобы создать новую.`);
     }
 
+    // Чужой счёт в ссылку не попадёт: страница /share и так фильтрует сделки по
+    // владельцу ссылки, но такую ссылку незачем и создавать — пусть ошибка
+    // придёт сразу, а не превратится в вечно пустую страницу.
+    const accountId = parsed.data.accountId?.trim() || null;
+    if (accountId) {
+      const owned = await prisma.exchangeAccount.findFirst({
+        where: { id: accountId, userId: user.userId },
+        select: { id: true },
+      });
+      if (!owned) return badRequest("Счёт не найден");
+    }
+
+    const periodFrom = parseRangeDate(parsed.data.periodFrom, "from");
+    const periodTo = parseRangeDate(parsed.data.periodTo, "to");
+    // Перепутанные местами даты дали бы вечно пустую ссылку — лучше сказать сразу.
+    if (periodFrom && periodTo && periodFrom >= periodTo) {
+      return badRequest("Начало периода позже его конца");
+    }
+
     const link = await prisma.shareLink.create({
-      data: { userId: user.userId, token: generateShareToken(), label: parsed.data.label?.trim() || null },
+      data: {
+        userId: user.userId,
+        token: generateShareToken(),
+        label: parsed.data.label?.trim() || null,
+        accountId,
+        periodFrom,
+        periodTo,
+      },
     });
     return NextResponse.json({ link });
   } catch (err) {

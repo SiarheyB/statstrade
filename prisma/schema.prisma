@@ -972,6 +972,17 @@ model ShareLink {
   user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   token        String    @unique
   label        String? // e.g. "For my mentor"
+  // Счёт, сделки которого показывает ссылка. NULL = все счета пользователя.
+  // Намеренно без relation: счёт могут удалить, и такая ссылка должна отдавать
+  // пустой список, а не превращаться молча в ссылку «на всё».
+  accountId    String?
+  // Период отбора сделок — конкретные даты из календаря. NULL с любой стороны
+  // означает «без этой границы»; обе NULL — всё время.
+  // periodTo хранится как начало следующих суток (см. миграцию): в календаре
+  // выбирают день целиком, и сделка, закрытая вечером последнего дня, должна
+  // попасть в выборку.
+  periodFrom   DateTime?
+  periodTo     DateTime?
   createdAt    DateTime  @default(now())
   lastViewedAt DateTime?
   revokedAt    DateTime?

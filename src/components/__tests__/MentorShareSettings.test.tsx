@@ -11,13 +11,25 @@ vi.mock("@/lib/i18n/provider", () => ({
   }),
 }));
 
-function mockFetch(featureEnabled: boolean, links: Array<Record<string, unknown>> = []) {
+const ACCOUNTS = [
+  { id: "a1", label: "Основной", exchange: "bybit" },
+  { id: "a2", label: "Форекс", exchange: "mt5" },
+];
+
+function mockFetch(
+  featureEnabled: boolean,
+  links: Array<Record<string, unknown>> = [],
+  accounts: Array<Record<string, unknown>> = ACCOUNTS,
+) {
   const fn = vi.fn((url: string) => {
     if (url.includes("/api/features")) {
       return Promise.resolve({
         ok: true,
         json: () => Promise.resolve({ value: { enabled: featureEnabled, maxLinksPerUser: 5 } }),
       });
+    }
+    if (url.includes("/api/accounts")) {
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(accounts) });
     }
     if (url.includes("/api/share-links")) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve({ links }) });
@@ -67,10 +79,13 @@ describe("MentorShareSettings", () => {
           json: () => Promise.resolve({ value: { enabled: true, maxLinksPerUser: 5 } }),
         });
       }
+      if (url.includes("/api/accounts")) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(ACCOUNTS) });
+      }
       if (url.includes("/api/share-links") && !url.includes("?")) {
         return Promise.resolve({
           ok: true,
-          json: () => Promise.resolve({ links: [{ id: "l1", token: "tok1", label: "My mentor", createdAt: "", lastViewedAt: null }] }),
+          json: () => Promise.resolve({ links: [{ id: "l1", token: "tok1", label: "My mentor", createdAt: "", lastViewedAt: null, accountId: null }] }),
         });
       }
       return Promise.resolve({ ok: true, json: () => Promise.resolve({}) });
@@ -85,7 +100,7 @@ describe("MentorShareSettings", () => {
   });
 
   it("copies the link to clipboard", async () => {
-    mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null }]);
+    mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null }]);
     await act(async () => {
       render(<MentorShareSettings />);
     });
@@ -97,7 +112,7 @@ describe("MentorShareSettings", () => {
   });
 
   it("revokes a link after confirmation", async () => {
-    const fetchMock = mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null }]);
+    const fetchMock = mockFetch(true, [{ id: "l1", token: "tok1", label: "Mentor A", createdAt: "", lastViewedAt: null, accountId: null }]);
     await act(async () => {
       render(<MentorShareSettings />);
     });
@@ -107,4 +122,99 @@ describe("MentorShareSettings", () => {
     });
     expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining("/api/share-links?id=l1"), expect.objectContaining({ method: "DELETE" }));
   });
+
+  it("в списке счетов первым идёт «все биржи», дальше подключённые", async () => {
+    mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    // Первый выпадающий список — счета, второй — период.
+    const accountSelect = screen.getAllByRole("combobox")[0];
+    const options = [...accountSelect.querySelectorAll("option")];
+    expect(options.map((o) => o.textContent)).toEqual([
+      "mentor.allAccounts",
+      "Основной · BYBIT",
+      "Форекс · MT5",
+    ]);
+    // По умолчанию — все биржи: ссылка без выбора счёта ведёт себя как раньше.
+    expect((accountSelect as HTMLSelectElement).value).toBe("");
+  });
+
+  it("создаёт ссылку на выбранный счёт", async () => {
+    const fetchMock = mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "a2" } });
+    await act(async () => {
+      fireEvent.click(screen.getByText("mentor.create"));
+    });
+
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === "POST");
+    expect(JSON.parse(post![1].body as string)).toEqual({ accountId: "a2" });
+  });
+
+  it("показывает у ссылки, чей это счёт, и помечает удалённый", async () => {
+    mockFetch(true, [
+      { id: "l1", token: "t1", label: "На bybit", createdAt: "", lastViewedAt: null, accountId: "a1", periodFrom: null, periodTo: null },
+      {
+        id: "l2", token: "t2", label: "На всё", createdAt: "", lastViewedAt: null, accountId: null,
+        periodFrom: "2026-06-01T00:00:00.000Z", periodTo: "2026-07-01T00:00:00.000Z",
+      },
+      { id: "l3", token: "t3", label: "Осиротевшая", createdAt: "", lastViewedAt: null, accountId: "gone", periodFrom: null, periodTo: null },
+    ]);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+
+    // Тот же текст есть и пунктом выпадающего списка — берём все совпадения.
+    // Подпись ссылки: счёт и период вместе.
+    expect(await screen.findByText(/Основной · BYBIT · mentor\.periodAll/)).toBeInTheDocument();
+    expect(screen.getByText(/mentor\.accountGone/)).toBeInTheDocument();
+    // Конец хранится как начало следующих суток — в подписи показываем 30 июня.
+    expect(screen.getByText(/mentor\.allAccounts · 6\/1\/2026 — 6\/30\/2026/)).toBeInTheDocument();
+  });
+
+  it("отправляет выбранные даты периода", async () => {
+    const fetchMock = mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    const from = screen.getByLabelText("mentor.periodFrom");
+    const to = screen.getByLabelText("mentor.periodTo");
+    fireEvent.change(from, { target: { value: "2026-06-01" } });
+    fireEvent.change(to, { target: { value: "2026-06-30" } });
+    // Календари ограничивают друг друга, чтобы нельзя было выбрать конец раньше начала.
+    expect(to).toHaveAttribute("min", "2026-06-01");
+    expect(from).toHaveAttribute("max", "2026-06-30");
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("mentor.create"));
+    });
+
+    const post = fetchMock.mock.calls.find((c) => c[1]?.method === "POST");
+    expect(JSON.parse(post![1].body as string)).toEqual({
+      periodFrom: "2026-06-01",
+      periodTo: "2026-06-30",
+    });
+  });
+
+  it("сбрасывает обе даты одной кнопкой", async () => {
+    mockFetch(true);
+    await act(async () => {
+      render(<MentorShareSettings />);
+    });
+    await screen.findByText("mentor.title");
+
+    fireEvent.change(screen.getByLabelText("mentor.periodFrom"), { target: { value: "2026-06-01" } });
+    fireEvent.click(screen.getByTitle("mentor.periodClear"));
+    expect(screen.getByLabelText("mentor.periodFrom")).toHaveValue("");
+  });
+
 });

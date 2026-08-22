@@ -6,7 +6,8 @@ import { translate, type Locale, LOCALE_COOKIE } from "./core";
 import { setFormatLocale, setFormatTimezone } from "@/lib/format";
 import { TIMEZONE_COOKIE, type TimezoneId, normalizeTimezone } from "@/lib/timezone";
 
-type T = (key: string, vars?: Record<string, string | number>) => string;
+/** Функция перевода. Экспортируется для компонентов, которым её передают пропсом. */
+export type T = (key: string, vars?: Record<string, string | number>) => string;
 
 type Ctx = {
   locale: Locale;

@@ -67,7 +67,7 @@ export default function TradesPage() {
   const [ann, setAnn] = useState<Record<string, Ann>>({});
   const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null; publicUrl: string | null }>>({});
   const [cloudConnected, setCloudConnected] = useState(false);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewTradeId, setPreviewTradeId] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
@@ -269,6 +269,23 @@ export default function TradesPage() {
   // прислал. Список тегов у строки берём из локального состояния ann, чтобы
   // правка сразу отражалась в UI до перезагрузки страницы.
   const pageRows = data?.trades ?? [];
+
+  // Листаем скриншоты в пределах открытой страницы таблицы: следующая порция
+  // сделок ещё не загружена, а тянуть её из просмотрщика — это уже другая
+  // история (и лишние запросы посреди листания).
+  const gallery = pageRows
+    .map((tr) => ({ trade: tr, url: imageOf(tr).url }))
+    .filter((x): x is { trade: SerializedTrade; url: string } => Boolean(x.url));
+  const previewIndex = gallery.findIndex((x) => x.trade.id === previewTradeId);
+  const preview = previewIndex >= 0 ? { ...gallery[previewIndex], index: previewIndex } : null;
+  // По кругу: с последнего скриншота стрелка вправо ведёт к первому.
+  function stepPreview(delta: number) {
+    setPreviewTradeId((openId) => {
+      if (gallery.length === 0) return openId;
+      const at = gallery.findIndex((x) => x.trade.id === openId);
+      return gallery[(at + delta + gallery.length) % gallery.length].trade.id;
+    });
+  }
   const total = data?.total ?? 0;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -555,7 +572,7 @@ export default function TradesPage() {
                                 connected={cloudConnected}
                                 onUploaded={(url, provider, publicUrl) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider, publicUrl } }))}
                                 onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null, publicUrl: null } }))}
-                                onPreview={(url) => setPreviewUrl(url)}
+                                onPreview={() => setPreviewTradeId(tr.id)}
                               />
                             </DetailField>
                           </div>
@@ -615,10 +632,18 @@ export default function TradesPage() {
         </div>
       )}
 
-      {previewUrl && (
+      {preview && (
         // key=url — remounts on a new image so zoom/pan resets, instead of
         // an effect syncing it (see ImagePreviewModal for why).
-        <ImagePreviewModal key={previewUrl} url={previewUrl} onClose={() => setPreviewUrl(null)} />
+        <ImagePreviewModal
+          key={preview.url}
+          url={preview.url}
+          caption={`${fmtSymbol(preview.trade.symbol)} · ${fmtDate(preview.trade.exitTime)}`}
+          position={{ index: preview.index + 1, total: gallery.length }}
+          onPrev={gallery.length > 1 ? () => stepPreview(-1) : undefined}
+          onNext={gallery.length > 1 ? () => stepPreview(1) : undefined}
+          onClose={() => setPreviewTradeId(null)}
+        />
       )}
     </div>
   );

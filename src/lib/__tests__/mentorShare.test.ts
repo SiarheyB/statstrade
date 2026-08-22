@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   tradeFindMany: vi.fn().mockResolvedValue([]),
   importedTradeFindMany: vi.fn().mockResolvedValue([]),
   exchangeAccountFindMany: vi.fn().mockResolvedValue([]),
+  tradeAnnotationFindMany: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -12,6 +13,7 @@ vi.mock('@/lib/db', () => ({
     trade: { findMany: mocks.tradeFindMany },
     importedTrade: { findMany: mocks.importedTradeFindMany },
     exchangeAccount: { findMany: mocks.exchangeAccountFindMany },
+    tradeAnnotation: { findMany: mocks.tradeAnnotationFindMany },
   },
 }));
 
@@ -27,7 +29,13 @@ vi.mock('@/lib/analytics/metrics', () => ({
   }),
 }));
 
-import { computePublicSummary, generateShareToken } from '@/lib/mentorShare';
+import {
+  computePublicSummary,
+  computePublicTrades,
+  formatRangeDate,
+  generateShareToken,
+  parseRangeDate,
+} from '@/lib/mentorShare';
 
 describe('mentorShare module', () => {
   beforeEach(() => {
@@ -35,6 +43,7 @@ describe('mentorShare module', () => {
     mocks.tradeFindMany.mockResolvedValue([]);
     mocks.importedTradeFindMany.mockResolvedValue([]);
     mocks.exchangeAccountFindMany.mockResolvedValue([]);
+    mocks.tradeAnnotationFindMany.mockResolvedValue([]);
   });
 
   it('scopes trades by the user accounts and selects only needed columns', async () => {
@@ -192,9 +201,146 @@ describe('mentorShare module', () => {
       },
     ]);
 
-    const result = await computePublicSummary('user123');
+    await computePublicSummary('user123');
     const { computeMetrics } = await import('@/lib/analytics/metrics');
     const passedTrades = (computeMetrics as any).mock.calls[0][0];
     expect(passedTrades[0].result).toBe('breakeven');
+  });
+
+  describe('computePublicTrades', () => {
+    const account = { id: 'a1', label: 'Основной', exchange: 'bybit' };
+    const trade = {
+      id: 't1', accountId: 'a1', symbol: 'BTC/USDT', market: 'spot', side: 'long',
+      entryTime: new Date('2026-06-01T10:00:00Z'), exitTime: new Date('2026-06-01T12:00:00Z'),
+      entryPrice: 60000, exitPrice: 61200, returnPct: 0.02, rr: 2.4, result: 'win',
+    };
+
+    it('не выбирает из базы ни одной денежной колонки', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      mocks.tradeFindMany.mockResolvedValue([trade]);
+      await computePublicTrades('u1');
+
+      // Счёт: без balance и capital — по ним виден размер депозита.
+      const accountSelect = mocks.exchangeAccountFindMany.mock.calls[0][0].select;
+      expect(accountSelect).toEqual({ id: true, label: true, exchange: true });
+
+      // Сделки: без netPnl, grossPnl, fees и qty (объём × цена — те же деньги).
+      const tradeSelect = mocks.tradeFindMany.mock.calls[0][0].select;
+      for (const money of ['netPnl', 'grossPnl', 'fees', 'qty']) {
+        expect(tradeSelect).not.toHaveProperty(money);
+      }
+    });
+
+    it('группирует сделки по счетам и подставляет публичную ссылку на скриншот', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account, { id: 'a2', label: 'Форекс', exchange: 'mt5' }]);
+      mocks.tradeFindMany.mockResolvedValue([trade, { ...trade, id: 't2', accountId: 'a2' }]);
+      mocks.tradeAnnotationFindMany.mockResolvedValue([
+        { tradeKey: 't1', imagePublicUrl: 'https://drive.example/abc' },
+      ]);
+
+      const out = await computePublicTrades('u1');
+
+      expect(out.map((a) => a.accountId)).toEqual(['a1', 'a2']);
+      expect(out[0].trades[0].imageUrl).toBe('https://drive.example/abc');
+      expect(out[1].trades[0].imageUrl).toBeNull();
+      // Структура сделки на месте, денег в ней нет.
+      expect(out[0].trades[0]).toMatchObject({ symbol: 'BTC/USDT', side: 'long', rr: 2.4, result: 'win' });
+      expect(Object.keys(out[0].trades[0])).not.toContain('netPnl');
+    });
+
+    it('ссылка на один счёт не выходит за его пределы', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      mocks.tradeFindMany.mockResolvedValue([trade]);
+
+      await computePublicTrades('u1', 'a1');
+
+      // Счёт ищем среди счетов владельца ссылки: подставленный чужой id не
+      // должен открыть чужие сделки.
+      expect(mocks.exchangeAccountFindMany.mock.calls[0][0].where).toEqual({ userId: 'u1', id: 'a1' });
+      // Сделки — только по найденным счетам.
+      expect(mocks.tradeFindMany.mock.calls[0][0].where).toEqual({ accountId: { in: ['a1'] } });
+    });
+
+    it('сужает выборку выбранным периодом', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      const from = new Date('2026-06-01T00:00:00Z');
+      const to = new Date('2026-07-01T00:00:00Z'); // начало следующих суток после 30 июня
+
+      await computePublicTrades('u1', null, { from, to });
+
+      // Границы по времени ВЫХОДА: конец строгий, потому что это уже 1 июля.
+      expect(mocks.tradeFindMany.mock.calls[0][0].where.exitTime).toEqual({ gte: from, lt: to });
+      // Импортированные сделки режутся тем же окном.
+      expect(mocks.importedTradeFindMany.mock.calls[0][0].where.exitTime).toEqual({ gte: from, lt: to });
+    });
+
+    it('одна граница работает без второй', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      const from = new Date('2026-06-01T00:00:00Z');
+
+      await computePublicTrades('u1', null, { from, to: null });
+
+      expect(mocks.tradeFindMany.mock.calls[0][0].where.exitTime).toEqual({ gte: from });
+    });
+
+    it('без периода берёт всю историю', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      await computePublicTrades('u1', null, null);
+      expect(mocks.tradeFindMany.mock.calls[0][0].where.exitTime).toBeUndefined();
+    });
+
+    it('без счёта берёт все счета пользователя', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account]);
+      await computePublicTrades('u1', null);
+      expect(mocks.exchangeAccountFindMany.mock.calls[0][0].where).toEqual({ userId: 'u1' });
+    });
+
+    it('счёт без сделок не показываем', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([account, { id: 'a2', label: 'Пустой', exchange: 'okx' }]);
+      mocks.tradeFindMany.mockResolvedValue([trade]);
+
+      const out = await computePublicTrades('u1');
+      expect(out.map((a) => a.label)).toEqual(['Основной']);
+    });
+
+    it('импортированные сделки берёт под тем же ключом, что и аннотации', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a2', label: 'Форекс', exchange: 'mt5' }]);
+      mocks.importedTradeFindMany.mockResolvedValue([
+        {
+          accountId: 'a2', externalId: '777', symbol: 'EURUSD', market: 'forex', side: 'short',
+          entryTime: new Date('2026-06-02T08:00:00Z'), exitTime: new Date('2026-06-02T09:00:00Z'),
+          entryPrice: 1.1, exitPrice: 1.09, rr: 1.5, netPnl: -25,
+        },
+      ]);
+      mocks.tradeAnnotationFindMany.mockResolvedValue([
+        { tradeKey: 'a2:777', imagePublicUrl: 'https://drive.example/eur' },
+      ]);
+
+      const out = await computePublicTrades('u1');
+      expect(out[0].trades[0].id).toBe('a2:777');
+      expect(out[0].trades[0].imageUrl).toBe('https://drive.example/eur');
+      // Из netPnl наружу уходит только знак — как результат сделки.
+      expect(out[0].trades[0].result).toBe('loss');
+      expect(JSON.stringify(out)).not.toContain('-25');
+    });
+  });
+
+  describe('границы периода из календаря', () => {
+    it('конец периода — начало следующих суток, чтобы день попал целиком', () => {
+      expect(parseRangeDate('2026-06-30', 'to')).toEqual(new Date('2026-07-01T00:00:00.000Z'));
+      expect(parseRangeDate('2026-06-01', 'from')).toEqual(new Date('2026-06-01T00:00:00.000Z'));
+    });
+
+    it('пустая и кривая дата — это «без границы»', () => {
+      expect(parseRangeDate('', 'from')).toBeNull();
+      expect(parseRangeDate(null, 'to')).toBeNull();
+      expect(parseRangeDate('30.06.2026', 'from')).toBeNull();
+    });
+
+    it('обратно в дату календаря отдаёт выбранный пользователем день', () => {
+      expect(formatRangeDate(new Date('2026-07-01T00:00:00.000Z'), 'to')).toBe('2026-06-30');
+      expect(formatRangeDate(new Date('2026-06-01T00:00:00.000Z'), 'from')).toBe('2026-06-01');
+      expect(formatRangeDate(null, 'from')).toBe('');
+    });
   });
 });

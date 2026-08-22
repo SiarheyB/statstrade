@@ -1,8 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X, AlertTriangle, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import {
+  X, AlertTriangle, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, ExternalLink,
+  Maximize2, Minimize2,
+} from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { useFullscreen } from "@/lib/useFullscreen";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 6;
@@ -14,28 +18,50 @@ const WHEEL_ZOOM_SPEED = 0.0018;
 // кнопки, двойной клик) и панорамирование перетаскиванием при увеличении —
 // скриншоты сделок часто мелкие детали (уровни, разметка), без зума
 // разглядеть их невозможно.
+// Листание между картинками (стрелки на экране и ←/→ на клавиатуре) и подпись
+// с номером — нужны там, где скриншотов много подряд: на менторской странице
+// наставник пролистывает разбор сделка за сделкой, не закрывая просмотр.
 export default function ImagePreviewModal({
   url,
   onClose,
+  onPrev,
+  onNext,
+  position,
+  caption,
+  externalUrl,
 }: {
   url: string;
   onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** «3 / 12» под картинкой. */
+  position?: { index: number; total: number };
+  /** Что за сделка — иначе при листании непонятно, на что смотришь. */
+  caption?: string;
+  /** Куда уйти, если картинка не открывается прямо здесь (Яндекс.Диск отдаёт
+   *  страницу просмотра, а не файл). */
+  externalUrl?: string;
 }) {
   const { t } = useI18n();
   const [failed, setFailed] = useState(false);
   const [scale, setScale] = useState(1);
   const [pos, setPos] = useState({ x: 0, y: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
+  // Разворот картинки на весь экран — тот же механизм, что у графиков
+  // (нативный Fullscreen API, а где его нет — оверлей во всё окно).
+  const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
+      if (e.key === "ArrowLeft") onPrev?.();
+      if (e.key === "ArrowRight") onNext?.();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, onPrev, onNext]);
 
   // Не даём смещению унести картинку далеко за пределы видимой области —
   // иначе после сильного зума+пана легко "потерять" изображение за краем.
@@ -116,7 +142,38 @@ export default function ImagePreviewModal({
       className="fixed inset-0 bg-black/70 flex items-center justify-center p-4 z-50"
       onClick={onClose}
     >
-      <div className="relative w-[92vw] h-[88vh] max-w-5xl" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={fsRef}
+        className={
+          fsActive
+            ? "relative h-screen w-screen max-w-none bg-black"
+            : "relative w-[92vw] h-[88vh] max-w-5xl"
+        }
+        onClick={(e) => e.stopPropagation()}
+      >
+        {caption && (
+          <div className="absolute -top-3 left-0 z-10 max-w-[70%] truncate rounded-lg border border-border bg-bg/90 px-2.5 py-1 text-xs text-muted shadow-lg">
+            {caption}
+          </div>
+        )}
+        {onPrev && (
+          <button
+            onClick={onPrev}
+            aria-label={t("trades.image.prev")}
+            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-bg/85 p-2 text-fg shadow-lg transition-colors hover:text-accent"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        )}
+        {onNext && (
+          <button
+            onClick={onNext}
+            aria-label={t("trades.image.next")}
+            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full border border-border bg-bg/85 p-2 text-fg shadow-lg transition-colors hover:text-accent"
+          >
+            <ChevronRight size={18} />
+          </button>
+        )}
         <button
           onClick={onClose}
           aria-label={t("common.close")}
@@ -125,9 +182,19 @@ export default function ImagePreviewModal({
           <X size={16} />
         </button>
         {failed ? (
-          <div className="card p-8 text-center text-sm text-muted flex flex-col items-center gap-2 h-full items-center justify-center">
+          <div className="card p-8 text-center text-sm text-muted flex flex-col items-center gap-3 h-full items-center justify-center">
             <AlertTriangle size={20} className="text-loss" />
             {t("trades.image.unavailable")}
+            {externalUrl && (
+              <a
+                href={externalUrl}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-accent/30 bg-accent/5 px-3 py-1.5 text-xs text-accent transition-colors hover:border-accent/60 hover:bg-accent/10"
+              >
+                <ExternalLink size={13} /> {t("trades.image.openExternal")}
+              </a>
+            )}
           </div>
         ) : (
           <>
@@ -158,6 +225,11 @@ export default function ImagePreviewModal({
               />
             </div>
             <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex items-center gap-1 bg-bg/90 border border-border rounded-lg px-1.5 py-1 shadow-lg">
+              {position && (
+                <span className="px-1.5 text-xs text-faint tabular-nums">
+                  {position.index} / {position.total}
+                </span>
+              )}
               <button
                 onClick={() => zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.4)}
                 disabled={scale <= MIN_SCALE}
@@ -167,6 +239,14 @@ export default function ImagePreviewModal({
                 <ZoomOut size={15} />
               </button>
               <span className="text-xs text-faint tabular-nums w-10 text-center">{Math.round(scale * 100)}%</span>
+              <button
+                onClick={fsToggle}
+                aria-label={fsActive ? t("chart.exitFullscreen") : t("chart.fullscreen")}
+                title={fsActive ? t("chart.exitFullscreen") : t("chart.fullscreen")}
+                className="p-1.5 rounded text-faint hover:text-fg hover:bg-surface-2"
+              >
+                {fsActive ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+              </button>
               <button
                 onClick={() => zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.4)}
                 disabled={scale >= MAX_SCALE}

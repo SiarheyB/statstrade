@@ -1,72 +1,123 @@
+import Link from "next/link";
 import { BarChart3 } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { computePublicSummary } from "@/lib/mentorShare";
-import { EquityChart } from "@/components/charts.lazy";
-import { fmtUsd, fmtPct } from "@/lib/format";
+import { getServerT } from "@/lib/i18n/server";
+import type { T } from "@/lib/i18n/provider";
+import LocaleMenu from "@/components/LocaleMenu";
+import MentorTrades from "@/components/mentor/MentorTrades";
+import {
+  computePublicSummary,
+  computePublicTrades,
+  formatRangeDate,
+  PUBLIC_TRADES_LIMIT,
+} from "@/lib/mentorShare";
 
 export const dynamic = "force-dynamic";
 
-// PUBLIC, unauthenticated page (outside /dashboard — not covered by the auth
-// middleware). "Mentor Mode": a read-only performance snapshot shared via a
-// high-entropy token, so a trader can show a coach/mentor how they're doing
-// without handing out a login.
+// ПУБЛИЧНАЯ страница без авторизации (вне /dashboard — middleware её не
+// закрывает). «Режим ментора»: журнал сделок только на чтение по ссылке с
+// длинным токеном, чтобы показать наставнику свою торговлю, не отдавая вход
+// в аккаунт.
+//
+// Ни одной денежной величины: ни в сводке, ни в списке сделок. Ментор смотрит
+// на то, КАК торгуют (паттерн, точка входа, ошибка, скриншот), а размер счёта
+// и заработок — не его дело. Поэтому здесь нет ни P&L, ни комиссий, ни объёма,
+// ни кривой эквити (она в долларах) — эти поля даже не выбираются из базы.
 export default async function SharePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
+  const { t } = await getServerT();
 
   const feature = await getFeatureConfig("mentorMode");
-  if (!feature.enabled) return <Unavailable />;
+  if (!feature.enabled) return <Unavailable t={t} />;
 
   const link = await prisma.shareLink.findUnique({ where: { token } });
-  if (!link || link.revokedAt) return <Unavailable />;
+  if (!link || link.revokedAt) return <Unavailable t={t} />;
 
   prisma.shareLink.update({ where: { id: link.id }, data: { lastViewedAt: new Date() } }).catch(() => {});
 
-  const s = await computePublicSummary(link.userId);
+  // link.accountId = null — ссылка на все счета сразу; обе границы null — за всё время.
+  const range = { from: link.periodFrom, to: link.periodTo };
+  const [s, accounts] = await Promise.all([
+    computePublicSummary(link.userId, link.accountId, range),
+    computePublicTrades(link.userId, link.accountId, range),
+  ]);
+  const shown = accounts.reduce((n, a) => n + a.trades.length, 0);
+  // Что выбрал автор ссылки в календаре — показываем отдельно от фактических
+  // дат первой и последней сделки ниже.
+  const chosenRange = link.periodFrom || link.periodTo
+    ? [
+        formatRangeDate(link.periodFrom, "from") || "…",
+        formatRangeDate(link.periodTo, "to") || "…",
+      ].join(" – ")
+    : null;
+  const period =
+    s.firstTradeAt && s.lastTradeAt
+      ? `${s.firstTradeAt.slice(0, 10)} – ${s.lastTradeAt.slice(0, 10)}`
+      : null;
 
   return (
-    <div className="min-h-screen bg-bg px-4 py-10 md:py-16">
-      <div className="mx-auto max-w-3xl">
-        <div className="flex items-center gap-2 mb-1 text-muted">
-          <BarChart3 size={18} className="text-accent" />
-          <span className="text-sm">TradeStats</span>
+    <div className="flex min-h-screen flex-col bg-bg">
+      <header className="sticky top-0 z-30 flex items-center justify-between gap-2 border-b border-border px-4 py-3 glass-panel sm:px-6">
+        <Link href="/" className="flex items-center gap-2 text-base font-semibold">
+          <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
+            <BarChart3 size={18} />
+          </span>
+          TradeStats
+        </Link>
+        <div className="flex items-center gap-3">
+          <span className="hidden text-xs text-faint sm:inline">{t("mentorPage.readOnly")}</span>
+          <LocaleMenu />
         </div>
-        <h1 className="text-xl font-semibold tracking-tight">{link.label || "Trading performance"}</h1>
+      </header>
+
+      <main className="mx-auto w-full max-w-[100rem] flex-1 px-4 py-8 sm:px-6">
+        <h1 className="text-xl font-semibold tracking-tight">
+          {link.label || t("mentorPage.defaultTitle")}
+        </h1>
         <p className="mt-1 text-sm text-faint">
-          Read-only shared summary · {s.totalTrades} trades
-          {s.firstTradeAt && s.lastTradeAt
-            ? ` · ${new Date(s.firstTradeAt).toLocaleDateString()} – ${new Date(s.lastTradeAt).toLocaleDateString()}`
-            : ""}
+          {t("mentorPage.subtitle", { n: s.totalTrades })}
+          {/* Если автор ссылки задал период — показываем именно его. Иначе
+              подставляем фактические даты первой и последней сделки. */}
+          {chosenRange ?? period ? ` · ${chosenRange ?? period}` : ""}
         </p>
 
-        <div className="mt-6 grid grid-cols-2 md:grid-cols-4 gap-3">
-          <Stat label="Net P&L" value={fmtUsd(s.netPnl, { sign: true })} tone={s.netPnl >= 0 ? "profit" : "loss"} />
-          <Stat label="Win rate" value={fmtPct(s.winRate, 0)} />
-          <Stat label="Profit factor" value={s.profitFactor.toFixed(2)} />
-          <Stat label="Max drawdown" value={fmtPct(s.maxDrawdownPct, 1)} tone="loss" />
+        {/* fmtPct тут не годится: он ставит «+» перед любым положительным
+            числом, а доля прибыльных со знаком плюс и «просадка +0.5%» —
+            бессмыслица. winRate и maxDrawdownPct приходят уже в процентах
+            (0–100), просадка — положительной величиной потери. */}
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Stat label={t("mentorPage.winRate")} value={`${s.winRate.toFixed(0)}%`} />
+          <Stat label={t("mentorPage.profitFactor")} value={s.profitFactor.toFixed(2)} />
+          <Stat
+            label={t("mentorPage.maxDrawdown")}
+            value={s.maxDrawdownPct > 0 ? `−${s.maxDrawdownPct.toFixed(1)}%` : "0%"}
+            tone="loss"
+          />
         </div>
 
-        {s.equityCurve.length > 1 && (
-          <div className="card p-5 mt-5">
-            <h3 className="font-medium text-sm mb-3">Equity curve</h3>
-            <EquityChart data={s.equityCurve} />
-          </div>
+        {accounts.length === 0 ? (
+          <div className="card mt-5 p-10 text-center text-sm text-muted">{t("mentorPage.noTrades")}</div>
+        ) : (
+          <MentorTrades accounts={accounts} />
         )}
 
-        <p className="mt-8 text-xs text-faint text-center">
-          Shared read-only via TradeStats Mentor Mode — no login, no access to the account.
-        </p>
-      </div>
+        {shown >= PUBLIC_TRADES_LIMIT && (
+          <p className="mt-3 text-xs text-faint">{t("mentorPage.limit", { n: PUBLIC_TRADES_LIMIT })}</p>
+        )}
+
+        <p className="mt-8 text-center text-xs text-faint">{t("mentorPage.footer")}</p>
+      </main>
     </div>
   );
 }
 
-function Unavailable() {
+function Unavailable({ t }: { t: T }) {
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center px-4">
+    <div className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div className="text-center text-muted">
-        <p className="text-lg font-medium">This link isn&apos;t available.</p>
-        <p className="text-sm mt-1 text-faint">It may have been revoked, or sharing is currently disabled.</p>
+        <p className="text-lg font-medium">{t("mentorPage.unavailable")}</p>
+        <p className="mt-1 text-sm text-faint">{t("mentorPage.unavailableHint")}</p>
       </div>
     </div>
   );
@@ -76,7 +127,11 @@ function Stat({ label, value, tone }: { label: string; value: string; tone?: "pr
   return (
     <div className="card p-4">
       <div className="text-xs text-faint">{label}</div>
-      <div className={`text-lg font-semibold tabular-nums ${tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : ""}`}>
+      <div
+        className={`text-lg font-semibold tabular-nums ${
+          tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : ""
+        }`}
+      >
         {value}
       </div>
     </div>

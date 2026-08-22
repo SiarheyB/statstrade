@@ -87,6 +87,13 @@ export function useFullscreen<T extends HTMLElement>(): FullscreenState<T> {
     const el = ref.current as FsElement | null;
     if (!el) return;
 
+    // Нативный фуллскрин недоступен или запрещён — разворачиваем оверлеем
+    // во всё окно: снаружи разницы нет, флаг active один.
+    const showAsOverlay = () => {
+      setOverlay(true);
+      notifyResize();
+    };
+
     if (fullscreenElement()) {
       const doc = document as FsDocument;
       const exit = doc.exitFullscreen ?? doc.webkitExitFullscreen;
@@ -101,15 +108,19 @@ export function useFullscreen<T extends HTMLElement>(): FullscreenState<T> {
 
     const request = el.requestFullscreen ?? el.webkitRequestFullscreen;
     if (!request) {
-      setOverlay(true);
-      notifyResize();
+      showAsOverlay();
       return;
     }
-    void Promise.resolve(request.call(el)).catch(() => {
-      // Браузер отказал (iOS Safari, политика прав) — разворачиваем оверлеем.
-      setOverlay(true);
-      notifyResize();
-    });
+    // Отказ прилетает двумя разными способами: реджектом промиса или
+    // синхронным исключением (так делает встроенный просмотрщик, когда
+    // fullscreen запрещён политикой фрейма). Ловим оба — иначе кнопка
+    // молча не работает.
+    try {
+      const started = request.call(el) as Promise<void> | undefined;
+      if (started && typeof started.catch === "function") started.catch(showAsOverlay);
+    } catch {
+      showAsOverlay();
+    }
   }, [overlay]);
 
   return { ref, active: native || overlay, toggle };
