@@ -142,6 +142,30 @@ describe("detectFalseBreakout2b", () => {
     expect(detectFalseBreakout2b(candles, LEVEL, ATR)).toBeNull();
   });
 
+  // ЛП2Б — это обычный ЛП, только с закрытием ЗА уровнем. Значит подход
+  // обязан быть как у обычного ЛП: цена идёт к уровню с одной стороны и
+  // уходит за него только пробойным баром. Живой случай ALGOUSDT 22.08.2026:
+  // цена прилетела снизу, перескочила уровень 0.0925 с закрытием в 2.3 ATR
+  // над ним, а на следующий день вернулась под уровень — сетап читался как
+  // ложный пробой ПОДДЕРЖКИ и предлагал лонг, хотя обычного ЛП в лонг от
+  // этого уровня не существует: слева он был только сопротивлением.
+  it("rejects a break back through a level the price had just jumped over", () => {
+    const jumped: DailyCandle[] = [];
+    for (let i = 0; i < 20; i++) jumped.push(bar(i, 60, 62, 58, 60));
+    jumped.push(bar(20, 62, 75, 61, 74));
+    jumped.push(bar(21, 74, 84, 73, 82));
+    jumped.push(bar(22, 82, 90, 81, 89));
+    // Перескок уровня вверх с закрытием далеко над ним...
+    jumped.push(bar(23, 89, 124, 88, 123));
+    // ...и возврат под уровень на следующий день.
+    jumped.push(bar(24, 123, 124, 94, 99));
+
+    expect(detectFalseBreakout2b(jumped, LEVEL, ATR)).toBeNull();
+    // Без проверки стороны подхода это и был тот самый ложный «лонг».
+    const withoutSideCheck = { ...DEFAULT_2B_THRESHOLDS, approachSideDeadbandAtr: Infinity };
+    expect(detectFalseBreakout2b(jumped, LEVEL, ATR, withoutSideCheck)?.direction).toBe("long");
+  });
+
   it("returns null without a usable ATR or with too little history", () => {
     expect(detectFalseBreakout2b(series(), LEVEL, 0)).toBeNull();
     expect(detectFalseBreakout2b(series().slice(-3), LEVEL, ATR)).toBeNull();

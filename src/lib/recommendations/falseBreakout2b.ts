@@ -60,6 +60,11 @@ export interface FalseBreakout2bThresholds {
   huggingWindow: number;
   /** Что считается «вплотную к уровню» для этих баров, в ATR. */
   huggingCloseAtr: number;
+  /**
+   * Мёртвая зона вокруг уровня при определении стороны подхода, в ATR:
+   * закрытие в паре сотых ATR от линии — это «на уровне», а не «за ним».
+   */
+  approachSideDeadbandAtr: number;
 }
 
 export const DEFAULT_2B_THRESHOLDS: FalseBreakout2bThresholds = {
@@ -87,6 +92,7 @@ export const DEFAULT_2B_THRESHOLDS: FalseBreakout2bThresholds = {
   maxBarsHuggingLevel: 2,
   huggingWindow: 6,
   huggingCloseAtr: 1,
+  approachSideDeadbandAtr: 0.1,
 };
 
 export type Break2bSide = "up" | "down";
@@ -169,6 +175,20 @@ export function detectFalseBreakout2b(
   const brokeDown = last.c < levelPrice && prev.c >= levelPrice;
   if (!brokeUp && !brokeDown) return null;
   const brokeSide: Break2bSide = brokeUp ? "up" : "down";
+
+  // ЛП2Б — это обычный ЛП, у которого бар не отбился от уровня внутри дня, а
+  // ЗАКРЫЛСЯ за ним. Значит и подход обязан быть как у обычного ЛП: всё окно
+  // подхода цена стоит по ту сторону уровня, откуда к нему идёт, и уходит за
+  // уровень только пробойным баром. Одного prev.c мало: цена может перескочить
+  // уровень снизу и на следующий день вернуться под него — тогда «пробой вниз»
+  // засчитывался уровню, который слева был только сопротивлением, и сетап
+  // разворачивался в лонг, хотя обычного ЛП в лонг от такого уровня нет вовсе
+  // (ALGOUSDT 22.08.2026 от уровня 0.0925).
+  const deadband = atr * th.approachSideDeadbandAtr;
+  const approachSideBroken = candles
+    .slice(-(th.approachWindow + 1), -1)
+    .some((c) => (brokeUp ? c.c > levelPrice + deadband : c.c < levelPrice - deadband));
+  if (approachSideBroken) return null;
 
   // Закрылись за уровнем, но недалеко — иначе это состоявшийся пробой.
   const closeBeyondAtr = Math.abs(last.c - levelPrice) / atr;
