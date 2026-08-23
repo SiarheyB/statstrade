@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAdminSession, notFound, recordAudit } from "@/lib/admin";
 import { badRequest, serverError } from "@/lib/api";
-import { syncChunk } from "@/lib/sync";
+import { syncChunk, AccountGoneError } from "@/lib/sync";
 
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
@@ -43,6 +43,7 @@ export async function POST(req: Request) {
     }
     return badRequest("Неизвестное действие");
   } catch (err) {
+    if (err instanceof AccountGoneError) return badRequest("Аккаунт не найден");
     return serverError((err as Error).message);
   }
 }

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
-import { syncChunk } from "@/lib/sync";
+import { syncChunk, AccountGoneError } from "@/lib/sync";
 
 // One chunk of a chunked background import. The client calls this repeatedly
 // (while status === "syncing") to walk the scan and render a progress bar.
@@ -33,6 +33,8 @@ export async function POST(
     const progress = await syncChunk(id, { rescan });
     return NextResponse.json(progress);
   } catch (err) {
+    // Аккаунт удалили, пока шёл чанк — это не ошибка сервера.
+    if (err instanceof AccountGoneError) return badRequest("Аккаунт не найден");
     return serverError((err as Error).message);
   }
 }

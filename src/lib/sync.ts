@@ -1,4 +1,5 @@
 import type { Exchange } from "ccxt";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "./db";
 import { decrypt } from "./crypto";
 import { bumpStatsVersion } from "./statsCache";
@@ -433,11 +434,40 @@ function sinceForPhase(
   return now - FULL_LOOKBACK_DAYS * 86_400_000;
 }
 
+// Аккаунт могли удалить прямо посреди фоновой синхронизации: чанк живёт до
+// 42 секунд, а план строится и того дольше, DELETE /api/accounts/[id] ничего
+// не отменяет. Тогда любая запись по нему падает с P2025 (запись не найдена)
+// или P2003 (внешний ключ филла) — это не сбой синхронизации, а гонка, и в
+// логи админки она попадать не должна.
+export class AccountGoneError extends Error {
+  constructor(accountId: string) {
+    super(`Account ${accountId} no longer exists`);
+    this.name = "AccountGoneError";
+  }
+}
+
+function isAccountGone(err: unknown): boolean {
+  if (err instanceof AccountGoneError) return true;
+  const code = (err as { code?: unknown } | null)?.code;
+  return code === "P2025" || code === "P2003";
+}
+
+// Единственная точка записи в ExchangeAccount из синхронизации: updateMany не
+// бросает при отсутствии строки, поэтому исчезнувший аккаунт превращается в
+// понятный AccountGoneError вместо сырого текста Prisma.
+async function updateAccount(
+  accountId: string,
+  data: Prisma.ExchangeAccountUpdateManyMutationInput,
+): Promise<void> {
+  const { count } = await prisma.exchangeAccount.updateMany({ where: { id: accountId }, data });
+  if (count === 0) throw new AccountGoneError(accountId);
+}
+
 // Process one time-bounded chunk of the active scan: fetch trades for the next
 // batch of tasks, persist fills, advance the cursor, and report progress.
 async function processChunk(accountId: string): Promise<SyncProgress> {
   const account = await prisma.exchangeAccount.findUnique({ where: { id: accountId } });
-  if (!account) throw new Error("Account not found");
+  if (!account) throw new AccountGoneError(accountId);
 
   const plan: string[] = account.syncPlan ? JSON.parse(account.syncPlan) : [];
   const total = plan.length;
@@ -472,6 +502,8 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
         const count = await persistFills(accountId, account.exchange, fills);
         imported += count;
       } catch (err) {
+        // Аккаунт удалили посреди чанка — дальше писать некуда, выходим тихо.
+        if (isAccountGone(err)) throw new AccountGoneError(accountId);
         const label = symbol || kind;
         const errMsg = formatCCXTError(err);
         errors.push(`${label}: ${errMsg}`);
@@ -479,10 +511,7 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
       }
       cursor++;
       if (cursor % 20 === 0) {
-        await prisma.exchangeAccount.update({
-          where: { id: accountId },
-          data: { syncCursor: cursor, syncImported: imported },
-        });
+        await updateAccount(accountId, { syncCursor: cursor, syncImported: imported });
       }
     }
   } finally {
@@ -506,10 +535,7 @@ async function processChunk(accountId: string): Promise<SyncProgress> {
     };
   }
 
-  await prisma.exchangeAccount.update({
-    where: { id: accountId },
-    data: { syncStatus: "syncing", syncCursor: cursor, syncImported: imported },
-  });
+  await updateAccount(accountId, { syncStatus: "syncing", syncCursor: cursor, syncImported: imported });
   return { status: "syncing", phase, done: cursor, total, imported, error: null };
 }
 
@@ -523,19 +549,16 @@ async function finishScan(
   const now = new Date();
   const hardFail = errors.length > 0 && imported === 0;
   const errorSummary = errors.length ? errors.slice(0, 5).join(" | ") : null;
-  await prisma.exchangeAccount.update({
-    where: { id: accountId },
-    data: {
-      syncStatus: hardFail ? "error" : "idle",
-      syncError: errorSummary,
-      syncPlan: null,
-      syncCursor: 0,
-      syncTotal: 0,
-      syncImported: 0,
-      syncPhase: null,
-      lastSyncAt: now,
-      fullSyncAt: phase === "full" && !hardFail ? now : prevFullSyncAt,
-    },
+  await updateAccount(accountId, {
+    syncStatus: hardFail ? "error" : "idle",
+    syncError: errorSummary,
+    syncPlan: null,
+    syncCursor: 0,
+    syncTotal: 0,
+    syncImported: 0,
+    syncPhase: null,
+    lastSyncAt: now,
+    fullSyncAt: phase === "full" && !hardFail ? now : prevFullSyncAt,
   });
 }
 
@@ -546,23 +569,20 @@ export async function syncChunk(
   opts: { rescan?: boolean } = {},
 ): Promise<SyncProgress> {
   const account = await prisma.exchangeAccount.findUnique({ where: { id: accountId } });
-  if (!account) throw new Error("Account not found");
+  if (!account) throw new AccountGoneError(accountId);
   if (!isExchangeId(account.exchange)) {
     throw new Error(`Unsupported exchange: ${account.exchange}`);
   }
 
   if (opts.rescan) {
-    await prisma.exchangeAccount.update({
-      where: { id: accountId },
-      data: {
-        syncStatus: "idle",
-        syncPlan: null,
-        syncCursor: 0,
-        syncTotal: 0,
-        syncImported: 0,
-        syncPhase: null,
-        fullSyncAt: null,
-      },
+    await updateAccount(accountId, {
+      syncStatus: "idle",
+      syncPlan: null,
+      syncCursor: 0,
+      syncTotal: 0,
+      syncImported: 0,
+      syncPhase: null,
+      fullSyncAt: null,
     });
     account.syncStatus = "idle";
     account.syncPlan = null;
@@ -578,10 +598,7 @@ export async function syncChunk(
   // return immediately; the client's next call processes the first chunk. This
   // keeps the start call well under the serverless time limit.
   const phase: "full" | "incremental" = account.fullSyncAt ? "incremental" : "full";
-  await prisma.exchangeAccount.update({
-    where: { id: accountId },
-    data: { syncStatus: "syncing", syncPhase: phase, syncError: null, syncCursor: 0, syncImported: 0 },
-  });
+  await updateAccount(accountId, { syncStatus: "syncing", syncPhase: phase, syncError: null, syncCursor: 0, syncImported: 0 });
 
   // Refresh the account balance (deposit) for the risk manager / capital field.
   try {
@@ -593,12 +610,10 @@ export async function syncChunk(
       account.demoTrading,
     );
     if (bal != null) {
-      await prisma.exchangeAccount.update({
-        where: { id: accountId },
-        data: { balance: bal, balanceAt: new Date() },
-      });
+      await updateAccount(accountId, { balance: bal, balanceAt: new Date() });
     }
   } catch (balErr) {
+    if (isAccountGone(balErr)) throw new AccountGoneError(accountId);
     logger.error("sync", accountId, "BALANCE_FAILED", `Failed to refresh balance for ${account.exchange}`, { exchange: account.exchange, error: (balErr as Error).message });
   }
 
@@ -615,12 +630,10 @@ export async function syncChunk(
       account.demoTrading,
     );
   } catch (err) {
+    if (isAccountGone(err)) throw new AccountGoneError(accountId);
     const errMsg = formatCCXTError(err);
     logger.error("sync", accountId, "SYNC_BUILD_PLAN_ERROR", `Failed to build plan for ${account.exchange}`, { exchange: account.exchange, error: errMsg, stack: (err as Error).stack });
-    await prisma.exchangeAccount.update({
-      where: { id: accountId },
-      data: { syncStatus: "error", syncError: errMsg, syncPhase: null },
-    });
+    await updateAccount(accountId, { syncStatus: "error", syncError: errMsg, syncPhase: null });
     return { status: "error", phase: null, done: 0, total: 0, imported: 0, error: errMsg };
   }
 
@@ -629,26 +642,20 @@ export async function syncChunk(
     // the server IP). Surface the reason instead of silently completing.
     const why = diag.join(" | ") || "no tradable pairs found";
     logger.error("sync", accountId, "SYNC_EMPTY_PLAN", `No tasks for ${account.exchange}`, { exchange: account.exchange, diag });
-    await prisma.exchangeAccount.update({
-      where: { id: accountId },
-      data: {
-        syncStatus: "error",
-        syncError: why,
-        syncPlan: null,
-        syncCursor: 0,
-        syncTotal: 0,
-        syncImported: 0,
-        syncPhase: null,
-        lastSyncAt: new Date(),
-      },
+    await updateAccount(accountId, {
+      syncStatus: "error",
+      syncError: why,
+      syncPlan: null,
+      syncCursor: 0,
+      syncTotal: 0,
+      syncImported: 0,
+      syncPhase: null,
+      lastSyncAt: new Date(),
     });
     return { status: "error", phase, done: 0, total: 0, imported: 0, error: why };
   }
 
-  await prisma.exchangeAccount.update({
-    where: { id: accountId },
-    data: { syncPlan: JSON.stringify(plan), syncTotal: plan.length, syncCursor: 0, syncImported: 0 },
-  });
+  await updateAccount(accountId, { syncPlan: JSON.stringify(plan), syncTotal: plan.length, syncCursor: 0, syncImported: 0 });
   return { status: "syncing", phase, done: 0, total: plan.length, imported: 0, error: null };
 }
 
@@ -693,6 +700,7 @@ export function kickUserSync(userId: string): void {
         try {
           await syncChunkGuarded(a.id);
         } catch (err) {
+          if (isAccountGone(err)) continue; // аккаунт удалён во время синхронизации
           logger.error("sync", a.id, "KICK_USER_SYNC_FAILED", `Kick sync failed for account`, { exchange: a.exchange, error: (err as Error).message });
         }
       }
@@ -749,6 +757,7 @@ export async function runDueSyncs(): Promise<{
       try {
         if (await syncChunkGuarded(a.id)) advanced.push(a.id);
       } catch (err) {
+        if (isAccountGone(err)) continue; // аккаунт удалён во время синхронизации
         failed.push(a.id);
         logger.error("sync", a.id, "AUTO_SYNC_FAILED", `Auto-sync failed for account`, { exchange: a.exchange, error: (err as Error).message });
       }

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 vi.mock("@/lib/sync", () => ({
   syncChunk: vi.fn(),
+  AccountGoneError: class AccountGoneError extends Error {},
 }));
 
 import {
@@ -10,7 +11,7 @@ import {
   mockGetAuthUser,
   mockPrisma,
 } from "@/lib/__tests__/helpers/routeMocks";
-import { syncChunk } from "@/lib/sync";
+import { syncChunk, AccountGoneError } from "@/lib/sync";
 import { POST } from "@/app/api/accounts/[id]/sync/route";
 
 const base = "https://example.com/api/accounts/a1/sync";
@@ -49,6 +50,16 @@ describe("POST /api/accounts/[id]/sync", () => {
     );
     expect(res.status).toBe(200);
     expect(syncChunk).toHaveBeenCalledWith("a1", { rescan: true });
+  });
+
+  it("returns 400 when the account is deleted mid-sync", async () => {
+    asUser();
+    mockPrisma.exchangeAccount.findFirst.mockResolvedValue({ id: "a1" });
+    (syncChunk as any).mockRejectedValueOnce(new AccountGoneError("gone"));
+    const res = await POST(new Request(base, { method: "POST" }), {
+      params: Promise.resolve({ id: "a1" }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it("returns 500 on sync error", async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { syncChunk, persistFills, runDueSyncs, kickUserSync } from '@/lib/sync';
+import { syncChunk, persistFills, runDueSyncs, kickUserSync, AccountGoneError } from '@/lib/sync';
 
 // Mock database and external modules for sync testing
 vi.mock('@/lib/db', () => ({
@@ -8,6 +8,7 @@ vi.mock('@/lib/db', () => ({
       findUnique: vi.fn(),
       findMany: vi.fn(),
       update: vi.fn(),
+      updateMany: vi.fn(),
       create: vi.fn(),
     },
     fill: {
@@ -51,6 +52,7 @@ describe('syncChunk core functionality', () => {
     vi.clearAllMocks();
     const db = await import('@/lib/db');
     prisma = db.prisma;
+    prisma.exchangeAccount.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it('starts new scan when account has no syncPlan', async () => {
@@ -108,11 +110,11 @@ describe('syncChunk core functionality', () => {
       passphrase: null,
     });
 
-    vi.mocked(prisma.exchangeAccount.update).mockResolvedValue(undefined);
+    vi.mocked(prisma.exchangeAccount.updateMany).mockResolvedValue({ count: 1 });
 
     await syncChunk('acc123', { rescan: true });
 
-    expect(prisma.exchangeAccount.update).toHaveBeenCalledWith(
+    expect(prisma.exchangeAccount.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'acc123' },
         data: expect.objectContaining({
@@ -126,6 +128,38 @@ describe('syncChunk core functionality', () => {
         }),
       }),
     );
+  });
+
+  it('аккаунт, удалённый во время синхронизации, даёт AccountGoneError', async () => {
+    vi.mocked(prisma.exchangeAccount.findUnique).mockResolvedValue(null);
+    await expect(syncChunk('gone')).rejects.toBeInstanceOf(AccountGoneError);
+  });
+
+  it('пропавшая строка при записи прогресса тоже даёт AccountGoneError', async () => {
+    vi.mocked(prisma.exchangeAccount.findUnique).mockResolvedValue({
+      id: 'acc123',
+      exchange: 'bybit',
+      marketType: 'spot',
+      syncStatus: 'idle',
+      syncPlan: null,
+      syncCursor: 0,
+      syncTotal: 0,
+      syncImported: 0,
+      syncPhase: null,
+      syncError: null,
+      lastSyncAt: new Date('2024-01-01T00:00:00Z'),
+      fullSyncAt: null,
+      balance: null,
+      balanceAt: null,
+      demoTrading: false,
+      autoSync: true,
+      syncIntervalMinutes: 60,
+      apiKey: 'key',
+      apiSecret: 'secret',
+      passphrase: null,
+    });
+    prisma.exchangeAccount.updateMany.mockResolvedValue({ count: 0 });
+    await expect(syncChunk('acc123')).rejects.toBeInstanceOf(AccountGoneError);
   });
 });
 
