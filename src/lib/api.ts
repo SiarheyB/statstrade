@@ -5,8 +5,13 @@ import { logError } from "./errorLog";
 
 // Throttle lastSeenAt writes: at most once per user per 5 minutes. Kept
 // in-process (long-running container) so we avoid a DB write on every request.
-// 5-минутная гранулярность нужна статусу «онлайн» в админке (порог 10 мин);
-// для адаптивного бэкоффа синка точность неважна.
+// Точность тут нужна только адаптивному бэкоффу синка (дни простоя).
+//
+// ВАЖНО: lastSeenAt — это НЕ «онлайн». Его поднимает любой запрос с валидной
+// сессией, а открытая вкладка дашборда сама опрашивает сервер раз в 30-60 с
+// (SyncProvider, поддержка, уведомления) — даже если человек давно ушёл.
+// Статус «онлайн» считается по lastActiveAt, который пишет только маячок
+// присутствия (см. markPresence и components/PresenceBeacon.tsx).
 const SEEN_THROTTLE_MS = 5 * 60 * 1000;
 const lastSeenWrites = new Map<string, number>();
 
@@ -19,6 +24,27 @@ function touchLastSeen(userId: string): void {
   prisma.user
     .update({ where: { id: userId }, data: { lastSeenAt: new Date(now) } })
     .catch(() => lastSeenWrites.delete(userId));
+}
+
+// Маячок присутствия: вкладка видима и человек что-то делал недавно.
+// Троттлинг короче порога «онлайн», иначе пользователь мигал бы офлайном между
+// записями. Заодно закрывает и lastSeenAt — отдельный запрос ему не нужен.
+const PRESENCE_THROTTLE_MS = 30 * 1000;
+const presenceWrites = new Map<string, number>();
+
+export function markPresence(userId: string): void {
+  const now = Date.now();
+  const prev = presenceWrites.get(userId) ?? 0;
+  if (now - prev < PRESENCE_THROTTLE_MS) return;
+  presenceWrites.set(userId, now);
+  lastSeenWrites.set(userId, now);
+  const at = new Date(now);
+  prisma.user
+    .update({ where: { id: userId }, data: { lastSeenAt: at, lastActiveAt: at } })
+    .catch(() => {
+      presenceWrites.delete(userId);
+      lastSeenWrites.delete(userId);
+    });
 }
 
 // Resolve the current user from the session cookie, or null.

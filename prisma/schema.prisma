@@ -20,9 +20,14 @@ model User {
   googleId             String?               @unique // Google "sub" when linked to a Google account
   name                 String?
   createdAt            DateTime              @default(now())
-  // Last time the user was seen on an authenticated request (throttled write,
-  // ~once/hour). Drives adaptive auto-sync backoff: idle users sync less often.
+  // Last time ANY authenticated request came from the user (throttled write,
+  // ~once per 5 min) — including background polls of an open tab. Drives
+  // adaptive auto-sync backoff: idle users sync less often.
   lastSeenAt           DateTime?
+  // Last time the user was actually AT the screen: visible tab + interaction in
+  // the last few minutes (маячок PresenceBeacon → /api/presence). Это и есть
+  // «онлайн» в админке — фоновый опрос открытой вкладки его не поднимает.
+  lastActiveAt         DateTime?
   // JSON arrays of user-configurable dropdown options for trade annotations.
   entryPointOptions    String?
   entryTypeOptions     String?

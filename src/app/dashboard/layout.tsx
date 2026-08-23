@@ -5,6 +5,7 @@ import DashboardNav from "@/components/DashboardNav";
 import SyncProvider from "@/components/SyncProvider";
 import { SidebarProvider } from "@/lib/sidebar/provider";
 import DemoBanner from "@/components/landing/DemoBanner";
+import PresenceBeacon from "@/components/PresenceBeacon";
 
 export default async function DashboardLayout({
   children,
@@ -16,6 +17,8 @@ export default async function DashboardLayout({
 
   return (
     <SyncProvider>
+      {/* Статус «онлайн» в админке, см. components/PresenceBeacon.tsx */}
+      <PresenceBeacon />
       <SidebarProvider>
         <div className="md:flex min-h-screen">
           <DashboardNav email={session.email} isAdmin={isAdminSession(session)} demo={session.demo === true} />

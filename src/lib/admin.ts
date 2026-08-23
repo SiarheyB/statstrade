@@ -47,7 +47,11 @@ export function notFound() {
   return NextResponse.json({ error: "Not found" }, { status: 404 });
 }
 
-export const ONLINE_THRESHOLD_MS = 10 * 60_000;
+// «Онлайн» = маячок присутствия (см. /api/presence) приходил недавно. Маячок
+// шлётся раз в минуту, пока вкладка видима и человек что-то делал, поэтому
+// 5 минут — это «прямо сейчас за экраном» с запасом на сетевые перерывы.
+// Считать по lastSeenAt нельзя: его поднимает фоновый опрос открытой вкладки.
+export const ONLINE_THRESHOLD_MS = 5 * 60_000;
 
 // Feed staleness threshold
 export const FEED_STALE_MS = 90_000;

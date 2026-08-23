@@ -23,7 +23,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 vi.mock("@/lib/admin", () => ({
-  ONLINE_THRESHOLD_MS: 10 * 60_000,
+  ONLINE_THRESHOLD_MS: 5 * 60_000,
   getFeedFreshness: vi.fn(),
 }));
 

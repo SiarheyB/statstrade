@@ -57,7 +57,7 @@ export default async function AdminOverviewPage() {
 
   const [users, online, newWeek, newMonth, accounts, syncErrors, fills] = await Promise.all([
     prisma.user.count(),
-    prisma.user.count({ where: { lastSeenAt: { gte: new Date(Date.now() - ONLINE_THRESHOLD_MS) } } }),
+    prisma.user.count({ where: { lastActiveAt: { gte: new Date(Date.now() - ONLINE_THRESHOLD_MS) } } }),
     prisma.user.count({ where: { createdAt: { gte: weekAgo } } }),
     prisma.user.count({ where: { createdAt: { gte: monthAgo } } }),
     prisma.exchangeAccount.count(),

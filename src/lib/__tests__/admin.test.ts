@@ -106,8 +106,8 @@ describe('admin', () => {
   });
 
   describe('константы', () => {
-    it('ONLINE_THRESHOLD_MS = 10 минут', () => {
-      expect(ONLINE_THRESHOLD_MS).toBe(10 * 60_000);
+    it('ONLINE_THRESHOLD_MS = 5 минут', () => {
+      expect(ONLINE_THRESHOLD_MS).toBe(5 * 60_000);
     });
 
     it('FEED_STALE_MS = 90 секунд', () => {

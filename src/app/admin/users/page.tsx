@@ -15,6 +15,7 @@ export default async function AdminUsersPage() {
       name: true,
       createdAt: true,
       lastSeenAt: true,
+      lastActiveAt: true,
       twoFactorEnabled: true,
       googleId: true,
       _count: { select: { accounts: true, annotations: true } },
@@ -30,7 +31,9 @@ export default async function AdminUsersPage() {
   // Серверный компонент: Date.now() выполняется на сервере при каждом запросе,
   // никакой гидратации тут нет — правило React Compiler бьёт мимо.
   /* eslint-disable react-hooks/purity -- server component, no hydration */
-    online: !!u.lastSeenAt && Date.now() - u.lastSeenAt.getTime() < ONLINE_THRESHOLD_MS,
+    // Онлайн — по маячку присутствия, а не по lastSeenAt: последний поднимает
+    // и фоновый опрос забытой открытой вкладки (см. lib/api.ts).
+    online: !!u.lastActiveAt && Date.now() - u.lastActiveAt.getTime() < ONLINE_THRESHOLD_MS,
     lastSeenAt: u.lastSeenAt ? u.lastSeenAt.toISOString() : null,
     twoFactorEnabled: u.twoFactorEnabled,
     google: !!u.googleId,

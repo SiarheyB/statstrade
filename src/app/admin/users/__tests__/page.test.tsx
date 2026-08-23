@@ -13,7 +13,7 @@ vi.mock("@/lib/i18n/server", () => ({
 
 vi.mock("@/lib/admin", () => ({
   isAdminEmail: vi.fn(() => false),
-  ONLINE_THRESHOLD_MS: 10 * 60_000,
+  ONLINE_THRESHOLD_MS: 5 * 60_000,
 }));
 
 vi.mock("@/lib/db", () => ({
@@ -39,6 +39,7 @@ describe("AdminUsersPage", () => {
         name: "User One",
         createdAt: new Date("2024-01-01T00:00:00Z"),
         lastSeenAt: new Date(),
+        lastActiveAt: new Date(),
         twoFactorEnabled: true,
         googleId: "g-1",
         _count: { accounts: 2, annotations: 1 },
