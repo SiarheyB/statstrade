@@ -41,6 +41,9 @@ import {
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
+import SessionPicker from "@/components/SessionPicker";
+import { drawSessionBoxes } from "@/lib/sessionOverlay";
+import { sessionWindows, TRADING_SESSIONS, type SessionId } from "@/lib/tradingSessions";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -110,6 +113,32 @@ export default function ForexView() {
     } catch {
       // приватный режим/заблокированное хранилище — просто дефолт
     }
+  }, []);
+
+  // Подсветка торговых сессий (Токио/Лондон/Нью-Йорк). Каждая включается
+  // отдельно и запоминается: у одних вся торговля в лондонскую сессию, другим
+  // важен только Нью-Йорк, и навязывать всем три коробки незачем.
+  const [sessionIds, setSessionIds] = useState<SessionId[]>([]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("forex.sessions");
+      if (saved === null) return;
+      const known = new Set(TRADING_SESSIONS.map((s) => s.id));
+      const parsed = saved.split(",").filter((v): v is SessionId => known.has(v as SessionId));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSessionIds(parsed);
+    } catch {
+      // приватный режим — просто дефолт
+    }
+  }, []);
+
+  const toggleSession = useCallback((id: SessionId) => {
+    setSessionIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try { localStorage.setItem("forex.sessions", next.join(",")); } catch { /* noop */ }
+      return next;
+    });
   }, []);
 
   const toggleVpOverlay = useCallback(() => {
@@ -627,6 +656,12 @@ function inferBinSize(levels: { price: number }[]): number {
     // должны читаться без напряжения. Считается по видимому окну (t0..t1), а
     // не берётся из панели: панель показывает фиксированный период, и на
     // графике её профиль означал бы не то, что видит пользователь.
+    // Сессии — самый нижний слой: это фон, по которому читают, в какое время
+    // рынок ходил. Окна считаются по видимому диапазону, поэтому при зуме их
+    // ровно столько, сколько влезает.
+    if (sessionIds.length > 0) {
+      drawSessionBoxes(ctx, sessionWindows(t0, t1, sessionIds), candles, sx, sy, layout);
+    }
     if (showVpOverlay) {
       drawVolumeProfileOverlay(ctx, sy, plotX, plotW, plotH, profileFromCandles(candles, t0, t1));
     }
@@ -742,7 +777,7 @@ function inferBinSize(levels: { price: number }[]): number {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, getTimeAxis, range, timezone, t, showVpOverlay, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, t, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
@@ -877,6 +912,7 @@ function inferBinSize(levels: { price: number }[]): number {
           >
             {RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
           </select>
+          <SessionPicker value={sessionIds} onToggle={toggleSession} timezone={timezone} />
           <button
             onClick={toggleVpOverlay}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 px-2 text-xs transition ${showVpOverlay ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
