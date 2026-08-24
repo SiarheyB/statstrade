@@ -440,6 +440,10 @@ model UserDrawing {
   lineWidth Int       @default(2)
   fillColor String?
   label     String?
+  // Показывать ли цену уровня/луча ярлыком на ценовой шкале (см.
+  // components/DrawingOverlay.tsx). По умолчанию да: рисуя горизонталь,
+  // трейдер обычно как раз и хочет видеть её цену.
+  showPrice Boolean   @default(true)
   createdAt DateTime  @default(now()) @db.Timestamp
   updatedAt DateTime  @updatedAt @db.Timestamp
   deletedAt DateTime? @db.Timestamp

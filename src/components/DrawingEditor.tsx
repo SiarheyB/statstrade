@@ -18,7 +18,7 @@
  */
 "use client";
 
-import { Trash2, X } from "lucide-react";
+import { Tag, Trash2, X } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import type { DrawingRow } from "@/lib/drawings";
 
@@ -27,15 +27,18 @@ type Props = {
   /** Базовый путь API рисунков страницы: /api/orderflow/drawings и т.п. */
   apiBase: string;
   /** Применить изменение к локальному списку (ответ сервера уже успешен). */
-  onPatched: (id: string, patch: { color?: string; lineWidth?: number }) => void;
+  onPatched: (id: string, patch: { color?: string; lineWidth?: number; showPrice?: boolean }) => void;
   onDelete: (id: string) => void;
   onClose: () => void;
 };
 
 export default function DrawingEditor({ drawing, apiBase, onPatched, onDelete, onClose }: Props) {
   const { t } = useI18n();
+  // Старые рисунки приезжают без поля (колонка добавлена позже) — считаем,
+  // что цена показывается: именно ради неё уровень обычно и рисуют.
+  const showPrice = drawing.showPrice !== false;
 
-  const patch = async (body: { color?: string; lineWidth?: number }) => {
+  const patch = async (body: { color?: string; lineWidth?: number; showPrice?: boolean }) => {
     try {
       const res = await fetch(`${apiBase}?id=${drawing.id}`, {
         method: "PUT",
@@ -73,6 +76,27 @@ export default function DrawingEditor({ drawing, apiBase, onPatched, onDelete, o
         />
         <span className="w-2 tabular-nums text-faint">{drawing.lineWidth}</span>
       </label>
+      {/* Ярлык с ценой есть только у горизонтальных инструментов — у
+          прямоугольника и трендовой показывать нечего, кнопку не рисуем. */}
+      {(drawing.toolType === "horizontal_line" || drawing.toolType === "horizontal_ray") && (
+        <>
+          <span className="h-4 w-px bg-border-strong" />
+          <button
+            type="button"
+            onClick={() => void patch({ showPrice: !showPrice })}
+            title={showPrice ? t("of.hidePrice") : t("of.showPrice")}
+            aria-label={showPrice ? t("of.hidePrice") : t("of.showPrice")}
+            aria-pressed={showPrice}
+            className={`flex items-center gap-1 rounded px-1.5 py-1 transition-colors ${
+              showPrice
+                ? "bg-accent/20 text-accent border border-accent/40"
+                : "text-faint border border-transparent hover:text-fg hover:bg-bg-muted"
+            }`}
+          >
+            <Tag size={13} />
+          </button>
+        </>
+      )}
       <span className="h-4 w-px bg-border-strong" />
       <button
         type="button"

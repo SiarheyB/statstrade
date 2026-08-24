@@ -269,6 +269,8 @@ const en: Dict = {
   "of.color": "Color",
   "of.lineWidth": "Width",
   "of.delete": "Delete",
+  "of.showPrice": "Show price on the axis",
+  "of.hidePrice": "Hide price",
 
   // liquidation map
   "liq.title": "Liquidation heatmap",
@@ -1730,6 +1732,8 @@ const ru: Dict = {
   "of.color": "Цвет",
   "of.lineWidth": "Толщина",
   "of.delete": "Удалить",
+  "of.showPrice": "Показывать цену на шкале",
+  "of.hidePrice": "Скрыть цену",
 
   // liquidation map
   "liq.title": "Карта ликвидаций",

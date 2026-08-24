@@ -11,7 +11,14 @@ import type { DrawingRow } from "@/lib/drawings";
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({
     t: (key: string) =>
-      ({ "of.color": "Цвет", "of.lineWidth": "Толщина", "of.delete": "Удалить", "common.close": "Закрыть" })[key] ?? key,
+      ({
+        "of.color": "Цвет",
+        "of.lineWidth": "Толщина",
+        "of.delete": "Удалить",
+        "common.close": "Закрыть",
+        "of.showPrice": "Показывать цену на шкале",
+        "of.hidePrice": "Скрыть цену",
+      })[key] ?? key,
     timezone: "UTC",
   }),
 }));
@@ -28,6 +35,7 @@ function drawing(over: Partial<DrawingRow> = {}): DrawingRow {
     lineWidth: 2,
     fillColor: null,
     label: null,
+    showPrice: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -85,6 +93,35 @@ describe("DrawingEditor", () => {
     fireEvent.change(screen.getByDisplayValue("#e6b800"), { target: { value: "#00ff00" } });
     await waitFor(() => expect(fetch).toHaveBeenCalled());
     expect(props.onPatched).not.toHaveBeenCalled();
+  });
+
+  it("у горизонтали есть переключатель цены, и он шлёт showPrice", async () => {
+    const props = setup({ drawing: drawing({ toolType: "horizontal_line" }) });
+    fireEvent.click(screen.getByTitle("Скрыть цену")); // сейчас включено
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/orderflow/drawings?id=d1",
+        expect.objectContaining({ body: JSON.stringify({ showPrice: false }) }),
+      ),
+    );
+    expect(props.onPatched).toHaveBeenCalledWith("d1", { showPrice: false });
+  });
+
+  it("выключенная цена включается обратно", async () => {
+    setup({ drawing: drawing({ toolType: "horizontal_ray", showPrice: false }) });
+    fireEvent.click(screen.getByTitle("Показывать цену на шкале"));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/orderflow/drawings?id=d1",
+        expect.objectContaining({ body: JSON.stringify({ showPrice: true }) }),
+      ),
+    );
+  });
+
+  it("у прямоугольника переключателя цены нет — показывать нечего", () => {
+    setup({ drawing: drawing({ toolType: "rectangle" }) });
+    expect(screen.queryByTitle("Скрыть цену")).toBeNull();
+    expect(screen.queryByTitle("Показывать цену на шкале")).toBeNull();
   });
 
   it("calls onDelete and onClose from the icon buttons", () => {

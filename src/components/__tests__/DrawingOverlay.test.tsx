@@ -53,6 +53,7 @@ function makeRow(overrides: Partial<DrawingRow> & { points: string; toolType: Dr
     lineWidth: 2,
     fillColor: null,
     label: null,
+    showPrice: true,
     createdAt: new Date(),
     updatedAt: new Date(),
     deletedAt: null,
@@ -111,6 +112,44 @@ describe("drawDrawings", () => {
     });
     drawDrawings(ctx, sx, sy, 0, 200, 100, [row], null);
     expect(arcs).toHaveLength(4);
+  });
+
+  it("рисует ярлык цены уровня на шкале в цвете уровня", () => {
+    const calls: Array<{ text: string; x: number }> = [];
+    const ctx = makeFakeCtx();
+    const fills: string[] = [];
+    (ctx as unknown as { fillText: (t: string, x: number) => void }).fillText = (text, x) => {
+      calls.push({ text, x });
+      fills.push(ctx.fillStyle as string);
+    };
+    const layout = { plotX: 0, plotW: 200, plotH: 100, W: 264, H: 120 };
+    const row = makeRow({
+      toolType: "horizontal_line",
+      color: "#a855f7",
+      points: JSON.stringify([{ t: 10, price: 4765.5 }]),
+    });
+    drawDrawings(ctx, sx, (p) => 100 - (p - 4700) / 10, 0, 200, 100, [row], null, layout);
+    // ярлык рисуется правее области графика (на ценовой шкале)
+    expect(calls.some((c) => c.text === "4,766" && c.x > layout.plotX + layout.plotW)).toBe(true);
+  });
+
+  it("не рисует ярлык, если цена выключена или нет layout", () => {
+    const texts: string[] = [];
+    const ctx = makeFakeCtx();
+    (ctx as unknown as { fillText: (t: string) => void }).fillText = (t) => { texts.push(t); };
+    const layout = { plotX: 0, plotW: 200, plotH: 100, W: 264, H: 120 };
+    const off = makeRow({
+      toolType: "horizontal_ray",
+      showPrice: false,
+      points: JSON.stringify([{ t: 10, price: 50 }]),
+    });
+    drawDrawings(ctx, sx, sy, 0, 200, 100, [off], null, layout);
+    expect(texts).toHaveLength(0);
+
+    // без layout (вызов из старого кода) — тоже молча без ярлыка
+    const on = makeRow({ toolType: "horizontal_ray", points: JSON.stringify([{ t: 10, price: 50 }]) });
+    drawDrawings(ctx, sx, sy, 0, 200, 100, [on], null);
+    expect(texts).toHaveLength(0);
   });
 
   it("skips a drawing with invalid points JSON", () => {

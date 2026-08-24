@@ -6,6 +6,7 @@ import {
   niceStep,
   niceTimeStep,
   gridLineCount,
+  drawAxisPriceTag,
   fmtTimeHM,
   fmtDateDM,
   dayKey,
@@ -85,6 +86,13 @@ describe("pure helpers", () => {
     expect(fmtValLabel(2_500_000)).toBe("2.50M");
     expect(fmtValLabel(2_500)).toBe("2.50K");
     expect(fmtValLabel(500)).toBe("500");
+  });
+
+  it("fmtPriceLabel не съедает знаки у валютных мажоров", () => {
+    expect(fmtPriceLabel(4765.5)).toBe("4,766");   // золото/крипта — целые
+    expect(fmtPriceLabel(159.126)).toBe("159.13"); // йена — как было
+    expect(fmtPriceLabel(1.16693)).toBe("1.16693"); // было «1.17» — 7 пунктов мимо
+    expect(fmtPriceLabel(0.6234)).toBe("0.6234");
   });
 
   it("niceStep returns 1 for non-finite or non-positive input", () => {
@@ -274,6 +282,17 @@ describe("canvas drawing functions", () => {
     expect(gridLineCount(100000, 100, 3, 20)).toBe(20); // потолок
     expect(gridLineCount(NaN, 100, 3, 20)).toBe(3);
     expect(gridLineCount(0, 100, 3, 20)).toBe(3);
+  });
+
+  it("drawAxisPriceTag рисует плашку цвета уровня и не выходит за график", () => {
+    const layout = computePlotLayout(800, 400);
+    drawAxisPriceTag(ctx, 4765.5, 10, layout, "#a855f7");
+    expect(ctx.fillRect).toHaveBeenCalled();
+    expect(ctx.fillText).toHaveBeenCalledWith("4,766", layout.plotX + layout.plotW + 5, expect.any(Number));
+    (ctx.fillRect as unknown as { mockClear: () => void }).mockClear();
+    // уровень за пределами видимой области — плашки нет
+    drawAxisPriceTag(ctx, 1, layout.plotH + 50, layout, "#a855f7");
+    expect(ctx.fillRect).not.toHaveBeenCalled();
   });
 
   it("drawPriceGrid draws gridlines and labels within plot bounds", () => {

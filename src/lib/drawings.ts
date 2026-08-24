@@ -34,6 +34,8 @@ export interface CreateDrawingInput {
   lineWidth?: number;
   fillColor?: string;
   label?: string;
+  /** Показывать ярлык с ценой у горизонтальной линии/луча. */
+  showPrice?: boolean;
 }
 
 export interface UpdateDrawingInput {
@@ -42,6 +44,7 @@ export interface UpdateDrawingInput {
   lineWidth?: number;
   fillColor?: string;
   label?: string;
+  showPrice?: boolean;
 }
 
 export interface DrawingFilter {
@@ -62,6 +65,7 @@ export interface DrawingRow {
   lineWidth: number;
   fillColor: string | null;
   label: string | null;
+  showPrice: boolean;
   createdAt: Date;
   updatedAt: Date;
   deletedAt: Date | null;
@@ -131,6 +135,7 @@ const createSchema = z.object({
   lineWidth: z.number().int().min(1).max(10).optional(),
   fillColor: colorSchema.optional(),
   label: z.string().max(MAX_LABEL_LEN).optional(),
+  showPrice: z.boolean().optional(),
 });
 
 const updateSchema = z.object({
@@ -139,6 +144,7 @@ const updateSchema = z.object({
   lineWidth: z.number().int().min(1).max(10).optional(),
   fillColor: colorSchema.optional(),
   label: z.string().max(MAX_LABEL_LEN).optional(),
+  showPrice: z.boolean().optional(),
 });
 
 /** Первая ошибка zod в виде "invalid <путь>: <сообщение>". */
@@ -181,6 +187,7 @@ export async function createDrawing(input: CreateDrawingInput): Promise<DrawingR
       lineWidth: data.lineWidth ?? 2,
       fillColor: data.fillColor ?? null,
       label: data.label ?? null,
+      showPrice: data.showPrice ?? true,
     },
   });
 
@@ -238,6 +245,7 @@ export async function updateDrawing(
   if (patch.lineWidth !== undefined) data.lineWidth = patch.lineWidth;
   if (patch.fillColor !== undefined) data.fillColor = patch.fillColor;
   if (patch.label !== undefined) data.label = patch.label;
+  if (patch.showPrice !== undefined) data.showPrice = patch.showPrice;
 
   const updated = await prisma.userDrawing.update({
     where: { id },

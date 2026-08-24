@@ -26,6 +26,7 @@ type DrawingBody = {
   lineWidth?: number;
   fillColor?: string;
   label?: string;
+  showPrice?: boolean;
 };
 
 /** null — тело нечитаемо (битый JSON или превышен лимит размера). */
@@ -84,6 +85,7 @@ export async function POST(req: Request) {
       lineWidth: body.lineWidth,
       fillColor: body.fillColor,
       label: body.label,
+      showPrice: body.showPrice,
     });
 
     return NextResponse.json({ drawing }, { status: 201 });
@@ -114,6 +116,7 @@ export async function PUT(req: Request) {
       lineWidth: body.lineWidth,
       fillColor: body.fillColor,
       label: body.label,
+      showPrice: body.showPrice,
     });
 
     if (!updated) return badRequest("Drawing not found");

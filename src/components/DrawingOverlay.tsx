@@ -6,6 +6,7 @@
  */
 
 import type { DrawingRow, DrawingPoint, DrawingToolType } from "@/lib/drawings";
+import { drawAxisPriceTag, type PlotLayout } from "@/lib/candlestickChart";
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
@@ -40,8 +41,15 @@ export function drawDrawings(
   plotH: number,
   drawings: DrawingRow[],
   selectedId: string | null,
+  /** Нужен, чтобы нарисовать ярлык цены на правой шкале — она лежит ЗА
+   *  областью графика, а сама отрисовка рисунков обрезана по ней. */
+  layout?: PlotLayout,
 ): void {
   if (!drawings.length) return;
+
+  // Ярлыки цены собираем по ходу дела и рисуем после снятия клипа: внутри
+  // clip() всё, что правее графика, просто не видно.
+  const priceTags: { price: number; y: number; color: string }[] = [];
 
   ctx.save();
   ctx.beginPath();
@@ -119,6 +127,7 @@ export function drawDrawings(
         ctx.stroke();
         drawHandle(ctx, plotX, y, color, isSelected);
         drawHandle(ctx, plotX + plotW, y, color, isSelected);
+        if (d.showPrice !== false) priceTags.push({ price: pts[0].price, y, color });
         break;
       }
       case "horizontal_ray": {
@@ -138,8 +147,7 @@ export function drawDrawings(
         ctx.fillStyle = color;
         ctx.fill();
         drawHandle(ctx, rx, ry, color, isSelected);
-        // Цена над точкой
-        drawPriceLabel(ctx, rx, ry, pts[0].price, color);
+        if (d.showPrice !== false) priceTags.push({ price: pts[0].price, y: ry, color });
         break;
       }
       case "rectangle": {
@@ -179,6 +187,12 @@ export function drawDrawings(
   }
 
   ctx.restore();
+
+  // Ярлык цены — той же расцветки, что и сам уровень: так на шкале сразу
+  // видно, какому уровню какая цена принадлежит.
+  if (layout) {
+    for (const tag of priceTags) drawAxisPriceTag(ctx, tag.price, tag.y, layout, tag.color);
+  }
 }
 
 /** Маленький кружок-маркер на точках рисунка. */
@@ -194,16 +208,6 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
     ctx.arc(x, y, 5, 0, Math.PI * 2);
     ctx.stroke();
   }
-}
-
-/** Подпись с ценой над точкой. */
-function drawPriceLabel(ctx: CanvasRenderingContext2D, x: number, y: number, price: number, color: string): void {
-  const label = price.toFixed(2);
-  ctx.font = "11px monospace";
-  ctx.fillStyle = color;
-  ctx.textAlign = "left";
-  ctx.textBaseline = "bottom";
-  ctx.fillText(label, x + 4, y - 4);
 }
 
 // ─── Hit testing ─────────────────────────────────────────────────────────────

@@ -145,9 +145,49 @@ export function computePlotLayout(W: number, H: number, padBottom = PADB): PlotL
 }
 
 export function fmtPriceLabel(p: number): string {
-  if (p >= 1000) return Math.round(p).toLocaleString("en-US");
-  if (p >= 1) return p.toFixed(2);
+  const a = Math.abs(p);
+  if (a >= 1000) return Math.round(p).toLocaleString("en-US");
+  if (a >= 10) return p.toFixed(2);
+  // Валютные мажоры (0.6–1.5) двумя знаками превращались в «1.17» — на
+  // форексе это 7 пунктов, то есть подпись цены становилась бесполезной.
+  if (a >= 1) return p.toFixed(5);
   return p.toPrecision(4);
+}
+
+/** Достаточно ли цвет тёмный, чтобы писать по нему светлым. */
+function isDarkColor(hex: string): boolean {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return false;
+  const h = m[1].length === 3 ? m[1].split("").map((c) => c + c).join("") : m[1];
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  // Стандартная относительная яркость: тёмный фон → светлый текст.
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255 < 0.55;
+}
+
+/** Ярлык с ценой на правой шкале произвольного цвета (уровни пользователя). */
+export function drawAxisPriceTag(
+  ctx: CanvasRenderingContext2D,
+  price: number,
+  y: number,
+  layout: PlotLayout,
+  color: string,
+) {
+  const { plotX, plotW, plotH } = layout;
+  if (y < 0 || y > plotH) return;
+  const cy = Math.min(plotH - 7, Math.max(7, y));
+  ctx.save();
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  ctx.fillStyle = color;
+  ctx.fillRect(plotX + plotW, cy - 7, PADR, 14);
+  ctx.fillStyle = isDarkColor(color) ? "#f5f5f7" : "#08080d";
+  ctx.font = "10px ui-sans-serif, system-ui";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
+  ctx.fillText(fmtPriceLabel(price), plotX + plotW + 5, cy + 3);
+  ctx.restore();
 }
 
 export function fmtValLabel(v: number): string {
