@@ -33,6 +33,22 @@ function fakeChild() {
   };
 }
 
+/** Управляемый «процесс»: тест сам решает, что скрипт напечатал и с каким
+ *  кодом завершился — так проверяется всё, что роут делает ПОСЛЕ запуска. */
+function controllableChild() {
+  const handlers: Record<string, ((arg: unknown) => void)[]> = {};
+  const child = {
+    stdout: { on: (ev: string, cb: (arg: unknown) => void) => { (handlers[`stdout:${ev}`] ??= []).push(cb); } },
+    stderr: { on: (ev: string, cb: (arg: unknown) => void) => { (handlers[`stderr:${ev}`] ??= []).push(cb); } },
+    on: (ev: string, cb: (arg: unknown) => void) => { (handlers[ev] ??= []).push(cb); },
+  };
+  return {
+    child,
+    stdout: (line: string) => handlers["stdout:data"]?.forEach((cb) => cb(Buffer.from(line))),
+    close: (code: number) => handlers["close"]?.forEach((cb) => cb(code)),
+  };
+}
+
 function post(body: unknown) {
   return new Request(base, { method: "POST", body: JSON.stringify(body) });
 }
@@ -151,5 +167,78 @@ describe("удаление", () => {
     const res = await DELETE(new Request(`${base}?file=../../.env`, { method: "DELETE" }));
     expect(res.status).toBe(400);
     expect(fs.unlink).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("журнал операций и созданный файл", () => {
+  beforeEach(() => {
+    mockGetAdminSession.mockReset();
+    spawnMock.mockReset();
+    vi.mocked(fs.mkdir).mockReset().mockResolvedValue(undefined);
+    asAdmin();
+  });
+
+  it("после экспорта отдаёт имя созданного файла — его страница и скачивает", async () => {
+    const ctrl = controllableChild();
+    spawnMock.mockImplementation(() => ctrl.child);
+
+    const res = await POST(post({ action: "export_full" }));
+    const { operationId } = await res.json();
+
+    // скрипт печатает абсолютный путь файла последней строкой
+    ctrl.stdout(`${process.cwd()}/backup/tmp/db-export_20260825_101500.sql`);
+    ctrl.close(0);
+
+    const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();
+    expect(status.status).toBe("success");
+    expect(status.file).toBe("db-export_20260825_101500.sql");
+  });
+
+  it("посторонний путь в выводе за файл не принимается", async () => {
+    const ctrl = controllableChild();
+    spawnMock.mockImplementation(() => ctrl.child);
+    const res = await POST(post({ action: "export_full" }));
+    const { operationId } = await res.json();
+
+    ctrl.stdout("/etc/passwd");
+    ctrl.stdout(`${process.cwd()}/backup/tmp/../../../etc/passwd`);
+    ctrl.close(0);
+
+    const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();
+    expect(status.status).toBe("success");
+    expect(status.file).toBeUndefined();
+  });
+
+  it("упавшая операция файла не отдаёт", async () => {
+    const ctrl = controllableChild();
+    spawnMock.mockImplementation(() => ctrl.child);
+    const res = await POST(post({ action: "export_full" }));
+    const { operationId } = await res.json();
+
+    ctrl.stdout(`${process.cwd()}/backup/tmp/half-written.sql`);
+    ctrl.close(1);
+
+    const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();
+    expect(status.status).toBe("error");
+    expect(status.file).toBeUndefined();
+  });
+
+  it("action=operations возвращает журнал новыми сверху и с действием", async () => {
+    spawnMock.mockImplementation(() => fakeChild());
+    await POST(post({ action: "export_analytics" }));
+    await POST(post({ action: "create_basic_dump" }));
+
+    const data = await (await GET(new Request(`${base}?action=operations`))).json();
+    expect(data.operations.length).toBeGreaterThanOrEqual(2);
+    expect(data.operations[0].action).toBe("create_basic_dump");
+    expect(data.operations[0]).toHaveProperty("startedAt");
+    expect(data.operations[0].status).toBe("running");
+  });
+
+  it("журнал закрыт для не-админа", async () => {
+    asNonAdmin();
+    const res = await GET(new Request(`${base}?action=operations`));
+    expect(res.status).toBe(404);
   });
 });

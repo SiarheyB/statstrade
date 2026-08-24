@@ -68,11 +68,24 @@ function scriptEnv(): NodeJS.ProcessEnv {
 
 type Operation = {
   id: string;
+  /** Что запускали — нужно, чтобы журнал восстанавливался после перезагрузки
+   *  страницы: без действия строку не подписать. */
+  action: BackupAction;
   status: "pending" | "running" | "success" | "error";
   logs: string[];
   startedAt: number;
   completedAt?: number;
+  /** Файл, который создал экспорт — страница сразу отдаёт его браузеру. */
+  file?: string;
+  /** Порядковый номер запуска: две операции легко попадают в одну
+   *  миллисекунду, и сортировка по startedAt тогда даёт случайный порядок. */
+  seq: number;
 };
+
+let operationSeq = 0;
+
+/** Сколько операций помним для журнала. */
+const MAX_OPERATIONS = 20;
 
 // in-memory store for ops
 const operations: Record<string, Operation> = {};
@@ -82,6 +95,19 @@ const MAX_LOG_LINES = 2000;
 function pushLog(op: Operation, line: string) {
   op.logs.push(line);
   if (op.logs.length > MAX_LOG_LINES) op.logs.splice(0, op.logs.length - MAX_LOG_LINES);
+}
+
+// Скрипт печатает путь созданного файла последней строкой вывода. Ловим его,
+// чтобы страница могла сразу скачать дамп на машину пользователя: экспорт
+// нужен «себе на диск», а не «в контейнер на сервере».
+function extractProducedFile(logs: string[]): string | undefined {
+  for (let i = logs.length - 1; i >= 0; i--) {
+    const line = logs[i].trim();
+    if (!line.startsWith(TMP_DIR)) continue;
+    const name = line.slice(TMP_DIR.length).replace(/^[/\\]/, "");
+    if (isSafeBackupName(name)) return name;
+  }
+  return undefined;
 }
 
 function generateId() {
@@ -123,6 +149,24 @@ export async function GET(request: Request) {
     }
   }
 
+  // Журнал операций: страница подтягивает его при загрузке, иначе после
+  // обновления вкладки история пропадала целиком — даже у операции, которая
+  // прямо сейчас идёт на сервере.
+  if (action === "operations") {
+    const list = Object.values(operations)
+      .sort((a, b) => b.seq - a.seq)
+      .map((op) => ({
+        id: op.id,
+        action: op.action,
+        status: op.status,
+        startedAt: op.startedAt,
+        completedAt: op.completedAt,
+        file: op.file,
+        logs: op.logs.slice(-200),
+      }));
+    return json({ operations: list });
+  }
+
   // Handle operation status polling for backup operations
   if (operationId && (!action || action === "status" || action === "")) {
     const op = operations[operationId];
@@ -131,6 +175,7 @@ export async function GET(request: Request) {
       logs: op.logs,
       status: op.status,
       startedAt: op.startedAt,
+      file: op.file,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -183,8 +228,11 @@ export async function POST(request: Request) {
   }
 
   const operationId = generateId();
-  const op: Operation = { id: operationId, status: "pending", logs: [], startedAt: Date.now() };
+  const op: Operation = { id: operationId, action, status: "pending", logs: [], startedAt: Date.now(), seq: ++operationSeq };
   operations[operationId] = op;
+  // Держим только последние: иначе журнал растёт в памяти процесса до перезапуска.
+  const ids = Object.keys(operations).sort((a, b) => operations[a].seq - operations[b].seq);
+  for (const id of ids.slice(0, Math.max(0, ids.length - MAX_OPERATIONS))) delete operations[id];
 
   await recordAudit(session, `backup.${action}`, {
     targetType: "backup",
@@ -207,6 +255,7 @@ export async function POST(request: Request) {
   child.on("close", (code) => {
     op.completedAt = Date.now();
     op.status = code === 0 ? "success" : "error";
+    if (op.status === "success") op.file = extractProducedFile(op.logs);
     pushLog(op, `[${new Date().toISOString()}] Process exited with code ${code}`);
   });
 

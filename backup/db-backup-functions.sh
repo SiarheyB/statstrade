@@ -250,22 +250,26 @@ import_clean() {
 
   log "Starting clean import from ${input_file}"
 
-  # Stop all connections
-  exec_in_db psql -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${DB_NAME}';" || true
-
-  # Drop and recreate database
-  docker compose -f "${COMPOSE_FILE}" exec -T db env PGPASSWORD="${DB_PASSWORD}" \
-    dropdb -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "${DB_NAME}" || true
-
-  docker compose -f "${COMPOSE_FILE}" exec -T db env PGPASSWORD="${DB_PASSWORD}" \
-    createdb -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" "${DB_NAME}" || {
-    error "Failed to create database"
+  # Полная замена содержимого базы делается ПЕРЕСОЗДАНИЕМ СХЕМЫ, а не
+  # dropdb/createdb. Причины две, и обе видны только в бою:
+  #   • скрипт запускается из контейнера app, где нет docker CLI, — прежний
+  #     вариант звал `docker compose exec` и падал с «docker: command not
+  #     found», отчитавшись при этом «Failed to create database»;
+  #   • базу всё равно нельзя удалить, пока к ней подключено приложение: оно
+  #     переподключается быстрее, чем идёт dropdb.
+  # DROP SCHEMA public CASCADE убирает все таблицы, последовательности и типы —
+  # то есть ровно то, чего ждут от «чистого» импорта, — и работает на живом
+  # соединении.
+  exec_in_db psql -v ON_ERROR_STOP=1 -q \
+    -c 'DROP SCHEMA IF EXISTS public CASCADE' \
+    -c 'CREATE SCHEMA public' >> "${LOG_FILE}" 2>&1 || {
+    error "Failed to reset schema"
     return 1
   }
 
-  # Restore database using psql for plain SQL dump (pipe content from host)
-  cat "${input_file}" | docker compose -f "${COMPOSE_FILE}" exec -T db env PGPASSWORD="${DB_PASSWORD}" \
-    psql -h "${DB_HOST}" -p "${DB_PORT}" -U "${DB_USER}" -d "${DB_NAME}" >> "${LOG_FILE}" 2>&1 || {
+  # ON_ERROR_STOP обязателен: без него psql проглатывает ошибки построчно и
+  # выходит с кодом 0 — «импорт прошёл успешно» на полупустой базе.
+  exec_in_db psql -v ON_ERROR_STOP=1 -q -f - < "${input_file}" >> "${LOG_FILE}" 2>&1 || {
     error "Failed to restore database"
     return 1
   }

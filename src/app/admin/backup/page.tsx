@@ -32,6 +32,24 @@ interface BackupOperation {
   logs: string[];
   startedAt: number;
   completedAt?: number;
+  /** Дамп, который создала операция экспорта. */
+  file?: string;
+}
+
+const DOWNLOAD_URL = (name: string) => `/api/admin/backup/download?file=${encodeURIComponent(name)}`;
+
+/** Скачать файл на машину пользователя.
+ *
+ * Экспорт делает дамп на сервере (pg_dump живёт там), но нужен он человеку
+ * на своём диске — поэтому по готовности сразу отдаём файл браузеру, а не
+ * оставляем «где-то в контейнере». */
+function downloadToBrowser(name: string) {
+  const a = document.createElement('a');
+  a.href = DOWNLOAD_URL(name);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 function formatFileSize(bytes: number): string {
@@ -132,8 +150,35 @@ export default function AdminBackupPage() {
     }
   }
 
+  // Журнал живёт на сервере (в памяти процесса), поэтому после перезагрузки
+  // вкладки его можно вернуть — иначе идущая прямо сейчас операция пропадала
+  // из интерфейса вместе с обновлением страницы.
+  async function fetchOperations() {
+    try {
+      const res = await fetch('/api/admin/backup?action=operations');
+      if (!res.ok) return;
+      const data = await res.json();
+      const list: BackupOperation[] = (data.operations ?? [])
+        .filter((op: { action?: string }) => op.action && op.action in OP_TITLE_KEY)
+        .map((op: { id: string; action: OpType; status: OpStatus; logs?: string[]; startedAt: number; completedAt?: number; file?: string }) => ({
+          id: op.id,
+          type: op.action,
+          status: op.status,
+          logs: op.logs ?? [],
+          startedAt: op.startedAt,
+          completedAt: op.completedAt,
+          file: op.file,
+        }))
+        .reverse();
+      setOperations(list);
+    } catch {
+      // журнал — не критичная часть страницы
+    }
+  }
+
   useEffect(() => {
     fetchFiles();
+    fetchOperations();
     return () => {
       Object.values(polls.current).forEach(clearInterval);
     };
@@ -184,6 +229,13 @@ export default function AdminBackupPage() {
             setBusy(false);
             if (statusData.status === 'success') {
               fetchFiles();
+              // Экспорт закончился — сразу кладём дамп на диск пользователя.
+              if (statusData.file) {
+                setOperations((prev) => prev.map((o) =>
+                  o.id === data.operationId ? { ...o, file: statusData.file } : o,
+                ));
+                downloadToBrowser(statusData.file);
+              }
             }
             setProgress(statusData.status === 'success'
               ? t('admin.backup.success')
@@ -479,13 +531,26 @@ export default function AdminBackupPage() {
                           </div>
                         </div>
                       </div>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); deleteFile(f.name); }}
-                        className='p-1 text-loss hover:bg-loss/10 rounded shrink-0'
-                        title='Удалить'
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <div className='flex items-center gap-1 shrink-0'>
+                        {/* Ссылка, а не fetch: браузер сам качает поток и
+                            показывает прогресс — дамп бывает на сотни МБ. */}
+                        <a
+                          href={DOWNLOAD_URL(f.name)}
+                          onClick={(e) => e.stopPropagation()}
+                          download={f.name}
+                          className='p-1 text-muted hover:text-fg hover:bg-bg-muted rounded'
+                          title={t('admin.backup.download')}
+                        >
+                          <Download size={14} />
+                        </a>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); deleteFile(f.name); }}
+                          className='p-1 text-loss hover:bg-loss/10 rounded'
+                          title={t('admin.backup.deleteFile')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
