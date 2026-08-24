@@ -23,6 +23,7 @@ import { drawDrawings } from "@/components/DrawingOverlay";
 import DivergenceHistory from "@/components/DivergenceHistory";
 import AbsorptionPanel from "@/components/AbsorptionPanel";
 import DrawingToolbar from "@/components/DrawingToolbar";
+import DrawingEditor from "@/components/DrawingEditor";
 import FullscreenButton from "@/components/FullscreenButton";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import type {
@@ -1481,9 +1482,14 @@ export default function OrderflowPage() {
         <>
           <div
             ref={fsRef}
+            // relative и fixed вместе оставлять нельзя: .relative в CSS
+            // Tailwind идёт после .fixed и выигрывает — разворот оверлеем
+            // (когда нативный Fullscreen API недоступен) складывал карточку
+            // в полоску. Позиционированным предком для панелей внутри
+            // одинаково служит и fixed.
             className={clsx(
-              "card p-2 relative",
-              fsActive && "fixed inset-0 z-50 flex flex-col rounded-none",
+              "card p-2",
+              fsActive ? "fixed inset-0 z-50 flex flex-col rounded-none" : "relative",
             )}
             style={{ background: "#0a0b10" }}
           >
@@ -1491,72 +1497,14 @@ export default function OrderflowPage() {
               const d = drawings.find(dd => dd.id === selectedDrawingId);
               if (!d) return null;
               return (
-                <div className="absolute top-0 left-0 right-0 z-10 flex items-center gap-3 p-2 bg-[#0a0b10]/90 border-b border-border/30 text-xs">
-                  <span className="text-muted font-medium mr-1">{t("of.drawingEditor")}</span>
-                  <button
-                    className="ml-auto text-faint hover:text-fg p-0.5"
-                    onClick={() => { setSelectedDrawingId(null); setShowDrawingEditor(false); }}
-                    title="Закрыть"
-                  >
-                    ✕
-                  </button>
-                  <label className="flex items-center gap-1 text-faint">
-                    {t("of.color")}
-                    <input
-                      type="color"
-                      value={d.color}
-                      onChange={async (ev) => {
-                        const newColor = ev.target.value;
-                        try {
-                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ color: newColor }),
-                          });
-                          if (res.ok) {
-                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, color: newColor } : dd));
-                          }
-                        } catch (err) {
-                          console.error("Failed to update color", err);
-                        }
-                      }}
-                      className="w-6 h-6 rounded border border-border/30 cursor-pointer"
-                    />
-                  </label>
-                  <label className="flex items-center gap-1 text-faint">
-                    {t("of.lineWidth")}
-                    <input
-                      type="range"
-                      min={1}
-                      max={5}
-                      value={d.lineWidth}
-                      onChange={async (ev) => {
-                        const newWidth = Number(ev.target.value);
-                        try {
-                          const res = await fetch(`/api/orderflow/drawings?id=${d.id}`, {
-                            method: "PUT",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify({ lineWidth: newWidth }),
-                          });
-                          if (res.ok) {
-                            setDrawings(prev => prev.map(dd => dd.id === d.id ? { ...dd, lineWidth: newWidth } : dd));
-                          }
-                        } catch (err) {
-                          console.error("Failed to update width", err);
-                        }
-                      }}
-                      className="w-14"
-                    />
-                    <span className="tabular-nums text-faint">{d.lineWidth}</span>
-                  </label>
-                  <button
-                    className="text-[11px] px-2 py-0.5 rounded bg-loss/20 text-loss hover:bg-loss/40 transition-colors"
-                    // eslint-disable-next-line react-hooks/refs -- вызывается по клику, не в рендере
-                    onClick={() => void deleteDrawingById(d.id)}
-                  >
-                    {t("of.delete")}
-                  </button>
-                </div>
+                <DrawingEditor
+                  drawing={d}
+                  apiBase="/api/orderflow/drawings"
+                  onPatched={(id, p) => setDrawings(prev => prev.map(dd => dd.id === id ? { ...dd, ...p } : dd))}
+                  // eslint-disable-next-line react-hooks/refs -- вызывается по клику, не в рендере
+                  onDelete={(id) => void deleteDrawingById(id)}
+                  onClose={() => { setSelectedDrawingId(null); setShowDrawingEditor(false); }}
+                />
               );
             })()}
             <div className={clsx("flex gap-2", fsActive ? "flex-1 min-h-0 items-stretch" : "items-start")}>
