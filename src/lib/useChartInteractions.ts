@@ -24,13 +24,34 @@ type DragState = {
 };
 type DrawingResizeState = {
   drawingId: string;
-  cornerIdx: number; // 0=TL,1=TR,2=BL,3=BR
+  /** Какую ручку прямоугольника тянем: 0..3 — углы, 4..7 — середины сторон
+   *  (см. RECT_HANDLE_EDGES и findDrawingAt). */
+  handleIdx: number;
   origMinT: number;
   origMaxT: number;
   origMinPrice: number;
   origMaxPrice: number;
   originalPoints: DrawingPoint[];
 };
+
+/** Какие грани прямоугольника двигает ручка. Ручки середин сторон меняют
+ *  ровно одну координату (как в TradingView): боковые — только время,
+ *  верх/низ — только цену, поэтому «растянуть вбок» не трогает цены. */
+type RectEdges = { left?: true; right?: true; top?: true; bottom?: true };
+const RECT_HANDLE_EDGES: RectEdges[] = [
+  { left: true, top: true },     // 0 TL
+  { right: true, top: true },    // 1 TR
+  { left: true, bottom: true },  // 2 BL
+  { right: true, bottom: true }, // 3 BR
+  { left: true },                // 4 левая сторона
+  { right: true },               // 5 правая
+  { top: true },                 // 6 верх
+  { bottom: true },              // 7 низ
+];
+const RECT_HANDLE_CURSORS = [
+  "nwse-resize", "nesw-resize", "nesw-resize", "nwse-resize",
+  "ew-resize", "ew-resize", "ns-resize", "ns-resize",
+];
 type DrawingDragState = { drawingId: string; dx: number; dy: number; originalPoints: DrawingPoint[] };
 
 const ZOOM_IN_LIMIT = 1;
@@ -227,40 +248,41 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
           const yspan = v.y1 - v.y0 || 1;
           const cv = o.canvasRef.current;
           if (drawingResizeRef.current) {
+            const rs = drawingResizeRef.current;
+            const edges = RECT_HANDLE_EDGES[rs.handleIdx] ?? RECT_HANDLE_EDGES[0];
+            const movesT = !!(edges.left || edges.right);
+            const movesP = !!(edges.top || edges.bottom);
             let tChart = proj.invX(mx);
             let priceChart = v.y1 - (my / lay.plotH) * yspan;
+            // Магнит применяем только к той оси, которую реально тянем: иначе
+            // боковая ручка утаскивала бы цену на high/low ближайшей свечи,
+            // хотя цена при растяжении по времени меняться не должна.
             if (magnet && candles.length) {
               const snapped = snapToCandle(tChart, priceChart, candles, true);
-              snappedRef.current = snapped;
-              tChart = snapped.t;
-              priceChart = snapped.price;
+              snappedRef.current = {
+                t: movesT ? snapped.t : tChart,
+                price: movesP ? snapped.price : priceChart,
+              };
+              if (movesT) tChart = snapped.t;
+              if (movesP) priceChart = snapped.price;
             }
-            const rs = drawingResizeRef.current;
-            let newT1: number, newT2: number, newP1: number, newP2: number;
-            switch (rs.cornerIdx) {
-              case 0:
-                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
-                newP1 = priceChart; newP2 = rs.origMinPrice;
-                break;
-              case 1:
-                newT1 = rs.origMinT; newT2 = Math.round(tChart);
-                newP1 = priceChart; newP2 = rs.origMinPrice;
-                break;
-              case 2:
-                newT1 = Math.round(tChart); newT2 = rs.origMaxT;
-                newP1 = rs.origMaxPrice; newP2 = priceChart;
-                break;
-              default:
-                newT1 = rs.origMinT; newT2 = Math.round(tChart);
-                newP1 = rs.origMaxPrice; newP2 = priceChart;
-                break;
-            }
+            // Неподвижные грани берём из исходных чисел, а не пересчитываем из
+            // пикселей — иначе цена «плыла» бы на округлениях price → y → price.
             drawingDragRef.current = {
               drawingId: rs.drawingId,
               dx: 0, dy: 0,
-              originalPoints: [{ t: newT1, price: newP1 }, { t: newT2, price: newP2 }],
+              originalPoints: [
+                {
+                  t: edges.left ? Math.round(tChart) : rs.origMinT,
+                  price: edges.top ? priceChart : rs.origMaxPrice,
+                },
+                {
+                  t: edges.right ? Math.round(tChart) : rs.origMaxT,
+                  price: edges.bottom ? priceChart : rs.origMinPrice,
+                },
+              ],
             };
-            if (cv) cv.style.cursor = "nwse-resize";
+            if (cv) cv.style.cursor = RECT_HANDLE_CURSORS[rs.handleIdx] ?? "nwse-resize";
             scheduleRedraw();
             return;
           }
@@ -348,7 +370,12 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
             const syLocal = (p: number) => lay.plotH - ((p - v.y0) / yspan) * lay.plotH;
             const hit = findDrawingAt(mx, my, drawings, sxLocal, syLocal, lay.plotX, lay.plotW, lay.plotH);
             if (hit) {
-              cv.style.cursor = hit.pointIdx >= 0 && hit.pointIdx <= 3 ? "nwse-resize" : "pointer";
+              // Курсор-стрелка ресайза только у ручек прямоугольника: у линий
+              // pointIdx=0 — это сама точка, тащить её «по диагонали» нечего.
+              cv.style.cursor =
+                hit.toolType === "rectangle" && hit.pointIdx >= 0
+                  ? RECT_HANDLE_CURSORS[hit.pointIdx] ?? "pointer"
+                  : "pointer";
             } else {
               cv.style.cursor = mx >= lay.plotX + lay.plotW ? "ns-resize" : my >= lay.plotH - 8 ? "ew-resize" : "default";
             }
@@ -424,14 +451,14 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
           }
           drawingDragRef.current = null;
           drawingResizeRef.current = null;
-          if (hitDrawing?.toolType === "rectangle" && hit.pointIdx >= 0 && hit.pointIdx <= 3 && originalPoints.length >= 2) {
+          if (hitDrawing?.toolType === "rectangle" && hit.pointIdx >= 0 && hit.pointIdx < RECT_HANDLE_EDGES.length && originalPoints.length >= 2) {
             const minT = Math.min(originalPoints[0].t, originalPoints[1].t);
             const maxT = Math.max(originalPoints[0].t, originalPoints[1].t);
             const minPrice = Math.min(originalPoints[0].price, originalPoints[1].price);
             const maxPrice = Math.max(originalPoints[0].price, originalPoints[1].price);
             drawingResizeRef.current = {
               drawingId: hit.id,
-              cornerIdx: hit.pointIdx,
+              handleIdx: hit.pointIdx,
               origMinT: minT, origMaxT: maxT,
               origMinPrice: minPrice, origMaxPrice: maxPrice,
               originalPoints,

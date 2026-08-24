@@ -28,6 +28,13 @@ type Props = {
   // overlay=true кладёт панель поверх canvas (левый верхний угол) —
   // график получает всю ширину контейнера.
   overlay?: boolean;
+  // Таймфреймы под инструментами рисования. Нужны в полноэкранном режиме:
+  // селект таймфрейма живёт в шапке страницы, а она в фуллскрине не видна —
+  // без этой колонки график приходилось сворачивать ради каждого переключения.
+  // Не передан (или пустой) — блок не рисуется вовсе.
+  timeframes?: readonly string[];
+  activeTimeframe?: string;
+  onSelectTimeframe?: (tf: string) => void;
 };
 
 const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] = [
@@ -37,13 +44,14 @@ const TOOLS: { type: DrawingToolType; label: string; icon: React.ReactNode }[] =
   { type: "rectangle", label: "Прямоугольник", icon: <Square size={14} /> },
 ];
 
-export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings, locked, onToggleLocked, canUndoMove, onUndoMove, overlay = false }: Props) {
+export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onToggleMagnet, showDrawings, onToggleShowDrawings, locked, onToggleLocked, canUndoMove, onUndoMove, overlay = false, timeframes, activeTimeframe, onSelectTimeframe }: Props) {
+  const showTimeframes = !!timeframes?.length && !!onSelectTimeframe;
   return (
     <div
       className={
         overlay
-          ? "absolute top-1 left-1 z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40"
-          : "flex flex-col gap-0.5 py-1.5 px-0.5"
+          ? "absolute top-1 left-1 z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40 max-h-[calc(100%-0.5rem)] overflow-y-auto"
+          : "flex flex-col gap-0.5 py-1.5 px-0.5 max-h-full overflow-y-auto"
       }
     >
       {TOOLS.map((tool) => (
@@ -111,6 +119,25 @@ export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onTog
       >
         <Undo2 size={14} />
       </button>
+      {showTimeframes && (
+        <>
+          <div className="w-5 h-px bg-border-strong my-0.5 mx-auto" />
+          {timeframes!.map((tf) => (
+            <button
+              key={tf}
+              onClick={() => onSelectTimeframe!(tf)}
+              className={`flex items-center justify-center w-7 h-6 rounded text-[10px] font-medium tabular-nums transition-colors ${
+                tf === activeTimeframe
+                  ? "bg-accent/20 text-accent border border-accent/40"
+                  : "text-muted hover:text-fg hover:bg-bg-muted border border-transparent"
+              }`}
+              title={`Таймфрейм ${tf}`}
+            >
+              {tf}
+            </button>
+          ))}
+        </>
+      )}
     </div>
   );
 }

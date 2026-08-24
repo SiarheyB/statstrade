@@ -34,6 +34,15 @@ function makeFakeCtx(): CanvasRenderingContext2D {
   } as unknown as CanvasRenderingContext2D;
 }
 
+/** Тот же фейк, но с записью кружков-маркеров: по ним проверяем, где именно
+ *  оказались ручки прямоугольника. */
+function makeRecordingCtx(): { ctx: CanvasRenderingContext2D; arcs: Array<[number, number]> } {
+  const arcs: Array<[number, number]> = [];
+  const ctx = makeFakeCtx();
+  (ctx as unknown as { arc: (x: number, y: number) => void }).arc = (x, y) => { arcs.push([x, y]); };
+  return { ctx, arcs };
+}
+
 function makeRow(overrides: Partial<DrawingRow> & { points: string; toolType: DrawingRow["toolType"] }): DrawingRow {
   return {
     id: "d1",
@@ -80,6 +89,30 @@ describe("drawDrawings", () => {
     expect(() => drawDrawings(ctx, sx, sy, 0, 200, 100, rows, rows[2].id)).not.toThrow();
   });
 
+  it("draws 4 corner + 4 side handles for a rectangle", () => {
+    const { ctx, arcs } = makeRecordingCtx();
+    // x0=10,x1=60,y0=20,y1=50 -> середины (10,35),(60,35),(35,20),(35,50)
+    const row = makeRow({
+      toolType: "rectangle",
+      points: JSON.stringify([{ t: 10, price: 50 }, { t: 60, price: 80 }]),
+    });
+    drawDrawings(ctx, sx, sy, 0, 200, 100, [row], null);
+    expect(arcs).toEqual([
+      [10, 20], [60, 20], [10, 50], [60, 50],
+      [10, 35], [60, 35], [35, 20], [35, 50],
+    ]);
+  });
+
+  it("draws only corner handles when the rectangle sides are too short", () => {
+    const { ctx, arcs } = makeRecordingCtx();
+    const row = makeRow({
+      toolType: "rectangle",
+      points: JSON.stringify([{ t: 10, price: 50 }, { t: 30, price: 70 }]),
+    });
+    drawDrawings(ctx, sx, sy, 0, 200, 100, [row], null);
+    expect(arcs).toHaveLength(4);
+  });
+
   it("skips a drawing with invalid points JSON", () => {
     const ctx = makeFakeCtx();
     const row = makeRow({ toolType: "trend_line", points: "not json" });
@@ -108,7 +141,7 @@ describe("findDrawingAt", () => {
     });
     // sy(50) = 50, line runs horizontally at y=50 from x=0 to x=100
     const hit = findDrawingAt(50, 50, [row], sx, sy, 0, 200, 100);
-    expect(hit).toEqual({ id: "d1", pointIdx: -1 });
+    expect(hit).toEqual({ id: "d1", pointIdx: -1, toolType: "trend_line" });
   });
 
   it("misses when far from the line", () => {
@@ -127,17 +160,40 @@ describe("findDrawingAt", () => {
     });
     // x0=10,x1=60; y0=min(sy(50)=50, sy(80)=20)=20, y1=50 -> BL corner=(10,50) is index 2
     const hit = findDrawingAt(10, 50, [row], sx, sy, 0, 200, 100);
-    expect(hit).toEqual({ id: "d1", pointIdx: 2 });
+    expect(hit).toEqual({ id: "d1", pointIdx: 2, toolType: "rectangle" });
   });
 
-  it("hits a rectangle edge (not a corner)", () => {
+  it("hits the side mid-handles (4=left, 5=right, 6=top, 7=bottom)", () => {
     const row = makeRow({
       toolType: "rectangle",
       points: JSON.stringify([{ t: 10, price: 50 }, { t: 60, price: 80 }]),
     });
-    // top edge is y=min(50,20)=20 from x=10..60, midpoint x=35
-    const hit = findDrawingAt(35, 20, [row], sx, sy, 0, 200, 100);
-    expect(hit).toEqual({ id: "d1", pointIdx: -1 });
+    // x0=10,x1=60,y0=20,y1=50 -> середины сторон: (10,35),(60,35),(35,20),(35,50)
+    expect(findDrawingAt(10, 35, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 4, toolType: "rectangle" });
+    expect(findDrawingAt(60, 35, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 5, toolType: "rectangle" });
+    expect(findDrawingAt(35, 20, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 6, toolType: "rectangle" });
+    expect(findDrawingAt(35, 50, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 7, toolType: "rectangle" });
+  });
+
+  it("has no mid-handles on a small rectangle (sides under the minimum)", () => {
+    // 20x20 px — обе стороны короче MID_HANDLE_MIN_SIDE: в середине верхней
+    // стороны должен быть обычный контур (перенос), а не ручка ресайза.
+    const row = makeRow({
+      toolType: "rectangle",
+      points: JSON.stringify([{ t: 10, price: 50 }, { t: 30, price: 70 }]),
+    });
+    expect(findDrawingAt(20, 30, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: -1, toolType: "rectangle" });
+  });
+
+  it("hits a rectangle edge (not a handle)", () => {
+    const row = makeRow({
+      toolType: "rectangle",
+      points: JSON.stringify([{ t: 10, price: 50 }, { t: 60, price: 80 }]),
+    });
+    // top edge is y=min(50,20)=20 from x=10..60; берём точку в стороне от
+    // середины (x=35) и от углов
+    const hit = findDrawingAt(24, 20, [row], sx, sy, 0, 200, 100);
+    expect(hit).toEqual({ id: "d1", pointIdx: -1, toolType: "rectangle" });
   });
 
   it("returns null when there are no drawings", () => {
@@ -156,6 +212,6 @@ describe("findDrawingAt", () => {
     });
     // ray drawn from x=50 to plotW; a point left of x=50 should miss
     expect(findDrawingAt(10, 50, [row], sx, sy, 0, 200, 100)).toBeNull();
-    expect(findDrawingAt(80, 50, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 0 });
+    expect(findDrawingAt(80, 50, [row], sx, sy, 0, 200, 100)).toEqual({ id: "d1", pointIdx: 0, toolType: "horizontal_ray" });
   });
 });

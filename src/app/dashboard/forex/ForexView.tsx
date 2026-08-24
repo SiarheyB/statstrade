@@ -980,6 +980,11 @@ function inferBinSize(levels: { price: number }[]): number {
             onToggleLocked={() => setDrawingsLocked(v => !v)}
             canUndoMove={canUndoMove}
             onUndoMove={handleUndoMove}
+            /* Таймфреймы — только в фуллскрине: в обычном режиме над графиком
+               виден селект в шапке, дублировать его незачем. */
+            timeframes={fsActive ? RANGES : undefined}
+            activeTimeframe={range}
+            onSelectTimeframe={setRange}
           />
           <FullscreenButton
             active={fsActive}

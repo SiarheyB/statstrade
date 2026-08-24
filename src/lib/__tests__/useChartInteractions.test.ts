@@ -280,7 +280,7 @@ describe("useChartInteractions — selecting/dragging existing drawings", () => 
       toolType: "rectangle",
       points: JSON.stringify([{ t: 0, price: 100 }, { t: 1000, price: 50 }]),
     });
-    mocks.findDrawingAt.mockReturnValue({ id: "d1", pointIdx: 0 });
+    mocks.findDrawingAt.mockReturnValue({ id: "d1", pointIdx: 0, toolType: "rectangle" });
     const opts = makeOpts({ getDrawings: () => [drawing] });
     const { result } = renderHook(() => useChartInteractions(opts));
     act(() => {
@@ -290,7 +290,38 @@ describe("useChartInteractions — selecting/dragging existing drawings", () => 
     act(() => {
       result.current.onDown(mouseEvent(opts.canvasRef.current!, 300, 150));
     });
-    expect(result.current.drawingResizeRef.current?.cornerIdx).toBe(0);
+    expect(result.current.drawingResizeRef.current?.handleIdx).toBe(0);
+  });
+
+  it("side handle resize keeps both prices untouched (magnet on)", () => {
+    const drawing = drawingRow({
+      toolType: "rectangle",
+      points: JSON.stringify([{ t: 0, price: 100 }, { t: 1000, price: 50 }]),
+    });
+    // ручка 4 — левая сторона: тянем по времени, цены обязаны остаться теми же
+    mocks.findDrawingAt.mockReturnValue({ id: "d1", pointIdx: 4, toolType: "rectangle" });
+    const candles: Candle[] = [
+      candle(0, 100, 120, 80, 110),
+      candle(1000, 110, 130, 90, 120),
+    ];
+    const opts = makeOpts({ getDrawings: () => [drawing], getCandles: () => candles, magnet: true });
+    const { result } = renderHook(() => useChartInteractions(opts));
+    act(() => {
+      result.current.layoutRef.current = { plotX: 0, plotW: 600, plotH: 300 };
+      result.current.viewRef.current = { t0: 0, t1: 2000, y0: 0, y1: 200 };
+    });
+    act(() => {
+      result.current.onDown(mouseEvent(opts.canvasRef.current!, 100, 150));
+    });
+    act(() => {
+      result.current.onMove(mouseEvent(opts.canvasRef.current!, 250, 40));
+    });
+    const pts = result.current.drawingDragRef.current?.originalPoints;
+    expect(pts?.[0].price).toBe(100);
+    expect(pts?.[1].price).toBe(50);
+    // время левой границы поехало, правая осталась на месте
+    expect(pts?.[1].t).toBe(1000);
+    expect(pts?.[0].t).not.toBe(0);
   });
 
   it("clicking empty space while a drawing is selected clears the selection", () => {
@@ -333,7 +364,7 @@ describe("useChartInteractions — selecting/dragging existing drawings", () => 
     act(() => {
       result.current.drawingDragRef.current = { drawingId: "d1", dx: 0, dy: 0, originalPoints: resizedPoints };
       result.current.drawingResizeRef.current = {
-        drawingId: "d1", cornerIdx: 0, origMinT: 0, origMaxT: 1000, origMinPrice: 50, origMaxPrice: 100,
+        drawingId: "d1", handleIdx: 0, origMinT: 0, origMaxT: 1000, origMinPrice: 50, origMaxPrice: 100,
         originalPoints: origPoints,
       };
     });

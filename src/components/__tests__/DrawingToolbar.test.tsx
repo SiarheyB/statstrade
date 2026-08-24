@@ -80,4 +80,24 @@ describe("DrawingToolbar", () => {
     await user.click(btn);
     expect(props.onUndoMove).toHaveBeenCalled();
   });
+
+  it("does not render timeframes when they are not passed (обычный режим)", () => {
+    setup();
+    expect(screen.queryByTitle("Таймфрейм 1h")).toBeNull();
+  });
+
+  it("renders a timeframe button per timeframe and marks the active one", () => {
+    setup({ timeframes: ["5m", "1h", "1d"], activeTimeframe: "1h", onSelectTimeframe: vi.fn() });
+    // 8 кнопок панели + 3 таймфрейма
+    expect(screen.getAllByRole("button")).toHaveLength(11);
+    expect(screen.getByTitle("Таймфрейм 1h").className).toContain("text-accent");
+    expect(screen.getByTitle("Таймфрейм 5m").className).not.toContain("text-accent");
+  });
+
+  it("calls onSelectTimeframe with the clicked timeframe", async () => {
+    const user = userEvent.setup();
+    const props = setup({ timeframes: ["5m", "1h"], activeTimeframe: "1h", onSelectTimeframe: vi.fn() });
+    await user.click(screen.getByTitle("Таймфрейм 5m"));
+    expect(props.onSelectTimeframe).toHaveBeenCalledWith("5m");
+  });
 });

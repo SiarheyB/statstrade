@@ -1560,7 +1560,9 @@ export default function OrderflowPage() {
               );
             })()}
             <div className={clsx("flex gap-2", fsActive ? "flex-1 min-h-0 items-stretch" : "items-start")}>
-              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} locked={drawingsLocked} onToggleLocked={() => setDrawingsLocked(v => !v)} canUndoMove={canUndoMove} onUndoMove={handleUndoMove} />
+              {/* Таймфреймы отдаём панели только в фуллскрине: в обычном режиме
+                  над графиком виден селект в шапке, дублировать его незачем. */}
+              <DrawingToolbar activeTool={activeTool} onSelectTool={setActiveTool} magnet={magnet} onToggleMagnet={() => setMagnet(v => !v)} showDrawings={showDrawings} onToggleShowDrawings={() => setShowDrawings(v => !v)} locked={drawingsLocked} onToggleLocked={() => setDrawingsLocked(v => !v)} canUndoMove={canUndoMove} onUndoMove={handleUndoMove} timeframes={fsActive ? RANGES : undefined} activeTimeframe={range} onSelectTimeframe={setRange} />
               <div className="flex-1 min-w-0 relative">
                 <FullscreenButton
                   active={fsActive}

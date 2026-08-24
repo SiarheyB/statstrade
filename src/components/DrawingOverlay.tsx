@@ -5,9 +5,30 @@
  * Поддерживает: trend_line, horizontal_line, horizontal_ray, rectangle.
  */
 
-import type { DrawingRow, DrawingPoint } from "@/lib/drawings";
+import type { DrawingRow, DrawingPoint, DrawingToolType } from "@/lib/drawings";
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
+
+/** Сторона короче — середину не показываем: маркер слипается с угловыми и
+ *  попасть в него мышью всё равно нельзя. */
+const MID_HANDLE_MIN_SIDE = 24; // px
+
+/** Ручки в серединах сторон прямоугольника, в порядке индексов 4..7:
+ *  [левая, правая, верхняя, нижняя]. null — сторона слишком короткая. */
+function rectMidHandles(
+  x0: number, y0: number, x1: number, y1: number,
+): Array<{ x: number; y: number } | null> {
+  const cx = (x0 + x1) / 2;
+  const cy = (y0 + y1) / 2;
+  const tallEnough = y1 - y0 >= MID_HANDLE_MIN_SIDE;
+  const wideEnough = x1 - x0 >= MID_HANDLE_MIN_SIDE;
+  return [
+    tallEnough ? { x: x0, y: cy } : null,
+    tallEnough ? { x: x1, y: cy } : null,
+    wideEnough ? { x: cx, y: y0 } : null,
+    wideEnough ? { x: cx, y: y1 } : null,
+  ];
+}
 
 /** Нарисовать все рисунки на canvas. */
 export function drawDrawings(
@@ -127,9 +148,11 @@ export function drawDrawings(
         const x1 = Math.max(screenPts[0].x, screenPts[1].x);
         const y0 = Math.min(screenPts[0].y, screenPts[1].y);
         const y1 = Math.max(screenPts[0].y, screenPts[1].y);
-        const w = x1 - x0;
-        const h = y1 - y0;
-        if (w <= 0 || h <= 0) break;
+        // Схлопнутый в линию прямоугольник (тянули грань до противоположной)
+        // всё равно рисуем: иначе фигура пропадает с экрана и пользователь не
+        // может её ни увидеть, ни разжать обратно.
+        const w = Math.max(x1 - x0, 1);
+        const h = Math.max(y1 - y0, 1);
         // Заливка
         if (d.fillColor) {
           ctx.fillStyle = d.fillColor;
@@ -144,6 +167,12 @@ export function drawDrawings(
         drawHandle(ctx, x1, y0, color, isSelected);
         drawHandle(ctx, x0, y1, color, isSelected);
         drawHandle(ctx, x1, y1, color, isSelected);
+        // Маркеры в серединах сторон (как в TradingView): тянут ровно одну
+        // грань — боковые меняют только время, верхний/нижний только цену.
+        // На коротких сторонах не рисуем: маркер слипся бы с угловыми.
+        for (const m of rectMidHandles(x0, y0, x1, y1)) {
+          if (m) drawHandle(ctx, m.x, m.y, color, isSelected);
+        }
         break;
       }
     }
@@ -181,8 +210,10 @@ function drawPriceLabel(ctx: CanvasRenderingContext2D, x: number, y: number, pri
 
 const HIT_RADIUS = 6; // px — радиус попадания в линию
 
-/** Найти рисунок под курсором. Возвращает { id, pointIdx } или null.
- *  Для rectangle: pointIdx = -1 (край), 0..3 (угол: TL, TR, BL, BR). */
+/** Найти рисунок под курсором. Возвращает { id, pointIdx, toolType } или null.
+ *  Для rectangle: pointIdx = -1 (контур — тащим фигуру целиком),
+ *  0..3 (углы TL, TR, BL, BR), 4..7 (середины сторон: левая, правая, верх,
+ *  низ — тянут ровно одну грань, как в TradingView). */
 export function findDrawingAt(
   mx: number,
   my: number,
@@ -192,7 +223,7 @@ export function findDrawingAt(
   plotX: number,
   plotW: number,
   _plotH: number,
-): { id: string; pointIdx: number } | null {
+): { id: string; pointIdx: number; toolType: DrawingToolType } | null {
   // Идём в обратном порядке — верхний рисунок (последний созданный) выбирается первым
   for (let i = drawings.length - 1; i >= 0; i--) {
     const d = drawings[i];
@@ -219,14 +250,14 @@ export function findDrawingAt(
       case "trend_line": {
         if (screenPts.length < 2) break;
         if (distToSegment(mx, my, screenPts[0], screenPts[1]) < HIT_RADIUS) {
-          return { id: d.id, pointIdx: -1 };
+          return { id: d.id, pointIdx: -1, toolType: d.toolType };
         }
         break;
       }
       case "horizontal_line": {
         const y = screenPts[0].y;
         if (Math.abs(my - y) < HIT_RADIUS && mx >= plotX && mx <= plotX + plotW) {
-          return { id: d.id, pointIdx: 0 };
+          return { id: d.id, pointIdx: 0, toolType: d.toolType };
         }
         break;
       }
@@ -237,7 +268,7 @@ export function findDrawingAt(
         const y = screenPts[0].y;
         const rx = screenPts[0].x;
         if (Math.abs(my - y) < HIT_RADIUS && mx >= rx && mx <= plotX + plotW) {
-          return { id: d.id, pointIdx: 0 };
+          return { id: d.id, pointIdx: 0, toolType: d.toolType };
         }
         break;
       }
@@ -247,21 +278,24 @@ export function findDrawingAt(
         const x1 = Math.max(screenPts[0].x, screenPts[1].x);
         const y0 = Math.min(screenPts[0].y, screenPts[1].y);
         const y1 = Math.max(screenPts[0].y, screenPts[1].y);
-        // Сначала проверяем углы (resize-хендлы)
-        const corners: Array<{ x: number; y: number }> = [
-          { x: x0, y: y0 }, // TL
-          { x: x1, y: y0 }, // TR
-          { x: x0, y: y1 }, // BL
-          { x: x1, y: y1 }, // BR
+        // Сначала проверяем ручки: 0..3 — углы, 4..7 — середины сторон.
+        // Углы идут первыми, чтобы на маленьком прямоугольнике выигрывал угол.
+        const handles: Array<{ x: number; y: number } | null> = [
+          { x: x0, y: y0 }, // 0 TL
+          { x: x1, y: y0 }, // 1 TR
+          { x: x0, y: y1 }, // 2 BL
+          { x: x1, y: y1 }, // 3 BR
+          ...rectMidHandles(x0, y0, x1, y1), // 4 L, 5 R, 6 T, 7 B
         ];
-        for (let ci = 0; ci < 4; ci++) {
-          if (Math.hypot(mx - corners[ci].x, my - corners[ci].y) < HIT_RADIUS + 2) {
-            return { id: d.id, pointIdx: ci };
+        for (let ci = 0; ci < handles.length; ci++) {
+          const hnd = handles[ci];
+          if (hnd && Math.hypot(mx - hnd.x, my - hnd.y) < HIT_RADIUS + 2) {
+            return { id: d.id, pointIdx: ci, toolType: d.toolType };
           }
         }
         // Потом проверяем контур
         if (pointNearRectEdge(mx, my, x0, y0, x1, y1, HIT_RADIUS)) {
-          return { id: d.id, pointIdx: -1 };
+          return { id: d.id, pointIdx: -1, toolType: d.toolType };
         }
         break;
       }
