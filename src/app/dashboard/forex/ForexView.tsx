@@ -660,9 +660,9 @@ function inferBinSize(levels: { price: number }[]): number {
             return { ...d, points: JSON.stringify(shifted) };
           } catch { return d; }
         });
-        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, adjusted, selectedDrawingId, layout);
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, adjusted, selectedDrawingId, layout, candles);
       } else {
-        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId, layout);
+        drawDrawings(ctx, sx, sy, plotX, plotW, plotH, drawings, selectedDrawingId, layout, candles);
       }
     }
 

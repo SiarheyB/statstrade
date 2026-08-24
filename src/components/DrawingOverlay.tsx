@@ -6,7 +6,7 @@
  */
 
 import type { DrawingRow, DrawingPoint, DrawingToolType } from "@/lib/drawings";
-import { drawAxisPriceTag, type PlotLayout } from "@/lib/candlestickChart";
+import { drawAxisPriceTag, fmtPriceLabel, type Candle, type PlotLayout } from "@/lib/candlestickChart";
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
@@ -44,6 +44,9 @@ export function drawDrawings(
   /** Нужен, чтобы нарисовать ярлык цены на правой шкале — она лежит ЗА
    *  областью графика, а сама отрисовка рисунков обрезана по ней. */
   layout?: PlotLayout,
+  /** Свечи нужны, чтобы решить, с какой стороны линии писать цену: уровень
+   *  по хаю подписываем сверху, по лоу — снизу (см. priceLabelSide). */
+  candles?: Candle[],
 ): void {
   if (!drawings.length) return;
 
@@ -127,7 +130,10 @@ export function drawDrawings(
         ctx.stroke();
         drawHandle(ctx, plotX, y, color, isSelected);
         drawHandle(ctx, plotX + plotW, y, color, isSelected);
-        if (d.showPrice !== false) priceTags.push({ price: pts[0].price, y, color });
+        if (d.showPrice !== false) {
+          priceTags.push({ price: pts[0].price, y, color });
+          drawPriceChip(ctx, plotX + 6, y, pts[0].price, color, priceLabelSide(pts[0].price, y, plotH, candles, sx, plotX, plotW), plotX, plotW);
+        }
         break;
       }
       case "horizontal_ray": {
@@ -147,7 +153,11 @@ export function drawDrawings(
         ctx.fillStyle = color;
         ctx.fill();
         drawHandle(ctx, rx, ry, color, isSelected);
-        if (d.showPrice !== false) priceTags.push({ price: pts[0].price, y: ry, color });
+        if (d.showPrice !== false) {
+          priceTags.push({ price: pts[0].price, y: ry, color });
+          // Луч идёт вправо от точки — там же, чуть правее якоря, и подпись.
+          drawPriceChip(ctx, rx + 8, ry, pts[0].price, color, priceLabelSide(pts[0].price, ry, plotH, candles, sx, plotX, plotW), plotX, plotW);
+        }
         break;
       }
       case "rectangle": {
@@ -193,6 +203,78 @@ export function drawDrawings(
   if (layout) {
     for (const tag of priceTags) drawAxisPriceTag(ctx, tag.price, tag.y, layout, tag.color);
   }
+}
+
+/** С какой стороны линии писать цену.
+ *
+ * Раньше подпись всегда висела над точкой и налезала то на свечи, то на
+ * маркеры сигналов — прочитать её было нельзя. Правило простое и совпадает
+ * с тем, как уровни ставят руками: если ценовое движение в основном НИЖЕ
+ * уровня (уровень провели по хаю — сопротивление), подпись уходит вверх, в
+ * пустоту; если выше (уровень по лоу — поддержка) — вниз.
+ *
+ * Свечи берём только видимые: загружено может быть куда больше, чем сейчас
+ * на экране, и уехавшая история перетянула бы решение на себя.
+ */
+export function priceLabelSide(
+  price: number,
+  y: number,
+  plotH: number,
+  candles: Candle[] | undefined,
+  sx: (ms: number) => number,
+  plotX: number,
+  plotW: number,
+): "above" | "below" {
+  const CHIP_H = 21; // высота подписи с отступом
+  let side: "above" | "below" = "above";
+
+  if (candles && candles.length > 0) {
+    let below = 0;
+    let visible = 0;
+    for (const c of candles) {
+      const x = sx(c.t);
+      if (x < plotX || x > plotX + plotW) continue;
+      visible++;
+      if ((c.h + c.l) / 2 < price) below++;
+    }
+    // Большинство свечей ниже уровня — он сверху, там и место для подписи.
+    if (visible > 0) side = below * 2 >= visible ? "above" : "below";
+  }
+
+  // У края графика переворачиваем: подпись, вылезшая за холст, не читается.
+  if (side === "above" && y - CHIP_H < 0) return "below";
+  if (side === "below" && y + CHIP_H > plotH) return "above";
+  return side;
+}
+
+/** Подпись с ценой у самой линии — с подложкой, чтобы читалась поверх свечей. */
+function drawPriceChip(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  price: number,
+  color: string,
+  side: "above" | "below",
+  plotX: number,
+  plotW: number,
+): void {
+  const text = fmtPriceLabel(price);
+  ctx.save();
+  ctx.font = "11px ui-sans-serif, system-ui";
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  const w = ctx.measureText(text).width + 8;
+  const h = 15;
+  // Не даём подписи уехать за правый край области графика.
+  const bx = Math.min(x, plotX + plotW - w - 2);
+  const by = side === "above" ? y - 6 - h : y + 6;
+  ctx.fillStyle = "rgba(8, 8, 13, 0.82)";
+  ctx.fillRect(bx, by, w, h);
+  ctx.fillStyle = color;
+  ctx.fillText(text, bx + 4, by + h / 2);
+  ctx.restore();
 }
 
 /** Маленький кружок-маркер на точках рисунка. */

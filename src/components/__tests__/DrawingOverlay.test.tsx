@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { drawDrawings, findDrawingAt } from "@/components/DrawingOverlay";
+import { drawDrawings, findDrawingAt, priceLabelSide } from "@/components/DrawingOverlay";
 import type { DrawingRow } from "@/lib/drawings";
+import type { Candle } from "@/lib/candlestickChart";
 
 const sx = (t: number) => t; // identity mapping for simplicity
 const sy = (price: number) => 100 - price; // simple inverse mapping
@@ -23,6 +24,7 @@ function makeFakeCtx(): CanvasRenderingContext2D {
     strokeRect: () => {},
     arc: () => {},
     fillText: () => {},
+    measureText: (t: string) => ({ width: t.length * 6 }),
     strokeStyle: "",
     lineWidth: 0,
     globalAlpha: 1,
@@ -60,6 +62,38 @@ function makeRow(overrides: Partial<DrawingRow> & { points: string; toolType: Dr
     ...overrides,
   };
 }
+
+describe("priceLabelSide", () => {
+  const candle = (t: number, mid: number): Candle => ({ t, o: mid, h: mid + 2, l: mid - 2, c: mid });
+  const idX = (t: number) => t;
+
+  it("уровень по хаю (свечи ниже) — подпись сверху", () => {
+    const candles = [candle(10, 90), candle(20, 92), candle(30, 88)];
+    expect(priceLabelSide(100, 50, 200, candles, idX, 0, 100)).toBe("above");
+  });
+
+  it("уровень по лоу (свечи выше) — подпись снизу", () => {
+    const candles = [candle(10, 110), candle(20, 112), candle(30, 108)];
+    expect(priceLabelSide(100, 50, 200, candles, idX, 0, 100)).toBe("below");
+  });
+
+  it("свечи вне видимой области не учитываются", () => {
+    // всё, что за пределами [plotX, plotX+plotW], игнорируем: загруженная
+    // история шире экрана и перетянула бы решение на себя
+    const candles = [candle(500, 90), candle(600, 90), candle(20, 110)];
+    expect(priceLabelSide(100, 50, 200, candles, idX, 0, 100)).toBe("below");
+  });
+
+  it("без свечей — сверху, но у верхнего края переворачивается вниз", () => {
+    expect(priceLabelSide(100, 50, 200, undefined, idX, 0, 100)).toBe("above");
+    expect(priceLabelSide(100, 5, 200, undefined, idX, 0, 100)).toBe("below");
+  });
+
+  it("у нижнего края переворачивается вверх", () => {
+    const candles = [candle(10, 110), candle(20, 112)]; // просили бы «снизу»
+    expect(priceLabelSide(100, 195, 200, candles, idX, 0, 100)).toBe("above");
+  });
+});
 
 describe("drawDrawings", () => {
   it("does nothing when there are no drawings", () => {
@@ -133,10 +167,10 @@ describe("drawDrawings", () => {
     expect(calls.some((c) => c.text === "4,766" && c.x > layout.plotX + layout.plotW)).toBe(true);
   });
 
-  it("не рисует ярлык, если цена выключена или нет layout", () => {
-    const texts: string[] = [];
+  it("с выключенной ценой не рисует ни подписи у линии, ни ярлыка на шкале", () => {
+    const calls: Array<{ text: string; x: number }> = [];
     const ctx = makeFakeCtx();
-    (ctx as unknown as { fillText: (t: string) => void }).fillText = (t) => { texts.push(t); };
+    (ctx as unknown as { fillText: (t: string, x: number) => void }).fillText = (t, x) => { calls.push({ text: t, x }); };
     const layout = { plotX: 0, plotW: 200, plotH: 100, W: 264, H: 120 };
     const off = makeRow({
       toolType: "horizontal_ray",
@@ -144,12 +178,19 @@ describe("drawDrawings", () => {
       points: JSON.stringify([{ t: 10, price: 50 }]),
     });
     drawDrawings(ctx, sx, sy, 0, 200, 100, [off], null, layout);
-    expect(texts).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
 
-    // без layout (вызов из старого кода) — тоже молча без ярлыка
-    const on = makeRow({ toolType: "horizontal_ray", points: JSON.stringify([{ t: 10, price: 50 }]) });
-    drawDrawings(ctx, sx, sy, 0, 200, 100, [on], null);
-    expect(texts).toHaveLength(0);
+  it("подпись у линии рисуется и без layout, ярлык на шкале — только с ним", () => {
+    const calls: Array<{ text: string; x: number }> = [];
+    const ctx = makeFakeCtx();
+    (ctx as unknown as { fillText: (t: string, x: number) => void }).fillText = (t, x) => { calls.push({ text: t, x }); };
+    const row = makeRow({ toolType: "horizontal_ray", points: JSON.stringify([{ t: 10, price: 50 }]) });
+
+    drawDrawings(ctx, sx, sy, 0, 200, 100, [row], null);
+    // подпись у самого луча есть, а на шкале (x > plotX+plotW) — нет
+    expect(calls).toHaveLength(1);
+    expect(calls[0].x).toBeLessThan(200);
   });
 
   it("skips a drawing with invalid points JSON", () => {
