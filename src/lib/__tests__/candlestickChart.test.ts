@@ -5,6 +5,7 @@ import {
   fmtValLabel,
   niceStep,
   niceTimeStep,
+  gridLineCount,
   fmtTimeHM,
   fmtDateDM,
   dayKey,
@@ -241,6 +242,38 @@ describe("canvas drawing functions", () => {
   let ctx: CanvasRenderingContext2D;
   beforeEach(() => {
     ctx = fakeCtx();
+  });
+
+  it("сетка гуще на большом полотне и реже на узком", () => {
+    // Плотность привязана к пикселям: на фуллскрине линий должно быть заметно
+    // больше, на телефоне — не больше прежнего, иначе подписи слипаются.
+    const lines = (w: number, h: number) => {
+      const layout = computePlotLayout(w, h);
+      const strokes = () => (ctx.stroke as unknown as { mock: { calls: unknown[] } }).mock.calls.length;
+      (ctx.stroke as unknown as { mockClear: () => void }).mockClear();
+      drawPriceGrid(ctx, layout, 4640, 4690, (p) => layout.plotH - ((p - 4640) / 50) * layout.plotH);
+      const price = strokes();
+      (ctx.stroke as unknown as { mockClear: () => void }).mockClear();
+      const t0 = Date.UTC(2026, 7, 24, 16, 0);
+      const t1 = t0 + 2.2 * 3600_000;
+      drawTimeGrid(ctx, layout, t0, t1, "UTC", (ms) => layout.plotX + ((ms - t0) / (t1 - t0)) * layout.plotW);
+      return { price, time: strokes() };
+    };
+
+    const wide = lines(1000, 620);   // график на весь экран
+    const narrow = lines(375, 480);  // телефон
+
+    expect(wide.price).toBeGreaterThanOrEqual(9);  // было 5 при фиксированных 6 линиях
+    expect(wide.time).toBeGreaterThanOrEqual(8);   // было 4 (шаг 30 минут)
+    expect(narrow.time).toBeLessThanOrEqual(wide.time);
+  });
+
+  it("gridLineCount ограничен снизу и сверху и не боится мусора", () => {
+    expect(gridLineCount(1000, 100, 3, 20)).toBe(10);
+    expect(gridLineCount(50, 100, 3, 20)).toBe(3);      // пол
+    expect(gridLineCount(100000, 100, 3, 20)).toBe(20); // потолок
+    expect(gridLineCount(NaN, 100, 3, 20)).toBe(3);
+    expect(gridLineCount(0, 100, 3, 20)).toBe(3);
   });
 
   it("drawPriceGrid draws gridlines and labels within plot bounds", () => {

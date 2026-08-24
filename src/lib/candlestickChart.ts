@@ -172,6 +172,24 @@ const TIME_STEPS_MS = [
   3600000, 2 * 3600000, 4 * 3600000, 6 * 3600000, 12 * 3600000,
   86400000, 2 * 86400000, 7 * 86400000, 30 * 86400000,
 ];
+// Плотность сетки считаем от размера полотна, а не фиксированным числом линий.
+// Раньше было «8 вертикалей и 6 горизонталей» на любой экран: на развёрнутом
+// во весь экран графике это одна линия на четверть ширины — на минутном
+// таймфрейме сетка выглядела пустой, подписи шли через полчаса. Привязка к
+// пикселям делает её вдвое гуще на большом экране и при этом не склеивает
+// подписи на узком (там линий становится меньше, а не больше).
+//
+// Числа — это минимальный просвет между линиями в CSS-пикселях: подпись
+// времени «17:05» при 10px шрифте занимает ~30px, ценовая — ~12px по высоте.
+const TIME_GRID_PX = 70;
+const PRICE_GRID_PX = 48;
+
+/** Сколько линий сетки уместится по одной оси, с потолком и полом. */
+export function gridLineCount(sizePx: number, perLinePx: number, min: number, max: number): number {
+  if (!Number.isFinite(sizePx) || sizePx <= 0) return min;
+  return Math.max(min, Math.min(max, Math.round(sizePx / perLinePx)));
+}
+
 export function niceTimeStep(xspan: number, maxLines = 8): number {
   for (const s of TIME_STEPS_MS) if (xspan / s <= maxLines) return s;
   return TIME_STEPS_MS[TIME_STEPS_MS.length - 1];
@@ -206,7 +224,7 @@ export function drawPriceGrid(
   ctx.font = "10px ui-sans-serif, system-ui";
   ctx.textAlign = "left";
   const yspan = yMax - yMin || 1;
-  const priceStep = niceStep(yspan / 6);
+  const priceStep = niceStep(yspan / gridLineCount(plotH, PRICE_GRID_PX, 3, 24));
   const priceStart = Math.ceil(yMin / priceStep) * priceStep;
   for (let price = priceStart; price <= yMax; price += priceStep) {
     const y = sy(price);
@@ -238,7 +256,7 @@ export function drawTimeGrid(
   const c0 = axis.compress(t0);
   const c1 = axis.compress(t1);
   const xspan = c1 - c0 || 1;
-  const timeStep = niceTimeStep(xspan);
+  const timeStep = niceTimeStep(xspan, gridLineCount(plotW, TIME_GRID_PX, 3, 20));
   const timeStart = Math.ceil(c0 / timeStep) * timeStep;
   ctx.textAlign = "center";
   let lastDay: number | null = null;
