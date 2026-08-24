@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import {
   overduePartitions,
   dropOldPartitions,
+  orphanPartitions,
+  dropOrphanPartitions,
   pruneDefaultPartition,
   prunePartitionedTables,
 } from "../prune.mjs";
@@ -102,6 +104,7 @@ describe("collector/prune", () => {
 
   it("сбой одной таблицы не отменяет очистку остальных", async () => {
     const pool = makePool((sql, params) => {
+      if (sql.includes("NOT EXISTS")) return { rows: [] }; // сирот нет
       if (sql.includes("pg_inherits")) {
         if (params[0] === "ObSnapshot") throw new Error("relation does not exist");
         return parts(`${params[0]}_p20260707`);
@@ -123,6 +126,43 @@ describe("collector/prune", () => {
     expect(status.tables.ObFootprint.dropped).toBe(1);
     expect(status.dropped).toBe(2);
     expect(status.errors).toHaveLength(1);
+  });
+
+  it("orphanPartitions ищет неприкреплённые таблицы с именем партиции", async () => {
+    const pool = makePool(() => ({ rows: [{ name: "ObTrade_p20260707", bytes: "31457280" }] }));
+    const rows = await orphanPartitions(pool, "ObTrade", 30);
+    expect(rows).toHaveLength(1);
+    expect(pool.calls[0].params).toEqual(["ObTrade", "30"]);
+    // строгий отбор: имя партиции, отсутствие родителя и дата старше границы
+    expect(pool.calls[0].sql).toContain("_p[0-9]{8}$");
+    expect(pool.calls[0].sql).toContain("NOT EXISTS");
+    expect(pool.calls[0].sql).toContain("to_date");
+  });
+
+  it("осиротевшие партиции удаляются и считаются отдельно", async () => {
+    const pool = makePool((sql) =>
+      sql.includes("NOT EXISTS")
+        ? { rows: [{ name: "ObTrade_p20260707", bytes: "10" }, { name: "ObTrade_p20260708", bytes: "20" }] }
+        : { rows: [] },
+    );
+    const r = await dropOrphanPartitions(pool, "ObTrade", 30, silent);
+    expect(r.dropped).toEqual(["ObTrade_p20260707", "ObTrade_p20260708"]);
+    expect(r.bytes).toBe(30);
+    expect(pool.clientCalls[0].sql).toBe("SET lock_timeout = 5000");
+    expect(pool.released.count).toBe(1);
+  });
+
+  it("сироты попадают в общий счётчик и в статус таблицы", async () => {
+    const pool = makePool((sql) => {
+      if (sql.includes("NOT EXISTS")) return { rows: [{ name: "ObFootprint_p20260707", bytes: "1" }] };
+      if (sql.includes("to_regclass")) return { rows: [{ exists: false }] };
+      if (sql.includes("pg_inherits")) return parts("ObFootprint_p20260725");
+      return { rows: [] };
+    });
+    const status = await prunePartitionedTables(pool, [{ table: "ObFootprint", days: 30 }], silent);
+    expect(status.tables.ObFootprint.dropped).toBe(1);        // обычная партиция
+    expect(status.tables.ObFootprint.orphansDropped).toBe(1); // осиротевшая
+    expect(status.dropped).toBe(2);                            // и та и другая
   });
 
   it("статус помнит ретеншн каждой таблицы", async () => {

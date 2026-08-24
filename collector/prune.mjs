@@ -80,6 +80,70 @@ export async function dropOldPartitions(pool, table, cutoffDays, opts = {}) {
 }
 
 /**
+ * «Осиротевшие» партиции: таблицы с именем партиции, которые ни к чему не
+ * прикреплены.
+ *
+ * Такое бывает после ручного ALTER TABLE ... DETACH PARTITION, после
+ * пересоздания родительской таблицы (партиции остаются обычными таблицами) и
+ * после прерванной миграции. Беда в том, что они невидимы: обход по
+ * pg_inherits их не находит, значит очистка их не трогает и отчитывается
+ * «удалять нечего», а место они занимают наравне с живыми — на скриншотах
+ * админки это выглядит как «июль не удаляется, а ошибок нет».
+ *
+ * Отбор строгий: только имя вида <Таблица>_pГГГГММДД, только не прикреплённые,
+ * и только те, чья дата в имени старше границы ретеншна.
+ */
+export async function orphanPartitions(pool, table, cutoffDays) {
+  const { rows } = await pool.query(
+    `SELECT c.relname AS name, pg_total_relation_size(c.oid)::bigint AS bytes
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema()
+        AND c.relkind = 'r'
+        AND c.relname ~ ('^' || $1 || '_p[0-9]{8}$')
+        AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)
+        AND (to_date(right(c.relname, 8), 'YYYYMMDD') + 1)
+            <= (NOW() - ($2 || ' days')::interval)::date
+      ORDER BY c.relname`,
+    [table, String(cutoffDays)],
+  );
+  return rows;
+}
+
+/** Удалить осиротевшие партиции (см. orphanPartitions). */
+export async function dropOrphanPartitions(pool, table, cutoffDays, opts = {}) {
+  const lockTimeoutMs = opts.lockTimeoutMs ?? LOCK_TIMEOUT_MS;
+  const log = opts.log ?? console;
+  const result = { dropped: [], failed: [], bytes: 0 };
+
+  const parts = await orphanPartitions(pool, table, cutoffDays);
+  if (parts.length === 0) return result;
+
+  log.warn?.(
+    `[prune] ${table}: найдено ${parts.length} осиротевших партиций ` +
+    `(не прикреплены к таблице, поэтому обычная очистка их не видела) — удаляю`,
+  );
+
+  const client = await pool.connect();
+  try {
+    await client.query(`SET lock_timeout = ${Number(lockTimeoutMs)}`);
+    for (const p of parts) {
+      try {
+        await client.query(`DROP TABLE IF EXISTS "${p.name}"`);
+        result.dropped.push(p.name);
+        result.bytes += Number(p.bytes ?? 0);
+      } catch (err) {
+        result.failed.push({ name: p.name, error: err.message });
+      }
+    }
+  } finally {
+    try { await client.query("RESET lock_timeout"); } catch { /* соединение уже могло отвалиться */ }
+    client.release();
+  }
+  return result;
+}
+
+/**
  * Строки, застрявшие в DEFAULT-партиции.
  *
  * Туда попадает всё, для чего в момент записи не оказалось дневной партиции
@@ -132,19 +196,27 @@ export async function prunePartitionedTables(pool, plan, opts = {}) {
   for (const { table, days } of plan) {
     try {
       const r = await dropOldPartitions(pool, table, days, opts);
+      // Отдельным проходом — партиции, отвалившиеся от родителя: обычный
+      // обход по pg_inherits их не видит (см. orphanPartitions).
+      const orphans = await dropOrphanPartitions(pool, table, days, opts);
       const defRows = await pruneDefaultPartition(pool, table, days, opts);
-      status.dropped += r.dropped.length;
+      status.dropped += r.dropped.length + orphans.dropped.length;
       status.tables[table] = {
         days,
         dropped: r.dropped.length,
         failed: r.failed.length,
+        orphansDropped: orphans.dropped.length,
+        orphansFailed: orphans.failed.length,
         defaultRowsDeleted: defRows,
       };
       if (r.failed.length > 0) {
         status.errors.push(`${table}: ${r.failed[0].name} — ${r.failed[0].error}`);
       }
+      if (orphans.failed.length > 0) {
+        status.errors.push(`${table}: ${orphans.failed[0].name} (сирота) — ${orphans.failed[0].error}`);
+      }
     } catch (err) {
-      status.tables[table] = { days, dropped: 0, failed: 0, defaultRowsDeleted: 0, error: err.message };
+      status.tables[table] = { days, dropped: 0, failed: 0, orphansDropped: 0, orphansFailed: 0, defaultRowsDeleted: 0, error: err.message };
       status.errors.push(`${table}: ${err.message}`);
       log.error?.(`[prune] ${table}: ${err.message}`);
     }

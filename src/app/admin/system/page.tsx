@@ -105,6 +105,26 @@ export default async function AdminSystemPage() {
   }
   const overdueTotal = partStats.reduce((s, x) => s + x.overdue, 0);
 
+  // «Осиротевшие» партиции — таблицы с именем партиции, не прикреплённые ни к
+  // какой таблице. Блок выше их не покажет (он идёт по pg_inherits), а место
+  // они занимают: именно так июльские ObFootprint/ObTrade и оставались в базе,
+  // пока очистка честно отчитывалась «удалять нечего».
+  let orphans = { count: 0, bytes: 0 };
+  try {
+    const rows = await prisma.$queryRaw<{ count: bigint; bytes: bigint }[]>`
+      SELECT count(*)::bigint AS count, COALESCE(sum(pg_total_relation_size(c.oid)), 0)::bigint AS bytes
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = 'public'
+         AND c.relkind = 'r'
+         AND c.relname ~ '^Ob(Snapshot|Trade|Footprint|BigTrade)_p[0-9]{8}$'
+         AND NOT EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhrelid = c.oid)
+    `;
+    orphans = { count: Number(rows[0]?.count ?? 0), bytes: Number(rows[0]?.bytes ?? 0) };
+  } catch {
+    orphans = { count: 0, bytes: 0 };
+  }
+
   const maxBytes = Math.max(...tables.map((t) => t.bytes), 1);
 
   return (
@@ -153,6 +173,12 @@ export default async function AdminSystemPage() {
             {overdueTotal > 0 && (
               <span className="inline-flex items-center gap-1 text-xs text-loss">
                 <AlertTriangle size={13} /> {t("admin.system.partitionsOverdue", { n: overdueTotal })}
+              </span>
+            )}
+            {orphans.count > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-loss" title={t("admin.system.orphansHint")}>
+                <AlertTriangle size={13} />{" "}
+                {t("admin.system.partitionsOrphans", { n: orphans.count, size: fmtBytes(orphans.bytes) })}
               </span>
             )}
           </div>

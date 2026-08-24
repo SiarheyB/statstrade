@@ -15,7 +15,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
-import { dropOldPartitions, overduePartitions, pruneDefaultPartition } from "./prune.mjs";
+import { dropOldPartitions, overduePartitions, pruneDefaultPartition, orphanPartitions, dropOrphanPartitions, prunePartitionedTables } from "./prune.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_SQL = resolve(__dirname, "../prisma/migrations/20260704090000_partition_ob_tables/migration.sql");
@@ -521,7 +521,58 @@ async function runTests(pool) {
     if (left.rows[0].n !== 1) throw new Error(`В DEFAULT осталось ${left.rows[0].n} строк, ожидалась 1 (свежая)`);
   })();
 
+  await test("prune.mjs: удаляет отвалившуюся от родителя партицию", async () => {
+    // Ровно тот случай, из-за которого июльские таблицы висели до конца
+    // августа: партицию отцепили от родителя (DETACH), обход по pg_inherits
+    // её больше не видит — и очистка честно отчитывается «удалять нечего».
+    await makeParted("test_prune_orphan");
+    const { rows } = await pool.query(`SELECT to_char((NOW() - interval '40 days')::date, 'YYYYMMDD') AS d`);
+    const old = `test_prune_orphan_p${rows[0].d}`;
+    await pool.query(`ALTER TABLE test_prune_orphan DETACH PARTITION ${old}`);
+
+    const seen = await overduePartitions(pool, "test_prune_orphan", 30);
+    if (seen.some((r) => r.name === old)) throw new Error("Отцепленная партиция не должна попадать в обычный обход");
+
+    const found = await orphanPartitions(pool, "test_prune_orphan", 30);
+    if (!found.some((r) => r.name === old)) throw new Error(`orphanPartitions не нашла ${old}`);
+
+    const r = await dropOrphanPartitions(pool, "test_prune_orphan", 30, { log: { warn: () => {}, error: () => {} } });
+    if (r.dropped.length !== 1) throw new Error(`Ожидалось удаление 1 сироты, удалено ${r.dropped.length}`);
+
+    const check = await pool.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [old]);
+    if (check.rows[0].exists) throw new Error(`${old} должна быть удалена`);
+  })();
+
+  await test("prune.mjs: свежую сироту не трогает", async () => {
+    await makeParted("test_prune_orphan_fresh");
+    const { rows } = await pool.query(`SELECT to_char((NOW() - interval '1 day')::date, 'YYYYMMDD') AS d`);
+    const fresh = `test_prune_orphan_fresh_p${rows[0].d}`;
+    await pool.query(`ALTER TABLE test_prune_orphan_fresh DETACH PARTITION ${fresh}`);
+    const r = await dropOrphanPartitions(pool, "test_prune_orphan_fresh", 30, { log: { warn: () => {}, error: () => {} } });
+    if (r.dropped.length !== 0) throw new Error("Сирота внутри ретеншна удаляться не должна");
+    const check = await pool.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [fresh]);
+    if (!check.rows[0].exists) throw new Error(`${fresh} не должна была удаляться`);
+  })();
+
+  await test("prune.mjs: общий проход убирает и обычные партиции, и сирот", async () => {
+    await makeParted("test_prune_mix");
+    const { rows } = await pool.query(`SELECT to_char((NOW() - interval '40 days')::date, 'YYYYMMDD') AS d`);
+    await pool.query(`ALTER TABLE test_prune_mix DETACH PARTITION test_prune_mix_p${rows[0].d}`);
+    const status = await prunePartitionedTables(
+      pool,
+      [{ table: "test_prune_mix", days: 30 }],
+      { log: { warn: () => {}, error: () => {} } },
+    );
+    const st = status.tables["test_prune_mix"];
+    if (st.dropped !== 1) throw new Error(`Обычных партиций удалено ${st.dropped}, ожидалась 1`);
+    if (st.orphansDropped !== 1) throw new Error(`Сирот удалено ${st.orphansDropped}, ожидалась 1`);
+    if (status.dropped !== 2) throw new Error(`Всего удалено ${status.dropped}, ожидалось 2`);
+  })();
+
   // Cleanup test tables
+  await pool.query(`DROP TABLE IF EXISTS test_prune_orphan CASCADE`);
+  await pool.query(`DROP TABLE IF EXISTS test_prune_mix CASCADE`);
+  await pool.query(`DROP TABLE IF EXISTS test_prune_orphan_fresh CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_prune_real CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_prune_lock CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_prune_default CASCADE`);
