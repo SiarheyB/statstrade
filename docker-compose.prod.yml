@@ -231,6 +231,13 @@ services:
       FX_DUKASCOPY_SYMBOLS: ${FX_DUKASCOPY_SYMBOLS:-XAU/USD,XAG/USD}
       FX_DUKASCOPY_POLL_SEC: ${FX_DUKASCOPY_POLL_SEC:-15}
       FX_DUKASCOPY_FAIL_CYCLES: ${FX_DUKASCOPY_FAIL_CYCLES:-4}
+      # Опрос тиков: из них собирается текущая (ещё не закрытая) минутка —
+      # 1MIN-бары Dukascopy отдаёт только закрытыми. 5 с × 9 инструментов =
+      # 1.8 запроса/с, вместе со свечами ~2.8/с (замер: 3/с эндпоинт держит
+      # без единой ошибки). Увеличивать шаг = экономить запросы ценой
+      # «живости» минутного графика.
+      FX_TICK_POLL_SEC: ${FX_TICK_POLL_SEC:-5}
+      FX_TICK_LIMIT: ${FX_TICK_LIMIT:-500}
       # Twelve Data выключен: историю приносит Dukascopy, а free-лимит и так
       # был в перерасходе. Включать только осознанно.
       FX_TWELVEDATA_ENABLED: ${FX_TWELVEDATA_ENABLED:-0}

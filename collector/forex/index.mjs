@@ -44,7 +44,8 @@
 
 import http from "node:http";
 import pg from "pg";
-import { fetchCandles as dukasFetchCandles, DUKAS_INTERVAL } from "./dukascopy.mjs";
+import { fetchCandles as dukasFetchCandles, fetchTicks as dukasFetchTicks, DUKAS_INTERVAL } from "./dukascopy.mjs";
+import { ticksToCandle } from "./forming.mjs";
 import { createFallbackController, isMarketClosed } from "./fallback.mjs";
 
 // ─── Конфигурация из ENV ──────────────────────────────────────────────────
@@ -107,6 +108,18 @@ const cfg = {
   // таймфреймы — реже (см. pollDukascopy), чтобы не долбить недокументированный
   // эндпоинт чаще, чем нужно.
   dukascopyPollSec: Number(process.env.FX_DUKASCOPY_POLL_SEC ?? 15),
+
+  // Шаг опроса ТИКОВ — из них собирается текущая (ещё не закрытая) минутка,
+  // см. refreshFormingMinute. Именно он определяет, как часто «дышит» свеча
+  // на минутном графике: 1MIN-бары Dukascopy отдаёт только закрытыми, и без
+  // этого опроса последняя свеча обновлялась бы раз в минуту, отставая ещё
+  // на минуту. Сами тики отстают на секунды, чаще 5 с смысла нет.
+  tickPollSec: Number(process.env.FX_TICK_POLL_SEC ?? 5),
+  // Сколько тиков просить. Замерено: EUR/USD ~80 тиков/мин, золото ~330 —
+  // 500 покрывает минуту целиком даже на золоте. Недобор не ломает свечу
+  // (h/l/v в БД сливаются через GREATEST/LEAST, открытие ставит первая
+  // запись), но на плотной минуте занизил бы объём до её закрытия.
+  tickLimit: Number(process.env.FX_TICK_LIMIT ?? 500),
 
   candleRetentionDays: Number(process.env.FX_CANDLE_RETENTION_DAYS ?? 365),
 
@@ -642,6 +655,99 @@ async function refreshFormingBucket(symbol, interval) {
   }
 }
 
+// ─── Живая минутка из тиков ──────────────────────────────────────────────
+//
+// Dukascopy отдаёт 1MIN только ЗАКРЫТЫМИ барами (замерено: в 14:25:59 самый
+// свежий бар — 14:24:00). Поэтому одного опроса свечей мало: текущая минута
+// появляется на графике лишь после того, как закончится, и пользователь видит
+// «свеча меняется раз в две минуты». Тики же отстают на секунды, и минутка из
+// них собирается ровно та же (проверено побарно на EUR/USD, USD/JPY, XAU/USD
+// — O/H/L/C совпадают, объём = сумма bidVol / 1e6).
+//
+// Закрытый бар из pollDukascopy приходит позже и перетирает нашу сборку
+// авторитетными значениями — конфликта нет: тиками мы пишем только ТЕКУЩУЮ
+// минуту, а Dukascopy отдаёт только уже закрытые.
+let tickCalls = 0;
+let tickErrors = 0;
+let lastTickOkAt = 0;
+
+// Отдельный upsert: обычный storeCandleRows перетирает h/l/v целиком, а
+// текущую минуту мы дописываем по кускам — окно тиков может не покрыть её
+// начало (перезапуск контейнера, лимит тиков). GREATEST/LEAST не дают
+// экстремумам «сузиться», а объёму — уехать назад. Открытие не трогаем
+// вовсе: его ставит первая запись.
+async function storeFormingMinute(symbol, t, candle) {
+  try {
+    await pool.query(
+      `INSERT INTO "FxCandle" ("symbol","exchange","interval","t","o","h","l","c","v")
+       VALUES ($1,$2,'1m',$3,$4,$5,$6,$7,$8)
+       ON CONFLICT ("symbol","exchange","interval","t") DO UPDATE SET
+         "h" = GREATEST("FxCandle"."h", EXCLUDED."h"),
+         "l" = LEAST("FxCandle"."l", EXCLUDED."l"),
+         "c" = EXCLUDED."c",
+         "v" = GREATEST("FxCandle"."v", EXCLUDED."v")`,
+      [symbol, cfg.exchange, new Date(t), candle.o, candle.h, candle.l, candle.c, candle.v],
+    );
+    writeErrors = 0;
+    lastWriteOkAt = Date.now();
+    return 1;
+  } catch (err) {
+    writeErrors++;
+    console.error(`[fx/store] forming 1m ${symbol}: ${err.message}`);
+    return 0;
+  }
+}
+
+async function refreshFormingMinute(symbol) {
+  if (!forexEnabled) return 0;
+  const now = Date.now();
+  const from = bucketStart(now, "1m");
+  try {
+    tickCalls++;
+    const ticks = await dukasFetchTicks(symbol, cfg.tickLimit, now);
+    const candle = ticksToCandle(ticks, from, from + INTERVAL_MS["1m"]);
+    lastTickOkAt = Date.now();
+    if (!candle) return 0; // тихая минута — писать нечего
+    return await storeFormingMinute(symbol, from, candle);
+  } catch (err) {
+    tickErrors++;
+    console.error(`[fx/ticks] ${symbol}: ${err.message}`);
+    return 0;
+  }
+}
+
+// Опрос тиков по всем инструментам. Последовательно, а не пачкой: эндпоинт
+// недокументированный, и ровный темп для него безопаснее залпа.
+//
+// Защита от наложения кругов: setInterval не ждёт предыдущий вызов, а круг из
+// 9 инструментов при живом источнике занимает ~2 с, но при таймауте (20 с ×
+// ретраи) легко перевалит за шаг таймера. Без флага круги начали бы копиться
+// и удвоили бы темп запросов ровно тогда, когда источнику и так плохо.
+let tickPollBusy = false;
+async function pollTicks() {
+  if (!forexEnabled) return;
+  if (isMarketClosed(Date.now())) return; // на закрытом рынке тиков нет
+  if (tickPollBusy) return;
+  tickPollBusy = true;
+  try {
+    await pollTicksRound();
+  } finally {
+    tickPollBusy = false;
+  }
+}
+
+async function pollTicksRound() {
+  for (const symbol of cfg.symbols) {
+    const stored = await refreshFormingMinute(symbol);
+    // Минутка поехала — пересобираем из неё ближайшие таймфреймы, иначе
+    // «живым» был бы только 1m, а 5m/15m всё так же ждали бы опроса свечей.
+    if (stored > 0) {
+      await refreshFormingBucket(symbol, "5m");
+      await refreshFormingBucket(symbol, "15m");
+    }
+  }
+}
+
 // Есть ли уже в БД история нужной глубины (чтобы не тянуть её при каждом
 // перезапуске контейнера).
 async function hasHistoryDepth(symbol, interval, depthDays) {
@@ -691,10 +797,12 @@ async function backfillDukascopyAll() {
   console.log(`[fx/dukas] backfill завершён (запросов: ${dukasCalls}, ошибок: ${dukasErrors})`);
 }
 
-// Периодический опрос — основной способ получения свечей.
+// Периодический опрос — источник ЗАКРЫТЫХ баров (они точные и дают глубину).
 //
-// «Живость» определяется шагом опроса: 1m обновляется каждые
-// dukascopyPollSec, старшие таймфреймы — кратно реже (им чаще и не нужно).
+// «Живость» текущей свечи он не определяет: закрытый бар минуты приходит уже
+// после её конца, поэтому текущая минутка собирается из тиков (pollTicks), а
+// старшие таймфреймы — из минуток. Здесь же шаг задаёт, как быстро закрытый
+// бар перетрёт нашу сборку авторитетными значениями.
 let dukasPollTick = 0;
 
 // На закрытом рынке опрашиваем редко — только чтобы не проспать открытие и
@@ -702,11 +810,23 @@ let dukasPollTick = 0;
 const CLOSED_MARKET_POLL_MS = 5 * 60_000;
 let lastClosedPollAt = 0;
 
+let dukasPollBusy = false;
 async function pollDukascopy() {
   if (!forexEnabled) return;
   const symbols = cfg.symbols;
   if (symbols.length === 0) return;
+  // См. tickPollBusy: круг опроса может не уложиться в шаг таймера, и тогда
+  // вызовы начнут накладываться друг на друга.
+  if (dukasPollBusy) return;
+  dukasPollBusy = true;
+  try {
+    await pollDukascopyRound(symbols);
+  } finally {
+    dukasPollBusy = false;
+  }
+}
 
+async function pollDukascopyRound(symbols) {
   const now = Date.now();
   if (isMarketClosed(now)) {
     if (now - lastClosedPollAt < CLOSED_MARKET_POLL_MS) return;
@@ -1102,6 +1222,13 @@ const server = http.createServer(async (req, res) => {
         failStreak: fallback.failStreak,
         lastOkAt: lastDukasOkAt ? new Date(lastDukasOkAt).toISOString() : null,
       },
+      ticks: {
+        pollSec: cfg.tickPollSec,
+        limit: cfg.tickLimit,
+        totalCalls: tickCalls,
+        errors: tickErrors,
+        lastOkAt: lastTickOkAt ? new Date(lastTickOkAt).toISOString() : null,
+      },
       errors: writeErrors,
       lastWriteOkAt: lastWriteOkAt ? new Date(lastWriteOkAt).toISOString() : null,
       exchange: cfg.exchange,
@@ -1154,6 +1281,11 @@ const dukascopyTimer = setInterval(() => {
   pollDukascopy().catch(err => console.error(`[fx/dukas] fatal: ${err.message}`));
 }, cfg.dukascopyPollSec * 1000);
 
+// 3.2. Опрос тиков — «живая» текущая минутка (и, через неё, 5m/15m).
+const tickTimer = setInterval(() => {
+  pollTicks().catch(err => console.error(`[fx/ticks] fatal: ${err.message}`));
+}, cfg.tickPollSec * 1000);
+
 // 4. Периодический fallback-догон через Twelve Data (подстраховка).
 const fallbackTimer = setInterval(() => {
   fallbackCatchUp().catch(err => console.error(`[fx/fallback] fatal: ${err.message}`));
@@ -1178,13 +1310,14 @@ const toggleTimer = setInterval(() => {
 
 // Статус — раз в 10 минут.
 setInterval(() => {
-  console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}, Dukascopy calls=${dukasCalls} (ошибок ${dukasErrors})`);
+  console.log(`[fx/status] WS: ${wsConnected ? "connected" : "disconnected"}, trades=${totalTrades}, TD calls=${totalTwelveDataCalls}, Dukascopy calls=${dukasCalls} (ошибок ${dukasErrors}), тиковых запросов=${tickCalls} (ошибок ${tickErrors})`);
 }, 600_000);
 
 async function shutdown() {
   console.log("[fx] shutdown…");
   clearInterval(flushTimer);
   clearInterval(dukascopyTimer);
+  clearInterval(tickTimer);
   clearInterval(fallbackTimer);
   clearInterval(pruneTimer);
   clearInterval(configSyncTimer);
