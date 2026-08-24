@@ -11,7 +11,20 @@ export const maxDuration = 30;
 // делается коллектором по FX_CANDLE_RETENTION_DAYS — это на случай, если
 // нужно почистить раньше срока (например, после смены источника/бага).
 
-const schema = z.object({ before: z.string().datetime() });
+// Либо «всё старше даты» (чистка истории), либо «всё по одной паре» —
+// второе нужно, когда пару сняли со сбора: её свечи иначе остаются в
+// FxCandle навсегда и продолжают висеть в таблице админки как отстающие.
+const SYMBOL_RE = /^[A-Z]{3}\/[A-Z]{3}$/;
+const schema = z
+  .object({
+    before: z.string().datetime().optional(),
+    symbol: z
+      .string()
+      .transform((v) => v.trim().toUpperCase())
+      .refine((v) => SYMBOL_RE.test(v), { message: "Формат пары: EUR/USD" })
+      .optional(),
+  })
+  .refine((v) => v.before || v.symbol, { message: "Укажите before или symbol" });
 
 export async function POST(req: Request) {
   const session = await getAdminSession();
@@ -24,16 +37,27 @@ export async function POST(req: Request) {
     return badRequest("Некорректный запрос");
   }
   const parsed = schema.safeParse(body);
-  if (!parsed.success) return badRequest("Укажите корректную дату (before)");
-  const before = new Date(parsed.data.before);
+  if (!parsed.success) {
+    return badRequest(parsed.error.issues[0]?.message ?? "Укажите корректную дату (before) или пару (symbol)");
+  }
+  const { symbol } = parsed.data;
+  const before = parsed.data.before ? new Date(parsed.data.before) : null;
 
   try {
-    const deleted = await prisma.$executeRaw`DELETE FROM "FxCandle" WHERE "t" < ${before}`;
+    let deleted: number;
+    if (symbol && before) {
+      deleted = await prisma.$executeRaw`DELETE FROM "FxCandle" WHERE "symbol" = ${symbol} AND "t" < ${before}`;
+    } else if (symbol) {
+      deleted = await prisma.$executeRaw`DELETE FROM "FxCandle" WHERE "symbol" = ${symbol}`;
+    } else {
+      deleted = await prisma.$executeRaw`DELETE FROM "FxCandle" WHERE "t" < ${before!}`;
+    }
     await recordAudit(session, "forex.purge-candles", {
       targetType: "FxCandle",
-      detail: `before=${before.toISOString()} deleted=${deleted}`,
+      targetId: symbol,
+      detail: `${symbol ? `symbol=${symbol} ` : ""}${before ? `before=${before.toISOString()} ` : ""}deleted=${deleted}`,
     });
-    return NextResponse.json({ ok: true, before: before.toISOString(), deleted });
+    return NextResponse.json({ ok: true, symbol: symbol ?? null, before: before?.toISOString() ?? null, deleted });
   } catch (err) {
     return serverError((err as Error).message);
   }

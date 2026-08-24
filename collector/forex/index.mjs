@@ -525,6 +525,11 @@ async function backfillOneSymbol(symbol) {
 // (bucketStart, наследие Twelve Data). Прямой запрос дал бы для золота другую
 // сетку, чем у остальных пар.
 
+// Текст последней ошибки источника. Счётчик «ошибок: N» в админке без него
+// ничего не объясняет: непонятно, это таймаут сети, 503 от источника или
+// сломанный ответ — а лезть в docker logs ради одной строки неудобно.
+let lastDukasError = null; // { at, symbol, interval, message }
+let lastTickError = null;
 let dukasCalls = 0;
 let dukasErrors = 0;
 let lastDukasOkAt = 0;
@@ -607,6 +612,7 @@ async function fetchAndStoreDukascopy(symbol, interval, limit) {
     return stored;
   } catch (err) {
     dukasErrors++;
+    lastDukasError = { at: Date.now(), symbol, interval, message: err.message };
     console.error(`[fx/dukas] ${symbol} ${interval}: ${err.message}`);
     return null;
   }
@@ -711,6 +717,7 @@ async function refreshFormingMinute(symbol) {
     return await storeFormingMinute(symbol, from, candle);
   } catch (err) {
     tickErrors++;
+    lastTickError = { at: Date.now(), symbol, interval: "tick", message: err.message };
     console.error(`[fx/ticks] ${symbol}: ${err.message}`);
     return 0;
   }
@@ -1183,6 +1190,17 @@ async function checkForexEnabled() {
 
 // ─── HTTP healthcheck ────────────────────────────────────────────────────
 
+/** Последняя ошибка источника в форме, пригодной для JSON. */
+function errorForHealth(err) {
+  if (!err) return null;
+  return {
+    at: new Date(err.at).toISOString(),
+    symbol: err.symbol,
+    interval: err.interval,
+    message: String(err.message).slice(0, 300),
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = (req.url ?? "").split("?")[0];
   if (url === "/health" || url === "/") {
@@ -1221,6 +1239,7 @@ const server = http.createServer(async (req, res) => {
         errors: dukasErrors,
         failStreak: fallback.failStreak,
         lastOkAt: lastDukasOkAt ? new Date(lastDukasOkAt).toISOString() : null,
+        lastError: errorForHealth(lastDukasError),
       },
       ticks: {
         pollSec: cfg.tickPollSec,
@@ -1228,6 +1247,7 @@ const server = http.createServer(async (req, res) => {
         totalCalls: tickCalls,
         errors: tickErrors,
         lastOkAt: lastTickOkAt ? new Date(lastTickOkAt).toISOString() : null,
+        lastError: errorForHealth(lastTickError),
       },
       errors: writeErrors,
       lastWriteOkAt: lastWriteOkAt ? new Date(lastWriteOkAt).toISOString() : null,

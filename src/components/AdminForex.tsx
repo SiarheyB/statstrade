@@ -30,6 +30,7 @@ const INTERVAL_MS: Record<string, number> = {
   "1w": 7 * 24 * 60 * 60_000,
 };
 
+type SourceError = { at: string; symbol?: string; interval?: string; message: string };
 type HealthData = {
   healthy: boolean;
   uptimeMs: number;
@@ -52,6 +53,17 @@ type HealthData = {
     errors: number;
     failStreak?: number;
     lastOkAt: string | null;
+    lastError?: SourceError | null;
+  };
+  // Тиковый опрос: из тиков собирается текущая (ещё не закрытая) минутка.
+  // У коллекторов старой версии блока нет.
+  ticks?: {
+    pollSec: number;
+    limit: number;
+    totalCalls: number;
+    errors: number;
+    lastOkAt: string | null;
+    lastError?: SourceError | null;
   };
   errors: number;
   lastWriteOkAt: string | null;
@@ -94,6 +106,8 @@ export default function AdminForex() {
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const [purging, setPurging] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/admin/forex", { cache: "no-store" });
@@ -104,6 +118,28 @@ export default function AdminForex() {
       setError((e as Error).message);
     }
   }, []);
+
+  // Пара снята со сбора, но её свечи остались в FxCandle — здесь они и
+  // убираются, иначе таблица навсегда остаётся с мёртвыми строками.
+  const purgeSymbol = useCallback(async (symbol: string) => {
+    if (!confirm(`Удалить все свечи ${symbol} из FxCandle? Действие необратимо.`)) return;
+    setPurging(symbol);
+    try {
+      const res = await fetch("/api/admin/forex/purge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbol }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error ?? `HTTP ${res.status}`);
+      } else {
+        await load();
+      }
+    } finally {
+      setPurging(null);
+    }
+  }, [load]);
 
   useEffect(() => {
     let alive = true;
@@ -142,13 +178,27 @@ export default function AdminForex() {
   // выходные показывала красное «N из N пар не обновляются». Предупреждение,
   // которое горит по расписанию, перестают читать.
   const marketClosed = isForexMarketClosed(now);
+
+  // Что коллектор реально собирает ПРЯМО СЕЙЧАС. Таблица ниже строится по
+  // содержимому FxCandle, а там остаются и пары, снятые со сбора, — их
+  // свечи закономерно «отстают» и раньше поднимали тревогу навсегда
+  // («6 из 7 пар не обновляются», хотя собирается ровно одна).
+  const collected = new Set<string>(
+    h?.data?.symbols
+      ?? (data?.config.filter((c) => c.enabled).map((c) => c.symbol))
+      ?? data?.envSymbols
+      ?? [],
+  );
+  const isCollected = (symbol: string) => collected.size === 0 || collected.has(symbol);
   const staleSymbols = data && !marketClosed
     ? data.symbols.filter((s) => {
+        if (!isCollected(s)) return false;
         const cell = data.bySymbol[s]?.["5m"];
         if (!cell?.lastT) return true;
         return now - Date.parse(cell.lastT) > INTERVAL_MS["5m"] * 3;
       })
     : [];
+  const droppedSymbols = data ? data.symbols.filter((s) => !isCollected(s)) : [];
 
   return (
     <div className="mt-6 space-y-6">
@@ -166,12 +216,24 @@ export default function AdminForex() {
         </div>
       )}
 
+      {droppedSymbols.length > 0 && (
+        <div className="card p-4 border-border-strong/60 flex items-start gap-3 text-sm text-muted">
+          <AlertTriangle size={18} className="text-faint shrink-0 mt-0.5" />
+          <div>
+            <div className="flex items-center gap-1.5">
+              В базе остались свечи пар, которые больше не собираются: {droppedSymbols.join(", ")}
+              <Hint text="Пара удалена из списка коллектора (или выключена), но её история в FxCandle осталась. На сбор и графики это не влияет — только занимает место. Удалить можно кнопкой «удалить данные» в таблице ниже." />
+            </div>
+          </div>
+        </div>
+      )}
+
       {staleSymbols.length > 0 && (
         <div className="card p-4 border-loss/40 flex items-start gap-3 text-sm">
           <AlertTriangle size={18} className="text-loss shrink-0 mt-0.5" />
           <div>
             <div className="font-medium text-loss flex items-center gap-1.5">
-              {staleSymbols.length} из {data?.symbols.length ?? 0} пар(ы) не обновляются на 5m {">"}15 мин
+              {staleSymbols.length} из {collected.size || data?.symbols.length || 0} пар(ы) не обновляются на 5m {">"}15 мин
               <Hint text="У этих пар нет свежей 5-минутной свечи дольше 15 минут (3× длины свечи — запас на паузы рынка/сети). Обычно значит: коллектор недавно перезапущен и ещё не наверстал данные, либо реально пропали тики от источника (WS отключён / тиков 0)." />
             </div>
             <div className="mt-1 text-muted">{staleSymbols.join(", ")}</div>
@@ -227,6 +289,11 @@ export default function AdminForex() {
                   ? `${h.data.dukascopy.symbols.join(", ")} · ${h.data.dukascopy.totalCalls} запросов`
                   : "инструменты не заданы"}
                 {h.data.dukascopy.errors > 0 && ` · ошибок: ${h.data.dukascopy.errors}`}
+                {h.data.dukascopy.lastError && (
+                  <span className="text-faint">
+                    (последняя: {h.data.dukascopy.lastError.symbol} {h.data.dukascopy.lastError.interval} — {h.data.dukascopy.lastError.message}, {agoLabel(h.data.dukascopy.lastError.at, now).text})
+                  </span>
+                )}
                 <Hint text="Dukascopy — основной источник данных по ВСЕМ инструментам: и валютным парам, и металлам. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось. Если он замолчит на несколько циклов подряд, коллектор сам поднимет резервный Finnhub." />
               </span>
             )}
@@ -234,6 +301,18 @@ export default function AdminForex() {
               <span className="text-muted flex items-center gap-1">
                 последний ответ Dukascopy: {agoLabel(h.data.dukascopy.lastOkAt, now).text}
                 <Hint text="Когда Dukascopy в последний раз отдал данные. На закрытом рынке (выходные) время растёт — это норма: новых свечей нет." />
+              </span>
+            )}
+            {h.data.ticks && (
+              <span className={clsx("flex items-center gap-1", h.data.ticks.errors > 0 ? "text-loss" : "text-muted")}>
+                тики: раз в {h.data.ticks.pollSec}с · {h.data.ticks.totalCalls} запросов
+                {h.data.ticks.errors > 0 && ` · ошибок: ${h.data.ticks.errors}`}
+                {h.data.ticks.lastError && (
+                  <span className="text-faint">
+                    (последняя: {h.data.ticks.lastError.symbol} — {h.data.ticks.lastError.message}, {agoLabel(h.data.ticks.lastError.at, now).text})
+                  </span>
+                )}
+                <Hint text="Опрос тиков Dukascopy: из них собирается ТЕКУЩАЯ (ещё не закрытая) минутка, а из неё — текущие бары 5m/15m. Закрытые бары приходят отдельным опросом свечей. Без тиков последняя свеча на минутном графике появлялась бы только после закрытия минуты." />
               </span>
             )}
             <span className="text-muted flex items-center gap-1">
@@ -256,7 +335,7 @@ export default function AdminForex() {
         <div className="card p-4 overflow-x-auto">
           <h3 className="text-sm font-medium mb-3 flex items-center gap-1.5">
             Свечи по парам (FxCandle)
-            <Hint text="Для каждой пары и таймфрейма: слева — сколько всего свечей сохранено в БД, справа после «·» — сколько времени прошло с последней (самой свежей) свечи. Красным помечены ячейки, где последняя свеча отстаёт больше чем на 3× длины своей свечи (например, для 1h — больше 3 часов)." />
+            <Hint text="Для каждой пары и таймфрейма: слева — сколько всего свечей сохранено в БД, справа после «·» — сколько времени прошло с последней (самой свежей) свечи. Красным помечены ячейки, где последняя свеча отстаёт больше чем на 3× длины своей свечи (например, для 1h — больше 3 часов). Пары с пометкой «не собирается» сняты со сбора (их нет в списке коллектора) — их свечи просто лежат в БД, отставание для них норма; кнопка «удалить данные» убирает их из FxCandle." />
           </h3>
           <table className="w-full text-xs tabular-nums">
             <thead>
@@ -268,23 +347,45 @@ export default function AdminForex() {
               </tr>
             </thead>
             <tbody>
-              {data.symbols.map((symbol) => (
-                <tr key={symbol} className="border-b border-border/20">
-                  <td className="py-1 pr-4 font-medium">{symbol}</td>
-                  {data.intervals.map((iv) => {
-                    const cell = data.bySymbol[symbol]?.[iv];
-                    if (!cell) return <td key={iv} className="py-1 pr-4 text-right text-faint">—</td>;
-                    const ago = agoLabel(cell.lastT, now);
-                    const expectedMs = INTERVAL_MS[iv] ?? 0;
-                    const stale = ago.ms > expectedMs * 3;
-                    return (
-                      <td key={iv} className={clsx("py-1 pr-4 text-right", stale ? "text-loss" : "text-muted")}>
-                        {cell.count} <span className="text-faint">· {ago.text}</span>
-                      </td>
-                    );
-                  })}
-                </tr>
-              ))}
+              {data.symbols.map((symbol) => {
+                const dropped = !isCollected(symbol);
+                return (
+                  <tr key={symbol} className="border-b border-border/20">
+                    <td className="py-1 pr-4 font-medium whitespace-nowrap">
+                      <span className={dropped ? "text-faint" : undefined}>{symbol}</span>
+                      {dropped && (
+                        <>
+                          <span className="ml-2 text-[10px] text-faint border border-border/50 rounded px-1 py-px">
+                            не собирается
+                          </span>
+                          <button
+                            onClick={() => void purgeSymbol(symbol)}
+                            disabled={purging === symbol}
+                            title="Удалить свечи этой пары из FxCandle"
+                            className="ml-2 text-[10px] text-loss hover:underline disabled:opacity-50"
+                          >
+                            {purging === symbol ? "удаляю…" : "удалить данные"}
+                          </button>
+                        </>
+                      )}
+                    </td>
+                    {data.intervals.map((iv) => {
+                      const cell = data.bySymbol[symbol]?.[iv];
+                      if (!cell) return <td key={iv} className="py-1 pr-4 text-right text-faint">—</td>;
+                      const ago = agoLabel(cell.lastT, now);
+                      const expectedMs = INTERVAL_MS[iv] ?? 0;
+                      // Снятую со сбора пару красным не помечаем: её свечи
+                      // отстают по определению, это не поломка.
+                      const stale = !dropped && ago.ms > expectedMs * 3;
+                      return (
+                        <td key={iv} className={clsx("py-1 pr-4 text-right", stale ? "text-loss" : dropped ? "text-faint" : "text-muted")}>
+                          {cell.count} <span className="text-faint">· {ago.text}</span>
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              })}
               {data.symbols.length === 0 && (
                 <tr><td colSpan={data.intervals.length + 1} className="py-4 text-center text-faint">Данных пока нет</td></tr>
               )}

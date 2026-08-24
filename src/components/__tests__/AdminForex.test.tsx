@@ -40,6 +40,52 @@ describe('AdminForex', () => {
     vi.restoreAllMocks();
   });
 
+  it('не считает отстающими пары, которые больше не собираются', async () => {
+    // В FxCandle остались свечи снятых пар — раньше они навсегда поднимали
+    // тревогу «N из N пар не обновляются», хотя собирается только золото.
+    const payload = makePayload({
+      symbols: ['EUR/USD', 'XAU/USD'],
+      health: {
+        ok: true,
+        data: {
+          healthy: true,
+          uptimeMs: 3600_000,
+          instruments: 1,
+          symbols: ['XAU/USD'],
+          backfillDone: true,
+          ws: { connected: false, reconnects: 0, totalTrades: 0, lastTradeAt: null },
+          twelveData: { apiKeySet: false, totalCalls: 0, fallbackIntervalSec: 30 },
+          dukascopy: {
+            symbols: ['XAU/USD'],
+            pollSec: 15,
+            totalCalls: 1106,
+            errors: 2,
+            lastOkAt: '2026-07-20T11:59:50Z',
+            lastError: { at: '2026-07-20T11:30:00Z', symbol: 'XAU/USD', interval: '1m', message: 'HTTP 503' },
+          },
+          errors: 0,
+          lastWriteOkAt: '2026-07-20T11:59:00Z',
+          exchange: 'finnhub',
+        },
+      },
+      bySymbol: {
+        'EUR/USD': { '5m': { count: 3905, lastT: '2026-07-17T12:00:00Z', oldestT: '2026-07-01T00:00:00Z' } },
+        'XAU/USD': { '5m': { count: 5203, lastT: '2026-07-20T11:58:00Z', oldestT: '2026-07-01T00:00:00Z' } },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(payload) }));
+
+    render(<AdminForex />);
+
+    await waitFor(() => expect(screen.getByText('не собирается')).toBeInTheDocument());
+    // Тревоги нет: единственная собираемая пара свежая
+    expect(screen.queryByText(/не обновляются на 5m/)).not.toBeInTheDocument();
+    // Зато видно, что за ошибка была у источника
+    expect(screen.getByText(/HTTP 503/)).toBeInTheDocument();
+    // И есть чем убрать мёртвые данные
+    expect(screen.getByTitle('Удалить свечи этой пары из FxCandle')).toBeInTheDocument();
+  });
+
   it('shows loading state initially', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<AdminForex />);

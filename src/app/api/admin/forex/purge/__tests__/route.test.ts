@@ -49,6 +49,33 @@ describe("/api/admin/forex/purge", () => {
       expect(mockRecordAudit).toHaveBeenCalled();
     });
 
+    it("purges a single symbol when only symbol is given", async () => {
+      mockPrisma.$executeRaw.mockResolvedValue(4200);
+      const res = await POST(new Request(base, { method: "POST", body: JSON.stringify({ symbol: "eur/usd" }) }));
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body).toMatchObject({ ok: true, symbol: "EUR/USD", before: null, deleted: 4200 });
+      expect(mockRecordAudit).toHaveBeenCalled();
+    });
+
+    it("accepts symbol together with before", async () => {
+      mockPrisma.$executeRaw.mockResolvedValue(1);
+      const before = new Date("2026-01-01T00:00:00Z").toISOString();
+      const res = await POST(new Request(base, { method: "POST", body: JSON.stringify({ symbol: "XAU/USD", before }) }));
+      expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ symbol: "XAU/USD", before });
+    });
+
+    it("returns 400 for a malformed symbol", async () => {
+      const res = await POST(new Request(base, { method: "POST", body: JSON.stringify({ symbol: "EURUSD" }) }));
+      expect(res.status).toBe(400);
+    });
+
+    it("returns 400 when neither before nor symbol is given", async () => {
+      const res = await POST(new Request(base, { method: "POST", body: JSON.stringify({}) }));
+      expect(res.status).toBe(400);
+    });
+
     it("returns 500 when prisma throws", async () => {
       mockPrisma.$executeRaw.mockRejectedValue(new Error("db down"));
       const before = new Date("2026-01-01T00:00:00Z").toISOString();
