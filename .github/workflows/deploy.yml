@@ -51,11 +51,12 @@ jobs:
       - name: Generate Prisma client
         run: npx prisma generate
 
+      # vitest покрывает и коллектор: collector/__tests__/prune.test.mjs
+      # проверяет НАСТОЯЩИЙ модуль очистки. Раньше рядом жил prune-check.mjs,
+      # который повторял логику pruneOld своей копией и потому проходил, даже
+      # когда реальная очистка была сломана, — он удалён.
       - name: Run vitest (unit + component)
         run: npx vitest run
-
-      - name: Run collector prune-check (unit)
-        run: node collector/prune-check.mjs
 
       - name: Run collector prune integration test
         run: node collector/prune-integration.mjs

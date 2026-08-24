@@ -12,6 +12,7 @@ import { createOrderBook } from "./orderbook.mjs"; // binance futures/spot
 import { createBybitBook } from "./bybit.mjs";
 import { createOkxBook } from "./okx.mjs";
 import { createTradeFeed } from "./trades.mjs";
+import { prunePartitionedTables } from "./prune.mjs";
 
 const cfg = {
   symbols: (process.env.SYMBOLS ?? "BTCUSDT").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean),
@@ -947,44 +948,40 @@ async function ensureRollupIndexes() {
   }
 }
 
+// Последний проход очистки — отдаётся в /health, чтобы «партиции не
+// удаляются» было видно в админке, а не только в логах контейнера.
+let lastPrune = null;
+let pruneBusy = false;
+
 async function pruneOld() {
+  // Час — большой запас, но при залипшей блокировке проход может тянуться
+  // дольше: наложение вызовов только добавит конкуренции за те же локи.
+  if (pruneBusy) {
+    console.warn("[prune] предыдущий проход ещё идёт — пропускаем этот час");
+    return;
+  }
+  pruneBusy = true;
   try {
     for (const tbl of PARTITIONED_TABLES) {
       await pool.query(`SELECT ob_ensure_partitions($1, 7)`, [tbl]);
     }
-    let snapDropped = 0;
-    let tradeDropped = 0;
-    // Snapshot-таблица — отдельный ретеншн (короткий, данные тяжёлые)
-    {
-      const r = await pool.query(
-        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObSnapshot", String(cfg.retentionDays)],
-      );
-      snapDropped = r.rows[0]?.n ?? 0;
-    }
-    // Сделки, футпринт, крупные ордера — другой ретеншн (дольше, легковеснее)
-    {
-      const r = await pool.query(
-        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObTrade", String(cfg.tradeRetentionDays)],
-      );
-      tradeDropped += r.rows[0]?.n ?? 0;
-    }
-    {
-      const r = await pool.query(
-        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObFootprint", String(cfg.tradeRetentionDays)],
-      );
-      tradeDropped += r.rows[0]?.n ?? 0;
-    }
-    {
-      const r = await pool.query(
-        `SELECT ob_drop_partitions_before($1, NOW() - ($2 || ' days')::interval) AS n`,
-        ["ObBigTrade", String(cfg.tradeRetentionDays)],
-      );
-      tradeDropped += r.rows[0]?.n ?? 0;
-    }
-    const total = snapDropped + tradeDropped;
+    // Снапшоты — свой (короткий) ретеншн, они тяжёлые; сделки, футпринт и
+    // крупные ордера — свой, подлиннее. Дропы идут по одной партиции с
+    // lock_timeout: одна занятая или битая партиция больше не отменяет всю
+    // очистку (см. collector/prune.mjs — там же разбор, почему так).
+    const pruneStatus = await prunePartitionedTables(pool, [
+      { table: "ObSnapshot", days: cfg.retentionDays },
+      { table: "ObTrade", days: cfg.tradeRetentionDays },
+      { table: "ObFootprint", days: cfg.tradeRetentionDays },
+      { table: "ObBigTrade", days: cfg.tradeRetentionDays },
+    ]);
+    lastPrune = pruneStatus;
+    const snapDropped = pruneStatus.tables["ObSnapshot"]?.dropped ?? 0;
+    const tradeDropped =
+      (pruneStatus.tables["ObTrade"]?.dropped ?? 0) +
+      (pruneStatus.tables["ObFootprint"]?.dropped ?? 0) +
+      (pruneStatus.tables["ObBigTrade"]?.dropped ?? 0);
+    const total = pruneStatus.dropped;
     // Rollup‑таблицы — НЕ партиционированы, чистим DELETE‑ом по ROLLUP_RETENTION_DAYS.
     //
     // rollupRetention <= 0 означает «хранить вечно» — это дефолт: агрегаты и
@@ -1081,7 +1078,11 @@ async function pruneOld() {
       );
     }
   } catch (err) {
+    if (lastPrune) lastPrune.errors.push(err.message);
+    else lastPrune = { at: Date.now(), dropped: 0, tables: {}, errors: [err.message] };
     console.error(`[prune] ошибка: ${err.message}`);
+  } finally {
+    pruneBusy = false;
   }
 }
 
@@ -1092,7 +1093,20 @@ const server = http.createServer(async (req, res) => {
     const status = feeds.map((f) => ({ feed: `${f.exchange}:${f.symbol}`, synced: f.book.synced, ...f.book.stats }));
     const healthy = feeds.some((f) => f.book.synced);
     res.writeHead(healthy ? 200 : 503, { "content-type": "application/json" });
-    res.end(JSON.stringify({ healthy, feeds: status }));
+    res.end(JSON.stringify({
+      healthy,
+      feeds: status,
+      // Очистка партиций: когда прошла, сколько сбросила и что не смогла.
+      prune: lastPrune
+        ? { ...lastPrune, at: new Date(lastPrune.at).toISOString(), running: pruneBusy }
+        : { at: null, dropped: 0, tables: {}, errors: [], running: pruneBusy },
+      retention: {
+        snapshotDays: cfg.retentionDays,
+        tradeDays: cfg.tradeRetentionDays,
+        rollupDays: cfg.rollupRetention,
+        rollupMinuteDays: cfg.rollupMinuteRetention,
+      },
+    }));
   } else if (url === "/scan-daily") {
     // Загрузка свежих дневных свечей с Binance по запросу приложения: кнопка
     // «Пересчитать сейчас» и ночной плановый прогон сначала дёргают этот

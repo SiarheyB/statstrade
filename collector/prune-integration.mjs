@@ -15,6 +15,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import pg from "pg";
+import { dropOldPartitions, overduePartitions, pruneDefaultPartition } from "./prune.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MIGRATION_SQL = resolve(__dirname, "../prisma/migrations/20260704090000_partition_ob_tables/migration.sql");
@@ -439,7 +440,91 @@ async function runTests(pool) {
       throw new Error(`Второй вызов: ожидалось 0, получено ${r2.rows[0].n}`);
     }
   })();
+  // ── Тесты РЕАЛЬНОГО кода очистки (collector/prune.mjs) ──
+  //
+  // Функция ob_drop_partitions_before выше осталась в БД, но коллектор ходит
+  // не через неё: она дропает все партиции одной транзакцией, из-за чего одна
+  // занятая или битая партиция отменяла всю очистку (июльские партиции жили до
+  // конца августа). Ниже проверяется именно то, что теперь работает в проде.
+
+  const makeParted = async (name) => {
+    await pool.query(`DROP TABLE IF EXISTS ${name} CASCADE`);
+    await pool.query(`CREATE TABLE ${name} (id BIGSERIAL, t TIMESTAMPTZ(3) NOT NULL) PARTITION BY RANGE (t)`);
+    await pool.query(`CREATE TABLE ${name}_default PARTITION OF ${name} DEFAULT`);
+    // две просроченные (40 и 39 дней назад) и одна свежая (вчера)
+    for (const daysAgo of [40, 39, 1]) {
+      const { rows } = await pool.query(`SELECT to_char((NOW() - ($1 || ' days')::interval)::date, 'YYYYMMDD') AS d`, [String(daysAgo)]);
+      const d = rows[0].d;
+      // DDL не принимает bind-параметры — дату подставляем строкой (она
+      // получена от самого Postgres, формат YYYYMMDD).
+      await pool.query(
+        `CREATE TABLE ${name}_p${d} PARTITION OF ${name}
+         FOR VALUES FROM (to_date('${d}', 'YYYYMMDD')) TO (to_date('${d}', 'YYYYMMDD') + 1)`,
+      );
+    }
+  };
+  const exists = async (nm) =>
+    (await pool.query(`SELECT to_regclass($1) IS NOT NULL AS e`, [nm])).rows[0].e;
+
+  await test("prune.mjs: видит просроченные партиции и не трогает свежие", async () => {
+    await makeParted("test_prune_real");
+    const overdue = await overduePartitions(pool, "test_prune_real", 30);
+    if (overdue.length !== 2) throw new Error(`Ожидалось 2 просроченных, получено ${overdue.length}`);
+    const r = await dropOldPartitions(pool, "test_prune_real", 30, { log: { error: () => {} } });
+    if (r.dropped.length !== 2) throw new Error(`Удалено ${r.dropped.length}, ожидалось 2`);
+    const left = await pool.query(
+      `SELECT count(*)::int AS n FROM pg_inherits WHERE inhparent = 'test_prune_real'::regclass`,
+    );
+    // осталась свежая партиция + DEFAULT
+    if (left.rows[0].n !== 2) throw new Error(`Осталось ${left.rows[0].n} партиций, ожидалось 2`);
+  })();
+
+  await test("prune.mjs: занятая партиция пропускается, остальные удаляются", async () => {
+    await makeParted("test_prune_lock");
+    const overdue = await overduePartitions(pool, "test_prune_lock", 30);
+    const locked = overdue[0].name;
+
+    // держим ACCESS SHARE на одной партиции из другого соединения
+    const holder = await pool.connect();
+    await holder.query("BEGIN");
+    await holder.query(`SELECT count(*) FROM "${locked}"`);
+    try {
+      const r = await dropOldPartitions(pool, "test_prune_lock", 30, {
+        lockTimeoutMs: 400,
+        log: { error: () => {} },
+      });
+      if (r.failed.length !== 1 || r.failed[0].name !== locked) {
+        throw new Error(`Ожидался ровно один пропуск (${locked}), получено ${JSON.stringify(r.failed)}`);
+      }
+      if (r.dropped.length !== overdue.length - 1) {
+        throw new Error(`Остальные партиции должны были удалиться, удалено ${r.dropped.length}`);
+      }
+      if (!(await exists(`"${locked}"`))) throw new Error("Занятая партиция не должна была удалиться");
+    } finally {
+      await holder.query("ROLLBACK");
+      holder.release();
+    }
+
+    // блокировка снята — следующий проход добирает остаток
+    const r2 = await dropOldPartitions(pool, "test_prune_lock", 30, { log: { error: () => {} } });
+    if (r2.dropped.length !== 1) throw new Error(`Второй проход должен был удалить 1, удалил ${r2.dropped.length}`);
+  })();
+
+  await test("prune.mjs: чистит строки, застрявшие в DEFAULT-партиции", async () => {
+    await makeParted("test_prune_default");
+    // строка на дату, для которой партиции нет → уходит в DEFAULT
+    await pool.query(`INSERT INTO test_prune_default (t) VALUES (NOW() - interval '100 days')`);
+    await pool.query(`INSERT INTO test_prune_default (t) VALUES (NOW())`);
+    const n = await pruneDefaultPartition(pool, "test_prune_default", 30, { log: { warn: () => {}, error: () => {} } });
+    if (n !== 1) throw new Error(`Ожидалось удаление 1 строки, удалено ${n}`);
+    const left = await pool.query(`SELECT count(*)::int AS n FROM test_prune_default_default`);
+    if (left.rows[0].n !== 1) throw new Error(`В DEFAULT осталось ${left.rows[0].n} строк, ожидалась 1 (свежая)`);
+  })();
+
   // Cleanup test tables
+  await pool.query(`DROP TABLE IF EXISTS test_prune_real CASCADE`);
+  await pool.query(`DROP TABLE IF EXISTS test_prune_lock CASCADE`);
+  await pool.query(`DROP TABLE IF EXISTS test_prune_default CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_ob_drop CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_default_safe CASCADE`);
   await pool.query(`DROP TABLE IF EXISTS test_mid_cutoff CASCADE`);

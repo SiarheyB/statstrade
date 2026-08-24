@@ -1,10 +1,39 @@
 import { prisma } from "@/lib/db";
 import { getServerT } from "@/lib/i18n/server";
-import { Database } from "lucide-react";
+import { Database, AlertTriangle } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
 type TableRow = { table: string; rows: number; bytes: number };
+
+// Партиционированные таблицы карты ордеров: их чистит не приложение, а
+// коллектор (раз в час дропает дневные партиции старше ретеншна). Здесь
+// показываем, справляется ли он: «просрочено» больше нуля из часа в час —
+// значит дропы не проходят (обычно занятая блокировка или ошибка на одной
+// партиции), и надо смотреть /health коллектора или его лог.
+const PARTITIONED = ["ObSnapshot", "ObTrade", "ObFootprint", "ObBigTrade"] as const;
+
+type PartRow = {
+  parent: string;
+  part: string;
+  upper: Date | null;
+  bytes: bigint;
+  retention_days: number | null;
+  overdue: boolean;
+};
+type PartStat = {
+  table: string;
+  parts: number;
+  oldest: Date | null;
+  overdue: number;
+  overdueBytes: number;
+  retentionDays: number | null;
+  defaultRows: number;
+};
+
+function fmtDay(d: Date | null, nf: string): string {
+  return d ? d.toLocaleDateString(nf, { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
+}
 
 function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -32,6 +61,49 @@ export default async function AdminSystemPage() {
   } catch (e) {
     error = (e as Error).message;
   }
+
+  // Статистика партиций: сколько их, самая старая и сколько просрочено.
+  //
+  // Просрочку считает сам Postgres: сравнивать с часами приложения нельзя —
+  // партиции живут по времени БД, да и серверное «сейчас» в рендере страницы
+  // делает её недетерминированной.
+  let partStats: PartStat[] = [];
+  try {
+    const parts = await prisma.$queryRaw<PartRow[]>`
+      SELECT p.relname AS parent,
+             c.relname AS part,
+             ((regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1])::timestamptz AS upper,
+             pg_total_relation_size(c.oid)::bigint AS bytes,
+             e.retention_days AS retention_days,
+             (e.retention_days IS NOT NULL
+              AND ((regexp_match(pg_get_expr(c.relpartbound, c.oid), 'TO \(''([^'']+)''\)'))[1])::timestamptz
+                  <= NOW() - (e.retention_days || ' days')::interval) AS overdue
+        FROM pg_inherits i
+        JOIN pg_class c ON c.oid = i.inhrelid
+        JOIN pg_class p ON p.oid = i.inhparent
+        LEFT JOIN "RetentionEpoch" e
+               ON e.category = CASE WHEN p.relname = 'ObSnapshot' THEN 'snapshot' ELSE 'trade' END
+       WHERE p.relname IN ('ObSnapshot', 'ObTrade', 'ObFootprint', 'ObBigTrade')
+         AND pg_get_expr(c.relpartbound, c.oid) <> 'DEFAULT'
+    `;
+    partStats = PARTITIONED.map((table) => {
+      const own = parts.filter((r) => r.parent === table && r.upper !== null);
+      const overdue = own.filter((r) => r.overdue);
+      const defRow = tables.find((x) => x.table === `${table}_default`);
+      return {
+        table,
+        parts: own.length,
+        oldest: own.reduce<Date | null>((m, r) => (!m || r.upper! < m ? r.upper! : m), null),
+        overdue: overdue.length,
+        overdueBytes: overdue.reduce((sum, r) => sum + Number(r.bytes), 0),
+        retentionDays: own[0]?.retention_days ?? null,
+        defaultRows: defRow ? Math.max(0, defRow.rows) : 0,
+      };
+    }).filter((x) => x.parts > 0);
+  } catch {
+    partStats = [];
+  }
+  const overdueTotal = partStats.reduce((s, x) => s + x.overdue, 0);
 
   const maxBytes = Math.max(...tables.map((t) => t.bytes), 1);
 
@@ -74,6 +146,52 @@ export default async function AdminSystemPage() {
           </table>
         </div>
       </div>
+      {partStats.length > 0 && (
+        <div className="mt-8 card overflow-hidden">
+          <div className="px-5 py-3 border-b border-border flex items-center gap-2">
+            <h2 className="text-sm font-medium">{t("admin.system.partitions")}</h2>
+            {overdueTotal > 0 && (
+              <span className="inline-flex items-center gap-1 text-xs text-loss">
+                <AlertTriangle size={13} /> {t("admin.system.partitionsOverdue", { n: overdueTotal })}
+              </span>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-faint border-b border-border">
+                  <th className="px-5 py-2 font-medium">{t("admin.system.th.table")}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.parts")}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.oldest")}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.retention")}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.overdue")}</th>
+                  <th className="px-5 py-2 font-medium text-right">{t("admin.system.th.inDefault")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {partStats.map((row) => (
+                  <tr key={row.table} className="border-b border-border/50 last:border-0">
+                    <td className="px-5 py-2.5 font-medium">{row.table}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{row.parts}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">{fmtDay(row.oldest, nf)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted">
+                      {row.retentionDays === null ? t("admin.dash") : `${row.retentionDays} д`}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right tabular-nums ${row.overdue > 0 ? "text-loss" : "text-muted"}`}>
+                      {row.overdue > 0 ? `${row.overdue} · ${fmtBytes(row.overdueBytes)}` : "0"}
+                    </td>
+                    <td className={`px-5 py-2.5 text-right tabular-nums ${row.defaultRows > 0 ? "text-loss" : "text-muted"}`}>
+                      {row.defaultRows > 0 ? row.defaultRows.toLocaleString(nf) : "0"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="px-5 py-3 text-xs text-faint">{t("admin.system.partitionsNote")}</p>
+        </div>
+      )}
+
       <p className="mt-3 text-xs text-faint">{t("admin.system.note")}</p>
     </div>
   );
