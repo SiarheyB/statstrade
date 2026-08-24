@@ -25,6 +25,8 @@ type PartStat = {
   table: string;
   parts: number;
   oldest: Date | null;
+  /** Когда самая старая партиция выйдет за ретеншн и будет удалена. */
+  dropsAt: Date | null;
   overdue: number;
   overdueBytes: number;
   retentionDays: number | null;
@@ -90,13 +92,21 @@ export default async function AdminSystemPage() {
       const own = parts.filter((r) => r.parent === table && r.upper !== null);
       const overdue = own.filter((r) => r.overdue);
       const defRow = tables.find((x) => x.table === `${table}_default`);
+      const oldest = own.reduce<Date | null>((m, r) => (!m || r.upper! < m ? r.upper! : m), null);
+      const retention = own[0]?.retention_days ?? null;
+      // Ради этой даты колонка и появилась: «почему июль ещё в базе» чаще
+      // всего означает не поломку очистки, а ретеншн длиннее, чем помнится.
+      const dropsAt = oldest && retention !== null
+        ? new Date(oldest.getTime() + retention * 86_400_000)
+        : null;
       return {
         table,
         parts: own.length,
-        oldest: own.reduce<Date | null>((m, r) => (!m || r.upper! < m ? r.upper! : m), null),
+        oldest,
+        dropsAt,
         overdue: overdue.length,
         overdueBytes: overdue.reduce((sum, r) => sum + Number(r.bytes), 0),
-        retentionDays: own[0]?.retention_days ?? null,
+        retentionDays: retention,
         defaultRows: defRow ? Math.max(0, defRow.rows) : 0,
       };
     }).filter((x) => x.parts > 0);
@@ -190,6 +200,7 @@ export default async function AdminSystemPage() {
                   <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.parts")}</th>
                   <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.oldest")}</th>
                   <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.retention")}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.dropsAt")}</th>
                   <th className="px-3 py-2 font-medium text-right">{t("admin.system.th.overdue")}</th>
                   <th className="px-5 py-2 font-medium text-right">{t("admin.system.th.inDefault")}</th>
                 </tr>
@@ -202,6 +213,9 @@ export default async function AdminSystemPage() {
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted">{fmtDay(row.oldest, nf)}</td>
                     <td className="px-3 py-2.5 text-right tabular-nums text-muted">
                       {row.retentionDays === null ? t("admin.dash") : `${row.retentionDays} д`}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-muted" title={t("admin.system.dropsAtHint")}>
+                      {row.overdue > 0 ? t("admin.system.dropsNow") : fmtDay(row.dropsAt, nf)}
                     </td>
                     <td className={`px-3 py-2.5 text-right tabular-nums ${row.overdue > 0 ? "text-loss" : "text-muted"}`}>
                       {row.overdue > 0 ? `${row.overdue} · ${fmtBytes(row.overdueBytes)}` : "0"}
