@@ -301,25 +301,28 @@ describe("ATR panel", () => {
     expect(await screen.findByText(/нужен ход 2\.08×ATR/)).toBeInTheDocument();
 
     await userEvent.click(screen.getByText("ETHUSDT"));
-    const atrPanel = (await screen.findByText("ATR — средний дневной ход")).parentElement!;
-    // Именно внутри панели ATR: снаружи «2» есть ещё и на счётчике фильтра.
-    expect(within(atrPanel).getByText("2")).toBeInTheDocument();
+    // Само значение ATR: ищем в панели по точному тексту узла (снаружи «2»
+    // есть ещё и на счётчике фильтра).
+    const atrPanel = (await screen.findByText("Дневной ход (ATR)")).closest("div")!.parentElement!;
+    expect(within(atrPanel).getByText((_, el) => el?.textContent === "2" && el.tagName === "SPAN")).toBeInTheDocument();
     expect(screen.getByText("Чтобы ложный пробой состоялся сегодня")).toBeInTheDocument();
-    expect(screen.getByText("2.08×ATR")).toBeInTheDocument();
+    // Главная цифра — в цене инструмента (ru-локаль: запятая), «в ATR» рядом.
+    expect(screen.getByText("4,16")).toBeInTheDocument();
+    expect(screen.getByText(/размах бара ≈ 2\.08 дневного хода/)).toBeInTheDocument();
     // Разбор пути: до уровня + прокол, одним баром.
-    expect(screen.getByText(/Дойти до уровня — 2\.00×ATR/)).toBeInTheDocument();
-    expect(screen.getByText(/проколоть его — ещё 0\.08×ATR/)).toBeInTheDocument();
-    // Вердикт по статистике дневных ходов из конспекта.
+    expect(screen.getByText(/Одним баром: дойти до уровня — 4 \(2\.00 дневного хода\)/)).toBeInTheDocument();
+    expect(screen.getByText(/проколоть его — ещё 0\.16/)).toBeInTheDocument();
+    // Вердикт по статистике дневных ходов из конспекта — частотой «дней из N».
     expect(screen.getByText("ход, который бывает редко")).toBeInTheDocument();
-    expect(screen.getByText(/примерно в 5% дней/)).toBeInTheDocument();
+    expect(screen.getAllByText(/1 день из 20/).length).toBeGreaterThan(0);
   });
 
   it("shows how much of the daily ATR today's bar has already spent", async () => {
     render(<RecommendationsPage />);
     await screen.findByText(/Ложный пробой · лонг/);
     await userEvent.click(screen.getByText("ETHUSDT"));
-    // Сегодняшний бар в CANDLES: h-l = 4, ATR 2 → 2.00×ATR.
-    expect(await screen.findByText(/2\.00×ATR \(200%\)/)).toBeInTheDocument();
+    // Сегодняшний бар в CANDLES: h-l = 4, ATR 2 → 200% дневного хода.
+    expect(await screen.findByText(/200% дневного хода/)).toBeInTheDocument();
     expect(screen.getByText(/дневной ход почти выбран/)).toBeInTheDocument();
   });
 
@@ -330,7 +333,10 @@ describe("ATR panel", () => {
     // Все цифры считаются от цены анализа, поэтому совпадают: значение в
     // шапке, в подсказке к нему и в панели. Живая цена, если ушла, выносится
     // отдельной строкой.
-    expect(await screen.findAllByText(/2\.08×ATR/)).toHaveLength(3);
+    // В шапке величина в ×ATR (сам чип и подсказка к нему), в раскрытой
+    // карточке — та же величина в цене и «дневных ходах».
+    expect(await screen.findAllByText(/2\.08×ATR/)).toHaveLength(2);
+    expect(screen.getByText(/размах бара ≈ 2\.08 дневного хода/)).toBeInTheDocument();
     expect(screen.getByText(/Сейчас цена/)).toBeInTheDocument();
   });
 
@@ -338,7 +344,7 @@ describe("ATR panel", () => {
     render(<RecommendationsPage />);
     await screen.findByText(/Пробой · лонг/);
     await userEvent.click(screen.getByText("BTCUSDT"));
-    expect(await screen.findByText("ATR — средний дневной ход")).toBeInTheDocument();
+    expect(await screen.findByText("Дневной ход (ATR)")).toBeInTheDocument();
     expect(screen.getByText("Путь до уровня")).toBeInTheDocument();
     expect(screen.queryByText("Чтобы ложный пробой состоялся сегодня")).not.toBeInTheDocument();
     expect(screen.getByText(/Для пробоя весь путь уже пройден/)).toBeInTheDocument();
@@ -399,8 +405,8 @@ describe("ЛП2Б card", () => {
     expect(await screen.findByText("Чтобы ЛП2Б состоялся завтра")).toBeInTheDocument();
     expect(screen.getByText(/Уровень уже пробит/)).toBeInTheDocument();
     expect(screen.getByText(/Уровень пробит вверх, закрылись над ним/)).toBeInTheDocument();
-    // Возврат в пределах одного ATR — рядовой день.
-    expect(screen.getByText(/примерно в 80% дней/)).toBeInTheDocument();
+    // Возврат в пределах одного дневного хода — рядовой день.
+    expect(screen.getAllByText(/8 дней из 10/).length).toBeGreaterThan(0);
   });
 
   it("warns when today's bar has already taken the price back", async () => {

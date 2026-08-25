@@ -504,6 +504,26 @@ function LevelSnapshot({
 // Цвет и вердикт по требуемому дневному ходу: до 1 ATR — рядовой день,
 // до 2 — редкий, дальше — почти не встречается (статистика из конспекта,
 // см. DAY_MOVE_ODDS).
+// Числа сетапа новичку ничего не говорят в виде «1.43×ATR»: непонятно ни от
+// чего процент, ни много это или мало. Поэтому везде рядом идёт та же
+// величина словами — «1.43 дневного хода» — и в цене инструмента, а ×ATR
+// остаётся короткой подписью для тех, кто привык считать в ATR.
+function atrWords(atrTimes: number): string {
+  // Меньше одного хода понятнее в процентах («44% дневного хода»), больше —
+  // в самих ходах («2.08 дневного хода»): проценты за сотню уже не читаются.
+  if (!Number.isFinite(atrTimes)) return "—";
+  return atrTimes < 1
+    ? `${Math.round(atrTimes * 100)}% дневного хода`
+    : `${atrTimes.toFixed(2)} дневного хода`;
+}
+
+/** «8 дней из 10» вместо «80% дней» — так частота читается без пересчёта. */
+function oddsWords(share: number): string {
+  if (!Number.isFinite(share) || share <= 0) return "почти никогда";
+  if (share >= 0.5) return `${Math.round(share * 10)} дней из 10`;
+  return `1 день из ${Math.max(2, Math.round(1 / share))}`;
+}
+
 const FEASIBILITY: Record<MoveFeasibility, { text: string; bar: string; note: string }> = {
   routine: { text: "text-profit", bar: "bg-profit", note: "обычный дневной ход" },
   stretch: { text: "text-warn", bar: "bg-warn", note: "ход больше обычного" },
@@ -617,23 +637,28 @@ function AtrPanel({
     <div className="rounded-lg border border-border bg-surface-2/40 p-3">
       <div className="grid gap-3 sm:grid-cols-2 sm:divide-x sm:divide-border">
         <div className="sm:pr-3">
-          <div className="text-[11px] uppercase tracking-wide text-faint">ATR — средний дневной ход</div>
+          <div className="text-[11px] uppercase tracking-wide text-faint">
+            <Hint text="ATR — средний дневной ход: на столько цена в среднем гуляет за день, от минимума до максимума. Это мерка «много или мало»: пройти один дневной ход инструменту обычно, полтора — уже нечасто, два — редко. Все расстояния в карточке заодно показаны в дневных ходах, чтобы было видно, реалистично ли это за один день.">
+              Дневной ход (ATR)
+            </Hint>
+          </div>
           <div className="mt-0.5 flex items-baseline gap-2">
             <span className="text-lg font-semibold">{fmtAtrPrice(atr)}</span>
             <span className="text-xs text-muted">≈ {atrPctOfPrice.toFixed(1)}% цены</span>
           </div>
           <div className="mt-1 text-xs text-muted">
-            Столько инструмент проходит за день в среднем: хай минус лоу, усреднённые по пяти последним
-            обычным дням (слишком большие и слишком мелкие бары в расчёт не идут).
+            За обычный день цена проходит примерно столько — от минимума дня до максимума. Считаем по пяти
+            последним обычным дням: слишком большие и слишком мелкие дни в расчёт не идут.
           </div>
           {progress && (
             <div className="mt-2 text-xs">
               <span className="text-faint">
-                Сегодня уже пройдено{liveBarAt ? ` (на ${fmtTime(liveBarAt)})` : " (по данным ночного скана)"}:{" "}
+                Сегодня прошла{liveBarAt ? ` (на ${fmtTime(liveBarAt)})` : " (по данным ночного скана)"}:{" "}
               </span>
               <span className={progress.exhausted ? "text-warn" : "text-fg"}>
-                {progress.movedAtr.toFixed(2)}×ATR ({Math.round(progress.movedPct)}%)
+                {fmtAtrPrice(progress.movedAtr * atr)}
               </span>
+              <span className="text-faint"> — это {Math.round(progress.movedPct)}% дневного хода</span>
               {progress.exhausted && (
                 <span className="text-warn"> — дневной ход почти выбран, на импульс сегодня рассчитывать поздно</span>
               )}
@@ -648,11 +673,13 @@ function AtrPanel({
                 {is2b ? "Чтобы ЛП2Б состоялся завтра" : "Чтобы ложный пробой состоялся сегодня"}
               </div>
               <div className="mt-0.5 flex items-baseline gap-2">
+                {/* Сначала цена, потом «сколько это дневных ходов»: цифра
+                    «1.43×ATR» сама по себе новичку ничего не говорит. */}
                 <span className={clsx("text-lg font-semibold", FEASIBILITY[budget.feasibility].text)}>
-                  {budget.totalAtr.toFixed(2)}×ATR
+                  {fmtAtrPrice(budget.totalPrice)}
                 </span>
                 <span className="text-xs text-muted">
-                  {is2b ? "обратный путь" : "размах бара"} ≈ {fmtAtrPrice(budget.totalPrice)}
+                  {is2b ? "обратный путь" : "размах бара"} ≈ {atrWords(budget.totalAtr)}
                 </span>
               </div>
               {/* У 2Б бюджет считается на ЗАВТРАШНИЙ бар, поэтому ход,
@@ -666,14 +693,16 @@ function AtrPanel({
               <div className="mt-2 text-xs text-muted">
                 {is2b ? (
                   <>
-                    Уровень уже пробит, и закрылись всего в {(budget.totalAtr - 0.08).toFixed(2)}×ATR за ним —
-                    завтрашнему бару остаётся вернуть цену обратно под уровень. Это короткий путь: в отличие от
-                    обычного ЛП, идти до уровня уже не нужно.
+                    Уровень уже пробит, и закрылись всего в{" "}
+                    {fmtAtrPrice((budget.totalAtr - 0.08) * atr)} за ним — завтрашнему бару остаётся вернуть
+                    цену обратно под уровень. Это короткий путь: в отличие от обычного ЛП, идти до уровня уже
+                    не нужно.
                   </>
                 ) : (
                   <>
-                    Дойти до уровня — {budget.toLevelAtr.toFixed(2)}×ATR, проколоть его — ещё{" "}
-                    {budget.pierceAtr.toFixed(2)}×ATR, и всё это одним баром, с возвратом обратно.
+                    Одним баром: дойти до уровня — {fmtAtrPrice(budget.toLevelAtr * atr)} (
+                    {atrWords(budget.toLevelAtr)}), проколоть его — ещё{" "}
+                    {fmtAtrPrice(budget.pierceAtr * atr)}, и вернуться обратно.
                   </>
                 )}
               </div>
@@ -683,8 +712,8 @@ function AtrPanel({
                 </span>
                 <span className="text-faint">
                   {" "}
-                  — такой размах бывает примерно в {Math.round(budget.oddsShare * 100)}% дней
-                  {budget.feasibility !== "routine" && "; ход в пределах 1×ATR — в 80%"}.
+                  — так широко инструмент ходит примерно {oddsWords(budget.oddsShare)}
+                  {budget.feasibility !== "routine" && ", а укладывается в один дневной ход — 8 дней из 10"}.
                 </span>
               </div>
               {is2b && returned2bToday && (
@@ -698,7 +727,7 @@ function AtrPanel({
                   Считаем от цены закрытия {fmtDate(setup.candlesTo)}. Сейчас цена {fmtAtrPrice(livePrice!)} — от
                   неё нужно{" "}
                   <span className={FEASIBILITY[liveBudget.feasibility].text}>
-                    {liveBudget.totalAtr.toFixed(2)}×ATR
+                    {fmtAtrPrice(liveBudget.totalPrice)} ({atrWords(liveBudget.totalAtr)})
                   </span>
                   .
                 </div>
@@ -723,10 +752,10 @@ function AtrPanel({
                     <div className="text-[11px] uppercase tracking-wide text-faint">Путь до уровня</div>
                     <div className="mt-0.5 flex items-baseline gap-2">
                       <span className={clsx("text-lg font-semibold", tone)}>
-                        {closeDistanceAtr !== null ? `${closeDistanceAtr.toFixed(2)}×ATR` : "вплотную"}
+                        {closeDistanceAtr !== null ? fmtAtrPrice(closeDistanceAtr * atr) : "вплотную"}
                       </span>
                       {closeDistanceAtr !== null && (
-                        <span className="text-xs text-muted">≈ {fmtAtrPrice(closeDistanceAtr * atr)}</span>
+                        <span className="text-xs text-muted">≈ {atrWords(closeDistanceAtr)}</span>
                       )}
                     </div>
                     <div className="mt-2 text-xs text-muted">
@@ -738,8 +767,8 @@ function AtrPanel({
                       ) : (
                         <>
                           Последний день закрылся не на самом уровне: до него ещё{" "}
-                          {closeDistanceAtr!.toFixed(2)}×ATR (≈ {fmtAtrPrice(closeDistanceAtr! * atr)}). Бару
-                          нужно сначала пройти это расстояние и только потом пробивать уровень.
+                          {fmtAtrPrice(closeDistanceAtr! * atr)}. Бару нужно сначала пройти это расстояние и
+                          только потом пробивать уровень.
                         </>
                       )}
                     </div>
@@ -747,22 +776,24 @@ function AtrPanel({
                       <div className={clsx("mt-1 text-xs", enoughLeft ? "text-faint" : "text-warn")}>
                         {enoughLeft ? (
                           <>
-                            Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
-                            {fmtAtrPrice(progress.leftAtr * atr)}) — на подход хватает.
+                            Из обычного дневного хода сегодня осталось ещё{" "}
+                            {fmtAtrPrice(progress.leftAtr * atr)} ({Math.round(progress.leftAtr * 100)}%) — на
+                            подход хватает.
                           </>
                         ) : (
                           <>
-                            Из дневного хода осталось {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
-                            {fmtAtrPrice(progress.leftAtr * atr)}) — меньше, чем нужно только на подход к
-                            уровню. Сегодня до пробоя, скорее всего, не дойдёт.
+                            Из обычного дневного хода сегодня осталось{" "}
+                            {fmtAtrPrice(progress.leftAtr * atr)} ({Math.round(progress.leftAtr * 100)}%) —
+                            меньше, чем нужно только на подход к уровню. Сегодня до пробоя, скорее всего, не
+                            дойдёт.
                           </>
                         )}
                       </div>
                     )}
                     {progress && atLevel && !progress.exhausted && (
                       <div className="mt-1 text-xs text-faint">
-                        Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
-                        {fmtAtrPrice(progress.leftAtr * atr)}).
+                        Из обычного дневного хода сегодня осталось ещё{" "}
+                        {fmtAtrPrice(progress.leftAtr * atr)} ({Math.round(progress.leftAtr * 100)}%).
                       </div>
                     )}
                   </>
@@ -855,8 +886,8 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
             <Hint
               text={
                 setup.bias === "false_breakout_2b"
-                  ? `Насколько цена уже ушла ЗА уровень — она его пробила и закрылась с другой стороны. Измеряется в ATR, среднем дневном ходе инструмента: ${setup.distanceAtr.toFixed(2)}×ATR это ${(setup.distanceAtr * 100).toFixed(0)}% обычного дневного движения.`
-                  : `Сколько цене осталось пройти до уровня, в ATR — среднем дневном ходе инструмента. ${setup.distanceAtr.toFixed(2)}×ATR значит ${(setup.distanceAtr * 100).toFixed(0)}% обычного дневного движения: чем меньше, тем ближе цена к уровню.`
+                  ? `Насколько цена уже ушла ЗА уровень — она его пробила и закрылась с другой стороны. Мерка — дневной ход (ATR), то есть сколько инструмент обычно проходит за день: ${setup.distanceAtr.toFixed(2)}×ATR это ${(setup.distanceAtr * 100).toFixed(0)}% обычного дневного движения.`
+                  : `Сколько цене осталось пройти до уровня. Мерка — дневной ход (ATR), то есть сколько инструмент обычно проходит за день от минимума до максимума: ${setup.distanceAtr.toFixed(2)}×ATR значит ${(setup.distanceAtr * 100).toFixed(0)}% такого дня. Чем меньше, тем ближе цена к уровню; больше 1 — за один день, скорее всего, не дойдёт.`
               }
             >
               {setup.bias === "false_breakout_2b" ? "за уровнем" : "до уровня"}{" "}
@@ -872,8 +903,8 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
                 <Hint
                   text={
                     setup.bias === "false_breakout_2b"
-                      ? `Сколько завтрашнему бару пройти, чтобы вернуть цену обратно за уровень: ${headBudget.totalAtr.toFixed(2)}×ATR. ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: встречается примерно в ${Math.round(headBudget.oddsShare * 100)}% торговых дней.`
-                      : `Сколько сегодняшнему бару нужно пройти, чтобы сетап состоялся: дойти до уровня, проколоть его и вернуться — итого ${headBudget.totalAtr.toFixed(2)}×ATR размаха. ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: встречается примерно в ${Math.round(headBudget.oddsShare * 100)}% торговых дней.`
+                      ? `Сколько завтрашнему бару пройти, чтобы вернуть цену обратно за уровень: ${atrWords(headBudget.totalAtr)} (${headBudget.totalAtr.toFixed(2)}×ATR). ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: такой день бывает примерно ${oddsWords(headBudget.oddsShare)}.`
+                      : `Сколько сегодняшнему бару нужно пройти, чтобы сетап состоялся: дойти до уровня, проколоть его и вернуться — итого ${atrWords(headBudget.totalAtr)} размаха (${headBudget.totalAtr.toFixed(2)}×ATR, то есть ${(headBudget.totalAtr * 100).toFixed(0)}% обычного дневного движения). ${FEASIBILITY[headBudget.feasibility].note[0].toUpperCase()}${FEASIBILITY[headBudget.feasibility].note.slice(1)}: такой день бывает примерно ${oddsWords(headBudget.oddsShare)}.`
                   }
                   className={FEASIBILITY[headBudget.feasibility].text}
                 >
