@@ -6,7 +6,7 @@
 
 import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { detectLevels, filterLevelsNearPrice, computeAtr, detectTrend, type DailyCandle } from "./levels";
+import { detectLevels, filterLevelsNearPrice, computeAtr, detectTrend, type DailyCandle, type DetectedLevel } from "./levels";
 import { computeBreakoutSignals } from "./breakoutSignals";
 import { detectFalseBreakout2b } from "./falseBreakout2b";
 import {
@@ -118,6 +118,32 @@ export function dropUnclosedBar(candles: DailyCandle[], now = Date.now()): Daily
   if (!last) return candles;
   const closesAt = last.t + DAY_MS;
   return closesAt > now ? candles.slice(0, -1) : candles;
+}
+
+/**
+ * Годится ли уровень под ЛОЖНЫЙ ПРОБОЙ (не 2Б). null — годится.
+ *
+ * Два требования конспекта, и оба про одно: ЛП — это возврат к уровню,
+ * который рынок ОСТАВИЛ В ПОКОЕ.
+ *  • источник — прошлый откат структуры, а не любая близкая линия;
+ *  • дальний ретест — уровень не трогали минимум MIN_RETEST_AGE_DAYS дней.
+ *
+ * «Локальная опорная точка» (local_stop) не проходит по обоим пунктам: она по
+ * построению живёт несколько дней и проводится по свежему экстремуму. Цена
+ * сделала лоу, постояла рядом два дня — это накопление у свежей опоры, а не
+ * ЛП. Тем же правилом отсекается разворот против свежего импульса от
+ * двухдневной линии (LINKUSDT 25.08.2026).
+ */
+export const MIN_RETEST_AGE_DAYS = 10;
+
+export function falseBreakoutLevelRejection(
+  level: { type: DetectedLevel["type"]; lastTouchedAt: number },
+  candlesTo: Date,
+): "not_retracement_source" | "retest_too_recent" | null {
+  if (level.type !== "retracement" && level.type !== "structure_break") return "not_retracement_source";
+  const daysSinceTouch = (candlesTo.getTime() - level.lastTouchedAt) / DAY_MS;
+  if (daysSinceTouch < MIN_RETEST_AGE_DAYS) return "retest_too_recent";
+  return null;
 }
 
 export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Promise<RecomputeResult> {
@@ -236,17 +262,19 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
         }
       }
 
-      if (signals.bias === "false_breakout" && trend !== "range") {
-        // Источник уровня — только настоящий прошлый откат структуры
-        // ("слева ищем другие откаты"), а не любой близкий уровень.
-        if (level.type !== "retracement" && level.type !== "structure_break") {
-          rejected.not_retracement_source = (rejected.not_retracement_source ?? 0) + 1;
-          continue;
-        }
-        // Дальний ретест: последнее касание уровня — не раньше 10 дней назад.
-        const daysSinceTouch = (candlesTo.getTime() - level.lastTouchedAt) / DAY_MS;
-        if (daysSinceTouch < 10) {
-          rejected.retest_too_recent = (rejected.retest_too_recent ?? 0) + 1;
+      // Требования к ЛП действуют ВСЕГДА, а не только при читаемом тренде.
+      // Раньше оба гейта стояли под `trend !== "range"`, и во флэте в выдачу
+      // попадали ложные пробои от «локальной опорной точки» возрастом в два
+      // дня: цена сделала лоу, постояла рядом — это накопление у свежей
+      // опоры, а не возврат к оставленному уровню. У ЛП по определению
+      // должен быть дальний ретест: уровень образовался, цена от него ушла,
+      // какое-то время не трогала — и только потом вернулась проколоть.
+      // ЛП2Б исключён намеренно (см. выше): там уровень свежий по замыслу —
+      // пробойный бар только что закрылся за ним.
+      if (signals.bias === "false_breakout") {
+        const reason = falseBreakoutLevelRejection(level, candlesTo);
+        if (reason) {
+          rejected[reason] = (rejected[reason] ?? 0) + 1;
           continue;
         }
       }

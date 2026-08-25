@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { mockPrisma } from "@/lib/__tests__/helpers/routeMocks";
-import { dropUnclosedBar, pickStrongestPerSymbol, recomputeRecommendations } from "../recompute";
+import {
+  dropUnclosedBar,
+  falseBreakoutLevelRejection,
+  MIN_RETEST_AGE_DAYS,
+  pickStrongestPerSymbol,
+  recomputeRecommendations,
+} from "../recompute";
 import * as featureConfig from "@/lib/featureConfig";
 
 const DAY_MS = 86_400_000;
@@ -280,5 +286,42 @@ describe("dropUnclosedBar", () => {
 
   it("tolerates an empty series", () => {
     expect(dropUnclosedBar([], Date.now())).toEqual([]);
+  });
+});
+
+
+describe("falseBreakoutLevelRejection", () => {
+  const at = (daysAgo: number) => Date.UTC(2026, 7, 25) - daysAgo * DAY_MS;
+  const now = new Date(Date.UTC(2026, 7, 25));
+
+  it("пропускает откат структуры, который давно не трогали", () => {
+    expect(falseBreakoutLevelRejection({ type: "retracement", lastTouchedAt: at(40) }, now)).toBeNull();
+    expect(falseBreakoutLevelRejection({ type: "structure_break", lastTouchedAt: at(11) }, now)).toBeNull();
+  });
+
+  it("отклоняет свежую локальную опору — это накопление, а не ЛП", () => {
+    // INXUSDT 25.08.2026: БСУ 22.08, цена рядом, дальнего ретеста не было
+    expect(falseBreakoutLevelRejection({ type: "local_stop", lastTouchedAt: at(2) }, now))
+      .toBe("not_retracement_source");
+    // и даже старая локальная опора не годится: тип не тот
+    expect(falseBreakoutLevelRejection({ type: "local_stop", lastTouchedAt: at(90) }, now))
+      .toBe("not_retracement_source");
+  });
+
+  it("отклоняет правильный тип уровня, если ретест был только что", () => {
+    expect(falseBreakoutLevelRejection({ type: "retracement", lastTouchedAt: at(2) }, now))
+      .toBe("retest_too_recent");
+    expect(falseBreakoutLevelRejection({ type: "retracement", lastTouchedAt: at(MIN_RETEST_AGE_DAYS - 1) }, now))
+      .toBe("retest_too_recent");
+  });
+
+  it("граница дальнего ретеста включительная", () => {
+    expect(falseBreakoutLevelRejection({ type: "retracement", lastTouchedAt: at(MIN_RETEST_AGE_DAYS) }, now)).toBeNull();
+  });
+
+  it("границы гэпов и прочие типы под ЛП не идут", () => {
+    for (const type of ["gap", "range_border", "parabar", "mirror", "historical", "break_point"] as const) {
+      expect(falseBreakoutLevelRejection({ type, lastTouchedAt: at(60) }, now)).toBe("not_retracement_source");
+    }
   });
 });
