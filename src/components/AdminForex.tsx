@@ -101,6 +101,18 @@ function agoLabel(ts: string | null, now: number): { text: string; ms: number } 
   return { text: `${Math.round(sec / 86400)}д назад`, ms };
 }
 
+// Ошибка считается «свежей» столько времени. Счётчики ошибок в /health —
+// накопительные с момента запуска процесса, поэтому красить строку по ним
+// нельзя: одна сетевая осечка утром держала бы панель красной до вечера,
+// хотя данные идут. Красное = проблема ПРЯМО СЕЙЧАС.
+const RECENT_ERROR_MS = 15 * 60_000;
+
+function isRecent(at: string | null | undefined, now: number): boolean {
+  if (!at) return false;
+  const ts = Date.parse(at);
+  return Number.isFinite(ts) && now - ts < RECENT_ERROR_MS;
+}
+
 export default function AdminForex() {
   const [data, setData] = useState<Payload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -284,7 +296,14 @@ export default function AdminForex() {
               <Hint text="Twelve Data — резерв последней очереди. По умолчанию выключен (FX_TWELVEDATA_ENABLED≠1): историю по всем парам теперь приносит Dukascopy, а бесплатного лимита Twelve Data в 800 запросов/сутки на все пары и таймфреймы не хватало." />
             </span>
             {h.data.dukascopy && (
-              <span className={clsx("flex items-center gap-1", h.data.dukascopy.errors > 0 ? "text-loss" : "text-muted")}>
+              <span className={clsx(
+                "flex items-center gap-1",
+                // Красным только если источник молчит прямо сейчас (пошла
+                // серия сбоев) или последняя ошибка совсем свежая.
+                (h.data.dukascopy.failStreak ?? 0) > 0 || isRecent(h.data.dukascopy.lastError?.at, now)
+                  ? "text-loss"
+                  : "text-muted",
+              )}>
                 Dukascopy (основной): {h.data.dukascopy.symbols.length > 0
                   ? `${h.data.dukascopy.symbols.join(", ")} · ${h.data.dukascopy.totalCalls} запросов`
                   : "инструменты не заданы"}
@@ -294,7 +313,7 @@ export default function AdminForex() {
                     (последняя: {h.data.dukascopy.lastError.symbol} {h.data.dukascopy.lastError.interval} — {h.data.dukascopy.lastError.message}, {agoLabel(h.data.dukascopy.lastError.at, now).text})
                   </span>
                 )}
-                <Hint text="Dukascopy — основной источник данных по ВСЕМ инструментам: и валютным парам, и металлам. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось. Если он замолчит на несколько циклов подряд, коллектор сам поднимет резервный Finnhub." />
+                <Hint text="Dukascopy — основной источник данных по ВСЕМ инструментам: и валютным парам, и металлам. Ключ ему не нужен, опрашивается раз в несколько секунд. Здесь: какие инструменты через него собираются, сколько запросов сделано с запуска и сколько из них не удалось. Счётчик ошибок накопительный за всё время работы процесса — одиночные сетевые осечки в нём остаются навсегда; строка краснеет, только если источник молчит прямо сейчас или последняя ошибка была меньше 15 минут назад. Если он замолчит на несколько циклов подряд, коллектор сам поднимет резервный Finnhub." />
               </span>
             )}
             {h.data.dukascopy && (
@@ -304,7 +323,10 @@ export default function AdminForex() {
               </span>
             )}
             {h.data.ticks && (
-              <span className={clsx("flex items-center gap-1", h.data.ticks.errors > 0 ? "text-loss" : "text-muted")}>
+              <span className={clsx(
+                "flex items-center gap-1",
+                isRecent(h.data.ticks.lastError?.at, now) ? "text-loss" : "text-muted",
+              )}>
                 тики: раз в {h.data.ticks.pollSec}с · {h.data.ticks.totalCalls} запросов
                 {h.data.ticks.errors > 0 && ` · ошибок: ${h.data.ticks.errors}`}
                 {h.data.ticks.lastError && (
@@ -312,7 +334,7 @@ export default function AdminForex() {
                     (последняя: {h.data.ticks.lastError.symbol} — {h.data.ticks.lastError.message}, {agoLabel(h.data.ticks.lastError.at, now).text})
                   </span>
                 )}
-                <Hint text="Опрос тиков Dukascopy: из них собирается ТЕКУЩАЯ (ещё не закрытая) минутка, а из неё — текущие бары 5m/15m. Закрытые бары приходят отдельным опросом свечей. Без тиков последняя свеча на минутном графике появлялась бы только после закрытия минуты." />
+                <Hint text="Опрос тиков Dukascopy: из них собирается ТЕКУЩАЯ (ещё не закрытая) минутка, а из неё — текущие бары 5m/15m. Закрытые бары приходят отдельным опросом свечей. Без тиков последняя свеча на минутном графике появлялась бы только после закрытия минуты. Счётчик ошибок накопительный: пара таймаутов на тысячи запросов — норма, красным строка становится, только если сбой был меньше 15 минут назад." />
               </span>
             )}
             <span className="text-muted flex items-center gap-1">

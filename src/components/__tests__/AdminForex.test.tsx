@@ -86,6 +86,87 @@ describe('AdminForex', () => {
     expect(screen.getByTitle('Удалить свечи этой пары из FxCandle')).toBeInTheDocument();
   });
 
+  it('старые ошибки источника не держат строку красной', async () => {
+    // 8 осечек за 13 часов работы, последняя — 12 часов назад: данные идут,
+    // краснеть не из-за чего
+    const payload = makePayload({
+      health: {
+        ok: true,
+        data: {
+          healthy: true,
+          uptimeMs: 13 * 3600_000,
+          instruments: 1,
+          symbols: ['XAU/USD'],
+          backfillDone: true,
+          ws: { connected: false, reconnects: 0, totalTrades: 0, lastTradeAt: null },
+          twelveData: { apiKeySet: false, totalCalls: 0, fallbackIntervalSec: 30 },
+          dukascopy: {
+            symbols: ['XAU/USD'], pollSec: 15, totalCalls: 4716, errors: 8, failStreak: 0,
+            lastOkAt: '2026-07-20T11:59:50Z',
+            lastError: { at: '2026-07-20T00:00:00Z', symbol: 'XAU/USD', interval: '1m', message: 'fetch failed' },
+          },
+          ticks: {
+            pollSec: 5, limit: 500, totalCalls: 8570, errors: 10,
+            lastOkAt: '2026-07-20T11:59:55Z',
+            lastError: { at: '2026-07-20T04:00:00Z', symbol: 'XAU/USD', message: 'timeout' },
+          },
+          errors: 0,
+          lastWriteOkAt: '2026-07-20T11:59:00Z',
+          exchange: 'finnhub',
+        },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(payload) }));
+
+    render(<AdminForex />);
+
+    const dukas = await screen.findByText(/Dukascopy \(основной\)/);
+    expect(dukas.className).toContain('text-muted');
+    expect(dukas.className).not.toContain('text-loss');
+    const ticks = screen.getByText(/тики: раз в/);
+    expect(ticks.className).not.toContain('text-loss');
+    // сами счётчики при этом видны — диагностику не прячем
+    expect(dukas.textContent).toContain('ошибок: 8');
+  });
+
+  it('свежая ошибка и серия сбоев красят строку', async () => {
+    const payload = makePayload({
+      now: '2026-07-20T12:00:00Z',
+      health: {
+        ok: true,
+        data: {
+          healthy: true,
+          uptimeMs: 3600_000,
+          instruments: 1,
+          symbols: ['XAU/USD'],
+          backfillDone: true,
+          ws: { connected: false, reconnects: 0, totalTrades: 0, lastTradeAt: null },
+          twelveData: { apiKeySet: false, totalCalls: 0, fallbackIntervalSec: 30 },
+          dukascopy: {
+            symbols: ['XAU/USD'], pollSec: 15, totalCalls: 100, errors: 3, failStreak: 2,
+            lastOkAt: '2026-07-20T11:40:00Z',
+            lastError: { at: '2026-07-20T11:59:00Z', symbol: 'XAU/USD', interval: '1m', message: 'HTTP 503' },
+          },
+          ticks: {
+            pollSec: 5, limit: 500, totalCalls: 200, errors: 1,
+            lastOkAt: '2026-07-20T11:59:50Z',
+            lastError: { at: '2026-07-20T11:58:00Z', symbol: 'XAU/USD', message: 'timeout' },
+          },
+          errors: 0,
+          lastWriteOkAt: '2026-07-20T11:59:00Z',
+          exchange: 'finnhub',
+        },
+      },
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(payload) }));
+
+    render(<AdminForex />);
+
+    const dukas = await screen.findByText(/Dukascopy \(основной\)/);
+    expect(dukas.className).toContain('text-loss');
+    expect(screen.getByText(/тики: раз в/).className).toContain('text-loss');
+  });
+
   it('shows loading state initially', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     render(<AdminForex />);
