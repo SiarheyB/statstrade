@@ -40,6 +40,52 @@ beforeEach(() => {
 });
 
 describe('AdminBackupPage', () => {
+  it('потерянная операция не крутится вечно, а помечается ошибкой', { timeout: 15000 }, async () => {
+    // приложение перезапустилось — статус операции сервер уже не помнит (404)
+    global.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (typeof url === 'string' && url.includes('action=list')) return Promise.resolve(jsonResponse({ files: [] }));
+      if (typeof url === 'string' && url.includes('action=operations')) return Promise.resolve(jsonResponse({ operations: [] }));
+      if (init?.method === 'POST') return Promise.resolve(jsonResponse({ operationId: 'gone' }));
+      if (typeof url === 'string' && url.includes('operationId=gone')) {
+        return Promise.resolve(jsonResponse({ error: 'Operation not found' }, false));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    const user = userEvent.setup();
+    render(<BackupPage />);
+    await user.click(screen.getByText('admin.backup.exportFull.title'));
+    // сообщение видно и в полоске состояния, и в журнале операции
+    const shown = await screen.findAllByText('admin.backup.lost', {}, { timeout: 10000 });
+    expect(shown.length).toBeGreaterThanOrEqual(1);
+    // и полоска перестала «крутиться»
+    expect(document.querySelector('.animate-spin')).toBeNull();
+    // и никакого «undefined» в строке прогресса
+    expect(screen.queryByText(/undefined/)).toBeNull();
+  });
+
+  it('идущую операцию из журнала доводит до конца после перезагрузки', { timeout: 15000 }, async () => {
+    let statusCalls = 0;
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (typeof url === 'string' && url.includes('action=list')) return Promise.resolve(jsonResponse({ files: [] }));
+      if (typeof url === 'string' && url.includes('action=operations')) {
+        return Promise.resolve(jsonResponse({
+          operations: [{ id: 'live', action: 'import_clean', status: 'running', startedAt: 1, logs: ['идёт'] }],
+        }));
+      }
+      if (typeof url === 'string' && url.includes('operationId=live')) {
+        statusCalls++;
+        return Promise.resolve(jsonResponse({ status: 'success', logs: ['идёт', 'готово'] }));
+      }
+      return Promise.resolve(jsonResponse({}));
+    });
+
+    render(<BackupPage />);
+    expect(await screen.findByText('идёт')).toBeInTheDocument();
+    await waitFor(() => expect(statusCalls).toBeGreaterThan(0), { timeout: 5000 });
+    expect(await screen.findByText('готово', {}, { timeout: 5000 })).toBeInTheDocument();
+  });
+
   it('восстанавливает журнал операций после перезагрузки страницы', async () => {
     global.fetch = vi.fn().mockImplementation((url: string) => {
       if (typeof url === 'string' && url.includes('action=list')) {
@@ -62,7 +108,7 @@ describe('AdminBackupPage', () => {
     expect(screen.getAllByText('admin.backup.exportFull.title')).toHaveLength(2);
   });
 
-  it('после успешного экспорта дамп сразу уезжает в браузер', async () => {
+  it('после успешного экспорта дамп сразу уезжает в браузер', { timeout: 15000 }, async () => {
     const clicks: string[] = [];
     const realCreate = document.createElement.bind(document);
     vi.spyOn(document, 'createElement').mockImplementation((tag: string) => {

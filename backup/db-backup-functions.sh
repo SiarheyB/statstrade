@@ -117,10 +117,16 @@ check_db_connection() {
 export_full() {
   local output_file="${1:-${TMP_DIR}/db-export_$(date +%Y%m%d_%H%M%S).sql}"
   log "Starting full database export to ${output_file}"
+  echo "Полный экспорт базы ${DB_NAME}…"
 
+  # Без --inserts: данные идут через COPY. Замерено на реальной базе — с
+  # построчными INSERT'ами дамп весил 320 МБ и заливался обратно 5+ минут,
+  # потому что psql выполняет каждую строку отдельным оператором. COPY и
+  # компактнее, и восстанавливается на порядок быстрее.
+  # Экспорт «только данные» и «базовый дамп» INSERT'ы сохраняют осознанно:
+  # импорт с дедупликацией дописывает им ON CONFLICT DO NOTHING.
   exec_in_db pg_dump \
     --no-owner --no-privileges --no-acl \
-    --column-inserts --inserts \
     --format=plain \
     "${DB_NAME}" > "${output_file}" || {
     error "Full export failed"
@@ -134,6 +140,7 @@ export_full() {
 export_data_only() {
   local output_file="${1:-${TMP_DIR}/db-data_$(date +%Y%m%d_%H%M%S).sql}"
   log "Starting data export for dedupation to ${output_file}"
+  echo "Экспорт данных по таблицам…"
 
   : > "${output_file}"
 
@@ -168,6 +175,7 @@ export_data_only() {
 export_analytics() {
   local output_file="${1:-${TMP_DIR}/db-analytics_$(date +%Y%m%d_%H%M%S).sql}"
   log "Starting analytics export to ${output_file}"
+  echo "Экспорт аналитических таблиц…"
 
   : > "${output_file}"
 
@@ -213,6 +221,7 @@ import_with_dedup() {
   [[ -f "${input_file}" ]] || { error "Input file not found: ${input_file}"; return 1; }
 
   log "Starting dedup import from ${input_file}"
+  echo "Импорт с дедупликацией из $(basename "${input_file}")…"
 
   local analytics_tables="Trade ObSnapshotRollup ObRollupBucket ObBigTrade ObTrade ObFootprint"
   local cleanup_failed=""
@@ -249,6 +258,9 @@ import_clean() {
   [[ -f "${input_file}" ]] || { error "Input file not found: ${input_file}"; return 1; }
 
   log "Starting clean import from ${input_file}"
+  # Всё, что печатается в stdout, видно в журнале операций админки. Без этого
+  # длинный импорт выглядел как «ожидание логов…» на все свои минуты.
+  echo "Полная замена базы из $(basename "${input_file}") ($(du -h "${input_file}" | cut -f1))"
 
   # Полная замена содержимого базы делается ПЕРЕСОЗДАНИЕМ СХЕМЫ, а не
   # dropdb/createdb. Причины две, и обе видны только в бою:
@@ -260,13 +272,25 @@ import_clean() {
   # DROP SCHEMA public CASCADE убирает все таблицы, последовательности и типы —
   # то есть ровно то, чего ждут от «чистого» импорта, — и работает на живом
   # соединении.
+  # Приложение и коллекторы держат соединения и читают таблицы непрерывно —
+  # DROP SCHEMA без этого ждал бы блокировку бесконечно (снаружи это выглядит
+  # как «зависло без логов»). Сначала отцепляем остальных, потом сносим схему
+  # с lock_timeout: лучше честная ошибка, чем вечное ожидание.
+  echo "Отключаю остальные соединения к базе…"
+  exec_in_db psql -q -c \
+    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()" \
+    >> "${LOG_FILE}" 2>&1 || true
+
+  echo "Пересоздаю схему…"
   exec_in_db psql -v ON_ERROR_STOP=1 -q \
+    -c "SET lock_timeout = '30s'" \
     -c 'DROP SCHEMA IF EXISTS public CASCADE' \
     -c 'CREATE SCHEMA public' >> "${LOG_FILE}" 2>&1 || {
-    error "Failed to reset schema"
+    error "Failed to reset schema (возможно, база занята — попробуйте ещё раз)"
     return 1
   }
 
+  echo "Заливаю дамп — на больших базах это несколько минут…"
   # ON_ERROR_STOP обязателен: без него psql проглатывает ошибки построчно и
   # выходит с кодом 0 — «импорт прошёл успешно» на полупустой базе.
   exec_in_db psql -v ON_ERROR_STOP=1 -q -f - < "${input_file}" >> "${LOG_FILE}" 2>&1 || {
@@ -275,6 +299,7 @@ import_clean() {
   }
 
   log "Clean import completed successfully"
+  echo "Импорт завершён: база заменена содержимым дампа"
 }
 
 # ─────────────────────────────────────────────────────
@@ -333,6 +358,7 @@ create_basic_dump() {
   local output_file="${1:-${TMP_DIR}/basic_dump_$(date +%Y%m%d_%H%M%S).sql}"
 
   log "Starting basic dump creation to ${output_file}"
+  echo "Базовый дамп: схема + данные по таблицам…"
 
   : > "${output_file}"
   local tables

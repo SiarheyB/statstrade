@@ -132,7 +132,10 @@ export default function AdminBackupPage() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
   const [filesLoading, setFilesLoading] = useState(false);
-  const [progress, setProgress] = useState<string | null>(null);
+  // У полоски состояния три вида, а не два: раньше «не success» рисовалось
+  // крутящимся спиннером — упавшая или потерянная операция выглядела как
+  // вечно идущая.
+  const [progress, setProgress] = useState<{ text: string; state: 'running' | 'success' | 'error' } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const polls = useRef<Record<string, ReturnType<typeof setInterval>>>({});
@@ -171,6 +174,15 @@ export default function AdminBackupPage() {
         }))
         .reverse();
       setOperations(list);
+      // Операция, начатая до перезагрузки страницы, всё ещё идёт на сервере —
+      // подхватываем её опрос, иначе строка журнала навсегда осталась бы в
+      // состоянии «выполняется».
+      for (const op of list) {
+        if (op.status === 'running' || op.status === 'pending') {
+          setBusy(true);
+          pollOperation(op.id, op.type);
+        }
+      }
     } catch {
       // журнал — не критичная часть страницы
     }
@@ -189,10 +201,74 @@ export default function AdminBackupPage() {
   }, [operations]);
 
 
+  // Опрос статуса операции. Вынесен из startOperation, потому что нужен и
+  // журналу: после перезагрузки страницы восстановленная операция может всё
+  // ещё идти, и её тоже надо доводить до конца.
+  function pollOperation(operationId: string, type: OpType) {
+    clearInterval(polls.current[operationId]);
+    const stop = () => {
+      clearInterval(polls.current[operationId]);
+      delete polls.current[operationId];
+      setBusy(false);
+    };
+
+    polls.current[operationId] = setInterval(async () => {
+      let statusData: {
+        status?: OpStatus;
+        logs?: string[];
+        file?: string;
+      } | null = null;
+      try {
+        const statusRes = await fetch(`/api/admin/backup?operationId=${operationId}`);
+        // 404 — операцию потеряли: процесс приложения перезапустился, а
+        // журнал живёт в его памяти. Раньше в этом месте прилетал ответ без
+        // status, и страница вечно крутила «Выполняется • undefined», хотя
+        // сама операция давно закончилась.
+        if (statusRes.ok) statusData = await statusRes.json();
+      } catch {
+        // сеть моргнула — попробуем на следующем тике
+        return;
+      }
+
+      if (!statusData?.status) {
+        stop();
+        setOperations((prev) => prev.map((op) =>
+          op.id === operationId && (op.status === 'running' || op.status === 'pending')
+            ? { ...op, status: 'error', logs: [...op.logs, t('admin.backup.lost')] }
+            : op,
+        ));
+        setProgress({ text: t('admin.backup.lost'), state: 'error' });
+        fetchFiles();
+        return;
+      }
+
+      const { status, logs, file: producedFile } = statusData;
+      setOperations((prev) => prev.map((op) =>
+        op.id === operationId
+          ? { ...op, logs: logs ?? op.logs, status, file: producedFile ?? op.file }
+          : op,
+      ));
+
+      if (status === 'success' || status === 'error') {
+        stop();
+        if (status === 'success') {
+          fetchFiles();
+          // Экспорт закончился — сразу кладём дамп на диск пользователя.
+          if (producedFile) downloadToBrowser(producedFile);
+        }
+        setProgress(status === 'success'
+          ? { text: t('admin.backup.success'), state: 'success' }
+          : { text: t('admin.backup.error'), state: 'error' });
+      } else {
+        setProgress({ text: `${t('admin.backup.inProgress')} • ${t(OP_TITLE_KEY[type])}`, state: 'running' });
+      }
+    }, 1500);
+  }
+
   async function startOperation(type: OpType, file?: string) {
     if (busy) return;
     setBusy(true);
-    setProgress(`${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`);
+    setProgress({ text: `${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`, state: 'running' });
 
     try {
       const response = await fetch('/api/admin/backup', {
@@ -210,46 +286,15 @@ export default function AdminBackupPage() {
           startedAt: Date.now(),
         };
         setOperations([...operations, op]);
-        setProgress(`${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`);
+        setProgress({ text: `${t('admin.backup.starting')} ${t(OP_TITLE_KEY[type])}…`, state: 'running' });
 
-        // Poll for operation status updates
-        const interval = setInterval(async () => {
-          const statusRes = await fetch(`/api/admin/backup?operationId=${data.operationId}`);
-          const statusData = await statusRes.json();
-
-          // Update the operations state with new status and logs
-          setOperations((prev) => prev.map((op) =>
-            op.id === data.operationId
-              ? { ...op, logs: statusData.logs || [], status: statusData.status }
-              : op
-          ));
-
-          if (['success', 'error', 'canceled'].includes(statusData.status)) {
-            clearInterval(interval);
-            setBusy(false);
-            if (statusData.status === 'success') {
-              fetchFiles();
-              // Экспорт закончился — сразу кладём дамп на диск пользователя.
-              if (statusData.file) {
-                setOperations((prev) => prev.map((o) =>
-                  o.id === data.operationId ? { ...o, file: statusData.file } : o,
-                ));
-                downloadToBrowser(statusData.file);
-              }
-            }
-            setProgress(statusData.status === 'success'
-              ? t('admin.backup.success')
-              : t('admin.backup.error'));
-          } else {
-            setProgress(`${t('admin.backup.inProgress')} • ${statusData.status}`);
-          }
-        }, 1500);
+        pollOperation(data.operationId, type);
       } else {
-        setProgress(`${t('admin.backup.error')}: ${data.error || t('admin.backup.unknown')}`);
+        setProgress({ text: `${t('admin.backup.error')}: ${data.error || t('admin.backup.unknown')}`, state: 'error' });
         setBusy(false);
       }
     } catch (e) {
-      setProgress(`${t('admin.backup.errorStart')}: ${(e as Error).message}`);
+      setProgress({ text: `${t('admin.backup.errorStart')}: ${(e as Error).message}`, state: 'error' });
       setBusy(false);
     }
   }
@@ -365,24 +410,26 @@ export default function AdminBackupPage() {
       </div>
 
       {progress && (
-        <div className='mt-4 card p-3 border-accent/30 bg-accent/5 text-sm flex items-center gap-2'>
-          {progress === t('admin.backup.success') ? (
-            <>
-              <CheckCircle size={16} className='text-profit' />
-              <span>{progress}</span>
-              <button
-                className='ml-auto hover:bg-loss/20 p-1 rounded text-loss'
-                onClick={() => setProgress(null)}
-                aria-label='close'
-              >
-                <X size={15} />
-              </button>
-            </>
-          ) : (
-            <>
-              <RefreshCw size={16} className='animate-spin text-accent' />
-              {progress}
-            </>
+        <div
+          className={clsx(
+            'mt-4 card p-3 text-sm flex items-center gap-2',
+            progress.state === 'success' && 'border-profit/30 bg-profit/5',
+            progress.state === 'error' && 'border-loss/40 bg-loss/5',
+            progress.state === 'running' && 'border-accent/30 bg-accent/5',
+          )}
+        >
+          {progress.state === 'success' && <CheckCircle size={16} className='text-profit' />}
+          {progress.state === 'error' && <AlertTriangle size={16} className='text-loss' />}
+          {progress.state === 'running' && <RefreshCw size={16} className='animate-spin text-accent' />}
+          <span>{progress.text}</span>
+          {progress.state !== 'running' && (
+            <button
+              className='ml-auto hover:bg-bg-muted p-1 rounded text-muted'
+              onClick={() => setProgress(null)}
+              aria-label='close'
+            >
+              <X size={15} />
+            </button>
           )}
         </div>
       )}
