@@ -706,25 +706,68 @@ function AtrPanel({
             </>
           ) : (
             <>
-              <div className="text-[11px] uppercase tracking-wide text-faint">Путь до уровня</div>
-              <div className="mt-0.5 flex items-baseline gap-2">
-                <span className="text-lg font-semibold text-profit">
-                  {closeDistanceAtr !== null ? `${closeDistanceAtr.toFixed(2)}×ATR` : "вплотную"}
-                </span>
-                {closeDistanceAtr !== null && (
-                  <span className="text-xs text-muted">≈ {fmtAtrPrice(closeDistanceAtr * atr)}</span>
-                )}
-              </div>
-              <div className="mt-2 text-xs text-muted">
-                Для пробоя весь путь уже пройден: вчерашний день закрылся вплотную к уровню, и бару остаётся
-                только пройти сам уровень — отдельный запас хода на подход не нужен.
-              </div>
-              {progress && !progress.exhausted && (
-                <div className="mt-1 text-xs text-faint">
-                  Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
-                  {fmtAtrPrice(progress.leftAtr * atr)}).
-                </div>
-              )}
+              {(() => {
+                // Пробойные сетапы гейт пропускает с закрытием до 0.5×ATR от
+                // уровня (у местной опоры — LOCAL_THRESHOLDS), поэтому «путь
+                // до уровня» здесь бывает и в пол-дневного хода. Раньше в
+                // этом месте стояла одна фраза на все случаи — «закрылся
+                // вплотную, отдельный запас хода не нужен», — и она прямо
+                // противоречила числу над собой (0.44×ATR ≈ половина ATR).
+                const atLevel = closeDistanceAtr === null || closeDistanceAtr <= AT_LEVEL_ATR;
+                // Хватит ли остатка дневного хода на подход. Без живого бара
+                // сравнивать не с чем — тогда просто не обещаем ничего.
+                const enoughLeft = progress ? closeDistanceAtr! <= progress.leftAtr : null;
+                const tone = atLevel || enoughLeft !== false ? "text-profit" : "text-warn";
+                return (
+                  <>
+                    <div className="text-[11px] uppercase tracking-wide text-faint">Путь до уровня</div>
+                    <div className="mt-0.5 flex items-baseline gap-2">
+                      <span className={clsx("text-lg font-semibold", tone)}>
+                        {closeDistanceAtr !== null ? `${closeDistanceAtr.toFixed(2)}×ATR` : "вплотную"}
+                      </span>
+                      {closeDistanceAtr !== null && (
+                        <span className="text-xs text-muted">≈ {fmtAtrPrice(closeDistanceAtr * atr)}</span>
+                      )}
+                    </div>
+                    <div className="mt-2 text-xs text-muted">
+                      {atLevel ? (
+                        <>
+                          Для пробоя весь путь уже пройден: последний день закрылся вплотную к уровню, и бару
+                          остаётся только пройти сам уровень — отдельный запас хода на подход не нужен.
+                        </>
+                      ) : (
+                        <>
+                          Последний день закрылся не на самом уровне: до него ещё{" "}
+                          {closeDistanceAtr!.toFixed(2)}×ATR (≈ {fmtAtrPrice(closeDistanceAtr! * atr)}). Бару
+                          нужно сначала пройти это расстояние и только потом пробивать уровень.
+                        </>
+                      )}
+                    </div>
+                    {progress && !atLevel && (
+                      <div className={clsx("mt-1 text-xs", enoughLeft ? "text-faint" : "text-warn")}>
+                        {enoughLeft ? (
+                          <>
+                            Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
+                            {fmtAtrPrice(progress.leftAtr * atr)}) — на подход хватает.
+                          </>
+                        ) : (
+                          <>
+                            Из дневного хода осталось {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
+                            {fmtAtrPrice(progress.leftAtr * atr)}) — меньше, чем нужно только на подход к
+                            уровню. Сегодня до пробоя, скорее всего, не дойдёт.
+                          </>
+                        )}
+                      </div>
+                    )}
+                    {progress && atLevel && !progress.exhausted && (
+                      <div className="mt-1 text-xs text-faint">
+                        Из дневного хода не израсходовано ещё {progress.leftAtr.toFixed(2)}×ATR (≈{" "}
+                        {fmtAtrPrice(progress.leftAtr * atr)}).
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </>
           )}
         </div>
@@ -732,6 +775,11 @@ function AtrPanel({
     </div>
   );
 }
+
+// Насколько близко к уровню закрытие считается «вплотную». Гейт пробоя
+// пропускает и 0.5×ATR (см. LOCAL_THRESHOLDS в lib/recommendations/quality.ts),
+// но полдневного хода до уровня — это не «вплотную», и говорить так нельзя.
+const AT_LEVEL_ATR = 0.1;
 
 function SetupCard({ setup }: { setup: LevelSetup }) {
   const [open, setOpen] = useState(false);
