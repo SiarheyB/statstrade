@@ -25,6 +25,7 @@ import AbsorptionPanel from "@/components/AbsorptionPanel";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import DrawingEditor from "@/components/DrawingEditor";
 import FullscreenButton from "@/components/FullscreenButton";
+import KeepAwakeButton from "@/components/KeepAwakeButton";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import type {
   DivergenceSignal,
@@ -1517,6 +1518,7 @@ export default function OrderflowPage() {
                   onToggle={fsToggle}
                   className="absolute top-1 right-1 z-10"
                 />
+                <KeepAwakeButton className="absolute top-1 right-9 z-10" />
                 <canvas
                   ref={canvasRef}
                   className={clsx("w-full", fsActive && "h-full")}

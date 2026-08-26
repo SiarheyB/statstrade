@@ -10,6 +10,7 @@ import DivergenceHistory from "@/components/DivergenceHistory";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import DrawingEditor from "@/components/DrawingEditor";
 import FullscreenButton from "@/components/FullscreenButton";
+import KeepAwakeButton from "@/components/KeepAwakeButton";
 import { drawDrawings } from "@/components/DrawingOverlay";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
@@ -980,6 +981,7 @@ function inferBinSize(levels: { price: number }[]): number {
             onToggle={fsToggle}
             className="absolute top-1 right-1 z-10"
           />
+          <KeepAwakeButton className="absolute top-1 right-9 z-10" />
           <canvas
             ref={candleCanvasRef}
             className="w-full cursor-crosshair"

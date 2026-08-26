@@ -5,6 +5,7 @@ import clsx from "clsx";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
+import KeepAwakeButton from "@/components/KeepAwakeButton";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, type TimezoneId } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
@@ -621,6 +622,7 @@ export default function LiqMapPage() {
             onToggle={fsToggle}
             className="absolute top-1 right-1 z-10"
           />
+          <KeepAwakeButton className="absolute top-1 right-9 z-10" />
           <canvas
             ref={canvasRef}
             className="w-full h-full block touch-none cursor-crosshair"
