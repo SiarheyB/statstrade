@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import type { Locale } from "@/lib/i18n/core";
 import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
 import { zonedParts, zonedDateToUtcMs, ianaFor } from "@/lib/timezone";
+import { flagFor } from "@/lib/econcalFlags";
 
 type Ev = {
   id: string;
@@ -21,11 +22,7 @@ type Ev = {
   actual: string | null;
 };
 
-const FLAGS: Record<string, string> = {
-  USD: "🇺🇸", EUR: "🇪🇺", GBP: "🇬🇧", JPY: "🇯🇵", CHF: "🇨🇭",
-  AUD: "🇦🇺", CAD: "🇨🇦", NZD: "🇳🇿", CNY: "🇨🇳",
-};
-const flag = (c: string) => FLAGS[c] ?? "🏳️";
+const flag = flagFor;
 
 const IMPACTS = ["high", "medium", "low"] as const;
 const IMPACT_DOT: Record<string, string> = {

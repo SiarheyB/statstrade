@@ -31,6 +31,10 @@ vi.mock("@/components/SyncProvider", () => ({
   default: ({ children }: { children: React.ReactNode }) => <div data-testid="sync-provider">{children}</div>,
 }));
 
+vi.mock("@/components/EconCalAlerts", () => ({
+  default: () => <div data-testid="econcal-alerts" />,
+}));
+
 vi.mock("@/lib/sidebar/provider", () => ({
   SidebarProvider: ({ children }: { children: React.ReactNode }) => <div data-testid="sidebar-provider">{children}</div>,
 }));

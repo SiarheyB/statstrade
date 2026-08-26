@@ -137,3 +137,40 @@ button:not(:disabled):active {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 22%, transparent);
 }
+
+/* Всплывающее напоминание о новости (components/EconCalAlerts.tsx):
+   въезжает справа, полоса снизу отсчитывает время до автоскрытия. */
+@keyframes ts-toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(1.5rem) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+@keyframes ts-toast-out {
+  to {
+    opacity: 0;
+    transform: translateX(1.5rem) scale(0.98);
+  }
+}
+@keyframes ts-toast-life {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+.toast-in {
+  animation: ts-toast-in 0.32s var(--ease-premium) both;
+}
+.toast-out {
+  animation: ts-toast-out 0.22s var(--ease-premium) both;
+}
+.toast-life {
+  transform-origin: left;
+  animation: ts-toast-life linear both;
+}

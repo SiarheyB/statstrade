@@ -6,6 +6,7 @@ import SyncProvider from "@/components/SyncProvider";
 import { SidebarProvider } from "@/lib/sidebar/provider";
 import DemoBanner from "@/components/landing/DemoBanner";
 import PresenceBeacon from "@/components/PresenceBeacon";
+import EconCalAlerts from "@/components/EconCalAlerts";
 
 export default async function DashboardLayout({
   children,
@@ -19,6 +20,8 @@ export default async function DashboardLayout({
     <SyncProvider>
       {/* Статус «онлайн» в админке, см. components/PresenceBeacon.tsx */}
       <PresenceBeacon />
+      {/* Напоминания перед выходом новостей — поверх любой страницы кабинета. */}
+      <EconCalAlerts />
       <SidebarProvider>
         <div className="md:flex min-h-screen">
           <DashboardNav email={session.email} isAdmin={isAdminSession(session)} demo={session.demo === true} />
