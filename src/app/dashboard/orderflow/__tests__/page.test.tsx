@@ -195,7 +195,6 @@ describe('OrderflowPage', () => {
     fireEvent.click(screen.getByText('of.clusters'));
     fireEvent.click(screen.getByText('of.divergence'));
     fireEvent.click(screen.getByText('of.absorption'));
-    fireEvent.click(screen.getByText('LIVE'));
     expect(document.querySelector('canvas')).toBeInTheDocument();
   });
 

@@ -10,7 +10,6 @@ import DivergenceHistory from "@/components/DivergenceHistory";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import DrawingEditor from "@/components/DrawingEditor";
 import FullscreenButton from "@/components/FullscreenButton";
-import KeepAwakeButton from "@/components/KeepAwakeButton";
 import { drawDrawings } from "@/components/DrawingOverlay";
 import { drawDivergenceMarkers } from "@/components/DivergenceOverlay";
 import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
@@ -42,6 +41,7 @@ import {
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
+import { useWakeLock } from "@/lib/useWakeLock";
 import SessionPicker from "@/components/SessionPicker";
 import { drawSessionBoxes } from "@/lib/sessionOverlay";
 import { sessionWindows, TRADING_SESSIONS, type SessionId } from "@/lib/tradingSessions";
@@ -167,6 +167,8 @@ export default function ForexView() {
   // Разворот свечного графика на весь экран (та же кнопка на /dashboard/orderflow
   // и /dashboard/liqmap).
   const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
+  // Пока график открыт, монитор не гаснет (см. lib/useWakeLock.ts).
+  useWakeLock();
 
   // Canvas refs — identical rendering pipeline to /dashboard/orderflow (src/lib/candlestickChart.ts)
   const candleCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -981,7 +983,6 @@ function inferBinSize(levels: { price: number }[]): number {
             onToggle={fsToggle}
             className="absolute top-1 right-1 z-10"
           />
-          <KeepAwakeButton className="absolute top-1 right-9 z-10" />
           <canvas
             ref={candleCanvasRef}
             className="w-full cursor-crosshair"

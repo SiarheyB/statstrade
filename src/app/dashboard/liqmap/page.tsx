@@ -5,10 +5,10 @@ import clsx from "clsx";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
-import KeepAwakeButton from "@/components/KeepAwakeButton";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, type TimezoneId } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
+import { useWakeLock } from "@/lib/useWakeLock";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Heatmap = {
@@ -117,6 +117,8 @@ export default function LiqMapPage() {
   // Разворот карты на весь экран (та же кнопка на /dashboard/forex и
   // /dashboard/orderflow).
   const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
+  // Пока график открыт, монитор не гаснет (см. lib/useWakeLock.ts).
+  useWakeLock();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ x0: 0, x1: 1, y0: 0, y1: 1 });
@@ -622,7 +624,6 @@ export default function LiqMapPage() {
             onToggle={fsToggle}
             className="absolute top-1 right-1 z-10"
           />
-          <KeepAwakeButton className="absolute top-1 right-9 z-10" />
           <canvas
             ref={canvasRef}
             className="w-full h-full block touch-none cursor-crosshair"

@@ -9,114 +9,61 @@
 // монитор гаснет через несколько минут. Единственный способ сказать «я тут,
 // я смотрю» — Screen Wake Lock API.
 //
-// Границы, которые API ставит за нас (и почему это безопасно держать
-// включённым по умолчанию):
+// Тумблера нет намеренно: страница графика открыта — значит на неё смотрят.
+// Границы API и так делают удержание безобидным:
 //  * блокировка живёт, только пока вкладка ВИДИМА — свернул окно или ушёл на
 //    другую вкладку, и система снова вольна гасить экран;
-//  * система сама отбирает блокировку при уходе в сон по крышке/кнопке;
-//  * нужен защищённый контекст (https или localhost) — иначе API просто нет.
+//  * уход со страницы графика её снимает (размонтирование хука);
+//  * система сама отбирает блокировку при сне по крышке/кнопке;
+//  * нужен защищённый контекст (https или localhost) — иначе API просто нет,
+//    и хук молча ничего не делает.
 
-import { useCallback, useEffect, useRef, useState } from "react";
-
-const STORAGE_KEY = "ts_keep_awake";
-/** Настройка меняется кнопкой — внутри одной вкладки `storage` не срабатывает. */
-const CHANGE_EVENT = "ts:keep-awake";
+import { useEffect } from "react";
 
 type Sentinel = {
   released: boolean;
   release: () => Promise<void>;
   addEventListener: (type: "release", cb: () => void) => void;
-  removeEventListener: (type: "release", cb: () => void) => void;
 };
 
 type WakeLockNavigator = Navigator & {
   wakeLock?: { request: (type: "screen") => Promise<Sentinel> };
 };
 
-function readEnabled(): boolean {
-  if (typeof window === "undefined") return true;
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    // Значения нет — включено: человек, открывший живой график, хочет его видеть.
-    return raw === null ? true : raw === "1";
-  } catch {
-    return true;
-  }
-}
-
-export type WakeLockState = {
-  /** Есть ли API вообще (нет — кнопку показывать незачем). */
-  supported: boolean;
-  /** Хочет ли пользователь удерживать экран. */
-  enabled: boolean;
-  /** Держится ли блокировка прямо сейчас (вкладка видима и запрос удался). */
-  active: boolean;
-  toggle: () => void;
-};
-
-export function useWakeLock(): WakeLockState {
-  // На сервере API нет, поэтому supported всегда стартует с false и уточняется
-  // в эффекте — разметка сервера и клиента совпадают.
-  const [supported, setSupported] = useState(false);
-  const [enabled, setEnabled] = useState(true);
-  const [active, setActive] = useState(false);
-  const sentinelRef = useRef<Sentinel | null>(null);
-
+/** Держит экран включённым, пока смонтирован вызывающий компонент. */
+export function useWakeLock(): void {
   useEffect(() => {
-    setSupported(typeof navigator !== "undefined" && "wakeLock" in navigator);
-    setEnabled(readEnabled());
-    const onChange = () => setEnabled(readEnabled());
-    window.addEventListener(CHANGE_EVENT, onChange);
-    return () => window.removeEventListener(CHANGE_EVENT, onChange);
-  }, []);
+    const api = (navigator as WakeLockNavigator).wakeLock;
+    if (!api) return;
 
-  useEffect(() => {
-    if (!supported || !enabled) return;
     let cancelled = false;
-
-    const release = async () => {
-      const sentinel = sentinelRef.current;
-      sentinelRef.current = null;
-      setActive(false);
-      if (sentinel && !sentinel.released) {
-        try {
-          await sentinel.release();
-        } catch {
-          // Уже отобрана системой — ничего делать не нужно.
-        }
-      }
-    };
+    let sentinel: Sentinel | null = null;
 
     const acquire = async () => {
-      if (cancelled || sentinelRef.current) return;
+      if (cancelled || sentinel) return;
       // Запрос из скрытой вкладки заведомо отклоняется — ждём возвращения.
       if (document.visibilityState !== "visible") return;
       try {
-        const sentinel = await (navigator as WakeLockNavigator).wakeLock!.request("screen");
+        const next = await api.request("screen");
         if (cancelled) {
-          await sentinel.release().catch(() => {});
+          await next.release().catch(() => {});
           return;
         }
-        sentinelRef.current = sentinel;
-        setActive(true);
+        sentinel = next;
         // Систему никто не обязывает держать блокировку вечно: она снимает её
         // при сворачивании, блокировке ноутбука, переходе в энергосбережение.
-        sentinel.addEventListener("release", () => {
-          if (sentinelRef.current === sentinel) {
-            sentinelRef.current = null;
-            setActive(false);
-          }
+        // Дальше её вернёт visibilitychange.
+        next.addEventListener("release", () => {
+          if (sentinel === next) sentinel = null;
         });
       } catch {
-        // NotAllowedError: политика браузера или экономия батареи.
-        // Молча остаёмся без блокировки — кнопка покажет, что она не держится.
-        setActive(false);
+        // NotAllowedError: политика браузера или экономия батареи. Живём без
+        // удержания — ронять из-за этого страницу графика незачем.
       }
     };
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") acquire();
-      else setActive(false);
     };
 
     acquire();
@@ -124,25 +71,9 @@ export function useWakeLock(): WakeLockState {
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibility);
-      release();
+      const held = sentinel;
+      sentinel = null;
+      if (held && !held.released) held.release().catch(() => {});
     };
-  }, [supported, enabled]);
-
-  const toggle = useCallback(() => {
-    setEnabled((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // Приватный режим — выбор не переживёт перезагрузку, и только.
-      }
-      window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
-      return next;
-    });
   }, []);
-
-  return { supported, enabled, active, toggle };
 }
-
-export const KEEP_AWAKE_KEY = STORAGE_KEY;
-export const KEEP_AWAKE_EVENT = CHANGE_EVENT;

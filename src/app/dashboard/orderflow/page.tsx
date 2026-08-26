@@ -25,7 +25,6 @@ import AbsorptionPanel from "@/components/AbsorptionPanel";
 import DrawingToolbar from "@/components/DrawingToolbar";
 import DrawingEditor from "@/components/DrawingEditor";
 import FullscreenButton from "@/components/FullscreenButton";
-import KeepAwakeButton from "@/components/KeepAwakeButton";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import type {
   DivergenceSignal,
@@ -60,6 +59,7 @@ import {
 } from "@/lib/candlestickChart";
 import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
+import { useWakeLock } from "@/lib/useWakeLock";
 
 type ObHeatmap = {
   priceMin: number;
@@ -207,7 +207,6 @@ export default function OrderflowPage() {
   const [error, setError] = useState<string | null>(null);
   const [minPct, setMinPct] = useState(20);
   const [brightness, setBrightness] = useState(55);
-  const [live, setLive] = useState(true);
   const [clusters, setClusters] = useState(true);
   const [showLiq, setShowLiq] = useState(true);
   const [hydrated, setHydrated] = useState(false);
@@ -250,6 +249,8 @@ export default function OrderflowPage() {
 
   // Разворот карточки с графиком (свечи + дельта) на весь экран.
   const { ref: fsRef, active: fsActive, toggle: fsToggle } = useFullscreen<HTMLDivElement>();
+  // Пока график открыт, монитор не гаснет (см. lib/useWakeLock.ts).
+  useWakeLock();
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
@@ -592,7 +593,6 @@ export default function OrderflowPage() {
       if (typeof s.exchange === "string" && s.exchange !== "all") setExchange(s.exchange);
       if (typeof s.minPct === "number") setMinPct(s.minPct);
       if (typeof s.brightness === "number") setBrightness(s.brightness);
-      if (typeof s.live === "boolean") setLive(s.live);
       if (typeof s.clusters === "boolean") setClusters(s.clusters);
       if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
       if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
@@ -610,12 +610,12 @@ export default function OrderflowPage() {
     try {
       localStorage.setItem(
         "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings }),
+        JSON.stringify({ range, symbol, exchange, minPct, brightness, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings }),
       );
     } catch {
       // ignore
     }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, live, clusters, showLiq, showVpOverlay, showAbsorption, showDrawings]);
+  }, [hydrated, range, symbol, exchange, minPct, brightness, clusters, showLiq, showVpOverlay, showAbsorption, showDrawings]);
 
   useEffect(() => {
     (async () => {
@@ -780,7 +780,6 @@ export default function OrderflowPage() {
   const LIVE_OVERLAYS_MS = 60_000;
 
   useEffect(() => {
-    if (!live) return;
     let cancelled = false;
     const q = `range=${range}&symbol=${symbol}&exchange=${exchange}`;
 
@@ -817,16 +816,15 @@ export default function OrderflowPage() {
       clearInterval(ivC);
       clearInterval(ivO);
     };
-  }, [live, range, symbol, exchange, timezone]);
+  }, [range, symbol, exchange, timezone]);
 
   // Второстепенные индикаторы (Volume Profile, Divergence, Imbalance,
   // Absorption) раньше грузились только один раз при смене symbol/exchange/
-  // range и не обновлялись, даже когда включён LIVE — только основной
-  // график свечей/карты ордеров жил в реальном времени. Реже основного (15с
+  // range и не обновлялись — в реальном времени жил только основной график
+  // свечей/карты ордеров. Реже основного (15с
   // вместо 3с): это более тяжёлые SQL-агрегации (детекция паттернов), нет
   // смысла гонять их так же часто, как обновление цены.
   useEffect(() => {
-    if (!live) return;
     const iv = setInterval(() => {
       if (document.hidden) return;
       loadVolumeProfile(true);
@@ -835,7 +833,7 @@ export default function OrderflowPage() {
       loadAbsorption(true);
     }, 15000);
     return () => clearInterval(iv);
-  }, [live, loadVolumeProfile, loadDivergence, loadImbalance, loadAbsorption]);
+  }, [loadVolumeProfile, loadDivergence, loadImbalance, loadAbsorption]);
 
   const draw = useCallback(() => {
     const cv = canvasRef.current;
@@ -1419,16 +1417,15 @@ export default function OrderflowPage() {
               <HelpCircle size={12} className="text-faint shrink-0" />
             </span>
           </button>
-          <button
-            onClick={() => setLive((v) => !v)}
-            className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${live ? "text-profit border-profit/40" : "text-muted hover:border-border-strong"}`}
+          {/* Не тумблер, а лампочка: карта лимиток живая всегда — выключать
+              обновление нечем и незачем. */}
+          <span
+            className="inline-flex items-center gap-1.5 input-base py-1.5 text-sm text-profit border-profit/40"
+            title={t("of.hintLive")}
           >
-            <span className={`h-2 w-2 rounded-full ${live ? "bg-profit animate-pulse" : "bg-faint"}`} />
+            <span className="h-2 w-2 rounded-full bg-profit animate-pulse" />
             LIVE
-            <span title={t("of.hintLive")} className="inline-flex cursor-help">
-              <HelpCircle size={12} className="text-faint shrink-0" />
-            </span>
-          </button>
+          </span>
           <button
             onClick={load}
             className="inline-flex items-center gap-1.5 input-base py-1.5 hover:border-border-strong transition"
@@ -1518,8 +1515,7 @@ export default function OrderflowPage() {
                   onToggle={fsToggle}
                   className="absolute top-1 right-1 z-10"
                 />
-                <KeepAwakeButton className="absolute top-1 right-9 z-10" />
-                <canvas
+                      <canvas
                   ref={canvasRef}
                   className={clsx("w-full", fsActive && "h-full")}
                   style={fsActive ? undefined : { height: "min(72vh, 720px)" }}
