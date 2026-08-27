@@ -60,6 +60,7 @@ import {
 import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
+import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 
 type ObHeatmap = {
   priceMin: number;
@@ -98,6 +99,8 @@ type Resp = {
 type HistorySegment = { from: number; to: number; heatmap: ObHeatmap | null; footprint: Footprint | null };
 
 const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
+/** Ключ настроек панели графика в localStorage (см. lib/chartPrefs.ts). */
+const PREFS_KEY = "orderflow.settings";
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
 // Верхняя граница памяти для догруженной истории (historyRef). При
@@ -582,40 +585,38 @@ export default function OrderflowPage() {
   }, [range, symbol, exchange, timezone]);
 
   useEffect(() => {
+    // Ждём чтения сохранённых настроек: иначе первый запрос уходит за
+    // дефолтным BTCUSDT 5m, а не за тем, что человек выбрал в прошлый раз.
+    if (!hydrated) return;
     load();
-  }, [load]);
+  }, [load, hydrated]);
 
   useEffect(() => {
-    try {
-      const s = JSON.parse(localStorage.getItem("orderflow.settings") || "{}");
-      if (typeof s.range === "string") setRange(s.range);
-      if (typeof s.symbol === "string") setSymbol(s.symbol);
-      if (typeof s.exchange === "string" && s.exchange !== "all") setExchange(s.exchange);
-      if (typeof s.minPct === "number") setMinPct(s.minPct);
-      if (typeof s.brightness === "number") setBrightness(s.brightness);
-      if (typeof s.clusters === "boolean") setClusters(s.clusters);
-      if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
-      if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
-      if (typeof s.showVpOverlay === "boolean") setShowVpOverlay(s.showVpOverlay);
-      if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
-      if (typeof s.showDrawings === "boolean") setShowDrawings(s.showDrawings);
-    } catch {
-      // ignore
-    }
+    const s = readChartPrefs(PREFS_KEY);
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage читается только на клиенте */
+    const savedRange = prefString(s.range, RANGES);
+    if (savedRange) setRange(savedRange);
+    if (typeof s.symbol === "string") setSymbol(s.symbol);
+    // "all" когда-то был вариантом в списке бирж — старую запись игнорируем.
+    if (typeof s.exchange === "string" && s.exchange !== "all") setExchange(s.exchange);
+    if (typeof s.minPct === "number") setMinPct(s.minPct);
+    if (typeof s.brightness === "number") setBrightness(s.brightness);
+    if (typeof s.clusters === "boolean") setClusters(s.clusters);
+    if (typeof s.showLiq === "boolean") setShowLiq(s.showLiq);
+    if (typeof s.showDivergence === "boolean") setShowDivergence(s.showDivergence);
+    if (typeof s.showVpOverlay === "boolean") setShowVpOverlay(s.showVpOverlay);
+    if (typeof s.showAbsorption === "boolean") setShowAbsorption(s.showAbsorption);
+    if (typeof s.showDrawings === "boolean") setShowDrawings(s.showDrawings);
     setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    try {
-      localStorage.setItem(
-        "orderflow.settings",
-        JSON.stringify({ range, symbol, exchange, minPct, brightness, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings }),
-      );
-    } catch {
-      // ignore
-    }
-  }, [hydrated, range, symbol, exchange, minPct, brightness, clusters, showLiq, showVpOverlay, showAbsorption, showDrawings]);
+    writeChartPrefs(PREFS_KEY, { range, symbol, exchange, minPct, brightness, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings });
+    // showDivergence раньше не было в зависимостях: тумблер дивергенций
+    // сохранялся, только если следом трогали что-то ещё.
+  }, [hydrated, range, symbol, exchange, minPct, brightness, clusters, showLiq, showDivergence, showVpOverlay, showAbsorption, showDrawings]);
 
   useEffect(() => {
     (async () => {
@@ -623,8 +624,16 @@ export default function OrderflowPage() {
         const res = await fetch("/api/orderflow/meta");
         if (!res.ok) return;
         const m = await res.json();
-        if (Array.isArray(m.symbols) && m.symbols.length) setMetaSymbols(m.symbols);
-        if (Array.isArray(m.exchanges) && m.exchanges.length) setMetaExchanges(m.exchanges);
+        if (Array.isArray(m.symbols) && m.symbols.length) {
+          setMetaSymbols(m.symbols);
+          // Сохранённой монеты может уже не быть в списке — тогда откатываемся
+          // на первую доступную, иначе селектор показывает пустое значение.
+          setSymbol((prev) => (m.symbols.includes(prev) ? prev : m.symbols[0]));
+        }
+        if (Array.isArray(m.exchanges) && m.exchanges.length) {
+          setMetaExchanges(m.exchanges);
+          setExchange((prev) => (m.exchanges.includes(prev) ? prev : m.exchanges[0]));
+        }
         if (m.minCoins && typeof m.minCoins === "object") setMetaMinCoins(m.minCoins);
       } catch {
         // оставляем дефолты

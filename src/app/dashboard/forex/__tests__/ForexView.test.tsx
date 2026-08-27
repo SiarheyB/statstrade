@@ -105,6 +105,7 @@ function stubCanvasRect(canvas: Element, w = 900, h = 500) {
 describe('ForexView', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn((url: string) => routerFetch(url)));
+    localStorage.clear();
   });
 
   afterEach(() => {
@@ -191,6 +192,47 @@ describe('ForexView', () => {
     const after = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/forex?')).length;
     expect(after).toBe(before);
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+  });
+
+  it('restores symbol/timeframe/sessions chosen last time', async () => {
+    localStorage.setItem('forex.settings', JSON.stringify({
+      symbol: 'GBP/USD', range: '4h', sessions: ['london', 'newYork'], showVpOverlay: true,
+    }));
+    const fetchMock = vi.fn((url: string, _init?: RequestInit) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    const mainCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/forex?'));
+    expect(mainCalls.length).toBeGreaterThan(0);
+    // Ни одного запроса за дефолтным EUR/USD 1h: график не должен успеть
+    // показать чужой инструмент, пока читаются настройки.
+    expect(mainCalls.every((u) => u.includes('symbol=GBP%2FUSD') && u.includes('range=4h'))).toBe(true);
+    const selects = screen.getAllByRole('combobox');
+    expect((selects[0] as HTMLSelectElement).value).toBe('GBP/USD');
+    expect((selects[1] as HTMLSelectElement).value).toBe('4h');
+    // Кнопка сессий подписана числом включённых.
+    expect(screen.getByTitle('fx.hintSessions').textContent).toContain('2');
+  });
+
+  it('picks up sessions saved by the previous storage format', async () => {
+    localStorage.setItem('forex.sessions', 'tokyo,london');
+    await renderPage();
+    expect(screen.getByTitle('fx.hintSessions').textContent).toContain('2');
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('forex.settings') || '{}').sessions).toEqual(['tokyo', 'london']);
+    });
+  });
+
+  it('remembers a timeframe change and a session toggle', async () => {
+    await renderPage();
+    const selects = screen.getAllByRole('combobox');
+    await act(async () => { fireEvent.change(selects[1], { target: { value: '15m' } }); });
+    await act(async () => { fireEvent.click(screen.getByTitle('fx.hintSessions')); });
+    await act(async () => { fireEvent.click(screen.getByText('fx.sessionLondon')); });
+    await waitFor(() => {
+      const saved = JSON.parse(localStorage.getItem('forex.settings') || '{}');
+      expect(saved.range).toBe('15m');
+      expect(saved.sessions).toEqual(['london']);
+    });
   });
 
   it('refresh button triggers a manual reload', async () => {

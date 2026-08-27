@@ -54,6 +54,31 @@ function routerFetch(url: string) {
 describe('LiqMapPage', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn((url: string) => routerFetch(url)));
+    localStorage.clear();
+  });
+
+  it('restores exchange/symbol/timeframe chosen last time', async () => {
+    localStorage.setItem('liqmap.settings', JSON.stringify({ exchange: 'bybit', symbol: 'ETHUSDT', tf: '1M' }));
+    const fetchMock = vi.fn((url: string) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await act(async () => { render(<LiqMapPage />); });
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.some((c) => String(c[0]).startsWith('/api/liqmap?'))).toBe(true);
+    });
+    const mapCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/liqmap?'));
+    // Ни одного запроса за дефолтным BTCUSDT 7d: карта не должна моргать
+    // чужими данными, пока читаются настройки.
+    expect(mapCalls.every((u) => u.includes('exchange=bybit') && u.includes('symbol=ETHUSDT') && u.includes('tf=1M'))).toBe(true);
+  });
+
+  it('remembers the timeframe after a change', async () => {
+    await act(async () => { render(<LiqMapPage />); });
+    await waitFor(() => expect(document.querySelectorAll('canvas').length).toBeGreaterThan(0));
+    const selects = screen.getAllByRole('combobox');
+    await act(async () => { fireEvent.change(selects[selects.length - 1], { target: { value: '1d' } }); });
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem('liqmap.settings') || '{}').tf).toBe('1d');
+    });
   });
 
   it('shows loading then renders canvas with data', async () => {

@@ -168,6 +168,20 @@ describe('OrderflowPage', () => {
     return canvases[0] as HTMLCanvasElement;
   }
 
+  it('restores symbol/exchange/timeframe chosen last time', async () => {
+    localStorage.setItem('orderflow.settings', JSON.stringify({
+      symbol: 'ETHUSDT', exchange: 'binance-spot', range: '1h', showDivergence: true,
+    }));
+    const fetchMock = vi.fn((url: string) => routerFetch(url));
+    vi.stubGlobal('fetch', fetchMock);
+    await renderPage();
+    const mainCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.startsWith('/api/orderflow?'));
+    expect(mainCalls.length).toBeGreaterThan(0);
+    // Ни одного запроса за дефолтным BTCUSDT 5m: график не должен моргать
+    // чужими данными, пока читаются настройки.
+    expect(mainCalls.every((u) => u.includes('symbol=ETHUSDT') && u.includes('range=1h') && u.includes('exchange=binance-spot'))).toBe(true);
+  });
+
   it('shows loading, then renders successfully with data (no throw)', async () => {
     await renderPage();
     expect(screen.queryByText('common.loading')).not.toBeInTheDocument();

@@ -9,6 +9,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, type TimezoneId } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
+import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 
 type Candle = { t: number; o: number; h: number; l: number; c: number };
 type Heatmap = {
@@ -18,6 +19,8 @@ type Heatmap = {
 type Resp = { exchange: string; symbol: string; tf: string; heatmap: Heatmap };
 
 const EXCHANGES = ["binance", "bybit", "okx"] as const;
+/** Ключ настроек панели карты в localStorage (см. lib/chartPrefs.ts). */
+const PREFS_KEY = "liqmap.settings";
 // We fetch ~2x history; show the recent half by default (same density as before),
 // older bars are reachable by dragging the chart left.
 const DEFAULT_X0 = 0.5;
@@ -109,6 +112,11 @@ export default function LiqMapPage() {
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
   const [tf, setTf] = useState<string>("7d");
+  // Биржа, монета и глубина карты переживают перезагрузку (см. lib/chartPrefs.ts):
+  // открыв карту второй раз, человек ждёт тот же экран, что закрыл. Пока
+  // настройки не прочитаны, запрос не уходит — иначе он ушёл бы за дефолтным
+  // BTCUSDT 7d, и карта успела бы моргнуть чужими данными.
+  const [hydrated, setHydrated] = useState(false);
   const [data, setData] = useState<Resp | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -131,11 +139,33 @@ export default function LiqMapPage() {
   const rafRef = useRef(0);
 
   useEffect(() => {
+    const saved = readChartPrefs(PREFS_KEY);
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage читается только на клиенте */
+    const savedExchange = prefString(saved.exchange, EXCHANGES);
+    if (savedExchange) setExchange(savedExchange);
+    const savedTf = prefString(saved.tf, TFS);
+    if (savedTf) setTf(savedTf);
+    if (typeof saved.symbol === "string") setSymbol(saved.symbol);
+    setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeChartPrefs(PREFS_KEY, { exchange, symbol, tf });
+  }, [hydrated, exchange, symbol, tf]);
+
+  useEffect(() => {
     (async () => {
       const res = await fetch("/api/liqmap/symbols");
       if (res.ok) {
         const d = await res.json();
-        if (Array.isArray(d.symbols) && d.symbols.length) setSymbols(d.symbols);
+        if (Array.isArray(d.symbols) && d.symbols.length) {
+          setSymbols(d.symbols);
+          // Сохранённой монеты может уже не быть в списке (биржа сняла пару) —
+          // тогда откатываемся на первую доступную, иначе селектор пуст.
+          setSymbol((prev) => (d.symbols.includes(prev) ? prev : d.symbols[0]));
+        }
       }
     })();
   }, []);
@@ -203,8 +233,9 @@ export default function LiqMapPage() {
   }, [exchange, symbol, tf]);
 
   useEffect(() => {
+    if (!hydrated) return;
     load();
-  }, [load]);
+  }, [load, hydrated]);
 
   const PADL = 56;
   const PADR = 64;

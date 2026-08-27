@@ -45,6 +45,7 @@ import { useWakeLock } from "@/lib/useWakeLock";
 import SessionPicker from "@/components/SessionPicker";
 import { drawSessionBoxes } from "@/lib/sessionOverlay";
 import { sessionWindows, TRADING_SESSIONS, type SessionId } from "@/lib/tradingSessions";
+import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -67,7 +68,9 @@ type FxResp = {
 /** Свеча графика + объём: нужен профилю объёма по видимому окну. */
 type FxCandle = Candle & { v: number };
 
-const RANGES = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"];
+const RANGES = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
+/** Ключ настроек панели графика в localStorage (см. lib/chartPrefs.ts). */
+const PREFS_KEY = "forex.settings";
 const VISIBLE_CANDLES: Record<string, number> = { "1m": 480, "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
 const DEFAULT_VISIBLE = 360;
 // Верхняя граница памяти для догруженной истории (historyRef) — см.
@@ -99,58 +102,59 @@ export default function ForexView() {
   // Профиль объёма поверх свечей (VPVR). Выключен по умолчанию: наложение
   // затемняет правый край, где стоят самые свежие свечи, — это осознанный
   // выбор пользователя, а не то, что должно включаться само.
-  //
-  // Запоминается в localStorage, как переключатели на /dashboard/orderflow:
-  // иначе его пришлось бы включать заново после каждой перезагрузки страницы.
   const [showVpOverlay, setShowVpOverlay] = useState(false);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("forex.showVpOverlay");
-      // Читаем именно в эффекте, а не ленивым useState: компонент рендерится и
-      // на сервере, где localStorage нет, — инициализатор упал бы на SSR.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (saved !== null) setShowVpOverlay(saved === "1");
-    } catch {
-      // приватный режим/заблокированное хранилище — просто дефолт
-    }
-  }, []);
-
   // Подсветка торговых сессий (Токио/Лондон/Нью-Йорк). Каждая включается
-  // отдельно и запоминается: у одних вся торговля в лондонскую сессию, другим
-  // важен только Нью-Йорк, и навязывать всем три коробки незачем.
+  // отдельно: у одних вся торговля в лондонскую сессию, другим важен только
+  // Нью-Йорк, и навязывать всем три коробки незачем.
   const [sessionIds, setSessionIds] = useState<SessionId[]>([]);
 
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("forex.sessions");
-      if (saved === null) return;
-      const known = new Set(TRADING_SESSIONS.map((s) => s.id));
-      const parsed = saved.split(",").filter((v): v is SessionId => known.has(v as SessionId));
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSessionIds(parsed);
-    } catch {
-      // приватный режим — просто дефолт
-    }
-  }, []);
-
   const toggleSession = useCallback((id: SessionId) => {
-    setSessionIds((prev) => {
-      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
-      try { localStorage.setItem("forex.sessions", next.join(",")); } catch { /* noop */ }
-      return next;
-    });
+    setSessionIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }, []);
 
-  const toggleVpOverlay = useCallback(() => {
-    setShowVpOverlay((v) => {
-      const next = !v;
-      try { localStorage.setItem("forex.showVpOverlay", next ? "1" : "0"); } catch { /* noop */ }
-      return next;
-    });
-  }, []);
+  const toggleVpOverlay = useCallback(() => setShowVpOverlay((v) => !v), []);
+
   const [divLoading, setDivLoading] = useState(false);
   const [divError, setDivError] = useState<string | null>(null);
+
+  // Панель графика переживает перезагрузку: инструмент, таймфрейм, сессии и
+  // профиль объёма лежат в localStorage (см. lib/chartPrefs.ts). До того как
+  // они прочитаны, данные не грузим — иначе первый запрос уходит за дефолтным
+  // EUR/USD 1h, и человек видит чужой график, который через миг сменится.
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const saved = readChartPrefs(PREFS_KEY);
+    // Раньше сессии и профиль объёма лежали в отдельных ключах — переносим их
+    // в общую запись, чтобы у тех, кто уже что-то включил, ничего не слетело.
+    if (saved.sessions === undefined && saved.showVpOverlay === undefined) {
+      try {
+        const legacySessions = localStorage.getItem("forex.sessions");
+        if (legacySessions !== null) saved.sessions = legacySessions.split(",");
+        const legacyVp = localStorage.getItem("forex.showVpOverlay");
+        if (legacyVp !== null) saved.showVpOverlay = legacyVp === "1";
+      } catch {
+        // хранилище закрыто — просто дефолты
+      }
+    }
+    const known = new Set<SessionId>(TRADING_SESSIONS.map((s) => s.id));
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage читается только на клиенте */
+    if (typeof saved.symbol === "string") setSymbol(saved.symbol);
+    const savedRange = prefString(saved.range, RANGES);
+    if (savedRange) setRange(savedRange);
+    if (Array.isArray(saved.sessions)) {
+      setSessionIds(saved.sessions.filter((v): v is SessionId => known.has(v as SessionId)));
+    }
+    if (typeof saved.showVpOverlay === "boolean") setShowVpOverlay(saved.showVpOverlay);
+    setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeChartPrefs(PREFS_KEY, { symbol, range, sessions: sessionIds, showVpOverlay });
+  }, [hydrated, symbol, range, sessionIds, showVpOverlay]);
 
   // Drawing tools / pan / zoom — same feature set as /dashboard/orderflow
   const [drawings, setDrawings] = useState<DrawingRow[]>([]);
@@ -286,7 +290,10 @@ export default function ForexView() {
     }
   }, [symbol]);
 
-  useEffect(() => { loadDrawings(); }, [loadDrawings]);
+  useEffect(() => {
+    if (!hydrated) return;
+    loadDrawings();
+  }, [loadDrawings, hydrated]);
 
   const saveDrawing = useCallback(async (toolType: DrawingToolType, pts: DrawingPoint[]) => {
     try {
@@ -408,9 +415,11 @@ export default function ForexView() {
   }, [symbol, range, timezone]);
 
   useEffect(() => {
+    // Ждём чтения сохранённых настроек: иначе первый запрос уходит за
+    // дефолтным EUR/USD 1h, а не за тем, что человек выбрал в прошлый раз.
+    if (!hydrated) return;
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [load]);
+  }, [load, hydrated]);
 
   // Тихое обновление данных раз в 3с — в отличие от load(), НЕ сбрасывает
   // текущий зум/пан пользователя (viewRef), как и на /dashboard/orderflow.
@@ -500,10 +509,11 @@ function inferBinSize(levels: { price: number }[]): number {
   }, [symbol, range, t]);
 
   useEffect(() => {
+    if (!hydrated) return;
     let alive = true;
     loadVolumeProfile(() => alive);
     return () => { alive = false; };
-  }, [loadVolumeProfile]);
+  }, [loadVolumeProfile, hydrated]);
 
   // ─── Load imbalance ──────────────────────────────────────────────────
 
@@ -541,10 +551,11 @@ function inferBinSize(levels: { price: number }[]): number {
   }, [symbol, range, t]);
 
   useEffect(() => {
+    if (!hydrated) return;
     let alive = true;
     loadImbalance(() => alive);
     return () => { alive = false; };
-  }, [loadImbalance]);
+  }, [loadImbalance, hydrated]);
 
   // ─── Load divergence ─────────────────────────────────────────────────
 
@@ -568,10 +579,11 @@ function inferBinSize(levels: { price: number }[]): number {
   }, [symbol, range, t]);
 
   useEffect(() => {
+    if (!hydrated) return;
     let alive = true;
     loadDivergence(() => alive);
     return () => { alive = false; };
-  }, [loadDivergence]);
+  }, [loadDivergence, hydrated]);
 
   // Тихое обновление Volume Profile / Imbalance / Divergence раз в 15с —
   // раньше грузились один раз при смене symbol/range и не обновлялись,
