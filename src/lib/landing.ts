@@ -174,11 +174,27 @@ const TZ_SLACK_MS = DAY_MS;
 async function loadStats(from: Date, now: number): Promise<LandingStats> {
   const [setups, symbols, events, news] = await Promise.all([
     prisma.levelSetup.count(),
-    // Нужно ровно одно число, поэтому считаем его в базе. Prisma-шный distinct
-    // тянул бы все дневные свечи в память (почти 200 тысяч строк) ради того же
-    // результата — 322 мс против единиц миллисекунд.
+    // Число инструментов = сколько РАЗНЫХ символов есть среди дневных свечей.
+    //
+    // Прямой count(DISTINCT "symbol") читает по строке индекса на КАЖДУЮ
+    // дневную свечу: локально это 200 тысяч строк за полсотни миллисекунд, а на
+    // сервере, где история глубже, — секунды (плюс heap fetches, если autovacuum
+    // отстал). Считалось это в рендере главной, то есть в ожидании посетителя.
+    //
+    // Здесь тот же ответ через «прыгающий» обход индекса (interval, symbol):
+    // берём первый символ, затем каждый следующий БОЛЬШИЙ найденного — по одной
+    // строке на символ (сотни) вместо одной на свечу (сотни тысяч). Postgres
+    // сам такой план не строит, отсюда рекурсивный CTE.
     prisma.$queryRaw<{ n: number }[]>`
-      SELECT count(DISTINCT "symbol")::int AS n FROM "ObCandle" WHERE "interval" = '1d'
+      WITH RECURSIVE syms AS (
+        (SELECT "symbol" FROM "ObCandle" WHERE "interval" = '1d' ORDER BY "symbol" LIMIT 1)
+        UNION ALL
+        SELECT (SELECT c."symbol" FROM "ObCandle" c
+                WHERE c."interval" = '1d' AND c."symbol" > s."symbol"
+                ORDER BY c."symbol" LIMIT 1)
+        FROM syms s WHERE s."symbol" IS NOT NULL
+      )
+      SELECT count(*)::int AS n FROM syms WHERE "symbol" IS NOT NULL
     `.then((rows) => rows[0]?.n ?? 0),
     prisma.economicEvent.count({ where: { time: { gte: from, lt: new Date(from.getTime() + DAY_MS) } } }),
     prisma.newsItem.count({ where: { publishedAt: { gte: new Date(now - DAY_MS) } } }),
