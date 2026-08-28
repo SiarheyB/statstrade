@@ -15,8 +15,12 @@ import type { VolumeProfile } from "@/components/VolumeProfile";
 // Полупрозрачные: профиль — фон для свечей, а не самостоятельная картинка.
 const VA_FILL = "rgba(22,199,132,0.22)"; // внутри Value Area
 const OUT_FILL = "rgba(120,132,156,0.16)"; // за пределами Value Area
-const POC_FILL = "rgba(230,184,0,0.45)";
-const POC_LINE = "rgba(230,184,0,0.75)";
+// POC — ярко-зелёный, а не жёлтый: жёлтым на графике идёт линия ТЕКУЩЕЙ ЦЕНЫ
+// (CHART_COLORS.accent) с бейджем на шкале, и две жёлтые горизонтали читались
+// как одна сущность. Зелёный ярче и насыщеннее заливки Value Area ниже, так
+// что POC остаётся видно на её фоне.
+const POC_FILL = "rgba(62,242,163,0.45)";
+const POC_LINE = "rgba(62,242,163,0.9)";
 const VA_LINE = "rgba(22,199,132,0.35)";
 const LABEL = "rgba(230,234,242,0.75)";
 

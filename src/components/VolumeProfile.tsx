@@ -42,7 +42,7 @@ export type VolumeProfile = {
 
 const HVN_COLOR = "#16c784"; // зелёный — высокий объём
 const LVN_COLOR = "#3a4354"; // тёмно-серый — низкий объём
-const POC_COLOR = "#e6b800"; // жёлтый — POC (максимум)
+const POC_COLOR = "#3ef2a3"; // зелёный — POC (максимум), в цвет линии POC на графике
 const VA_BG = "rgba(22,199,132,0.06)"; // фон Value Area
 const GRID = "#242b3a";
 const AXIS = "#5c6577";

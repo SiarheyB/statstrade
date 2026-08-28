@@ -436,7 +436,7 @@ model UserDrawing {
   exchange  String
   toolType  String
   points    String
-  color     String    @default("#e6b800")
+  color     String    @default("#38bdf8")
   lineWidth Int       @default(2)
   fillColor String?
   label     String?

@@ -38,6 +38,7 @@ import type {
   DrawingPoint,
 } from "@/lib/drawings";
 import {
+  CHART_COLORS,
   computePlotLayout,
   computeInitialView,
   drawPriceGrid,
@@ -754,25 +755,35 @@ export default function OrderflowPage() {
   }, [symbol, exchange, range]);
 
 
+  // Все наложения ждут `hydrated` по той же причине, что и свечи: до чтения
+  // localStorage состояние держит дефолтные BTCUSDT/1d, и без гейта каждая
+  // загрузка страницы уходила в сеть дважды — сначала за чужим таймфреймом,
+  // потом за сохранённым. Лишние тяжёлые агрегации на сервере и мигание
+  // индикаторов на экране.
   useEffect(() => {
+    if (!hydrated) return;
     loadVolumeProfile();
-  }, [loadVolumeProfile]);
+  }, [loadVolumeProfile, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     loadDivergence();
-  }, [loadDivergence]);
+  }, [loadDivergence, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     loadImbalance();
-  }, [loadImbalance]);
+  }, [loadImbalance, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     loadAbsorption();
-  }, [loadAbsorption]);
+  }, [loadAbsorption, hydrated]);
 
   useEffect(() => {
+    if (!hydrated) return;
     loadDrawings();
-  }, [loadDrawings]);
+  }, [loadDrawings, hydrated]);
 
   // LIVE идёт двумя разными темпами, потому что данные живут по-разному.
   //
@@ -1163,7 +1174,7 @@ export default function OrderflowPage() {
           y2 = sy(snappedRef.current.price);
         }
         ctx.save();
-        ctx.strokeStyle = "#e6b800";
+        ctx.strokeStyle = CHART_COLORS.drawing;
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 4]);
         ctx.globalAlpha = 0.6;
@@ -1216,7 +1227,7 @@ export default function OrderflowPage() {
       drawCrosshair(ctx, cx, cy, layout);
       // Если магнит активен — рисуем маркер притягивания
       if (activeTool && magnet && snappedRef.current) {
-        ctx.fillStyle = "#e6b800";
+        ctx.fillStyle = CHART_COLORS.drawing;
         ctx.beginPath();
         ctx.arc(cx, cy, 5, 0, Math.PI * 2);
         ctx.fill();

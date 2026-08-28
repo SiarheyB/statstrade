@@ -111,7 +111,7 @@ describe("createDrawing success", () => {
     expect(mocks.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         symbol: "BTCUSDT",
-        color: "#e6b800",
+        color: "#38bdf8",
         lineWidth: 2,
         fillColor: null,
         label: null,

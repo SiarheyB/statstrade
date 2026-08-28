@@ -7,6 +7,11 @@
 
 import { z } from "zod";
 import { prisma } from "@/lib/db";
+import { CHART_COLORS } from "@/lib/candlestickChart";
+
+// Цвет нового рисунка, если клиент не прислал свой. Берём из палитры графика,
+// чтобы дефолт в БД и черновик под курсором не разъезжались.
+const DEFAULT_DRAWING_COLOR = CHART_COLORS.drawing;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -183,7 +188,7 @@ export async function createDrawing(input: CreateDrawingInput): Promise<DrawingR
       exchange: data.exchange,
       toolType: data.toolType,
       points: JSON.stringify(data.points),
-      color: data.color ?? "#e6b800",
+      color: data.color ?? DEFAULT_DRAWING_COLOR,
       lineWidth: data.lineWidth ?? 2,
       fillColor: data.fillColor ?? null,
       label: data.label ?? null,

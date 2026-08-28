@@ -729,7 +729,7 @@ function inferBinSize(levels: { price: number }[]): number {
           y2 = sy(snappedRef.current.price);
         }
         ctx.save();
-        ctx.strokeStyle = CHART_COLORS.accent;
+        ctx.strokeStyle = CHART_COLORS.drawing;
         ctx.lineWidth = 2;
         ctx.setLineDash([5, 4]);
         ctx.globalAlpha = 0.6;
