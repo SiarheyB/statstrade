@@ -36,6 +36,15 @@ describe("GET /api/donate", () => {
     );
   });
 
+  it("is never cached: a wallet added in the admin panel shows up right away", async () => {
+    mockPrisma.donateWallet.findMany.mockResolvedValue([]);
+    const res = await GET();
+    // Раньше тут стоял public/stale-while-revalidate, и браузер до часа отдавал
+    // сохранённый пустой ответ — модалка писала «кошельки не настроены» уже
+    // после того, как кошелёк был добавлен.
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  });
+
   it("returns 500 when prisma throws", async () => {
     mockPrisma.donateWallet.findMany.mockRejectedValue(new Error("db down"));
     const res = await GET();

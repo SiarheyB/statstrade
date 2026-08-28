@@ -21,10 +21,14 @@ export default function DonateButton({ onOpen, collapsed }: { onOpen?: () => voi
   async function openModal() {
     onOpen?.();
     setOpen(true);
-    if (wallets) return; // уже загружено
+    // Непустой список перезапрашивать незачем — адреса меняются раз в год.
+    // А вот пустой (кошельки ещё не настроены) раньше запоминался навсегда:
+    // сайдбар живёт всю сессию и не размонтируется при переходах, поэтому
+    // админ, добавивший кошелёк, до перезагрузки страницы видел «не настроены».
+    if (wallets && wallets.length > 0) return;
     setLoading(true);
     try {
-      const res = await fetch("/api/donate");
+      const res = await fetch("/api/donate", { cache: "no-store" });
       if (res.ok) setWallets((await res.json()).wallets ?? []);
     } finally {
       setLoading(false);
