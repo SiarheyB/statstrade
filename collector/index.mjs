@@ -1392,6 +1392,88 @@ async function rollupFootprintLevel(limit) {
   return rowCount ?? 0;
 }
 
+// ─── Уборка мусора обновлений (VACUUM) ─────────────────────────────────────
+//
+// Postgres при UPDATE не переписывает строку на месте, а оставляет старую
+// версию мёртвым грузом до уборки. Мы обновляем много и постоянно: текущая
+// свеча переписывается каждую минуту (ON CONFLICT DO UPDATE), rollup-бакеты —
+// каждый флаш. Мусор копится быстрее, чем его разбирает autovacuum на слабом
+// сервере.
+//
+// Дороже всего это обходится ЧТЕНИЮ. Запрос по индексу может ответить, вообще
+// не заглядывая в таблицу, но только если карта видимости говорит, что все
+// строки на странице видимы всем, — а обновляет её как раз vacuum. Пока карта
+// не прогрета, чтение по индексу вырождается в чтение таблицы с диска: счётчик
+// инструментов на главной (count DISTINCT symbol по ObCandle) из-за этого
+// занимал на сервере 19 секунд вместо миллисекунд.
+//
+// Раз в сутки, а не в неделю: частая уборка каждый раз делает мало работы —
+// страницы, уже помеченные полностью видимыми, пропускаются. Редкая
+// превращается в долгий проход по всей таблице.
+//
+// VACUUM данные НЕ удаляет: он освобождает место под мёртвыми версиями строк
+// и обновляет статистику (ANALYZE). Историю чистит только pruneOld() по
+// ретеншну — это разные вещи.
+const VACUUM_TABLES = [
+  "ObCandle", // текущая свеча переписывается каждую минуту
+  "ObSnapshotRollup",
+  "ObRollupBucket",
+  "ObSnapshotRollupH",
+  "ObRollupBucketH",
+  "ObSnapshotRollupD",
+  "ObRollupBucketD",
+  "ObTradeRollup",
+  "ObFootprintRollup",
+  "ObFootprintRollupH",
+];
+// 0 — выключить уборку совсем (autovacuum при этом продолжает работать сам).
+const VACUUM_INTERVAL_HOURS = Number(process.env.VACUUM_INTERVAL_HOURS ?? 24);
+let vacuumBusy = false;
+
+/**
+ * Одна таблица за прогон — та, которую дольше всего не убирали.
+ *
+ * Почему по одной: vacuum читает таблицу и грузит диск, а таблиц десяток;
+ * запускать их разом на мини-ПК означает воткнуть сайт в полку на несколько
+ * минут. Проверка идёт каждый час, так что за десять часов очередь проходит
+ * целиком, и каждая таблица всё равно убирается чаще суток.
+ *
+ * Когда таблицу убирали, спрашиваем у самого Postgres (pg_stat_user_tables), а
+ * не помним сами: счётчик переживает перезапуски контейнера (watchtower их
+ * делает часто) и учитывает работу autovacuum — если тот справился сам,
+ * повторять за ним незачем.
+ */
+async function vacuumStaleTable() {
+  if (VACUUM_INTERVAL_HOURS <= 0 || vacuumBusy) return;
+  vacuumBusy = true;
+  try {
+    const { rows } = await pool.query(
+      `SELECT relname AS table,
+              GREATEST(COALESCE(last_vacuum, 'epoch'::timestamptz),
+                       COALESCE(last_autovacuum, 'epoch'::timestamptz)) AS done
+       FROM pg_stat_user_tables
+       WHERE relname = ANY($1)
+       ORDER BY done ASC
+       LIMIT 1`,
+      [VACUUM_TABLES],
+    );
+    const oldest = rows[0];
+    if (!oldest) return; // таблиц ещё нет (свежая база)
+    const ageHours = (Date.now() - new Date(oldest.done).getTime()) / 3600_000;
+    if (ageHours < VACUUM_INTERVAL_HOURS) return;
+
+    const started = Date.now();
+    // Имя таблицы — из своего списка выше, не из запроса: подставлять в SQL
+    // строку из внешнего источника нельзя, а параметром имя не передать.
+    await pool.query(`VACUUM (ANALYZE) "${oldest.table}"`);
+    console.log(`[vacuum] ${oldest.table} — ${Math.round((Date.now() - started) / 1000)}с`);
+  } catch (err) {
+    console.error(`[vacuum] ошибка: ${err.message}`);
+  } finally {
+    vacuumBusy = false;
+  }
+}
+
 async function rollupCascade() {
   try {
     const h = await rollupLevel(
@@ -1459,6 +1541,11 @@ const pruneTimer = setInterval(pruneOld, 3600_000);
 // уровень (первый раз на годовой истории это несколько прогонов).
 const cascadeTimer = setInterval(rollupCascade, 5 * 60_000);
 setTimeout(rollupCascade, 45_000);
+// Уборка мусора обновлений — по одной таблице за час, см. vacuumStaleTable().
+// Проверка частая, работа редкая: таблица берётся, только если её не убирали
+// дольше VACUUM_INTERVAL_HOURS.
+const vacuumTimer = setInterval(vacuumStaleTable, 3600_000);
+setTimeout(vacuumStaleTable, 120_000);
 setTimeout(async () => {
   await ensureRetentionEpochs();
   // Индексы — до первой чистки: BRIN по bucket нужен именно её DELETE-ам.
@@ -1484,6 +1571,7 @@ async function shutdown() {
   clearInterval(flushTimer.timer);
   clearInterval(pruneTimer);
   clearInterval(cascadeTimer);
+  clearInterval(vacuumTimer);
   clearInterval(configTimer);
   clearInterval(candleTimer);
   if (allPairsScanTimer) clearInterval(allPairsScanTimer);
