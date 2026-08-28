@@ -4,6 +4,7 @@
 // (bid+ask) на ценовом уровне. «Стены» крупных игроков светятся и гаснут.
 
 import { prisma } from "@/lib/db";
+import { heatmapScale } from "@/lib/heatmapScale";
 import { Prisma } from "@prisma/client";
 
 // Сколько свечей вставлять за один batch (чтобы не перегружать Prisma/$executeRaw).
@@ -15,7 +16,11 @@ export type ObHeatmap = {
   bins: number;
   cols: number;
   grid: number[][]; // [col][bin] средняя интенсивность (base units)
-  maxVal: number;
+  maxVal: number; // самая крупная ячейка окна — для подписей «сколько монет»
+  // Масштаб ЯРКОСТИ карты: 99-й перцентиль непустых ячеек. Раньше картинку
+  // нормировали по maxVal, и одна аномальная стена гасила всё окно —
+  // см. heatmapScale().
+  scaleVal: number;
   price: number; // последняя mid (центр последнего снапшота)
   times: number[]; // ms-таймстемпы колонок (длина = cols)
   // Профиль текущего стакана (последний снапшот): объём bid/ask по бинам.
@@ -943,6 +948,7 @@ export async function computeOrderflow(
   fillCoarseBucketGaps(grid, bucketSpanCols(LEVEL_MS[usedLevel ?? "minute"], fromMs, toMs, cols));
   let maxVal = 0;
   for (const col of grid) for (const v of col) if (v > maxVal) maxVal = v;
+  const scaleVal = heatmapScale(grid, maxVal);
   const times = new Array(cols).fill(0).map((_, c) => Math.round(fromMs + ((c + 0.5) / cols) * xspan));
 
   // Профиль текущего стакана.
@@ -1014,7 +1020,7 @@ export async function computeOrderflow(
   }
 
   return {
-    priceMin: pMin, priceMax: pMax, bins, cols, grid, maxVal, price, times,
+    priceMin: pMin, priceMax: pMax, bins, cols, grid, maxVal, scaleVal, price, times,
     profileBid, profileAsk, profileMax,
   };
 }
