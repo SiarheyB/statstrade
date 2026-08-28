@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { cacheMissingCovers, withLocalCovers } from "./newsImages";
 
 export type Lang = "en" | "ru";
 export type NewsSource = { id: string; name: string; url: string };
@@ -218,6 +219,12 @@ export async function refreshNews(lang: Lang, retentionDays?: number): Promise<R
     }),
   );
   await pruneOldNews(retentionDays);
+  // Обложки забираем к себе после чистки: качать картинку новости, которую тут
+  // же удалит ретеншн, незачем. Порцией — см. cacheMissingCovers.
+  const covers = await cacheMissingCovers();
+  if (covers.saved || covers.failed) {
+    console.log(`[news] обложек сохранено ${covers.saved}, не удалось ${covers.failed}`);
+  }
   await writeLastRefresh(lang, Date.now());
   return results;
 }
@@ -274,5 +281,11 @@ export async function getNews(opts: { lang?: Lang; force?: boolean; limit?: numb
     refreshing = true;
   }
 
-  return { items, lang, sources: NEWS_SOURCES[lang], refreshed, refreshing };
+  return {
+    items: await withLocalCovers(items),
+    lang,
+    sources: NEWS_SOURCES[lang],
+    refreshed,
+    refreshing,
+  };
 }

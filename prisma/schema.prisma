@@ -780,18 +780,42 @@ model ExchangeToggle {
 
 // deduped by canonical URL and refreshed lazily by the /api/news endpoint.
 model NewsItem {
-  id          String   @id @default(cuid())
+  id          String     @id @default(cuid())
   source      String // coindesk | cointelegraph | decrypt | forklog | beincrypto-ru | incrypted
-  lang        String   @default("en") // en | ru — language of the article/headline
+  lang        String     @default("en") // en | ru — language of the article/headline
   title       String
-  url         String   @unique
+  url         String     @unique
   summary     String?
   imageUrl    String?
   publishedAt DateTime
-  createdAt   DateTime @default(now())
+  createdAt   DateTime   @default(now())
+  image       NewsImage?
 
   @@index([lang, publishedAt])
   @@index([source])
+}
+
+// Обложка новости, сохранённая У НАС. Источники отдают картинки в исходном
+// размере — от полумегабайта до полутора, — а показываем мы их плашкой в
+// 80–112 px; одна такая обложка тянулась с чужого CDN дольше пятнадцати секунд
+// и весила больше всей остальной страницы. Здесь лежит ужатый webp (~20 КБ),
+// который отдаётся со своего сервера (см. /api/news/image/[id]).
+//
+// Отдельная таблица, а не колонка в NewsItem: Prisma в findMany без select
+// тянет ВСЕ скалярные поля, и байты картинок ездили бы в память на каждом
+// чтении ленты.
+//
+// onDelete: Cascade — обложка живёт ровно столько, сколько сама новость.
+// Ретеншн (pruneOldNews) удаляет строки NewsItem, и картинки уходят вместе с
+// ними на уровне БД, без отдельной уборки.
+model NewsImage {
+  newsId    String   @id
+  news      NewsItem @relation(fields: [newsId], references: [id], onDelete: Cascade)
+  data      Bytes // webp
+  mime      String   @default("image/webp")
+  width     Int
+  bytes     Int // размер после сжатия — для диагностики в админке
+  createdAt DateTime @default(now())
 }
 
 // Risk-manager limits. One row per user is the default profile (accountId = "");

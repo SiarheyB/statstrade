@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   // Нет строки в FeatureConfig = фича включена с дефолтами (см. featureConfig.ts).
   featureFindUnique: vi.fn().mockResolvedValue(null),
   featureUpsert: vi.fn().mockResolvedValue({}),
+  imageFindMany: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -20,6 +21,8 @@ vi.mock('@/lib/db', () => ({
       deleteMany: mocks.deleteMany,
     },
     featureConfig: { findUnique: mocks.featureFindUnique, upsert: mocks.featureUpsert },
+    // getNews подменяет ссылки на сохранённые у нас обложки (lib/newsImages.ts).
+    newsImage: { findMany: mocks.imageFindMany, upsert: vi.fn() },
   },
 }));
 
