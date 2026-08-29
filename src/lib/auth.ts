@@ -99,7 +99,7 @@ export async function verifySession(
   token: string,
 ): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, getSecret());
+    const { payload } = await jwtVerify(token, getSecret(), { algorithms: ["HS256"] });
     if (typeof payload.userId === "string" && typeof payload.email === "string") {
       const v = typeof payload.v === "number" ? payload.v : 0;
       if (v !== (await currentTokenVersion(payload.userId))) return null;
@@ -166,7 +166,7 @@ export async function getPendingUserId(): Promise<string | null> {
   const token = store.get(PENDING_COOKIE)?.value;
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, getSecret());
+    const { payload } = await jwtVerify(token, getSecret(), { algorithms: ["HS256"] });
     if (payload.pending === true && typeof payload.userId === "string") {
       return payload.userId;
     }

@@ -14,7 +14,7 @@ vi.mock("@/lib/db", () => ({
 }));
 
 import sharp from "sharp";
-import { withLocalCovers, cacheMissingCovers, newsImageSrc } from "@/lib/newsImages";
+import { withLocalCovers, cacheMissingCovers, newsImageSrc, isSafeCoverUrl } from "@/lib/newsImages";
 
 /** Настоящая картинка — конвейер sharp проверяем на деле, а не на моке. */
 async function pngBytes(width = 600, height = 400): Promise<Buffer> {
@@ -101,5 +101,45 @@ describe("cacheMissingCovers", () => {
   it("ничего не делает, когда все обложки уже сохранены", async () => {
     mocks.newsFindMany.mockResolvedValue([]);
     await expect(cacheMissingCovers()).resolves.toEqual({ saved: 0, failed: 0 });
+  });
+});
+
+describe("isSafeCoverUrl", () => {
+  // Адрес приходит из ЧУЖОГО RSS-фида, а скачиваем мы его с сервера — изнутри
+  // сети, где живут коллектор, Postgres и сам app.
+  it("пускает обычные CDN-адреса", () => {
+    for (const ok of [
+      "https://cdn.coindesk.com/a.jpg",
+      "https://images.example.co.uk/x/y.png?v=2",
+      "https://8.8.8.8/pic.jpg",
+    ]) {
+      expect(isSafeCoverUrl(ok), ok).toBe(true);
+    }
+  });
+
+  it("не пускает внутрь сети и на нешифрованный протокол", () => {
+    for (const bad of [
+      "http://cdn.example.com/a.jpg",        // не https
+      "https://localhost/a.jpg",
+      "https://collector:8080/metrics",      // имя сервиса в compose-сети
+      "https://db/a.jpg",
+      "https://127.0.0.1/a.jpg",
+      "https://10.1.2.3/a.jpg",
+      "https://192.168.0.1/a.jpg",
+      "https://172.16.0.1/a.jpg",
+      "https://169.254.169.254/latest/meta-data/",  // метаданные облака
+      "https://[::1]/a.jpg",
+      "file:///etc/passwd",
+      "не адрес вовсе",
+      "",
+    ]) {
+      expect(isSafeCoverUrl(bad), bad).toBe(false);
+    }
+  });
+
+  it("публичные адреса рядом с приватными диапазонами не отсекаются", () => {
+    // 172.32.x лежит ЗА пределами 172.16-31, это публичный адрес.
+    expect(isSafeCoverUrl("https://172.32.0.1/a.jpg")).toBe(true);
+    expect(isSafeCoverUrl("https://192.169.0.1/a.jpg")).toBe(true);
   });
 });

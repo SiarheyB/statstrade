@@ -58,8 +58,51 @@ export async function withLocalCovers<T extends { id: string; imageUrl: string |
   return items.map((i) => (has.has(i.id) ? { ...i, imageUrl: newsImageSrc(i.id) } : i));
 }
 
+/**
+ * Можно ли ходить по этому адресу.
+ *
+ * URL приходит из ЧУЖОГО RSS-фида, а качаем мы его с сервера — то есть изнутри
+ * сети, где живут коллектор (:8080), форекс-коллектор (:8081), Postgres и сам
+ * app. Фид, который подставит `http://collector:8080/metrics` или
+ * `http://169.254.169.254/`, заставит сервер сходить туда за нас. Ответ наружу
+ * не отдаётся (его жуёт sharp и давится), но прощупать внутренние порты и
+ * дёрнуть внутренние URL этого достаточно.
+ *
+ * Поэтому: только https и только публичные адреса. Обложки новостей лежат на
+ * CDN, других вариантов у них не бывает.
+ */
+export function isSafeCoverUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol !== "https:") return false;
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return false;
+  // IPv6-петля и link-local
+  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return false;
+  // IPv4: петля, приватные сети, link-local (включая метаданные облака)
+  const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (v4) {
+    const [a, b] = [Number(v4[1]), Number(v4[2])];
+    if (a === 127 || a === 10 || a === 0) return false;
+    if (a === 192 && b === 168) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 169 && b === 254) return false;
+  }
+  // Имя без точки — это имя сервиса в compose-сети (db, collector, app).
+  if (!host.includes(".")) return false;
+  return true;
+}
+
 async function downloadCover(url: string): Promise<Buffer | null> {
+  if (!isSafeCoverUrl(url)) return null;
   const res = await fetch(url, {
+    // Редирект — обход проверки выше: CDN мог бы увести на внутренний адрес.
+    // Обложки лежат по прямой ссылке, гоняться за переадресацией незачем.
+    redirect: "error",
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     // Часть CDN отдаёт 403 без внятного UA — тот же приём, что у обхода фидов.
     headers: { "user-agent": "Mozilla/5.0 (compatible; TradeStatsBot/1.0)" },

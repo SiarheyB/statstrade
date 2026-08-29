@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
+import { randomUUID } from "crypto";
 import { join } from "path";
 import fs from "fs/promises";
 import { getAdminSession, notFound, recordAudit } from "@/lib/admin";
@@ -111,7 +112,10 @@ function extractProducedFile(logs: string[]): string | undefined {
 }
 
 function generateId() {
-  return Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+  // randomUUID, а не Math.random: id операции уходит клиенту и по нему потом
+  // опрашивают её лог. Math.random для идентификатора, который видит внешняя
+  // сторона, не годится — и он ничем не дешевле.
+  return randomUUID();
 }
 
 async function ensureTmpDir() {

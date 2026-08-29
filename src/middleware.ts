@@ -36,7 +36,7 @@ async function verifySessionClaims(
 ): Promise<SessionClaims | null> {
   if (!token) return null;
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, secret, { algorithms: ["HS256"] });
     if (typeof payload.userId === "string" && typeof payload.email === "string") {
       return {
         userId: payload.userId,
