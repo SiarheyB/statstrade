@@ -61,12 +61,46 @@ export type FeedFreshness = { symbol: string; exchange: string; lastT: Date | nu
  * Get freshness of all orderbook feeds (from ObRollupBucket + ObSnapshot)
  * Returns freshness status per feed
  */
-export async function getFeedFreshness(): Promise<FeedFreshness[]> {
-  const feeds = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
-    SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
+/**
+ * Список фидов — «прыгающим» обходом первичного ключа, а не DISTINCT.
+ *
+ * `SELECT DISTINCT symbol, exchange` планировщик выполняет полным проходом:
+ * на проде это 172 тыс. строк (54 МБ) на каждый вызов, а админка опрашивает
+ * раздел «Карта ордеров» постоянно. Здесь берём первую пару, затем каждую
+ * следующую БОЛЬШУЮ найденной — по одной строке индекса на пару (их единицы)
+ * вместо одной на бакет. Postgres такой план сам не строит, отсюда
+ * рекурсивный CTE; тот же приём, что в lib/landing.ts для счётчика символов.
+ *
+ * Источник — ObRollupBucket, а не конфигурация: фид, сбор которого выключили,
+ * должен остаться в списке, пока его данные лежат в базе.
+ */
+export async function listCollectorFeeds(): Promise<{ symbol: string; exchange: string }[]> {
+  return prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
+    WITH RECURSIVE pairs AS (
+      (SELECT "symbol", "exchange" FROM "ObRollupBucket" ORDER BY "symbol", "exchange" LIMIT 1)
+      UNION ALL
+      SELECT n."symbol", n."exchange" FROM pairs p
+      CROSS JOIN LATERAL (
+        SELECT b."symbol", b."exchange" FROM "ObRollupBucket" b
+        WHERE (b."symbol", b."exchange") > (p."symbol", p."exchange")
+        ORDER BY b."symbol", b."exchange" LIMIT 1
+      ) n
+    )
+    SELECT "symbol", "exchange" FROM pairs ORDER BY "symbol", "exchange"
   `;
-  // Запускаем N запросов параллельно — каждый берёт max(t) по индексу
-  // (symbol, exchange, t) — быстро, без сканирования всей ObSnapshot.
+}
+
+/**
+ * Свежесть фидов. `max(t)` ограничен окном: без него запрос обходит ВСЕ
+ * дневные партиции ObSnapshot, хотя ответ нужен только чтобы понять, отстал ли
+ * фид больше чем на FEED_STALE_MS (90 секунд). Ничего свежее суток за этой
+ * границей быть не может, а «фид молчит дольше суток» и «фида нет вовсе» для
+ * админки одно и то же.
+ */
+const FRESHNESS_WINDOW = "24 hours";
+
+export async function getFeedFreshness(): Promise<FeedFreshness[]> {
+  const feeds = await listCollectorFeeds();
   const now = Date.now();
   const results = await Promise.all(
     feeds.map((f) =>
@@ -74,6 +108,7 @@ export async function getFeedFreshness(): Promise<FeedFreshness[]> {
         .$queryRaw<{ last_t: Date | null }[]>`
           SELECT max(t) AS last_t FROM "ObSnapshot"
           WHERE symbol = ${f.symbol} AND exchange = ${f.exchange}
+            AND t > now() - ${FRESHNESS_WINDOW}::interval
         `
         .then((r) => ({ ...f, lastT: r[0]?.last_t ?? null })),
     ),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAdminSession, notFound } from "@/lib/admin";
+import { getAdminSession, notFound, listCollectorFeeds } from "@/lib/admin";
 import { serverError } from "@/lib/api";
 
 export const maxDuration = 60;
@@ -89,13 +89,12 @@ async function nextPartitionCleanup(
   return { oldestT: new Date(hi).toISOString(), cleanupInMs: Math.max(0, cleanupAt - Date.now()) };
 }
 
-// Список фидов — из маленькой ObRollupBucket (не сканируем сырые таблицы).
+// Список фидов — «прыгающим» обходом PK вместо DISTINCT по всей таблице,
+// см. listCollectorFeeds в lib/admin.ts (там же почему).
 // Фолбэк, пока rollup пуст (свежий деплой): DISTINCT по снапшотам за сутки —
 // партиции ограничивают скан одним-двумя днями.
 async function listFeeds(): Promise<{ symbol: string; exchange: string }[]> {
-  const fromRollup = await prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
-    SELECT DISTINCT symbol, exchange FROM "ObRollupBucket" ORDER BY symbol, exchange
-  `;
+  const fromRollup = await listCollectorFeeds();
   if (fromRollup.length > 0) return fromRollup;
   return prisma.$queryRaw<{ symbol: string; exchange: string }[]>`
     SELECT DISTINCT symbol, exchange FROM "ObSnapshot"
@@ -232,11 +231,16 @@ async function getHeavyStats(): Promise<HeavyStats> {
           feedList.map((f) =>
             prisma
               .$queryRawUnsafe<{ last_min: number; last_t: Date | null }[]>(
+                // max(t) ограничен сутками: без границы запрос обходит ВСЕ
+                // дневные партиции таблицы, а показывает он «когда последний
+                // раз писали». Молчание дольше суток и отсутствие данных для
+                // админки — одно и то же, зато скан упирается в одну партицию.
                 `SELECT
                    (SELECT count(*)::int FROM "${tbl}"
                      WHERE symbol = $1 AND exchange = $2 AND t > now() - interval '1 minute') AS last_min,
                    (SELECT max(t) FROM "${tbl}"
-                     WHERE symbol = $1 AND exchange = $2) AS last_t`,
+                     WHERE symbol = $1 AND exchange = $2
+                       AND t > now() - interval '24 hours') AS last_t`,
                 f.symbol,
                 f.exchange,
               )
@@ -307,17 +311,21 @@ export async function GET(req: Request) {
         ? { symbol: feeds[0].symbol, exchange: feeds[0].exchange }
         : null;
     if (target) {
-      const bins = await prisma.$queryRaw<PreviewRow[]>`
-        SELECT price, "bidVol" AS "bidVol", "askVol" AS "askVol"
-        FROM "ObSnapshot"
-        WHERE symbol = ${target.symbol} AND exchange = ${target.exchange}
-          AND t = (SELECT max(t) FROM "ObSnapshot" WHERE symbol = ${target.symbol} AND exchange = ${target.exchange})
-        ORDER BY price
-      `;
-      const tRow = await prisma.$queryRaw<{ t: Date | null }[]>`
-        SELECT max(t) AS t FROM "ObSnapshot" WHERE symbol = ${target.symbol} AND exchange = ${target.exchange}
-      `;
-      preview = { symbol: target.symbol, exchange: target.exchange, t: tRow[0]?.t ?? null, bins };
+      // Последний снимок — из ObLatestBook: одна строка на (symbol, exchange),
+      // коллектор перезаписывает её на каждом тике. Раньше здесь было два
+      // прохода по сырому ObSnapshot (коррелированный max(t) внутри выборки
+      // плюс отдельный max(t) рядом), и оба шли МИМО кэша тяжёлой части —
+      // то есть на каждый опрос админки, а не раз в 10 секунд.
+      const book = await prisma.obLatestBook.findUnique({
+        where: { symbol_exchange: { symbol: target.symbol, exchange: target.exchange } },
+        select: { t: true, levels: true },
+      });
+      const levels = (book?.levels ?? []) as unknown as
+        { price: number; bidVol: number; askVol: number }[];
+      const bins: PreviewRow[] = levels
+        .map((l) => ({ price: l.price, bidVol: l.bidVol, askVol: l.askVol }))
+        .sort((a, b) => a.price - b.price);
+      preview = { symbol: target.symbol, exchange: target.exchange, t: book?.t ?? null, bins };
     }
 
     return NextResponse.json({ now: new Date().toISOString(), feeds, series, tableStats, collector, preview, retentionAges });

@@ -215,6 +215,13 @@ export const mockPrisma = {
     createMany: vi.fn().mockResolvedValue({ count: 0 }),
     upsert: vi.fn().mockResolvedValue({}),
   },
+  // Последний снимок стакана — одна строка на (symbol, exchange). Из неё
+  // админка берёт live-превью вместо двух проходов по сырому ObSnapshot.
+  obLatestBook: {
+    findUnique: vi.fn().mockResolvedValue(null),
+    findMany: vi.fn().mockResolvedValue([]),
+  },
+
   // Used by /api/orderflow/history (via lib/orderflow.ts fetchOrderflowCandlesBefore)
   obCandle: {
     findMany: vi.fn().mockResolvedValue([]),
