@@ -128,18 +128,28 @@ export async function rebuildAccountTrades(accountId: string): Promise<void> {
 }
 
 // Ленивый бэкафилл: пересобрать аккаунты, у которых Trade ещё не строился
-// (после деплоя / legacy). Guard от параллельных пересборок в одном процессе.
-const rebuilding = new Set<string>();
+// (после деплоя / legacy).
+//
+// Хранится ПРОМИС, а не просто флаг «идёт». Раньше был Set, и второй
+// одновременный вызов пропускал пересборку и сразу шёл читать Trade — а она в
+// этот момент между deleteMany и вставкой групп, то есть таблица наполовину
+// пуста. Первая загрузка дашборда как раз и дёргает /api/stats, /api/trades и
+// /api/risk параллельно, и все трое зовут ensureAccountTrades: один собирал,
+// двое читали недособранное. Теперь опоздавшие ждут ту же работу.
+const rebuilding = new Map<string, Promise<void>>();
+
 export async function ensureAccountTrades(
   accounts: { id: string; tradesRebuiltAt: Date | null }[],
 ): Promise<void> {
   for (const a of accounts) {
-    if (a.tradesRebuiltAt || rebuilding.has(a.id)) continue;
-    rebuilding.add(a.id);
-    try {
-      await rebuildAccountTrades(a.id);
-    } finally {
-      rebuilding.delete(a.id);
+    if (a.tradesRebuiltAt) continue;
+    const running = rebuilding.get(a.id);
+    if (running) {
+      await running;
+      continue;
     }
+    const job = rebuildAccountTrades(a.id).finally(() => rebuilding.delete(a.id));
+    rebuilding.set(a.id, job);
+    await job;
   }
 }

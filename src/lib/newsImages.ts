@@ -81,9 +81,19 @@ export function isSafeCoverUrl(raw: string): boolean {
   if (u.protocol !== "https:") return false;
   const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".internal")) return false;
-  // IPv6-петля и link-local
-  if (host === "::1" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return false;
-  // IPv4: петля, приватные сети, link-local (включая метаданные облака)
+
+  // IPv6 — только если это ДЕЙСТВИТЕЛЬНО адрес, а не имя. Проверять префиксы
+  // на любой строке нельзя: "fcdn.example.com" и "fd-media.example.com" —
+  // обычные домены CDN, а начинаются с fc/fd (диапазон ULA).
+  if (host.includes(":")) {
+    if (host === "::1") return false;
+    if (/^fe80:/.test(host)) return false;      // link-local
+    if (/^f[cd][0-9a-f]{2}:/.test(host)) return false; // ULA fc00::/7
+    return true;
+  }
+
+  // IPv4: петля, приватные сети, link-local (включая метаданные облака) и
+  // CGNAT 100.64/10 — именно в нём живёт tailnet этого развёртывания.
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
   if (v4) {
     const [a, b] = [Number(v4[1]), Number(v4[2])];
@@ -91,6 +101,7 @@ export function isSafeCoverUrl(raw: string): boolean {
     if (a === 192 && b === 168) return false;
     if (a === 172 && b >= 16 && b <= 31) return false;
     if (a === 169 && b === 254) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false; // 100.64.0.0/10, Tailscale
   }
   // Имя без точки — это имя сервиса в compose-сети (db, collector, app).
   if (!host.includes(".")) return false;

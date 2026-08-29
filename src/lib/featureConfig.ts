@@ -31,24 +31,33 @@ async function featureRows(): Promise<FeatureRows> {
   const now = Date.now();
   if (cache && now - cache.at < CACHE_MS) return cache.rows;
   if (inflight) return inflight;
-  inflight = prisma.featureConfig
+  const own = prisma.featureConfig
     .findMany({ select: { key: true, enabled: true, config: true } })
     .then((rows) => {
       const map: FeatureRows = new Map(
         rows.map((r) => [r.key, { enabled: r.enabled, config: r.config }]),
       );
-      cache = { at: Date.now(), rows: map };
+      // Только если этот запрос всё ещё «наш»: между стартом и ответом мог
+      // пройти invalidateFeatureCache (правка из админки), и тогда наши строки
+      // уже устарели — класть их в кэш нельзя.
+      if (inflight === own) cache = { at: Date.now(), rows: map };
       return map;
     })
     .finally(() => {
-      inflight = null;
+      if (inflight === own) inflight = null;
     });
-  return inflight;
+  inflight = own;
+  return own;
 }
 
 /** Сбросить кэш — после правки из админки значение должно примениться сразу. */
 export function invalidateFeatureCache(): void {
   cache = null;
+  // И запрос «в полёте»: он стартовал ДО записи, а его .then положил бы в кэш
+  // дозаписные строки — тумблер из админки «отыграл бы назад» на 15 секунд.
+  // Обнуляем ссылку: запрос честно доработает и вернёт значение своему
+  // вызывающему, но кэш заполнять ему уже нечем (проверка inflight === own).
+  inflight = null;
 }
 
 // Effective config for a feature: DB row (if any) merged over the static

@@ -197,18 +197,27 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
   // interval (the server cron can't fire often enough on its own).
   useEffect(() => {
     let cancelled = false;
+    // Видели ли на прошлом тике незаконченный скан. Пока он идёт, тик — это не
+    // опрос, а ДВИГАТЕЛЬ: сканирование биржи идёт порциями, и каждый чанк
+    // запускает именно он (см. syncStatus === "syncing" ниже). Если глушить
+    // такой тик по document.hidden, начатый импорт замирает, стоит человеку
+    // уйти на другую вкладку, — и не двигается, пока он не вернётся.
+    let scanInProgress = false;
+
     async function tick() {
       // Свёрнутую или фоновую вкладку не дёргаем — так же, как страницы
       // графиков. Провайдер живёт в layout кабинета, то есть тик шёл раз в
       // минуту с ЛЮБОЙ открытой страницы, включая забытую в другой вкладке.
-      // Ничего не теряем: следующий тик после возврата всё равно поднимет
-      // просроченный авто-синк, он определяется по lastSyncAt, а не по счётчику.
-      if (document.hidden) return;
+      // Просроченный авто-синк от этого не теряется: он определяется по
+      // lastSyncAt, и следующий тик после возврата его поднимет.
+      // Исключение — незаконченный скан: его надо доводить до конца.
+      if (document.hidden && !scanInProgress) return;
       try {
         const res = await fetch("/api/accounts");
         if (!res.ok || cancelled) return;
         const accs = (await res.json()) as SyncAccount[];
         const now = Date.now();
+        scanInProgress = accs.some((a) => !isMt(a.source) && a.syncStatus === "syncing");
         for (const a of accs) {
           if (isMt(a.source) || running.current.has(a.id)) continue;
           const lastMs = a.lastSyncAt ? new Date(a.lastSyncAt).getTime() : 0;

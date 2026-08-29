@@ -78,4 +78,22 @@ describe("featureConfig — кэш", () => {
     const v = await getFeatureConfig("monteCarlo");
     expect(v.enabled).toBe(false);
   });
+
+
+  // Запрос мог стартовать ДО правки из админки: его ответ уже устарел, и в кэш
+  // ему попадать нельзя — иначе тумблер «отыграет назад» на всё время TTL.
+  it("ответ запроса, начатого до правки, в кэш не попадает", async () => {
+    let release!: (v: unknown[]) => void;
+    findMany.mockReturnValueOnce(new Promise((r) => { release = r as (v: unknown[]) => void; }));
+
+    const early = getFeatureConfig("monteCarlo");           // стартовал с пустой БД
+    invalidateFeatureCache();                                // «админ нажал тумблер»
+    findMany.mockResolvedValue([{ key: "monteCarlo", enabled: false, config: null }]);
+    release([]);                                             // ответ старого запроса
+    await early;
+
+    // Следующее чтение обязано увидеть новое значение, а не закэшированное старое.
+    const v = await getFeatureConfig("monteCarlo");
+    expect(v.enabled).toBe(false);
+  });
 });

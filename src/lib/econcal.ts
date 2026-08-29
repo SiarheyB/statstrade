@@ -189,9 +189,24 @@ const EVENT_UPSERT_BATCH = 500;
  * ключ и не трогаются, country тоже (он выводится из currency и не меняется).
  */
 async function upsertEvents(events: NormalizedEvent[]): Promise<number> {
+  // Внутри ОДНОГО INSERT … ON CONFLICT два одинаковых ключа — это ошибка
+  // Postgres 21000 «ON CONFLICT DO UPDATE command cannot affect row a second
+  // time» (проверено на живой базе). Прежний upsert в цикле такое переживал,
+  // а здесь падала бы вся пачка — то есть обход календаря вставал бы целиком
+  // из-за одной задвоенной строки в чужом фиде. ForexFactory задваивает:
+  // он правит минуту публикации, и одно и то же событие приходит дважды.
+  //
+  // Схлопываем по ключу (time+currency+title), оставляя ПОСЛЕДНЕЕ — так же
+  // вёл себя upsert в цикле: последняя запись перетирала предыдущую.
+  const byKey = new Map<string, NormalizedEvent>();
+  for (const e of events) {
+    byKey.set(`${e.time.getTime()}|${e.currency}|${e.title}`, e);
+  }
+  const unique = [...byKey.values()];
+
   let written = 0;
-  for (let i = 0; i < events.length; i += EVENT_UPSERT_BATCH) {
-    const batch = events.slice(i, i + EVENT_UPSERT_BATCH);
+  for (let i = 0; i < unique.length; i += EVENT_UPSERT_BATCH) {
+    const batch = unique.slice(i, i + EVENT_UPSERT_BATCH);
     if (batch.length === 0) continue;
     const rows = batch.map(
       (e) => Prisma.sql`(${crypto.randomUUID()}, ${e.time}, ${e.currency}, ${e.country},

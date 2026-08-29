@@ -112,6 +112,10 @@ describe("isSafeCoverUrl", () => {
       "https://cdn.coindesk.com/a.jpg",
       "https://images.example.co.uk/x/y.png?v=2",
       "https://8.8.8.8/pic.jpg",
+      // Домены, начинающиеся с fc/fd: раньше проверка префикса IPv6-ULA
+      // применялась к ЛЮБОМУ имени и резала обычные CDN.
+      "https://fcdn.example.com/a.jpg",
+      "https://fd-media.example.com/a.jpg",
     ]) {
       expect(isSafeCoverUrl(ok), ok).toBe(true);
     }
@@ -129,6 +133,10 @@ describe("isSafeCoverUrl", () => {
       "https://172.16.0.1/a.jpg",
       "https://169.254.169.254/latest/meta-data/",  // метаданные облака
       "https://[::1]/a.jpg",
+      "https://[fd00::1]/a.jpg",              // IPv6 ULA — настоящий адрес
+      "https://[fe80::1]/a.jpg",              // IPv6 link-local
+      "https://100.100.100.100/a.jpg",        // 100.64/10 — tailnet
+      "https://100.64.0.1/a.jpg",
       "file:///etc/passwd",
       "не адрес вовсе",
       "",
@@ -141,5 +149,8 @@ describe("isSafeCoverUrl", () => {
     // 172.32.x лежит ЗА пределами 172.16-31, это публичный адрес.
     expect(isSafeCoverUrl("https://172.32.0.1/a.jpg")).toBe(true);
     expect(isSafeCoverUrl("https://192.169.0.1/a.jpg")).toBe(true);
+    // 100.63 и 100.128 лежат ЗА пределами CGNAT-диапазона 100.64-127.
+    expect(isSafeCoverUrl("https://100.63.0.1/a.jpg")).toBe(true);
+    expect(isSafeCoverUrl("https://100.128.0.1/a.jpg")).toBe(true);
   });
 });

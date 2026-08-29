@@ -68,6 +68,20 @@ vi.stubGlobal('fetch', vi.fn((url?: string) => {
 import { countryFor, flagFor, refreshCalendar, getCalendar, pruneOldEvents } from '@/lib/econcal';
 
 describe('econcal module', () => {
+  // Значения из всех пачек идут подряд: по EVENT_COLUMNS на событие,
+  // в том же порядке, что колонки в INSERT.
+  const upserted = () =>
+    mocks.executeRawMock.mock.calls.flatMap((c) => {
+      const values = (c[0] as { values: unknown[] }).values ?? [];
+      const out: Record<string, unknown>[] = [];
+      for (let i = 0; i < values.length; i += EVENT_COLUMNS) {
+        const [, time, currency, country, title, impact, category, forecast, previous, actual] =
+          values.slice(i, i + EVENT_COLUMNS);
+        out.push({ time, currency, country, title, impact, category, forecast, previous, actual });
+      }
+      return out;
+    });
+
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.findFirstMock.mockResolvedValue(null);
@@ -116,6 +130,35 @@ describe('econcal module', () => {
       expect(mocks.executeRawMock).toHaveBeenCalledTimes(1); // одна пачка, а не два запроса
     });
 
+    // Одинаковые ключи в ОДНОМ INSERT … ON CONFLICT — это ошибка Postgres
+    // 21000 «cannot affect row a second time», то есть падала бы вся пачка и
+    // обход календаря вставал бы целиком. ForexFactory задваивает события:
+    // он правит минуту публикации, и одно и то же приходит дважды.
+    it('задвоенное событие в фиде не рушит пачку', async () => {
+      const dup = {
+        title: "Central Bank Interest Rate Decision",
+        country: "USD",
+        date: "2026-01-15T14:00:00Z",
+        impact: "High",
+        forecast: "4.5%",
+        previous: "4.75%",
+        actual: "СВЕЖЕЕ",
+      };
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true, status: 200, json: async () => [...fakeFeedData, dup],
+      }));
+
+      const results = await refreshCalendar();
+      expect(results[0].error).toBeUndefined();
+
+      const rows = upserted();
+      const keys = rows.map((r) => `${(r.time as Date).getTime()}|${r.currency}|${r.title}`);
+      expect(new Set(keys).size).toBe(keys.length); // дублей в пачке не осталось
+      // Побеждает ПОСЛЕДНЕЕ вхождение — так же вёл себя upsert в цикле.
+      const winner = rows.find((r) => r.title === dup.title);
+      expect(winner?.actual).toBe("СВЕЖЕЕ");
+    });
+
     it('handles fetch errors gracefully', async () => {
       // Override global fetch for this test
       vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500 }));
@@ -133,19 +176,6 @@ describe('econcal module', () => {
         vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(items) }),
       );
 
-    // Значения из всех пачек идут подряд: по EVENT_COLUMNS на событие,
-    // в том же порядке, что колонки в INSERT.
-    const upserted = () =>
-      mocks.executeRawMock.mock.calls.flatMap((c) => {
-        const values = (c[0] as { values: unknown[] }).values ?? [];
-        const out: Record<string, unknown>[] = [];
-        for (let i = 0; i < values.length; i += EVENT_COLUMNS) {
-          const [, time, currency, country, title, impact, category, forecast, previous, actual] =
-            values.slice(i, i + EVENT_COLUMNS);
-          out.push({ time, currency, country, title, impact, category, forecast, previous, actual });
-        }
-        return out;
-      });
 
     it('skips rows without a title, currency or a valid date', async () => {
       feedOf([
