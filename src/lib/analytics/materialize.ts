@@ -81,24 +81,49 @@ export async function rebuildTradeGroups(
   await recomputeRRForAccount(accountId);
 }
 
-// Полная пересборка аккаунта + отметка tradesRebuiltAt (бэкафилл, демо-данные).
+/**
+ * Полная пересборка аккаунта + отметка tradesRebuiltAt (бэкафилл, демо-данные).
+ *
+ * Идёт ПО ГРУППАМ (пара + рынок), а не одной выборкой. Раньше сюда поднимались
+ * ВСЕ филлы аккаунта разом: на активном счёте это сотни тысяч строк в куче
+ * Node, и всё это внутри HTTP-запроса — ensureAccountTrades вызывается прямо
+ * из /api/stats, /api/trades и /api/risk. Именно этот сценарий записан в
+ * docker-compose.prod.yml как причина поднять mem_limit приложения до 3584m.
+ *
+ * Реконструкция независима по группам (см. rebuildTradeGroups), поэтому
+ * результат тот же, а в памяти одновременно живёт одна пара.
+ *
+ * Атомарности на весь аккаунт больше нет, и это допустимо: пересборка
+ * самовосстанавливающаяся. Упала на середине — tradesRebuiltAt остался NULL,
+ * следующий запрос начнёт заново, а начинается она со сноса всех строк счёта.
+ */
 export async function rebuildAccountTrades(accountId: string): Promise<void> {
-  const fills = await prisma.fill.findMany({
+  const groups = await prisma.fill.groupBy({
+    by: ["symbol", "market"],
     where: { accountId },
-    orderBy: { timestamp: "asc" },
-    select: FILL_SELECT,
   });
-  const trades = reconstructTrades(fills);
-  await prisma.$transaction([
-    prisma.trade.deleteMany({ where: { accountId } }),
-    ...(trades.length
-      ? [prisma.trade.createMany({ data: trades.map(toRow), skipDuplicates: true })]
-      : []),
-    prisma.exchangeAccount.update({
-      where: { id: accountId },
-      data: { tradesRebuiltAt: new Date() },
-    }),
-  ]);
+
+  // Сносим ВСЕ строки счёта, а не только пересобираемые группы: у группы,
+  // где филлов уже не осталось (откат импорта), иначе повисли бы старые сделки.
+  await prisma.trade.deleteMany({ where: { accountId } });
+
+  for (const g of groups) {
+    const fills = await prisma.fill.findMany({
+      where: { accountId, symbol: g.symbol, market: g.market },
+      orderBy: { timestamp: "asc" },
+      select: FILL_SELECT,
+    });
+    const trades = reconstructTrades(fills);
+    if (trades.length) {
+      await prisma.trade.createMany({ data: trades.map(toRow), skipDuplicates: true });
+    }
+  }
+
+  await prisma.exchangeAccount.update({
+    where: { id: accountId },
+    data: { tradesRebuiltAt: new Date() },
+  });
+  // Один раз на весь счёт, а не на каждую группу.
   await recomputeRRForAccount(accountId);
 }
 
