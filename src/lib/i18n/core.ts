@@ -27,7 +27,10 @@ export function translate(
   let value = table[key] ?? dictionaries.ru[key] ?? key;
   if (vars) {
     for (const [k, v] of Object.entries(vars)) {
-      value = value.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+      // split/join, а не new RegExp: один рендер дашборда делает сотни вызовов
+      // t(), и на каждую подстановку компилировалось регулярное выражение.
+      // Плюс имя переменной больше не нужно экранировать.
+      value = value.split(`{${k}}`).join(String(v));
     }
   }
   return value;

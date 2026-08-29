@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { translate, type Locale, LOCALE_COOKIE } from "./core";
 import { setFormatLocale, setFormatTimezone } from "@/lib/format";
@@ -32,31 +32,43 @@ export function I18nProvider({
   const [timezone, setTz] = useState<TimezoneId>(normalizeTimezone(initialTz));
   const router = useRouter();
 
-  // Keep number/date formatting in sync with the active locale/timezone.
+  // Синхронизация модульных переменных lib/format.ts делается ПРЯМО В РЕНДЕРЕ,
+  // а не в useEffect, и это намеренно: fmtMoney/fmtDate читают их синхронно
+  // во время того же рендера дочерних компонентов. Из эффекта они успели бы
+  // отработать только после первого кадра — и первый кадр вышел бы с чужой
+  // локалью и таймзоной, включая серверный рендер.
+  //
+  // Присваивание идемпотентно (одно и то же значение сколько угодно раз даёт
+  // тот же результат), поэтому повторный рендер в StrictMode ничего не портит.
   setFormatLocale(locale);
   setFormatTimezone(timezone);
 
-  const t: T = (key, vars) => translate(locale, key, vars);
+  // t, setLocale, setTimezone и сам объект контекста были новыми на КАЖДОМ
+  // рендере провайдера. Он обёрнут вокруг всего кабинета, а объект-литерал в
+  // value заставляет перерисоваться каждого потребителя контекста, даже когда
+  // ни язык, ни зона не менялись.
+  const t = useCallback<T>((key, vars) => translate(locale, key, vars), [locale]);
 
-  const setLocale = (l: Locale) => {
+  const setLocale = useCallback((l: Locale) => {
     setLoc(l);
     document.cookie = `${LOCALE_COOKIE}=${l}; path=/; max-age=31536000; samesite=lax`;
     document.documentElement.lang = l;
     router.refresh();
-  };
+  }, [router]);
 
-  const setTimezone = (tz: TimezoneId) => {
+  const setTimezone = useCallback((tz: TimezoneId) => {
     const normalized = normalizeTimezone(tz);
     setTz(normalized);
     document.cookie = `${TIMEZONE_COOKIE}=${normalized}; path=/; max-age=31536000; samesite=lax`;
     router.refresh();
-  };
+  }, [router]);
 
-  return (
-    <I18nContext.Provider value={{ locale, t, setLocale, timezone, setTimezone }}>
-      {children}
-    </I18nContext.Provider>
+  const value = useMemo(
+    () => ({ locale, t, setLocale, timezone, setTimezone }),
+    [locale, t, setLocale, timezone, setTimezone],
   );
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 
 export function useI18n(): Ctx {
