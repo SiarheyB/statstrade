@@ -13,6 +13,7 @@ import { createBybitBook } from "./bybit.mjs";
 import { createOkxBook } from "./okx.mjs";
 import { createTradeFeed } from "./trades.mjs";
 import { prunePartitionedTables } from "./prune.mjs";
+import { rollupCascade as runCascade } from "./cascade.mjs";
 
 const cfg = {
   symbols: (process.env.SYMBOLS ?? "BTCUSDT").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean),
@@ -1248,149 +1249,10 @@ async function backfillTradeRollup() {
   }
 }
 
-// ─── Каскад агрегатов стакана: час и сутки поверх минутного rollup ─────────
-//
-// Зачем (см. ORDERFLOW_PERF_PLAN.md §4): окно карты на старших таймфреймах —
-// месяцы и годы, а колонок на графике всегда 240. На "1d" колонка шириной 36
-// часов, и складывать в неё 2160 минутных строк незачем: результат тот же, что
-// у одной дневной. Минутный уровень при этом остаётся полным и вечным.
-//
-// Свёртка идемпотентна: повторный прогон того же периода ПЕРЕЗАПИСЫВАЕТ суммы
-// (DO UPDATE SET = EXCLUDED), а не прибавляет их. Поэтому её можно гонять по
-// расписанию, не отслеживая, что уже посчитано, и безопасно пересчитывать
-// период заново, если в минутный уровень задним числом доехали данные.
-//
-// Порция ограничена: первый прогон на годовой истории иначе стал бы одной
-// гигантской транзакцией на слабом сервере. Остаток догоняется следующими
-// прогонами (раз в 5 минут), пока каскад не поравняется с минутным уровнем.
-const CASCADE_CHUNK_HOURS = 24 * 14; // сколько периодов сворачиваем за прогон
-const CASCADE_CHUNK_DAYS = 90;
-// Свежий хвост, который закрывается на каждом прогоне до разбора истории.
-const CASCADE_TAIL_HOURS = 6;
-const CASCADE_TAIL_DAYS = 2;
-
-function unitMs(unit) {
-  return unit === "day" ? 86_400_000 : 3600_000;
-}
-
-/**
- * Свернуть один уровень каскада за диапазон [lo, hi).
- *
- * Диапазон задаётся снаружи (см. rollupCascade), потому что порядок свёртки
- * важнее самой свёртки: сперва свежий хвост, затем история назад.
- *
- * @returns сколько строк цен записано
- */
-async function rollupRange(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, lo, hi) {
-  if (!lo || !hi || lo >= hi) return 0;
-
-  const { rowCount } = await pool.query(
-    `INSERT INTO "${dstPrices}" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
-     SELECT s."symbol", s."exchange", date_trunc($3, s."bucket") AS bkt, s."price",
-            SUM(s."volSum"), SUM(s."bidSum"), SUM(s."askSum")
-     FROM "${srcPrices}" s
-     WHERE s."bucket" >= $1 AND s."bucket" < $2
-     GROUP BY s."symbol", s."exchange", bkt, s."price"
-     ON CONFLICT ("symbol","exchange","bucket","price")
-     DO UPDATE SET "volSum" = EXCLUDED."volSum",
-                   "bidSum" = EXCLUDED."bidSum",
-                   "askSum" = EXCLUDED."askSum"`,
-    [lo, hi, unit],
-  );
-
-  // Счётчики снапшотов — тем же окном: из них computeOrderflow берёт нормировку
-  // (число бирж / число снапшотов в колонке), и разъехавшись с ценами она
-  // исказила бы яркость карты.
-  await pool.query(
-    `INSERT INTO "${dstSnaps}" ("symbol","exchange","bucket","snaps","midSum")
-     SELECT s."symbol", s."exchange", date_trunc($3, s."bucket") AS bkt,
-            SUM(s."snaps")::int, SUM(s."midSum")
-     FROM "${srcSnaps}" s
-     WHERE s."bucket" >= $1 AND s."bucket" < $2
-     GROUP BY s."symbol", s."exchange", bkt
-     ON CONFLICT ("symbol","exchange","bucket")
-     DO UPDATE SET "snaps" = EXCLUDED."snaps", "midSum" = EXCLUDED."midSum"`,
-    [lo, hi, unit],
-  );
-
-  return rowCount ?? 0;
-}
-
-/**
- * Один уровень каскада: свежий хвост + порция истории.
- *
- * Порядок именно такой, потому что каскад догоняет историю не за один прогон.
- * Правый край карты — то, ради чего на неё смотрят, — должен быть свёрнут
- * ВСЕГДА, поэтому хвост закрывается первым, а история идёт НАЗАД от уже
- * свёрнутого края (MIN(dst)) к началу источника. Обратный порядок (вперёд от
- * MAX(dst)) не работает: свёрнутый хвост сам становится максимумом, и история
- * не разбирается никогда.
- *
- * Свёртка идемпотентна — перезаписывает суммы, а не прибавляет, — поэтому
- * пересчёт незавершённого периода на каждом прогоне безопасен.
- */
-async function rollupLevel(srcPrices, dstPrices, srcSnaps, dstSnaps, unit, chunk, tail) {
-  const step = unitMs(unit);
-  const { rows } = await pool.query(
-    `SELECT (SELECT MIN("bucket") FROM "${srcPrices}") AS src_lo,
-            (SELECT MAX("bucket") FROM "${srcPrices}") AS src_hi,
-            (SELECT MIN("bucket") FROM "${dstPrices}") AS dst_lo`,
-  );
-  const srcLo = rows[0]?.src_lo && new Date(rows[0].src_lo);
-  const srcHi = rows[0]?.src_hi && new Date(rows[0].src_hi);
-  if (!srcLo || !srcHi) return 0; // источник пуст — сворачивать нечего
-
-  // 1. Свежий хвост: последние `tail` периодов источника. Верхняя граница —
-  //    за концом данных, чтобы текущий незавершённый период тоже попал.
-  const tailLo = new Date(Math.max(srcLo.getTime(), srcHi.getTime() - tail * step));
-  let written = await rollupRange(
-    srcPrices, dstPrices, srcSnaps, dstSnaps, unit,
-    tailLo, new Date(srcHi.getTime() + step),
-  );
-
-  // 2. Порция истории — назад от самого раннего свёрнутого периода.
-  const dstLo = rows[0]?.dst_lo ? new Date(rows[0].dst_lo) : tailLo;
-  if (dstLo.getTime() > srcLo.getTime()) {
-    const histLo = new Date(Math.max(srcLo.getTime(), dstLo.getTime() - chunk * step));
-    written += await rollupRange(
-      srcPrices, dstPrices, srcSnaps, dstSnaps, unit, histLo, dstLo,
-    );
-  }
-
-  return written;
-}
-
-/**
- * Свёртка футпринта: часовой уровень из пятиминутного. Отдельная функция, а не
- * rollupLevel: у футпринта другие колонки (buyVol/sellVol) и нет парной таблицы
- * счётчиков — нормировать кластеры не нужно, они складываются как есть.
- */
-async function rollupFootprintLevel(limit) {
-  const { rows: state } = await pool.query(
-    `SELECT (SELECT MAX("bucket") FROM "ObFootprintRollupH") AS done,
-            (SELECT MIN("bucket") FROM "ObFootprintRollup") AS first`,
-  );
-  const from = state[0]?.done ?? state[0]?.first;
-  if (!from) return 0;
-
-  const { rowCount } = await pool.query(
-    `WITH b AS (
-       SELECT date_trunc('hour', $1::timestamptz) AS lo,
-              LEAST(date_trunc('hour', now()) + interval '1 hour',
-                    date_trunc('hour', $1::timestamptz) + ($2 || ' hour')::interval) AS hi
-     )
-     INSERT INTO "ObFootprintRollupH" ("symbol","exchange","bucket","price","buyVol","sellVol")
-     SELECT s."symbol", s."exchange", date_trunc('hour', s."bucket") AS bkt, s."price",
-            SUM(s."buyVol"), SUM(s."sellVol")
-     FROM "ObFootprintRollup" s, b
-     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
-     GROUP BY s."symbol", s."exchange", bkt, s."price"
-     ON CONFLICT ("symbol","exchange","bucket","price")
-     DO UPDATE SET "buyVol" = EXCLUDED."buyVol", "sellVol" = EXCLUDED."sellVol"`,
-    [from, String(limit)],
-  );
-  return rowCount ?? 0;
-}
+// Каскад агрегатов стакана (час и сутки поверх минутного rollup, часовой
+// футпринт поверх пятиминутного) живёт в ./cascade.mjs — там же разобрано,
+// почему границы периодов обязаны быть целыми и почему обрезка идёт в UTC.
+const rollupCascade = () => runCascade(pool);
 
 // ─── Уборка мусора обновлений (VACUUM) ─────────────────────────────────────
 //
@@ -1474,26 +1336,6 @@ async function vacuumStaleTable() {
   }
 }
 
-async function rollupCascade() {
-  try {
-    const h = await rollupLevel(
-      "ObSnapshotRollup", "ObSnapshotRollupH",
-      "ObRollupBucket", "ObRollupBucketH",
-      "hour", CASCADE_CHUNK_HOURS, CASCADE_TAIL_HOURS,
-    );
-    // Дневной уровень строим из часового, а не из минутного: он уже в сотни раз
-    // меньше, и суммы совпадают — сложение ассоциативно.
-    const d = await rollupLevel(
-      "ObSnapshotRollupH", "ObSnapshotRollupD",
-      "ObRollupBucketH", "ObRollupBucketD",
-      "day", CASCADE_CHUNK_DAYS, CASCADE_TAIL_DAYS,
-    );
-    const fp = await rollupFootprintLevel(CASCADE_CHUNK_HOURS);
-    if (h || d || fp) console.log(`[cascade] свёрнуто строк: час=${h} сутки=${d} футпринт=${fp}`);
-  } catch (err) {
-    console.error(`[cascade] ошибка: ${err.message}`);
-  }
-}
 
 // Бэкафилл rollup футпринта из сырого ObFootprint — чтобы кластеры работали на
 // уже накопленной истории сразу после деплоя.
@@ -1588,6 +1430,9 @@ if (RUN_MS > 0) setTimeout(shutdown, RUN_MS);
 } // end isMain
 
 // Экспорты для юнит-тестов (не влияют на работу скрипта)
-export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade, rollupLevel, rollupRange, rollupFootprintLevel };
+export { binSide, rowsForFeed, accumulateRollup, flushRollup, writeSnapshot, pruneOld, loadCollectorConfig, backfillRollup, fetchAndStoreCandles, backfillCandles, rollupCascade };
+// Сам каскад — в ./cascade.mjs (там же его тесты): импорт index.mjs поднимает
+// пул и HTTP-сервер, поэтому тестируемая логика вынесена отдельно.
+export { rollupLevel, rollupRange, rollupFootprintLevel } from "./cascade.mjs";
 export { FACTORY, DEFAULT_BIN, DEFAULT_MIN_COINS, marketOf, minCoinsFor };
 export { fetchUsdtFuturesSymbols, scanAllUsdtPairsDaily };
