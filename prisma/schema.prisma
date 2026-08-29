@@ -401,7 +401,11 @@ model ObCandle {
   v        Float    @default(0) // volume in base asset
 
   @@id([symbol, exchange, interval, t])
-  @@index([symbol, exchange, interval, t])
+  // Дубля первичного ключа здесь НЕТ намеренно: @@index с теми же колонками в
+  // том же порядке не обслуживает ни одного запроса, которого не обслужил бы
+  // PK, а весит столько же (на ObCandle это было 49 МБ при 96 МБ данных) и
+  // стоит лишней работы на каждой вставке. Снят миграцией candle_index_diet —
+  // то же, что orderflow_index_diet сделала для Ob*Rollup.
   // Для подсчёта числа инструментов на главной: DISTINCT symbol по интервалу.
   @@index([interval, symbol])
   // Поиск самой старой свечи при бэкафилле: MIN(t) по всей таблице.
@@ -870,7 +874,7 @@ model FxCandle {
   v        Float    @default(0) // volume
 
   @@id([symbol, exchange, interval, t])
-  @@index([symbol, exchange, interval, t])
+  // Дубля PK нет — см. ObCandle (миграция candle_index_diet).
   // Коллектор проверяет глубину истории таймфрейма без привязки к символу.
   @@index([exchange, interval, t])
 }
@@ -890,7 +894,7 @@ model FxQuote {
 
   @@id([symbol, exchange, t])
   @@index([symbol, t])
-  @@index([symbol, exchange, t])
+  // (symbol, exchange, t) — точный дубль PK, снят (candle_index_diet).
 }
 
 // Список валютных пар, которые собирает forex-collector — управляется из
@@ -914,7 +918,7 @@ model FxDepthRollup {
   askSum   Float    @default(0)
 
   @@id([symbol, exchange, bucket, price])
-  @@index([symbol, exchange, bucket])
+  // (symbol, exchange, bucket) — точный ПРЕФИКС PK, снят (candle_index_diet).
   @@index([symbol, bucket])
 }
 

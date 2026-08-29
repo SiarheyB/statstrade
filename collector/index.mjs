@@ -935,30 +935,74 @@ const ROLLUP_BRIN = [
   ["ObRollupBucket", "ObRollupBucket_bucket_brin"],
 ];
 
+// btree по bucket — там, где BRIN не годится.
+//
+// BRIN отвечает на диапазонное условие (DELETE в pruneOld), но НЕ отвечает на
+// MIN/MAX: он хранит границы по блокам, а не отсортированные значения, поэтому
+// планировщик уходит в Seq Scan. Свёртка футпринта на каждом прогоне (раз в
+// 5 минут) спрашивает ровно это:
+//   MAX(bucket) FROM ObFootprintRollupH  — докуда уже свёрнуто
+//   MIN(bucket) FROM ObFootprintRollup   — с чего начинать в первый раз
+// Замер до правки: 168 seq-сканов и 1.2 млн прочитанных строк по
+// ObFootprintRollup, 203 скана по ObFootprintRollupH.
+//
+// У стакана этой беды нет — там MIN/MAX берутся у маленьких таблиц счётчиков
+// (см. rollupLevel в cascade.mjs), но у футпринта парной таблицы счётчиков
+// не существует: кластеры складываются как есть, нормировать нечем.
+//
+// Индексы маленькие: одна запись на бакет-уровень, а не на строку данных.
+//
+// Таблицы счётчиков здесь по той же причине: разведка каскада
+// (rollupLevel в cascade.mjs) спрашивает у них MIN/MAX на каждом прогоне.
+// Перенос этого вопроса с таблиц ЦЕН на счётчики уже дал ~100× меньше строк,
+// но оставался Seq Scan; с btree это Index Only Scan за микросекунды.
+// Счётчиков одна строка на бакет, так что индекс — единицы мегабайт.
+const ROLLUP_BTREE = [
+  ["ObFootprintRollup", "ObFootprintRollup_bucket_btree"],
+  ["ObFootprintRollupH", "ObFootprintRollupH_bucket_btree"],
+  ["ObRollupBucket", "ObRollupBucket_bucket_btree"],
+  ["ObRollupBucketH", "ObRollupBucketH_bucket_btree"],
+  ["ObRollupBucketD", "ObRollupBucketD_bucket_btree"],
+];
+
 async function ensureRollupIndexes() {
+  for (const [tbl, idx] of ROLLUP_BTREE) {
+    await ensureIndex(tbl, idx, `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${idx}" ON "${tbl}" ("bucket")`, "btree");
+  }
   for (const [tbl, idx] of ROLLUP_BRIN) {
-    try {
-      // Прерванный CONCURRENTLY оставляет индекс невалидным: он не используется
-      // планировщиком и молча тормозит чистку. Такой сносим и строим заново.
-      const { rows } = await pool.query(
-        `SELECT i.indisvalid FROM pg_class c
-         JOIN pg_index i ON i.indexrelid = c.oid
-         WHERE c.relname = $1`,
-        [idx],
-      );
-      if (rows.length && rows[0].indisvalid === false) {
-        await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS "${idx}"`);
-      } else if (rows.length) {
-        continue;
-      }
-      await pool.query(
-        `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${idx}" ON "${tbl}" USING brin ("bucket")`,
-      );
-      console.log(`[index] BRIN ${idx} готов`);
-    } catch (err) {
-      // Не фатально: без индекса чистка просто идёт медленнее.
-      console.error(`[index] ${idx}: ${err.message}`);
+    await ensureIndex(
+      tbl, idx,
+      `CREATE INDEX CONCURRENTLY IF NOT EXISTS "${idx}" ON "${tbl}" USING brin ("bucket")`,
+      "BRIN",
+    );
+  }
+}
+
+/**
+ * Создать индекс, если его ещё нет. CONCURRENTLY и вне транзакции: обычный
+ * CREATE INDEX заблокировал бы вставки на минуты, а Prisma-миграция заворачивает
+ * всё в транзакцию, внутри которой CONCURRENTLY невозможен, — поэтому индексы
+ * этих таблиц создаёт коллектор, а не миграция.
+ */
+async function ensureIndex(tbl, idx, createSql, kind) {
+  try {
+    // Прерванный CONCURRENTLY оставляет индекс невалидным: он не используется
+    // планировщиком и молча тормозит запросы. Такой сносим и строим заново.
+    const { rows } = await pool.query(
+      `SELECT i.indisvalid FROM pg_class c
+       JOIN pg_index i ON i.indexrelid = c.oid
+       WHERE c.relname = $1`,
+      [idx],
+    );
+    if (rows.length && rows[0].indisvalid === false) {
+      await pool.query(`DROP INDEX CONCURRENTLY IF EXISTS "${idx}"`);
+    } else if (rows.length) {
+      return;
     }
+    await pool.query(createSql);
+    console.log(`[index] ${kind} ${idx} готов`);
+  } catch (err) {
+    console.error(`[index] ${idx}: ${err.message}`);
   }
 }
 
