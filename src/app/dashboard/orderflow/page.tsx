@@ -1437,15 +1437,13 @@ export default function OrderflowPage() {
               <HelpCircle size={12} className="text-faint shrink-0" />
             </span>
           </button>
-          {/* Не тумблер, а лампочка: карта лимиток живая всегда — выключать
-              обновление нечем и незачем. */}
-          <span
-            className="inline-flex items-center gap-1.5 input-base py-1.5 text-sm text-profit border-profit/40"
-            title={t("of.hintLive")}
-          >
-            <span className="h-2 w-2 rounded-full bg-profit animate-pulse" />
-            LIVE
-          </span>
+          {/* Индикатора LIVE здесь нет намеренно. Тумблер убрали раньше —
+              обновление идёт всегда, — но на его месте осталась «лампочка» в
+              том же классе input-base, что и соседние кнопки: она выглядела
+              кнопкой, хотя ничего не делала. И ничего не показывала: зелёная и
+              пульсирующая независимо от того, идёт опрос или нет (вкладка
+              скрыта, запрос упал — вид тот же). На форексе и карте ликвидаций
+              такого элемента и не было. */}
           <button
             onClick={load}
             className="inline-flex items-center gap-1.5 input-base py-1.5 hover:border-border-strong transition"
