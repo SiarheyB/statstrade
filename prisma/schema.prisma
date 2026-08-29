@@ -338,6 +338,11 @@ model Fill {
 // миграцию partition_ob_tables) и НЕ имеет PK — @id здесь только для типизации
 // клиента Prisma. Дневные партиции создаёт collector (ob_ensure_partitions),
 // чистка = DROP партиции (ob_drop_partitions_before) вместо DELETE.
+//
+// «НЕ имеет PK» стало правдой только в миграции drop_unused_partition_pk: до
+// неё PK (id, t) стоял на каждой партиции с idx_scan = 0 — по id эти таблицы
+// не читает никто. Колонка id и её sequence остались: 8 байт на строку против
+// 24+ у индексной записи, а NULL в ней сломал бы чтение модели с BigInt @id.
 model ObTrade {
   id       BigInt   @id @default(autoincrement())
   symbol   String
