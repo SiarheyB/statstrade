@@ -3,6 +3,7 @@
 // Модуль обязан оставаться edge-совместимым (без prisma, без node:crypto):
 // его вызывает middleware. Запись в БД — отдельно, см. ingest.ts.
 
+import { clientIpFromHeaders } from "@/lib/clientIp";
 import { detectBot, type BotVerdict } from "./bots";
 import { parseUa, primaryLang } from "./ua";
 import { classifySource, type SourceKind } from "./referrer";
@@ -108,14 +109,18 @@ export function countryFromHeaders(h: Headers): string | null {
   return null;
 }
 
-/** IP клиента из заголовков прокси (nginx/Cloudflare/туннель). */
-export function clientIpFromHeaders(h: Headers): string {
-  const cf = h.get("cf-connecting-ip");
-  if (cf) return cf.trim();
-  const xff = h.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return h.get("x-real-ip")?.trim() || "unknown";
-}
+/**
+ * IP клиента из заголовков прокси — общая реализация, см. lib/clientIp.ts
+ * (там разобрано, почему первому элементу x-forwarded-for и заголовку
+ * cf-connecting-ip доверять нельзя).
+ *
+ * Здесь это важно не меньше: из IP считается visitorId, а по нему работает
+ * защита от заливки таблицы просмотров (floodCheck). Подделываемый IP означал
+ * новый «посетитель» на каждый запрос и обход этой защиты.
+ *
+ * Реэкспорт, а не своя копия: две копии этой функции уже расходились.
+ */
+export { clientIpFromHeaders };
 
 export type BuildHitInput = {
   url: URL;

@@ -2,6 +2,8 @@
 // общей Map достаточно (при масштабировании на реплики → вынести в Redis).
 // Скользящее окно: храним таймстемпы попыток по ключу и чистим старые.
 
+import { clientIpFromRequest } from "./clientIp";
+
 type Bucket = number[];
 const buckets = new Map<string, Bucket>();
 
@@ -35,12 +37,10 @@ export function rateLimit(key: string, limit: number, windowMs: number): RateRes
   return { ok: true, retryAfterSec: 0 };
 }
 
-// IP клиента. За Cloudflare-туннелем реальный адрес — в cf-connecting-ip; иначе
-// первый в x-forwarded-for. Фолбэк, чтобы ключ всегда был непустой.
+// IP клиента — ключ всех лимитов. Реализация в lib/clientIp.ts: её же
+// использует статистика посещаемости из edge-middleware, и держать две копии
+// уже приводило к расхождению.
+export { clientIpFromHeaders } from "./clientIp";
 export function clientIp(req: Request): string {
-  const cf = req.headers.get("cf-connecting-ip");
-  if (cf) return cf.trim();
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0].trim();
-  return req.headers.get("x-real-ip")?.trim() || "unknown";
+  return clientIpFromRequest(req);
 }

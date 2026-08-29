@@ -112,48 +112,73 @@ describe('rateLimit', () => {
 });
 
 describe('clientIp', () => {
-  it('gets IP from cf-connecting-ip header', () => {
-    const req = new Request('http://test.com', {
-      headers: { 'cf-connecting-ip': '1.2.3.4' },
-    });
-    expect(clientIp(req)).toBe('1.2.3.4');
-  });
+  // Заголовки IP приходят снаружи, и всё, что клиент может написать сам,
+  // доверия не заслуживает: по этому значению ключуются лимиты входа,
+  // регистрации и 2FA. Наш nginx выставляет x-real-ip и x-forwarded-for
+  // ЗАМЕНОЙ и затирает cf-connecting-ip (см. deploy/nginx/nginx.conf).
 
-  it('gets IP from X-Forwarded-For', () => {
-    const req = new Request('http://test.com', {
-      headers: { 'x-forwarded-for': '5.6.7.8, 9.10.11.12' },
-    });
-    expect(clientIp(req)).toBe('5.6.7.8');
-  });
-
-  it('falls back to x-real-ip', () => {
+  it('берёт x-real-ip — его проставляет наш прокси', () => {
     const req = new Request('http://test.com', {
       headers: { 'x-real-ip': '13.14.15.16' },
     });
     expect(clientIp(req)).toBe('13.14.15.16');
   });
 
-  it('returns "unknown" for missing headers', () => {
+  it('из x-forwarded-for берёт ПОСЛЕДНИЙ элемент, а не первый', () => {
+    // Первый элемент цепочки — то, что прислал клиент; ближайший к нам
+    // (последний) проставлен прокси.
     const req = new Request('http://test.com', {
-      headers: {},
+      headers: { 'x-forwarded-for': '5.6.7.8, 9.10.11.12' },
+    });
+    expect(clientIp(req)).toBe('9.10.11.12');
+  });
+
+  it('игнорирует cf-connecting-ip, пока Cloudflare не объявлен явно', () => {
+    // Раньше он читался первым — и одного такого заголовка со случайным
+    // значением хватало, чтобы обойти любой лимит.
+    const req = new Request('http://test.com', {
+      headers: { 'cf-connecting-ip': '1.1.1.1', 'x-real-ip': '2.2.2.2' },
+    });
+    expect(clientIp(req)).toBe('2.2.2.2');
+  });
+
+  it('подделанный cf-connecting-ip не подменяет адрес и без других заголовков', () => {
+    const req = new Request('http://test.com', {
+      headers: { 'cf-connecting-ip': '1.1.1.1' },
     });
     expect(clientIp(req)).toBe('unknown');
   });
 
-  it('trims whitespace from headers', () => {
+  it('читает cf-connecting-ip, когда TRUST_CF_HEADERS=1', () => {
+    const prev = process.env.TRUST_CF_HEADERS;
+    process.env.TRUST_CF_HEADERS = '1';
+    try {
+      const req = new Request('http://test.com', {
+        headers: { 'cf-connecting-ip': '  1.1.1.1  ', 'x-real-ip': '2.2.2.2' },
+      });
+      expect(clientIp(req)).toBe('1.1.1.1');
+    } finally {
+      if (prev === undefined) delete process.env.TRUST_CF_HEADERS;
+      else process.env.TRUST_CF_HEADERS = prev;
+    }
+  });
+
+  it('x-real-ip важнее цепочки x-forwarded-for', () => {
     const req = new Request('http://test.com', {
-      headers: { 'cf-connecting-ip': '  192.168.1.1  ' },
+      headers: { 'x-real-ip': '3.3.3.3', 'x-forwarded-for': '4.4.4.4' },
+    });
+    expect(clientIp(req)).toBe('3.3.3.3');
+  });
+
+  it('обрезает пробелы', () => {
+    const req = new Request('http://test.com', {
+      headers: { 'x-real-ip': '  192.168.1.1  ' },
     });
     expect(clientIp(req)).toBe('192.168.1.1');
   });
 
-  it('prefers cf-connecting-ip over x-forwarded-for', () => {
-    const req = new Request('http://test.com', {
-      headers: {
-        'cf-connecting-ip': '1.1.1.1',
-        'x-forwarded-for': '2.2.2.2',
-      },
-    });
-    expect(clientIp(req)).toBe('1.1.1.1');
+  it('возвращает "unknown", когда заголовков нет', () => {
+    const req = new Request('http://test.com', { headers: {} });
+    expect(clientIp(req)).toBe('unknown');
   });
 });

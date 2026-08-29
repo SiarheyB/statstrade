@@ -17,10 +17,21 @@ function headers(extra: Record<string, string> = {}) {
 const NOW = new Date("2026-08-19T10:00:00Z");
 
 describe("clientIpFromHeaders", () => {
-  it("берёт адрес из заголовков прокси по приоритету", () => {
-    expect(clientIpFromHeaders(new Headers({ "cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2" }))).toBe("1.1.1.1");
-    expect(clientIpFromHeaders(new Headers({ "x-forwarded-for": "2.2.2.2, 10.0.0.1" }))).toBe("2.2.2.2");
+  // Из IP считается visitorId, а по нему работает защита от заливки таблицы
+  // просмотров (floodCheck в ingest.ts). Подделываемый адрес = новый
+  // «посетитель» на каждый запрос и обход этой защиты. Общая реализация с
+  // лимитами — см. lib/ratelimit.ts.
+  it("доверяет только тому, что проставил наш прокси", () => {
+    expect(clientIpFromHeaders(new Headers({ "x-real-ip": "3.3.3.3" }))).toBe("3.3.3.3");
+    // последний элемент цепочки — ближайший к нам; всё левее мог написать клиент
+    expect(clientIpFromHeaders(new Headers({ "x-forwarded-for": "2.2.2.2, 10.0.0.1" }))).toBe("10.0.0.1");
     expect(clientIpFromHeaders(new Headers())).toBe("unknown");
+  });
+
+  it("не даёт подменить адрес заголовком cf-connecting-ip", () => {
+    expect(
+      clientIpFromHeaders(new Headers({ "cf-connecting-ip": "1.1.1.1", "x-real-ip": "3.3.3.3" })),
+    ).toBe("3.3.3.3");
   });
 });
 
