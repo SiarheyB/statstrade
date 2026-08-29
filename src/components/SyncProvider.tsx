@@ -198,6 +198,12 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
   useEffect(() => {
     let cancelled = false;
     async function tick() {
+      // Свёрнутую или фоновую вкладку не дёргаем — так же, как страницы
+      // графиков. Провайдер живёт в layout кабинета, то есть тик шёл раз в
+      // минуту с ЛЮБОЙ открытой страницы, включая забытую в другой вкладке.
+      // Ничего не теряем: следующий тик после возврата всё равно поднимет
+      // просроченный авто-синк, он определяется по lastSyncAt, а не по счётчику.
+      if (document.hidden) return;
       try {
         const res = await fetch("/api/accounts");
         if (!res.ok || cancelled) return;

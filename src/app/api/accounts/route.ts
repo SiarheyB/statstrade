@@ -21,15 +21,51 @@ const createSchema = z.object({
   demoTrading: z.boolean().optional().default(false),
 });
 
-export async function GET() {
+// Поля, которые реально уезжают в ответ. Раньше select не было вовсе, и Prisma
+// тянула ВСЕ скалярные колонки — включая зашифрованные apiSecret и passphrase
+// (наружу они не отдаются, поднимать их в память приложения незачем) и
+// syncPlan: JSON со списком всех торговых пар, на полном скане Binance это
+// десятки килобайт. И всё это на каждом опросе.
+const ACCOUNT_FIELDS = {
+  id: true, exchange: true, label: true, source: true, accountCurrency: true,
+  marketType: true, demoTrading: true, balance: true, capital: true,
+  apiKey: true, // нужен только чтобы показать маску последних символов
+  lastSyncAt: true, syncStatus: true, syncError: true, syncPhase: true,
+  syncCursor: true, syncTotal: true, syncImported: true, fullSyncAt: true,
+  autoSync: true, syncIntervalMinutes: true, createdAt: true,
+} as const;
+
+/**
+ * ?counts=1 — досчитать число филлов и импортированных сделок по счёту.
+ *
+ * Это два COUNT(*) на КАЖДЫЙ счёт: на счёте с сотнями тысяч филлов — полный
+ * проход по индексу. Показывает их одна страница «Счета», а дёргают этот роут
+ * восемь мест, и SyncProvider — раз в минуту с любой страницы кабинета, пока
+ * открыта хоть одна вкладка. Считать их всем и всегда незачем.
+ */
+export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+
+  const withCounts = new URL(req.url).searchParams.get("counts") === "1";
 
   const accounts = await prisma.exchangeAccount.findMany({
     where: { userId: user.userId },
     orderBy: { createdAt: "asc" },
-    include: { _count: { select: { fills: true, importedTrades: true } } },
+    select: ACCOUNT_FIELDS,
   });
+
+  // Счётчики — двумя групповыми запросами на все счета сразу, а не include
+  // _count (тот считает по каждому счёту отдельно). Пустые Map, если не просили.
+  const ids = accounts.map((a) => a.id);
+  const [fillCounts, importedCounts] = withCounts && ids.length
+    ? await Promise.all([
+        prisma.fill.groupBy({ by: ["accountId"], where: { accountId: { in: ids } }, _count: { _all: true } }),
+        prisma.importedTrade.groupBy({ by: ["accountId"], where: { accountId: { in: ids } }, _count: { _all: true } }),
+      ])
+    : [[], []];
+  const fillsBy = new Map(fillCounts.map((r) => [r.accountId, r._count._all]));
+  const importedBy = new Map(importedCounts.map((r) => [r.accountId, r._count._all]));
 
   return NextResponse.json(
     accounts.map((a) => ({
@@ -43,7 +79,9 @@ export async function GET() {
       balance: a.balance,
       capital: a.capital,
       apiKeyMasked: a.apiKey ? maskSecret(safeDecrypt(a.apiKey)) : null,
-      importedCount: a._count.importedTrades,
+      // Без ?counts=1 остаются нулями: форма ответа не меняется, потребителям
+      // без счётчиков они и не нужны (см. ACCOUNT_FIELDS выше).
+      importedCount: importedBy.get(a.id) ?? 0,
       lastSyncAt: a.lastSyncAt,
       syncStatus: a.syncStatus,
       syncError: a.syncError,
@@ -54,7 +92,7 @@ export async function GET() {
       fullSyncAt: a.fullSyncAt,
       autoSync: a.autoSync,
       syncIntervalMinutes: a.syncIntervalMinutes,
-      fillCount: a._count.fills,
+      fillCount: fillsBy.get(a.id) ?? 0,
       createdAt: a.createdAt,
     })),
   );

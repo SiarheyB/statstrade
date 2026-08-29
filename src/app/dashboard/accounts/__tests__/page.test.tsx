@@ -86,7 +86,7 @@ beforeEach(() => {
   };
   global.confirm = vi.fn(() => true) as unknown as typeof confirm;
   global.fetch = vi.fn((url: string) => {
-    if (url === "/api/accounts") return jsonRes([]);
+    if (url.split("?")[0] === "/api/accounts") return jsonRes([]);
     return jsonRes({});
   }) as unknown as typeof fetch;
 });
@@ -105,7 +105,7 @@ describe("AccountsPage", () => {
 
   it("renders accounts once loaded", async () => {
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([account1]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([account1]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -116,7 +116,7 @@ describe("AccountsPage", () => {
 
   it("renders MT account with import/rollback controls instead of sync", async () => {
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([mtAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -137,7 +137,7 @@ describe("AccountsPage", () => {
 
   it("calls syncAccount when clicking sync on a non-MT account", async () => {
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([account1]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([account1]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -149,7 +149,7 @@ describe("AccountsPage", () => {
 
   it("removes an account after confirming deletion", async () => {
     global.fetch = vi.fn((url: string, opts?: RequestInit) => {
-      if (url === "/api/accounts" && (!opts || opts.method === undefined)) return jsonRes([account1]);
+      if (url.split("?")[0] === "/api/accounts" && (!opts || opts.method === undefined)) return jsonRes([account1]);
       if (url === "/api/accounts/acc1" && opts?.method === "DELETE") return jsonRes({});
       return jsonRes({});
     }) as unknown as typeof fetch;
@@ -170,7 +170,7 @@ describe("AccountsPage", () => {
   it("shows a permission-error banner for sync errors matching known keywords", async () => {
     const errAccount = { ...account1, syncError: "HTTP 403 forbidden" };
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([errAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([errAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -182,7 +182,7 @@ describe("AccountsPage", () => {
   it("shows plain error text for non-permission sync errors", async () => {
     const errAccount = { ...account1, syncError: "Some random failure" };
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([errAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([errAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -210,7 +210,7 @@ describe("AccountsPage — прогресс импорта", () => {
   it("shows the upload percentage while the file is being sent", async () => {
     syncState.importing = { "acc-mt": { phase: "upload", loaded: 512, total: 1024 } };
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([mtAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -224,7 +224,7 @@ describe("AccountsPage — прогресс импорта", () => {
   it("shows the processing phase without a percentage", async () => {
     syncState.importing = { "acc-mt": { phase: "processing", loaded: 1024, total: 1024 } };
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([mtAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 
@@ -235,7 +235,7 @@ describe("AccountsPage — прогресс импорта", () => {
 
   it("renders no import progress when nothing is running", async () => {
     global.fetch = vi.fn((url: string) => {
-      if (url === "/api/accounts") return jsonRes([mtAccount]);
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([mtAccount]);
       return jsonRes({});
     }) as unknown as typeof fetch;
 

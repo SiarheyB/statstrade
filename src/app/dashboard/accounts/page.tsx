@@ -92,7 +92,10 @@ export default function AccountsPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await fetch("/api/accounts");
+    // ?counts=1 — только эта страница показывает число филлов и импортированных
+    // сделок; остальным потребителям /api/accounts они не нужны, а это два
+    // COUNT(*) на каждый счёт (см. роут).
+    const res = await fetch("/api/accounts?counts=1");
     if (res.ok) setAccounts(await res.json());
     setLoading(false);
   }, []);

@@ -74,6 +74,8 @@ export const mockPrisma = {
   fill: {
     count: vi.fn().mockResolvedValue(0),
     findMany: vi.fn().mockResolvedValue([]),
+    // Счётчики филлов по счетам — одним групповым запросом (см. /api/accounts).
+    groupBy: vi.fn().mockResolvedValue([]),
   },
 
   riskProfile: {
@@ -87,6 +89,7 @@ export const mockPrisma = {
     findFirst: vi.fn().mockResolvedValue(null),
     createMany: vi.fn().mockResolvedValue({ count: 0 }),
     deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    groupBy: vi.fn().mockResolvedValue([]),
   },
 
   user: {
