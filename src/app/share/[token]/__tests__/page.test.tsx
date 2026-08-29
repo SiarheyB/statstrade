@@ -35,7 +35,7 @@ vi.mock("@/lib/mentorShare", async (importOriginal) => ({
 
 import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { computePublicSummary, computePublicTrades } from "@/lib/mentorShare";
+import { resetShareCache, computePublicSummary, computePublicTrades } from "@/lib/mentorShare";
 import SharePage from "../page";
 
 const mockedFindUnique = prisma.shareLink.findUnique as unknown as ReturnType<typeof vi.fn>;
@@ -66,6 +66,7 @@ const TRADE = {
 };
 
 beforeEach(() => {
+  resetShareCache(); // кэш общий на модуль — иначе случаи видят чужой результат
   vi.clearAllMocks();
   (prisma.shareLink.update as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({});
   mockedComputePublicTrades.mockResolvedValue([]);

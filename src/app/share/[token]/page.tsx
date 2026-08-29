@@ -11,6 +11,7 @@ import {
   computePublicTrades,
   formatRangeDate,
   isExpired,
+  touchShareView,
   PUBLIC_TRADES_LIMIT,
 } from "@/lib/mentorShare";
 
@@ -37,7 +38,9 @@ export default async function SharePage({ params }: { params: Promise<{ token: s
   // незачем понимать, была она когда-то живой или её вовсе не существовало.
   if (!link || link.revokedAt || isExpired(link.expiresAt)) return <Unavailable t={t} />;
 
-  prisma.shareLink.update({ where: { id: link.id }, data: { lastViewedAt: new Date() } }).catch(() => {});
+  // Отметка «открывали» — не чаще раза в минуту на ссылку: раньше это была
+  // запись в БД на каждый показ страницы (см. touchShareView).
+  touchShareView(link.id);
 
   // link.accountId = null — ссылка на все счета сразу; обе границы null — за всё время.
   const range = { from: link.periodFrom, to: link.periodTo };

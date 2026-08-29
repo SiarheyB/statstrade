@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   importedTradeFindMany: vi.fn().mockResolvedValue([]),
   exchangeAccountFindMany: vi.fn().mockResolvedValue([]),
   tradeAnnotationFindMany: vi.fn().mockResolvedValue([]),
+  shareLinkUpdate: vi.fn().mockResolvedValue({}),
 }));
 
 vi.mock('@/lib/db', () => ({
@@ -14,6 +15,7 @@ vi.mock('@/lib/db', () => ({
     importedTrade: { findMany: mocks.importedTradeFindMany },
     exchangeAccount: { findMany: mocks.exchangeAccountFindMany },
     tradeAnnotation: { findMany: mocks.tradeAnnotationFindMany },
+    shareLink: { update: mocks.shareLinkUpdate },
   },
 }));
 
@@ -29,7 +31,8 @@ vi.mock('@/lib/analytics/metrics', () => ({
   }),
 }));
 
-import {
+import { resetShareCache,
+  touchShareView,
   computePublicSummary,
   expiryFrom,
   isExpired,
@@ -41,6 +44,7 @@ import {
 
 describe('mentorShare module', () => {
   beforeEach(() => {
+    resetShareCache(); // кэш общий на модуль — иначе случаи видят чужой результат
     vi.clearAllMocks();
     mocks.tradeFindMany.mockResolvedValue([]);
     mocks.importedTradeFindMany.mockResolvedValue([]);
@@ -378,3 +382,62 @@ describe('mentorShare module', () => {
     });
   });
 });
+  describe('кэш и отметка просмотра', () => {
+    beforeEach(() => {
+      // Блок вне внешнего describe, поэтому общий сброс сюда не доходит.
+      resetShareCache();
+      vi.clearAllMocks();
+      mocks.tradeFindMany.mockResolvedValue([]);
+      mocks.importedTradeFindMany.mockResolvedValue([]);
+      mocks.exchangeAccountFindMany.mockResolvedValue([]);
+      mocks.tradeAnnotationFindMany.mockResolvedValue([]);
+      mocks.shareLinkUpdate.mockResolvedValue({});
+    });
+
+    it('повторный заход по той же ссылке не идёт в базу заново', async () => {
+      // Страница публичная и force-dynamic: её открывает кто угодно, сколько
+      // угодно раз, а сводка тянет ВСЮ историю сделок владельца.
+      mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a1', balance: 500 }]);
+      await computePublicSummary('user123', null, null);
+      const after1 = mocks.tradeFindMany.mock.calls.length;
+      await computePublicSummary('user123', null, null);
+      expect(mocks.tradeFindMany.mock.calls.length).toBe(after1);
+    });
+
+    it('другой счёт или другой период — своя запись кэша', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a1', balance: 500 }]);
+      await computePublicSummary('user123', null, null);
+      const after1 = mocks.tradeFindMany.mock.calls.length;
+      await computePublicSummary('user123', 'a1', null);
+      expect(mocks.tradeFindMany.mock.calls.length).toBeGreaterThan(after1);
+      const after2 = mocks.tradeFindMany.mock.calls.length;
+      await computePublicSummary('user123', 'a1', { from: new Date(1), to: null });
+      expect(mocks.tradeFindMany.mock.calls.length).toBeGreaterThan(after2);
+    });
+
+    it('сводка и список сделок кэшируются раздельно', async () => {
+      mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a1', balance: 500, label: 'L', exchange: 'binance' }]);
+      await computePublicSummary('user123', null, null);
+      const after = mocks.tradeFindMany.mock.calls.length;
+      await computePublicTrades('user123', null, null);
+      expect(mocks.tradeFindMany.mock.calls.length).toBeGreaterThan(after);
+    });
+
+    it('отметка просмотра пишется раз в минуту, а не на каждый показ', () => {
+      const t0 = 1_700_000_000_000;
+      touchShareView('link1', t0);
+      touchShareView('link1', t0 + 1_000);
+      touchShareView('link1', t0 + 30_000);
+      expect(mocks.shareLinkUpdate).toHaveBeenCalledTimes(1);
+      touchShareView('link1', t0 + 61_000);
+      expect(mocks.shareLinkUpdate).toHaveBeenCalledTimes(2);
+    });
+
+    it('троттлинг считается по каждой ссылке отдельно', () => {
+      const t0 = 1_700_000_000_000;
+      touchShareView('link1', t0);
+      touchShareView('link2', t0);
+      expect(mocks.shareLinkUpdate).toHaveBeenCalledTimes(2);
+    });
+  });
+

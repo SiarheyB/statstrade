@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { prisma } from '@/lib/db';
+import { createRouteCache } from '@/lib/routeCache';
 import { computeMetrics } from '@/lib/analytics/metrics';
 import type { RoundTripTrade, TradeSide, TradeResult } from '@/lib/analytics/types';
 
@@ -13,7 +14,37 @@ export function generateShareToken(): string {
 // only needs the big-picture numbers (no per-tag filters, no annotations), so
 // this stays simple rather than threading an unauthenticated request through
 // the full authenticated stats pipeline.
-export async function computePublicSummary(
+/**
+ * Кэш обеих тяжёлых выборок менторской страницы.
+ *
+ * Страница публичная и force-dynamic: её открывает кто угодно, у кого есть
+ * ссылка, сколько угодно раз, и каждый заход считался заново. Сводка при этом
+ * тянет ВСЮ историю сделок владельца (при периоде «за всё время» — без
+ * ограничения по количеству) и прогоняет её через computeMetrics.
+ *
+ * Ключ включает всё, что влияет на результат: владелец, счёт и период ссылки.
+ * Минуту эти цифры не меняются — сделка закрывается не чаще.
+ */
+const SHARE_TTL_MS = 60_000;
+const SHARE_STALE_MS = 5 * 60_000;
+let shareCache = createRouteCache(SHARE_TTL_MS, 100, { staleMs: SHARE_STALE_MS });
+/** Когда по каждой ссылке последний раз писали lastViewedAt (см. touchShareView). */
+const lastViewWrites = new Map<string, number>();
+
+/**
+ * Сбросить кэш и троттлинг отметки просмотра — общее состояние модуля.
+ * Нужен тестам (иначе случаи видят результат соседа) и как точка для отладки.
+ */
+export function resetShareCache(): void {
+  shareCache = createRouteCache(SHARE_TTL_MS, 100, { staleMs: SHARE_STALE_MS });
+  lastViewWrites.clear();
+}
+
+function shareKey(kind: string, userId: string, accountId?: string | null, range?: ShareRange | null): string {
+  return JSON.stringify([kind, userId, accountId ?? null, range?.from?.getTime() ?? null, range?.to?.getTime() ?? null]);
+}
+
+async function computePublicSummaryUncached(
   userId: string,
   accountId?: string | null,
   range?: ShareRange | null,
@@ -274,7 +305,7 @@ const EMPTY_NOTES = {
   note: null,
 } satisfies Pick<PublicTrade, "imageUrl" | "stopLoss" | "entryPoint" | "entryType" | "pattern" | "mistake" | "note">;
 
-export async function computePublicTrades(
+async function computePublicTradesUncached(
   userId: string,
   accountId?: string | null,
   range?: ShareRange | null,
@@ -390,4 +421,56 @@ export async function computePublicTrades(
   return accounts
     .filter((a) => byAccount.has(a.id))
     .map((a) => ({ accountId: a.id, label: a.label, exchange: a.exchange, trades: byAccount.get(a.id) ?? [] }));
+}
+
+
+// ─── Кэшированные точки входа ───────────────────────────────────────────────
+//
+// Страница зовёт только их. Реализации выше остаются «сырыми», чтобы их можно
+// было проверять тестами без кэша между вызовами.
+
+export function computePublicSummary(
+  userId: string,
+  accountId?: string | null,
+  range?: ShareRange | null,
+) {
+  return shareCache.fetch(shareKey("summary", userId, accountId, range), () =>
+    computePublicSummaryUncached(userId, accountId, range),
+  );
+}
+
+export function computePublicTrades(
+  userId: string,
+  accountId?: string | null,
+  range?: ShareRange | null,
+): Promise<PublicAccountTrades[]> {
+  return shareCache.fetch(shareKey("trades", userId, accountId, range), () =>
+    computePublicTradesUncached(userId, accountId, range),
+  );
+}
+
+/** Только для тестов: посмотреть, что кэш вообще наполняется. */
+export function shareCacheSize(): number {
+  return shareCache.size();
+}
+
+// ─── Отметка «ссылку открывали» ─────────────────────────────────────────────
+//
+// Писалась на КАЖДЫЙ показ страницы. Точность тут не нужна: значение видно в
+// настройках ментор-режима как «последний просмотр», и минутной гранулярности
+// с запасом хватает. Тот же приём, что у touchLastSeen в lib/api.ts.
+const VIEW_THROTTLE_MS = 60_000;
+
+export function touchShareView(linkId: string, now = Date.now()): void {
+  const prev = lastViewWrites.get(linkId) ?? 0;
+  if (now - prev < VIEW_THROTTLE_MS) return;
+  lastViewWrites.set(linkId, now);
+  // Карта не растёт бесконечно: ссылок у пользователя единицы, но подчистим
+  // протухшее, если их вдруг окажется много.
+  if (lastViewWrites.size > 500) {
+    for (const [k, at] of lastViewWrites) if (now - at > VIEW_THROTTLE_MS) lastViewWrites.delete(k);
+  }
+  prisma.shareLink
+    .update({ where: { id: linkId }, data: { lastViewedAt: new Date(now) } })
+    .catch(() => lastViewWrites.delete(linkId));
 }
