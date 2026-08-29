@@ -62,7 +62,6 @@ import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
-import { visibleScale } from "@/lib/heatmapScale";
 
 type ObHeatmap = {
   priceMin: number;
@@ -71,10 +70,6 @@ type ObHeatmap = {
   cols: number;
   grid: number[][];
   maxVal: number;
-  // Масштаб яркости (99-й перцентиль непустых ячеек, см. heatmapScale в
-  // lib/orderflow.ts). Может отсутствовать у ответа, отданного старой версией
-  // API из кэша, — тогда падаем на maxVal, как было раньше.
-  scaleVal?: number;
   price: number;
   times: number[];
   profileBid: number[];
@@ -144,12 +139,7 @@ function baseAsset(symbol: string): string {
 }
 
 const WALL_LEVELS = 8;
-/** Масштаб на весь загруженный кусок; запасной вариант, когда видимого нет. */
-function heatmapScaleOf(hm: ObHeatmap): number {
-  return hm.scaleVal && hm.scaleVal > 0 ? hm.scaleVal : hm.maxVal;
-}
-
-function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number, scale: number): HTMLCanvasElement {
+function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number): HTMLCanvasElement {
   const cv = document.createElement("canvas");
   cv.width = hm.cols;
   cv.height = hm.bins;
@@ -158,10 +148,7 @@ function buildOffscreen(hm: ObHeatmap, minT: number, gamma: number, scale: numbe
   for (let c = 0; c < hm.cols; c++) {
     const col = hm.grid[c];
     for (let b = 0; b < hm.bins; b++) {
-      // Масштаб приходит снаружи и считается по ВИДИМОЙ части карты
-      // (см. lib/heatmapScale.ts): ячейки крупнее него упираются в потолок
-      // яркости, а не задают его для всего окна.
-      const lin = scale ? Math.min(1, col[b] / scale) : 0;
+      const lin = hm.maxVal ? col[b] / hm.maxVal : 0;
       const row = hm.bins - 1 - b;
       const idx = (row * hm.cols + c) * 4;
       if (lin < minT) {
@@ -272,8 +259,6 @@ export default function OrderflowPage() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const deltaRef = useRef<HTMLCanvasElement>(null);
   const offRef = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
-  // Масштаб яркости видимого окна: пересчитывается при пане/зуме (см. visibleScale).
-  const scaleCacheRef = useRef<{ key: string; value: number }>({ key: "", value: 0 });
   // Кэш fYMin/fYMax/candleStep — иначе draw() проходил бы весь массив свечей
   // (до MAX_HISTORY_CANDLES) на каждый вызов, включая чисто hover-редрои.
   const rangeCacheRef = useRef<{
@@ -954,29 +939,10 @@ export default function OrderflowPage() {
     ctx.clip();
 
     if (showLiq) {
-      // Масштаб яркости — один на весь кадр (живое окно + догруженные куски),
-      // иначе соседние участки карты светились бы по-разному. Считается по
-      // видимому диапазону, поэтому меняется при пане/зуме — кэшируем, чтобы
-      // не пересобирать растр, пока картинка та же.
-      const scaleSources = [
-        ...(hm ? [hm] : []),
-        ...historySegmentsRef.current.flatMap((sg) => (sg.heatmap ? [sg.heatmap] : [])),
-      ];
-      // maxVal в ключе — чтобы масштаб пересчитался, когда карта доедет: свечи
-      // приходят первой фазой загрузки, и на этом кадре наложений ещё нет.
-      // Без него в кэш попадал ноль «по пустым данным» и оставался там: карта
-      // приходила, а рисовать было уже нечем.
-      const scaleKey = `${Math.round(t0 / 60_000)}:${Math.round(t1 / 60_000)}:${historyVersion}:${hm?.maxVal ?? 0}`;
-      if (scaleCacheRef.current.key !== scaleKey) {
-        const value = visibleScale(scaleSources, t0, t1) || (hm ? heatmapScaleOf(hm) : 0);
-        scaleCacheRef.current = { key: scaleKey, value };
-      }
-      const scale = scaleCacheRef.current.value;
-
       // Сначала — догруженные куски истории (каждый со своей сеткой времени и
       // цен), затем поверх живое окно. Без этого при скролле влево оставались
       // одни свечи: карта лимиток заканчивалась на границе исходного окна.
-      const sig = `${minT}:${gamma}:${scale}`;
+      const sig = `${minT}:${gamma}`;
       if (segOffscreenRef.current.sig !== sig) {
         segOffscreenRef.current = { sig, map: new Map() };
       }
@@ -990,7 +956,7 @@ export default function OrderflowPage() {
         if (segT1 < t0 || segT0 > t1) continue; // целиком за пределами видимого окна
         let raster = segMap.get(seg.from);
         if (!raster) {
-          raster = buildOffscreen(shm, minT, gamma, scale);
+          raster = buildOffscreen(shm, minT, gamma);
           segMap.set(seg.from, raster);
         }
         const x0 = sx(segT0);
@@ -1006,9 +972,9 @@ export default function OrderflowPage() {
       ctx.imageSmoothingEnabled = true;
 
       if (hm) {
-      const key = `${data.from}:${data.to}:${minT}:${gamma}:${scale}`;
+      const key = `${data.from}:${data.to}:${minT}:${gamma}`;
       if (!offRef.current || offRef.current.key !== key) {
-        offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma, scale) };
+        offRef.current = { key, canvas: buildOffscreen(hm, minT, gamma) };
       }
       const hmX0 = sx(hm.times[0] ?? t0);
       const hmX1 = sx(hm.times[hm.cols - 1] ?? t1);
@@ -1294,12 +1260,7 @@ export default function OrderflowPage() {
       drawTimeCrosshairTag(ctx, timeLabel, cx, layout);
 
       const base = baseAsset(data.symbol);
-      // Порог «это стена» — по тому же масштабу, что и яркость (он посчитан
-      // выше по видимому окну): иначе подпись появлялась бы там, где на карте
-      // ничего не нарисовано, и наоборот.
-      const wallScale = scaleCacheRef.current.value || (hm ? heatmapScaleOf(hm) : 0);
-      const hasWall = showLiq && insideHeatmap && !!hm && wallScale > 0
-        && vol / wallScale >= minT;
+      const hasWall = showLiq && insideHeatmap && !!hm && hm.maxVal > 0 && vol / hm.maxVal >= minT;
       if (hasWall) {
         const lines = [
           t("of.tipLimitOrder"),
