@@ -14,6 +14,9 @@ import { createOkxBook } from "./okx.mjs";
 import { createTradeFeed } from "./trades.mjs";
 import { prunePartitionedTables } from "./prune.mjs";
 import { rollupCascade as runCascade } from "./cascade.mjs";
+import { flushOne, withTx as withTxPool, insertChunked } from "./flush.mjs";
+// pool один на модуль — прибиваем его к withTx, чтобы вызовы не таскали аргумент.
+const withTx = (fn) => withTxPool(pool, fn);
 
 const cfg = {
   symbols: (process.env.SYMBOLS ?? "BTCUSDT").toUpperCase().split(",").map((s) => s.trim()).filter(Boolean),
@@ -582,40 +585,31 @@ async function flushFootprintRollup(now) {
   const curBucket = Math.floor(now.getTime() / FP_BUCKET_MS) * FP_BUCKET_MS;
   for (const [key, e] of fpRollup) {
     if (e.bucketMs >= curBucket) continue;
-    fpRollup.delete(key);
-    if (e.prices.size === 0) continue;
+    if (e.prices.size === 0) { fpRollup.delete(key); continue; }
     const bucket = new Date(e.bucketMs);
-    try {
-      const values = [];
-      const params = [];
-      let i = 0;
-      for (const [price, cell] of e.prices) {
-        const b = i * 6;
-        values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
-        params.push(e.symbol, e.exchange, bucket, price, cell.buy, cell.sell);
-        i += 1;
-      }
-      await pool.query(
-        `INSERT INTO "ObFootprintRollup" ("symbol","exchange","bucket","price","buyVol","sellVol")
-         VALUES ${values.join(",")}
-         ON CONFLICT ("symbol","exchange","bucket","price")
-         DO UPDATE SET "buyVol" = "ObFootprintRollup"."buyVol" + EXCLUDED."buyVol",
-                       "sellVol" = "ObFootprintRollup"."sellVol" + EXCLUDED."sellVol"`,
-        params,
-      );
-    } catch (err) {
-      console.error(`[rollup] flush футпринта ошибка ${key}: ${err.message}`);
-    }
+    const rows = [...e.prices].map(([price, cell]) => [
+      e.symbol, e.exchange, bucket, price, cell.buy, cell.sell,
+    ]);
+    await flushOne(fpRollup, key, e, "flush футпринта", () =>
+      withTx((client) =>
+        insertChunked(
+          client, "ObFootprintRollup",
+          ["symbol", "exchange", "bucket", "price", "buyVol", "sellVol"], rows,
+          `ON CONFLICT ("symbol","exchange","bucket","price")
+           DO UPDATE SET "buyVol" = "ObFootprintRollup"."buyVol" + EXCLUDED."buyVol",
+                         "sellVol" = "ObFootprintRollup"."sellVol" + EXCLUDED."sellVol"`,
+        ),
+      ),
+    );
   }
 }
 
 async function flushTradeRollup(curBucket) {
   for (const [key, e] of tradeRollup) {
     if (e.bucketMs >= curBucket) continue;
-    tradeRollup.delete(key);
-    if (e.buyVol === 0 && e.sellVol === 0 && e.trades === 0) continue;
-    try {
-      await pool.query(
+    if (e.buyVol === 0 && e.sellVol === 0 && e.trades === 0) { tradeRollup.delete(key); continue; }
+    await flushOne(tradeRollup, key, e, "flush ленты", () =>
+      pool.query(
         `INSERT INTO "ObTradeRollup" ("symbol","exchange","bucket","buyVol","sellVol","trades")
          VALUES ($1,$2,$3,$4,$5,$6)
          ON CONFLICT ("symbol","exchange","bucket")
@@ -623,10 +617,8 @@ async function flushTradeRollup(curBucket) {
                        "sellVol" = "ObTradeRollup"."sellVol" + EXCLUDED."sellVol",
                        "trades" = "ObTradeRollup"."trades" + EXCLUDED."trades"`,
         [e.symbol, e.exchange, new Date(e.bucketMs), e.buyVol, e.sellVol, e.trades],
-      );
-    } catch (err) {
-      console.error(`[rollup] flush ленты ошибка ${key}: ${err.message}`);
-    }
+      ),
+    );
   }
 }
 
@@ -638,39 +630,35 @@ async function flushRollup(now) {
   await flushFootprintRollup(now);
   for (const [key, e] of rollup) {
     if (e.bucketMs >= curBucket) continue;
-    rollup.delete(key);
-    if (e.snaps === 0 || e.prices.size === 0) continue;
+    if (e.snaps === 0 || e.prices.size === 0) { rollup.delete(key); continue; }
     const bucket = new Date(e.bucketMs);
-    try {
-      await pool.query(
-        `INSERT INTO "ObRollupBucket" ("symbol","exchange","bucket","snaps","midSum")
-         VALUES ($1,$2,$3,$4,$5)
-         ON CONFLICT ("symbol","exchange","bucket")
-         DO UPDATE SET "snaps" = "ObRollupBucket"."snaps" + EXCLUDED."snaps",
-                       "midSum" = "ObRollupBucket"."midSum" + EXCLUDED."midSum"`,
-        [e.symbol, e.exchange, bucket, e.snaps, e.midSum],
-      );
-      const values = [];
-      const params = [];
-      let i = 0;
-      for (const [price, cell] of e.prices) {
-        const b = i * 7;
-        values.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6},$${b + 7})`);
-        params.push(e.symbol, e.exchange, bucket, price, cell.vol, cell.bid, cell.ask);
-        i += 1;
-      }
-      await pool.query(
-        `INSERT INTO "ObSnapshotRollup" ("symbol","exchange","bucket","price","volSum","bidSum","askSum")
-         VALUES ${values.join(",")}
-         ON CONFLICT ("symbol","exchange","bucket","price")
-         DO UPDATE SET "volSum" = "ObSnapshotRollup"."volSum" + EXCLUDED."volSum",
-                       "bidSum" = "ObSnapshotRollup"."bidSum" + EXCLUDED."bidSum",
-                       "askSum" = "ObSnapshotRollup"."askSum" + EXCLUDED."askSum"`,
-        params,
-      );
-    } catch (err) {
-      console.error(`[rollup] flush ошибка ${key}: ${err.message}`);
-    }
+    const priceRows = [...e.prices].map(([price, cell]) => [
+      e.symbol, e.exchange, bucket, price, cell.vol, cell.bid, cell.ask,
+    ]);
+    // Счётчик снапшотов и сами цены — В ОДНОЙ транзакции. Порознь было так:
+    // счётчик записался, цены упали — и колонка карты за эту минуту пустая при
+    // ненулевом snaps, то есть средняя «высота стены» за час и сутки занижена.
+    // А с повторной попыткой (upsert складывает) счётчик ещё и удвоился бы.
+    await flushOne(rollup, key, e, "flush", () =>
+      withTx(async (client) => {
+        await client.query(
+          `INSERT INTO "ObRollupBucket" ("symbol","exchange","bucket","snaps","midSum")
+           VALUES ($1,$2,$3,$4,$5)
+           ON CONFLICT ("symbol","exchange","bucket")
+           DO UPDATE SET "snaps" = "ObRollupBucket"."snaps" + EXCLUDED."snaps",
+                         "midSum" = "ObRollupBucket"."midSum" + EXCLUDED."midSum"`,
+          [e.symbol, e.exchange, bucket, e.snaps, e.midSum],
+        );
+        await insertChunked(
+          client, "ObSnapshotRollup",
+          ["symbol", "exchange", "bucket", "price", "volSum", "bidSum", "askSum"], priceRows,
+          `ON CONFLICT ("symbol","exchange","bucket","price")
+           DO UPDATE SET "volSum" = "ObSnapshotRollup"."volSum" + EXCLUDED."volSum",
+                         "bidSum" = "ObSnapshotRollup"."bidSum" + EXCLUDED."bidSum",
+                         "askSum" = "ObSnapshotRollup"."askSum" + EXCLUDED."askSum"`,
+        );
+      }),
+    );
   }
 }
 
@@ -718,7 +706,29 @@ async function writeLatestBooks(books) {
   }
 }
 
+// Проход записи снапшота асинхронный и длинный: N upsert'ов ObLatestBook,
+// четыре многострочных вставки. Если БД тормозит (идёт VACUUM, pruneOld,
+// каскад), он не укладывается в SNAPSHOT_MS, и setInterval запускает
+// следующий поверх — дальше лавина: пул на 4 соединения, очередь растёт,
+// отставание копится. Все прочие периодические задачи такой guard имеют
+// (candlesRunning, pruneBusy, vacuumBusy, allPairsScanRunning) — этот
+// единственный забыли.
+let writeBusy = false;
+
 async function writeSnapshot() {
+  if (writeBusy) {
+    console.warn("[write] предыдущий проход ещё идёт — пропускаем тик");
+    return;
+  }
+  writeBusy = true;
+  try {
+    return await writeSnapshotOnce();
+  } finally {
+    writeBusy = false;
+  }
+}
+
+async function writeSnapshotOnce() {
   const t = new Date();
   const rows = [];
   const latestBooks = [];
@@ -831,7 +841,10 @@ async function writeSnapshot() {
     }
   }
 
-  await flushRollup(t);
+  // flushRollup здесь НЕ вызываем: его гоняет собственный таймер сразу после
+  // границы минуты (startRollupFlushBeat). Вызов отсюда сводил на нет смысл
+  // того таймера — сброс всё равно шёл каждые SNAPSHOT_MS, причём внутри
+  // критического пути записи снапшотов.
 
   const synced = feeds.filter((f) => f.book.synced).length;
   console.log(`[write] t=${t.toISOString()} ob=${rows.length} delta=${tRows.length} fp=${fpRows.length} big=${bigRows.length} feeds=${synced}/${feeds.length}`);
