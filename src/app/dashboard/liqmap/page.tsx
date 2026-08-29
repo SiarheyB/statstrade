@@ -5,8 +5,10 @@ import clsx from "clsx";
 import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
+import TimeframeRail from "@/components/TimeframeRail";
+import { drawTimeCrosshairTag, fmtCrosshairLabel } from "@/lib/candlestickChart";
 import { useI18n } from "@/lib/i18n/provider";
-import { zonedParts, type TimezoneId } from "@/lib/timezone";
+import { zonedParts } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
@@ -73,12 +75,6 @@ function fmtVal(v: number): string {
   if (v >= 1e3) return `${(v / 1e3).toFixed(2)}K`;
   return String(Math.round(v));
 }
-function fmtDT(ms: number, tz: TimezoneId): string {
-  const { y, mo, d, h, mi } = zonedParts(ms, tz);
-  const p = (x: number) => String(x).padStart(2, "0");
-  return `${y}-${p(mo + 1)}-${p(d)} ${p(h)}:${p(mi)}`;
-}
-
 type View = { x0: number; x1: number; y0: number; y1: number };
 
 // Render the grid into a cols×bins offscreen canvas (row 0 = top = high price);
@@ -107,7 +103,7 @@ function buildOffscreen(hm: Heatmap): HTMLCanvasElement {
 }
 
 export default function LiqMapPage() {
-  const { t, timezone } = useI18n();
+  const { t, timezone, locale } = useI18n();
   const [exchange, setExchange] = useState<string>("binance");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
@@ -390,16 +386,27 @@ export default function LiqMapPage() {
       ctx.fillText(fmtP(priceH), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, hov.my + 3)));
 
       const ci = Math.max(0, Math.min(n - 1, Math.floor(tfh * n)));
+
+      // Дата и время — плашкой на оси времени, как на карте ордеров и форексе.
+      // Раньше они были первой строкой всплывающей подсказки: подсказка ходит
+      // за курсором, и чтобы прочитать время, приходилось искать её глазами,
+      // тогда как на оси метка всегда на одном месте.
+      drawTimeCrosshairTag(
+        ctx,
+        fmtCrosshairLabel(hm.candles[ci].t, timezone, locale),
+        hov.mx,
+        { plotX, plotW, plotH, W, H },
+      );
+
       const colIdx = Math.max(0, Math.min(hm.cols - 1, Math.floor(tfh * hm.cols)));
       const binIdx = Math.max(0, Math.min(hm.bins - 1, Math.floor(((priceH - hm.priceMin) / span) * hm.bins)));
       const val = hm.grid[colIdx]?.[binIdx] ?? 0;
       const rows: [string, string][] = [
-        [fmtDT(hm.candles[ci].t, timezone), ""],
         [t("liq.tipPrice"), fmtP(priceH)],
         [t("liq.tipLiq"), fmtVal(val)],
       ];
       const boxW = 188;
-      const boxH = 16 + rows.length * 15;
+      const boxH = 10 + rows.length * 15;
       let bx = hov.mx + 14;
       let by = hov.my + 14;
       if (bx + boxW > plotX + plotW) bx = hov.mx - boxW - 14;
@@ -413,11 +420,8 @@ export default function LiqMapPage() {
       ctx.roundRect(bx, by, boxW, boxH, 7);
       ctx.fill();
       ctx.stroke();
-      ctx.fillStyle = "#e6e9f0";
-      ctx.font = "12px ui-sans-serif, system-ui";
-      ctx.fillText(rows[0][0], bx + 10, by + 18);
       ctx.font = "11px ui-sans-serif, system-ui";
-      for (let r = 1; r < rows.length; r++) {
+      for (let r = 0; r < rows.length; r++) {
         const yrow = by + 18 + r * 15;
         ctx.fillStyle = "#9aa3b5";
         ctx.textAlign = "left";
@@ -428,7 +432,7 @@ export default function LiqMapPage() {
         ctx.textAlign = "left";
       }
     }
-  }, [data, t, timezone]);
+  }, [data, t, timezone, locale]);
 
   const requestDraw = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -655,6 +659,25 @@ export default function LiqMapPage() {
             onToggle={fsToggle}
             className="absolute top-1 right-1 z-10"
           />
+          {/* Таймфреймы поверх canvas — только в фуллскрине: селект живёт в
+              шапке страницы, а её в полноэкранном режиме не видно. Панели
+              рисования тут нет, поэтому обёртку колонки задаём сами; сами
+              кнопки общие с картой ордеров (см. TimeframeRail). */}
+          {fsActive && (
+            <div
+              className="absolute top-1 z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40 max-h-[calc(100%-0.5rem)] overflow-y-auto"
+              // Не у самого края: в левом поле шириной PADL рисуется цветовая
+              // шкала с подписями, и колонка легла бы прямо на неё.
+              style={{ left: PADL + 4 }}
+            >
+              <TimeframeRail
+                items={TFS.map((f) => ({ value: f, label: t(`liq.tf.${f}`) }))}
+                active={tf}
+                onSelect={setTf}
+                title={(label) => `${t("liq.tfTitle")} ${label}`}
+              />
+            </div>
+          )}
           <canvas
             ref={canvasRef}
             className="w-full h-full block touch-none cursor-crosshair"

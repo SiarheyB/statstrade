@@ -9,10 +9,6 @@ import {
   Filter,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import {
-  shiftedMs,
-  type TimezoneId,
-} from "@/lib/timezone";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
@@ -48,6 +44,7 @@ import {
   drawLastPriceTag,
   drawPriceCrosshairTag,
   drawTimeCrosshairTag,
+  fmtCrosshairLabel,
   drawTooltipBox,
   drawDeltaCvdChart,
   drawHistoryStartBoundary,
@@ -120,21 +117,6 @@ function bigLimitFor(symbol: string): number {
   return BIG_LIMIT_COINS[symbol.toUpperCase()] ?? DEFAULT_BIG_LIMIT_COINS;
 }
 
-function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
-  const { ms: shifted } = shiftedMs(ms, tz);
-  const d = new Date(shifted);
-  const f = new Intl.DateTimeFormat(locale, {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short',
-    year: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'UTC',
-  });
-  return f.format(d);
-}
 function baseAsset(symbol: string): string {
   return symbol.replace(/(USDT|USDC|BUSD|USD|FDUSD)$/i, "") || symbol;
 }

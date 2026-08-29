@@ -2,7 +2,7 @@
 // and /dashboard/forex. Any visual fix here (grid, candles, crosshair, delta/CVD)
 // applies to every page that renders a chart, instead of being duplicated per page.
 
-import { zonedParts, type TimezoneId } from "@/lib/timezone";
+import { zonedParts, shiftedMs, type TimezoneId } from "@/lib/timezone";
 
 export type Candle = { t: number; o: number; h: number; l: number; c: number };
 
@@ -451,6 +451,33 @@ export function drawPriceCrosshairTag(ctx: CanvasRenderingContext2D, priceH: num
 }
 
 /** Time tag on the bottom axis that follows the crosshair. */
+/**
+ * Подпись под курсором на оси времени: «вт, 10 февр. 26 г., 21:00».
+ *
+ * Живёт рядом с drawTimeCrosshairTag, потому что нужна всем трём графикам
+ * (карта ордеров, форекс, карта ликвидаций) — раньше лежала внутри страницы
+ * карты ордеров, и остальные либо дублировали её, либо обходились своим
+ * форматом.
+ *
+ * Формат отдан Intl: порядок частей и сокращения месяцев в русском и
+ * английском разные, руками это не собрать. Сдвиг в таймзону пользователя
+ * делается ДО форматирования (shiftedMs), а сам Intl считает в UTC — иначе
+ * сдвиг применился бы дважды.
+ */
+export function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): string {
+  const { ms: shifted } = shiftedMs(ms, tz);
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "UTC",
+  }).format(new Date(shifted));
+}
+
 export function drawTimeCrosshairTag(ctx: CanvasRenderingContext2D, label: string, cx: number, layout: PlotLayout) {
   const { plotX, plotW, plotH, H } = layout;
   ctx.font = "11px ui-sans-serif, system-ui";

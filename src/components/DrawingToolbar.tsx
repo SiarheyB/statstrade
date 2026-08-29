@@ -8,6 +8,7 @@
 
 import { Minus, ArrowRight, TrendingUp, Square, Magnet, Eye, EyeOff, Lock, Unlock, Undo2 } from "lucide-react";
 import type { DrawingToolType } from "@/lib/drawings";
+import TimeframeRail from "@/components/TimeframeRail";
 
 export type { DrawingToolType };
 
@@ -122,20 +123,12 @@ export default function DrawingToolbar({ activeTool, onSelectTool, magnet, onTog
       {showTimeframes && (
         <>
           <div className="w-5 h-px bg-border-strong my-0.5 mx-auto" />
-          {timeframes!.map((tf) => (
-            <button
-              key={tf}
-              onClick={() => onSelectTimeframe!(tf)}
-              className={`flex items-center justify-center w-7 h-6 rounded text-[10px] font-medium tabular-nums transition-colors ${
-                tf === activeTimeframe
-                  ? "bg-accent/20 text-accent border border-accent/40"
-                  : "text-muted hover:text-fg hover:bg-bg-muted border border-transparent"
-              }`}
-              title={`Таймфрейм ${tf}`}
-            >
-              {tf}
-            </button>
-          ))}
+          {/* Разметка кнопок общая с картой ликвидаций — см. TimeframeRail. */}
+          <TimeframeRail
+            items={timeframes!.map((tf) => ({ value: tf, label: tf }))}
+            active={activeTimeframe ?? ""}
+            onSelect={onSelectTimeframe!}
+          />
         </>
       )}
     </div>
