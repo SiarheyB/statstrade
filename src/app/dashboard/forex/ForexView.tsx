@@ -46,6 +46,7 @@ import SessionPicker from "@/components/SessionPicker";
 import { drawSessionBoxes } from "@/lib/sessionOverlay";
 import { sessionWindows, TRADING_SESSIONS, type SessionId } from "@/lib/tradingSessions";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
+import { appendOlderHistory } from "@/lib/chartHistory";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -73,9 +74,8 @@ const RANGES = ["1m", "5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 const PREFS_KEY = "forex.settings";
 const VISIBLE_CANDLES: Record<string, number> = { "1m": 480, "5m": 480, "15m": 440, "1h": 400, "4h": 360, "12h": 320, "1d": 300, "1w": 52 };
 const DEFAULT_VISIBLE = 360;
-// Верхняя граница памяти для догруженной истории (historyRef) — см.
-// LAZY_HISTORY_PLAN.md и аналогичную константу на /dashboard/orderflow.
-const MAX_HISTORY_CANDLES = 4000;
+// Верхняя граница памяти для догруженной истории и правило обрезки —
+// в lib/chartHistory.ts, общие с картой ордеров.
 
 function parseTime(iso: string): number {
   return new Date(iso).getTime();
@@ -241,15 +241,12 @@ export default function ForexView() {
       };
       const newCandles = (d.candles ?? []).map((c) => ({ t: parseTime(c.t), o: c.o, h: c.h, l: c.l, c: c.c, v: c.v ?? 0 }));
       if (newCandles.length === 0) { hasMoreHistoryRef.current = false; return; }
-      let merged = [...newCandles, ...historyRef.current];
-      if (merged.length > MAX_HISTORY_CANDLES) {
-        merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
-        // Обрезали самый старый конец — если пользователь ещё раньше
-        // доскроллит, историю ниже нужно будет запросить заново.
-        hasMoreHistoryRef.current = true;
-      } else {
-        hasMoreHistoryRef.current = d.hasMore;
-      }
+      // Обрезка — в lib/chartHistory.ts. Прежняя оставляла ХВОСТ массива, то
+      // есть самые новые свечи, а догруженные старые встают в начало: каждая
+      // догрузка выбрасывалась тем же вызовом, который её принёс. Вдобавок
+      // hasMore при этом взводился обратно в true, и запросы уходили по кругу.
+      const merged = appendOlderHistory(newCandles, historyRef.current);
+      hasMoreHistoryRef.current = d.hasMore;
       historyRef.current = merged;
       setHistoryVersion((v) => v + 1);
     } catch {

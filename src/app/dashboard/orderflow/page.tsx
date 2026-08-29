@@ -62,6 +62,7 @@ import { useChartInteractions } from "@/lib/useChartInteractions";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
+import { appendOlderHistory } from "@/lib/chartHistory";
 
 type ObHeatmap = {
   priceMin: number;
@@ -104,10 +105,10 @@ const RANGES = ["5m", "15m", "1h", "4h", "12h", "1d", "1w"] as const;
 const PREFS_KEY = "orderflow.settings";
 const VISIBLE_CANDLES: Record<string, number> = { "5m": 130, "15m": 120, "1h": 110, "4h": 100, "12h": 95, "1d": 90, "1w": 60 };
 const DEFAULT_VISIBLE = 100;
-// Верхняя граница памяти для догруженной истории (historyRef). При
-// превышении обрезаем самый старый конец — если пользователь доскроллит
-// туда снова, история перезапросится тем же механизмом, что и в первый раз.
-const MAX_HISTORY_CANDLES = 4000;
+// Верхняя граница памяти для догруженной истории (historyRef) и правило
+// обрезки — в lib/chartHistory.ts. Прежняя обрезка оставляла самые НОВЫЕ
+// свечи, то есть выбрасывала только что догруженные старые: график упирался
+// в жёсткую дату (на 1h — ровно 200 суток назад), хотя в базе лежали годы.
 // Столько кусков наложений держим в памяти (каждый ~240×110 чисел + растр).
 const MAX_HISTORY_SEGMENTS = 8;
 const FALLBACK_EXCHANGES = ["binance-futures", "binance-spot"];
@@ -470,11 +471,7 @@ export default function OrderflowPage() {
       // Курсор — по факту ответа сервера, не зависит от обрезки буфера ниже.
       earliestFetchedRef.current = d.candles[0].t;
       hasMoreHistoryRef.current = d.hasMore;
-      let merged = [...d.candles, ...historyRef.current];
-      if (merged.length > MAX_HISTORY_CANDLES) {
-        merged = merged.slice(merged.length - MAX_HISTORY_CANDLES);
-      }
-      historyRef.current = merged;
+      historyRef.current = appendOlderHistory(d.candles, historyRef.current);
       setHistoryVersion((v) => v + 1);
 
       // Фаза 2 — наложения на тот же отрезок. Границы сервер выравнивает по
