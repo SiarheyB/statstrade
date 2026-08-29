@@ -478,6 +478,71 @@ export function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): s
   }).format(new Date(shifted));
 }
 
+/**
+ * Имя сайта для водяного знака.
+ *
+ * Константа, а не location.hostname: знак — это подпись бренда, и она должна
+ * быть одинаковой, каким бы адресом человек ни открыл график (туннель,
+ * локальная разработка, будущий второй домен). Из hostname на скриншоте
+ * оказалось бы «localhost:3000».
+ */
+export const CHART_WATERMARK = "tradingstat.ru";
+
+/**
+ * Подписи поверх графика: инструмент слева вверху и водяной знак справа внизу.
+ *
+ * Зачем инструмент. В полноэкранном режиме шапка страницы с селектором не
+ * видна, и понять, какой символ открыт, было неоткуда — особенно на скриншоте,
+ * отправленном кому-то ещё.
+ *
+ * Зачем тень, а не подложка. Фон под текстом бывает любым: на карте
+ * ликвидаций это ярко-жёлтое пятно, на карте лимиток — светло-серые стены,
+ * рядом — чёрный. Полупрозрачный текст без тени на светлом фоне исчезает, а
+ * плашка-подложка читается как элемент интерфейса, а не как подпись. Мягкая
+ * тень даёт читаемость на любом фоне и остаётся незаметной.
+ *
+ * Рисовать ПОСЛЕ данных, но ДО курсора и подсказки: под данными знак терялся
+ * бы в плотной карте, а поверх подсказки перекрывал бы цифры.
+ */
+export function drawChartWatermarks(
+  ctx: CanvasRenderingContext2D,
+  symbol: string,
+  layout: PlotLayout,
+) {
+  const { plotX, plotW, plotH } = layout;
+  // Кегль от ширины графика, а не постоянный. Постоянный выглядит соразмерно
+  // только на одном размере: те же 11 пикселей на встроенном графике заметны,
+  // а на развёрнутом во весь экран 4K превращаются в едва различимую строчку.
+  // Границы держат его в разумных пределах на очень узком и очень широком.
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const symbolSize = Math.round(clamp(plotW / 70, 13, 22));
+  const markSize = Math.round(clamp(plotW / 90, 11, 17));
+
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.9)";
+  ctx.shadowBlur = 4;
+  ctx.textBaseline = "alphabetic";
+
+  // Инструмент — слева вверху, читаемо, но тише подписей осей.
+  if (symbol) {
+    ctx.font = `600 ${symbolSize}px ui-sans-serif, system-ui`;
+    ctx.textAlign = "left";
+    ctx.fillStyle = "rgba(230,233,240,0.72)";
+    ctx.fillText(symbol, plotX + 10, symbolSize + 7);
+  }
+
+  // Водяной знак — справа внизу, ещё тише: это подпись, а не данные. Но и не
+  // настолько, чтобы пропасть: на чужом скриншоте он должен читаться, иначе
+  // теряет смысл.
+  ctx.font = `${markSize}px ui-sans-serif, system-ui`;
+  ctx.textAlign = "right";
+  ctx.fillStyle = "rgba(230,233,240,0.42)";
+  ctx.fillText(CHART_WATERMARK, plotX + plotW - 10, plotH - 10);
+
+  ctx.restore();
+  ctx.textAlign = "left";
+}
+
 export function drawTimeCrosshairTag(ctx: CanvasRenderingContext2D, label: string, cx: number, layout: PlotLayout) {
   const { plotX, plotW, plotH, H } = layout;
   ctx.font = "11px ui-sans-serif, system-ui";

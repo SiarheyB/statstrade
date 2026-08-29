@@ -45,6 +45,7 @@ import {
   drawPriceCrosshairTag,
   drawTimeCrosshairTag,
   fmtCrosshairLabel,
+  drawChartWatermarks,
   drawTooltipBox,
   drawDeltaCvdChart,
   drawHistoryStartBoundary,
@@ -1193,6 +1194,10 @@ export default function OrderflowPage() {
     const last = candles.length ? candles[candles.length - 1].c : (hm?.price ?? 0);
     const yp = sy(last);
     drawLastPriceTag(ctx, last, yp, layout);
+
+    // Инструмент слева вверху и водяной знак справа внизу — после данных,
+    // но до курсора: см. drawChartWatermarks.
+    drawChartWatermarks(ctx, data.symbol, layout);
 
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {

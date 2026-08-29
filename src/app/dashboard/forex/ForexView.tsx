@@ -27,6 +27,7 @@ import {
   drawLastPriceTag,
   drawPriceCrosshairTag,
   drawTimeCrosshairTag,
+  drawChartWatermarks,
   drawTooltipBox,
   drawDeltaCvdChart,
   drawTwoLineSeries,
@@ -749,6 +750,10 @@ function inferBinSize(levels: { price: number }[]): number {
     const last = candles[candles.length - 1].c;
     drawLastPriceTag(ctx, last, sy(last), layout);
 
+    // Инструмент слева вверху и водяной знак справа внизу — после данных,
+    // но до курсора: см. drawChartWatermarks.
+    drawChartWatermarks(ctx, symbol, layout);
+
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my >= 0 && hov.my <= plotH) {
       let cx = hov.mx;
@@ -789,7 +794,7 @@ function inferBinSize(levels: { price: number }[]): number {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, getTimeAxis, range, timezone, t, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, t, symbol, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 

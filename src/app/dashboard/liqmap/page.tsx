@@ -6,7 +6,7 @@ import { Flame, RefreshCw, Maximize2 } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
 import TimeframeRail from "@/components/TimeframeRail";
-import { drawTimeCrosshairTag, fmtCrosshairLabel } from "@/lib/candlestickChart";
+import { drawTimeCrosshairTag, fmtCrosshairLabel, drawChartWatermarks } from "@/lib/candlestickChart";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
@@ -368,6 +368,10 @@ export default function LiqMapPage() {
     ctx.fillText(fmtVal(hm.maxVal), barX + barW + 3, 9);
     ctx.fillText("0", barX + barW + 3, plotH - 2);
 
+    // Инструмент слева вверху и водяной знак справа внизу — после данных,
+    // но до курсора: см. drawChartWatermarks.
+    drawChartWatermarks(ctx, symbol, { plotX, plotW, plotH, W, H });
+
     // Crosshair + info box.
     const hov = hoverRef.current;
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
@@ -432,7 +436,7 @@ export default function LiqMapPage() {
         ctx.textAlign = "left";
       }
     }
-  }, [data, t, timezone, locale]);
+  }, [data, t, timezone, locale, symbol]);
 
   const requestDraw = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -665,10 +669,13 @@ export default function LiqMapPage() {
               кнопки общие с картой ордеров (см. TimeframeRail). */}
           {fsActive && (
             <div
-              className="absolute top-1 z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40 max-h-[calc(100%-0.5rem)] overflow-y-auto"
-              // Не у самого края: в левом поле шириной PADL рисуется цветовая
-              // шкала с подписями, и колонка легла бы прямо на неё.
-              style={{ left: PADL + 4 }}
+              className="absolute z-10 flex flex-col gap-0.5 py-1.5 px-0.5 rounded bg-bg/80 backdrop-blur-sm border border-border/40 overflow-y-auto"
+              // Слева не у самого края: в поле шириной PADL рисуется цветовая
+              // шкала с подписями, и колонка легла бы прямо на неё. Сверху — под
+              // подписью инструмента, которую рисует drawChartWatermarks в том
+              // же углу (на других графиках она левее, там панель рисования
+              // стоит вне области графика).
+              style={{ left: PADL + 4, top: 30, maxHeight: "calc(100% - 2.5rem)" }}
             >
               <TimeframeRail
                 items={TFS.map((f) => ({ value: f, label: t(`liq.tf.${f}`) }))}
