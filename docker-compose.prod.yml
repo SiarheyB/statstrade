@@ -80,7 +80,12 @@ services:
       - effective_io_concurrency=200
     environment:
       POSTGRES_USER: tradestats
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-tradestats}
+      # Без значения по умолчанию намеренно. Раньше стояло
+      # ${POSTGRES_PASSWORD:-tradestats}: забыл переменную — база молча
+      # поднималась с паролем "tradestats". Наружу порт не публикуется, но
+      # любой контейнер в compose-сети получал бы полный доступ по угадываемому
+      # паролю. Теперь отсутствие переменной ломает старт явным сообщением.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD обязателен — задайте его в .env}
       POSTGRES_DB: tradestats
     volumes:
       - tradestats_pg:/var/lib/postgresql/data
@@ -117,7 +122,7 @@ services:
       # connection_limit/pool_timeout — больше пула Prisma и дольше ожидание
       # соединения: карта ордеров шлёт по несколько тяжёлых SQL-агрегаций за
       # запрос, дефолтных 9 соединений не хватало (Timed out fetching a connection).
-      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public&connection_limit=20&pool_timeout=20
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD обязателен — задайте его в .env}@db:5432/tradestats?schema=public&connection_limit=20&pool_timeout=20
       # Авто-синхронизацию бирж «по времени» на сервере гоняет СИСТЕМНЫй крон
       # хоста (см. SELF_HOSTING.md — шаг про /api/cron/sync), поэтому встроенный
       # in-process планировщик выключен: иначе синхронизации дублировались бы.
@@ -178,7 +183,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD обязателен — задайте его в .env}@db:5432/tradestats?schema=public
       SYMBOLS: ${OB_SYMBOLS:-BTCUSDT,ETHUSDT}
       EXCHANGES: ${OB_EXCHANGES:-binance-futures,binance-spot}
       SNAPSHOT_MS: ${OB_SNAPSHOT_MS:-2000}
@@ -239,7 +244,7 @@ services:
       db:
         condition: service_healthy
     environment:
-      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:-tradestats}@db:5432/tradestats?schema=public
+      DATABASE_URL: postgresql://tradestats:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD обязателен — задайте его в .env}@db:5432/tradestats?schema=public
       FX_SYMBOLS: ${FX_SYMBOLS:-EUR/USD,GBP/USD,USD/JPY,USD/CHF,AUD/USD,NZD/USD,EUR/JPY,GBP/JPY,XAU/USD}
       FINNHUB_API_KEY: ${FINNHUB_API_KEY}
       TWELVEDATA_API_KEY: ${TWELVEDATA_API_KEY}
