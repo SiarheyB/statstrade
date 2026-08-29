@@ -1,0 +1,25 @@
+-- Учёт запросов. Расширение бесполезно без shared_preload_libraries — оно
+-- добавлено в command обоих compose-файлов.
+--
+-- ВАЖНО про порядок выката. Правки compose watchtower не подхватывает (см.
+-- CLAUDE.md), поэтому контейнер БД перезапускается вручную:
+--     git pull && docker compose -f docker-compose.prod.yml up -d db
+-- А эта миграция приедет раньше — её накатывает контейнер app при старте.
+-- Это безопасно: проверено на чистом postgres:16-alpine без preload —
+-- CREATE EXTENSION проходит с кодом 0, ошибку («must be loaded via
+-- shared_preload_libraries») даёт только ЗАПРОС к вьюхе. То есть миграция
+-- не встанет и старт приложения не сломает; учёт просто начнётся после
+-- перезапуска БД.
+--
+-- Зачем: без него на вопрос «какой запрос дороже всего» отвечать нечем, и
+-- каждый разбор превращается в чтение кода и догадки. Весь предыдущий аудит
+-- пришлось вести по pg_stat_user_tables (сканы и прочитанные строки) — этого
+-- хватило, чтобы найти Seq Scan в каскаде, но не хватает, чтобы ранжировать
+-- запросы по суммарному времени.
+--
+-- Смотреть:
+--   SELECT calls, round(mean_exec_time::numeric,1) AS ms,
+--          round(total_exec_time::numeric) AS total, left(query,120)
+--     FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 20;
+-- Обнулить перед замером: SELECT pg_stat_statements_reset();
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
