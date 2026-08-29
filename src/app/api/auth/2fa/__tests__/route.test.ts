@@ -20,6 +20,8 @@ vi.mock("@/lib/crypto", async (importOriginal) => ({
 vi.mock("@/lib/totp", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/totp")>()),
   verifyTotp: vi.fn().mockReturnValue(true),
+  // Роут гасит код, чтобы тот же второй раз не прошёл (см. lib/totp.ts).
+  consumeTotp: vi.fn().mockReturnValue(true),
 }));
 
 const base = "https://example.com/api/auth/2fa";
@@ -81,7 +83,7 @@ describe("DELETE /api/auth/2fa", () => {
 
   it("rejects a wrong code", async () => {
     const totp = await import("@/lib/totp");
-    (totp.verifyTotp as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
+    (totp.consumeTotp as ReturnType<typeof vi.fn>).mockReturnValueOnce(false);
     const res = await DELETE(new Request(base, { method: "DELETE", body: JSON.stringify({ code: "000000" }) }));
     expect(res.status).toBe(400);
   });

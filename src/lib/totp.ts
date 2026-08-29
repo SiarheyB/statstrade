@@ -71,6 +71,28 @@ export function totp(secretB32: string, time = Date.now()): string {
   return hotp(base32Decode(secretB32), Math.floor(time / 1000 / STEP_SECONDS));
 }
 
+/**
+ * Шаг времени, на котором код сошёлся, или null.
+ *
+ * Нужен отдельно от verifyTotp: по нему отличается повторное предъявление того
+ * же кода от нового (см. consumeTotp).
+ */
+export function totpCounter(
+  token: string,
+  secretB32: string,
+  window = 1,
+  time = Date.now(),
+): number | null {
+  const clean = token.replace(/\s/g, "");
+  if (!/^\d{6}$/.test(clean)) return null;
+  const counter = Math.floor(time / 1000 / STEP_SECONDS);
+  const secret = base32Decode(secretB32);
+  for (let w = -window; w <= window; w++) {
+    if (timingSafeEqualStr(hotp(secret, counter + w), clean)) return counter + w;
+  }
+  return null;
+}
+
 // Verify a user-entered code, tolerating ±`window` steps of clock skew.
 export function verifyTotp(
   token: string,
@@ -78,14 +100,56 @@ export function verifyTotp(
   window = 1,
   time = Date.now(),
 ): boolean {
-  const clean = token.replace(/\s/g, "");
-  if (!/^\d{6}$/.test(clean)) return false;
-  const counter = Math.floor(time / 1000 / STEP_SECONDS);
-  const secret = base32Decode(secretB32);
-  for (let w = -window; w <= window; w++) {
-    if (timingSafeEqualStr(hotp(secret, counter + w), clean)) return true;
-  }
-  return false;
+  return totpCounter(token, secretB32, window, time) !== null;
+}
+
+// ─── Защита от повторного предъявления ──────────────────────────────────────
+//
+// Код живёт 30 секунд, а с допуском на расхождение часов (±1 шаг) принимается
+// в окне около полутора минут. Всё это время один и тот же код проходил
+// повторно: подсмотренный через плечо или перехваченный на пути к серверу
+// работал, пока окно не закроется.
+//
+// Помним последний ПРИНЯТЫЙ шаг на ключ и не пускаем его же и более ранние.
+// В памяти, а не в БД: app — один долгоживущий контейнер (то же допущение, что
+// у ratelimit.ts и statsCache.ts). Перезапуск сбрасывает защиту, но окно
+// повтора — те же полторы минуты, и лишняя колонка в User этого не стоит.
+const usedStep = new Map<string, { step: number; at: number }>();
+const USED_TTL_MS = 5 * 60_000;
+let lastSweep = 0;
+
+function sweep(now: number): void {
+  if (now - lastSweep < USED_TTL_MS) return;
+  lastSweep = now;
+  for (const [k, v] of usedStep) if (now - v.at >= USED_TTL_MS) usedStep.delete(k);
+}
+
+/** Только для тестов: забыть все принятые коды. */
+export function resetTotpReplayGuard(): void {
+  usedStep.clear();
+  lastSweep = 0;
+}
+
+/**
+ * Проверить код и «погасить» его: тот же код второй раз не пройдёт.
+ * `key` — то, к чему привязан секрет (у нас id пользователя).
+ */
+export function consumeTotp(
+  key: string,
+  token: string,
+  secretB32: string,
+  window = 1,
+  time = Date.now(),
+): boolean {
+  const step = totpCounter(token, secretB32, window, time);
+  if (step === null) return false;
+  sweep(time);
+  const prev = usedStep.get(key);
+  // Не только сам шаг, но и все более ранние: иначе код предыдущего шага,
+  // ещё попадающий в окно допуска, оставался бы годным после нового.
+  if (prev && step <= prev.step) return false;
+  usedStep.set(key, { step, at: time });
+  return true;
 }
 
 // otpauth:// URI for QR codes / manual entry into authenticator apps.

@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
-import { generateSecret, totp, verifyTotp, otpauthURL } from "@/lib/totp";
+import { describe, it, expect, beforeEach } from "vitest";
+import {
+  generateSecret, totp, verifyTotp, otpauthURL,
+  totpCounter, consumeTotp, resetTotpReplayGuard,
+} from "@/lib/totp";
 
 const SECRET = generateSecret();
 
@@ -50,5 +53,72 @@ describe("totp", () => {
     expect(url).toContain(`secret=${SECRET}`);
     expect(url).toContain("issuer=TradeStats");
     expect(decodeURIComponent(url)).toContain("TradeStats:me@x.com");
+  });
+});
+
+describe("totpCounter", () => {
+  it("возвращает шаг, на котором код сошёлся", () => {
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    const step = Math.floor(t / 1000 / 30);
+    expect(totpCounter(totp(secret, t), secret, 1, t)).toBe(step);
+    // Код соседнего шага принимается допуском на расхождение часов —
+    // и опознаётся именно как соседний.
+    expect(totpCounter(totp(secret, t - 30_000), secret, 1, t)).toBe(step - 1);
+  });
+
+  it("на неверном коде возвращает null", () => {
+    const secret = generateSecret();
+    expect(totpCounter("000000", secret, 1, 1_800_000_000_000)).toBeNull();
+    expect(totpCounter("abc", secret)).toBeNull();
+  });
+});
+
+describe("consumeTotp — защита от повтора", () => {
+  beforeEach(() => resetTotpReplayGuard());
+
+  // Код живёт 30 секунд, а с допуском ±1 шаг принимается около полутора минут.
+  // Всё это время подсмотренный или перехваченный код проходил повторно.
+  it("тот же код второй раз не проходит", () => {
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    const code = totp(secret, t);
+    expect(consumeTotp("u1", code, secret, 1, t)).toBe(true);
+    expect(consumeTotp("u1", code, secret, 1, t)).toBe(false);
+    // И чуть позже, пока код ещё в окне допуска, — тоже нет.
+    expect(consumeTotp("u1", code, secret, 1, t + 20_000)).toBe(false);
+  });
+
+  it("код ПРЕДЫДУЩЕГО шага не проходит после нового", () => {
+    // Иначе перехваченный код соседнего шага оставался бы годным.
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    expect(consumeTotp("u1", totp(secret, t), secret, 1, t)).toBe(true);
+    expect(consumeTotp("u1", totp(secret, t - 30_000), secret, 1, t)).toBe(false);
+  });
+
+  it("следующий код проходит", () => {
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    expect(consumeTotp("u1", totp(secret, t), secret, 1, t)).toBe(true);
+    const next = t + 30_000;
+    expect(consumeTotp("u1", totp(secret, next), secret, 1, next)).toBe(true);
+  });
+
+  it("гашение раздельное по пользователям", () => {
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    const code = totp(secret, t);
+    expect(consumeTotp("u1", code, secret, 1, t)).toBe(true);
+    // У второго пользователя свой секрет и свой счётчик — чужое гашение
+    // не должно его задевать.
+    expect(consumeTotp("u2", code, secret, 1, t)).toBe(true);
+  });
+
+  it("неверный код ничего не гасит", () => {
+    const secret = generateSecret();
+    const t = 1_800_000_000_000;
+    expect(consumeTotp("u1", "000000", secret, 1, t)).toBe(false);
+    expect(consumeTotp("u1", totp(secret, t), secret, 1, t)).toBe(true);
   });
 });

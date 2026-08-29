@@ -7,7 +7,7 @@ import {
   clearPendingCookie,
 } from "@/lib/auth";
 import { decrypt } from "@/lib/crypto";
-import { verifyTotp } from "@/lib/totp";
+import { consumeTotp } from "@/lib/totp";
 import { badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { kickUserSync } from "@/lib/sync";
@@ -47,7 +47,10 @@ export async function POST(req: Request) {
     }
 
     const secret = decrypt(user.twoFactorSecret);
-    if (!verifyTotp(parsed.data.code, secret)) {
+    // consumeTotp, а не verifyTotp: код гасится, и второй раз тот же не пройдёт.
+    // Иначе подсмотренный или перехваченный код работал бы все полторы минуты,
+    // пока не закроется окно допуска на расхождение часов.
+    if (!consumeTotp(user.id, parsed.data.code, secret)) {
       return badRequest("Неверный код");
     }
 

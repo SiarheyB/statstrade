@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit } from "@/lib/ratelimit";
 import { decrypt } from "@/lib/crypto";
-import { verifyTotp } from "@/lib/totp";
+import { consumeTotp } from "@/lib/totp";
 
 const schema = z.object({ code: z.string().min(6).max(7) });
 
@@ -35,7 +35,7 @@ export async function POST(req: Request) {
     if (!row?.twoFactorSecret) {
       return badRequest("Сначала начните настройку (нет ключа)");
     }
-    if (!verifyTotp(parsed.data.code, decrypt(row.twoFactorSecret))) {
+    if (!consumeTotp(user.userId, parsed.data.code, decrypt(row.twoFactorSecret))) {
       return badRequest("Неверный код, попробуйте ещё раз");
     }
     await prisma.user.update({

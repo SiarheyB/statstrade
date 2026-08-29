@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests } from "@/lib/api";
 import { rateLimit } from "@/lib/ratelimit";
 import { decrypt } from "@/lib/crypto";
-import { verifyTotp } from "@/lib/totp";
+import { consumeTotp } from "@/lib/totp";
 
 // Current 2FA status for the settings UI.
 export async function GET() {
@@ -47,7 +47,7 @@ export async function DELETE(req: Request) {
     if (!row?.twoFactorEnabled || !row.twoFactorSecret) {
       return badRequest("Двухфакторная аутентификация не включена");
     }
-    if (!verifyTotp(parsed.data.code, decrypt(row.twoFactorSecret))) {
+    if (!consumeTotp(user.userId, parsed.data.code, decrypt(row.twoFactorSecret))) {
       return badRequest("Неверный код");
     }
     await prisma.user.update({
