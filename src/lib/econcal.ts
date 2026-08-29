@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { Prisma } from "@prisma/client";
 import { investingImpact, resolveImpact } from "./econcalImpact";
 
 // Economic calendar from the free ForexFactory / faireconomy weekly JSON feeds
@@ -172,21 +173,55 @@ async function alignStoredImpacts(): Promise<number> {
   return updated;
 }
 
+
+/** Сколько событий кладём одним запросом (у модели 10 колонок, предел
+ *  параметров Postgres — 65535, так что запас многократный). */
+const EVENT_UPSERT_BATCH = 500;
+
+/**
+ * Запись событий пачками вместо upsert в цикле.
+ *
+ * Недельный фид — это 150-300 событий, фидов несколько, и каждое событие
+ * стоило отдельного round-trip к БД: сотни последовательных запросов на один
+ * обход. Здесь то же самое одним INSERT … ON CONFLICT на пачку.
+ *
+ * Обновляются ровно те же поля, что и раньше: time/currency/title образуют
+ * ключ и не трогаются, country тоже (он выводится из currency и не меняется).
+ */
+async function upsertEvents(events: NormalizedEvent[]): Promise<number> {
+  let written = 0;
+  for (let i = 0; i < events.length; i += EVENT_UPSERT_BATCH) {
+    const batch = events.slice(i, i + EVENT_UPSERT_BATCH);
+    if (batch.length === 0) continue;
+    const rows = batch.map(
+      (e) => Prisma.sql`(${crypto.randomUUID()}, ${e.time}, ${e.currency}, ${e.country},
+                         ${e.title}, ${e.impact}, ${e.category}, ${e.forecast},
+                         ${e.previous}, ${e.actual}, NOW(), NOW())`,
+    );
+    written += await prisma.$executeRaw(
+      Prisma.sql`INSERT INTO "EconomicEvent"
+                   ("id","time","currency","country","title","impact","category",
+                    "forecast","previous","actual","createdAt","updatedAt")
+                 VALUES ${Prisma.join(rows)}
+                 ON CONFLICT ("time","currency","title") DO UPDATE SET
+                   "impact" = EXCLUDED."impact",
+                   "category" = EXCLUDED."category",
+                   "forecast" = EXCLUDED."forecast",
+                   "previous" = EXCLUDED."previous",
+                   "actual" = EXCLUDED."actual",
+                   "updatedAt" = NOW()`,
+    );
+  }
+  return written;
+}
+
 export async function refreshCalendar(): Promise<RefreshResult[]> {
   const results = await Promise.all(
     FEEDS.map(async (url) => {
       const feed = url.split("/").pop() ?? url;
       try {
         const events = await fetchFeed(url);
-        let upserted = 0;
-        for (const e of events) {
-          await prisma.economicEvent.upsert({
-            where: { time_currency_title: { time: e.time, currency: e.currency, title: e.title } },
-            create: e,
-            update: { impact: e.impact, category: e.category, forecast: e.forecast, previous: e.previous, actual: e.actual },
-          });
-          upserted++;
-        }
+        const upserted = await upsertEvents(events);
         return { feed, upserted };
       } catch (err) {
         return { feed, upserted: 0, error: (err as Error).message };

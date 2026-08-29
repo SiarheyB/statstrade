@@ -746,8 +746,12 @@ model SupportMessage {
 
 // Серверные ошибки (500-е из API-роутов через serverError(), и необработанные
 // исключения через Next.js instrumentation onRequestError). readAt = когда
-// прочитано в админке (NULL = новое → бейдж на "Admin"). Ручное удаление —
-// автоочистки нет.
+// прочитано в админке (NULL = новое → бейдж на "Admin").
+//
+// Чистится ночным кроном /api/cron/analytics по ERRORLOG_RETENTION_DAYS
+// (90 суток по умолчанию, см. lib/errorLog.ts). Раньше автоочистки не было, и
+// таблица росла бессрочно — а пишет сюда не только serverError(), но и
+// оповещения о посещаемости (lib/traffic/alerts.ts).
 model ErrorLog {
   id        String    @id @default(cuid())
   message   String

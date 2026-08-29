@@ -55,3 +55,23 @@ export function maskSecret(value: string, visible = 4): string {
   if (value.length <= visible) return "•".repeat(value.length);
   return "•".repeat(Math.max(4, value.length - visible)) + value.slice(-visible);
 }
+
+/**
+ * Сравнение секретов за постоянное время.
+ *
+ * Обычный `===` на строках выходит из цикла на первом несовпавшем символе, то
+ * есть время ответа зависит от того, сколько символов угадано. Для секретов,
+ * которые проверяются на каждом запросе (ключ приёмника статистики, токен
+ * крона, токен метрик коллектора), это лишний канал утечки — закрывается
+ * бесплатно.
+ *
+ * Разная длина отвергается сразу: timingSafeEqual на буферах разной длины
+ * бросает исключение, а сама длина секретом не является.
+ */
+export function secretEquals(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (typeof a !== "string" || typeof b !== "string") return false;
+  const ba = Buffer.from(a, "utf8");
+  const bb = Buffer.from(b, "utf8");
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}

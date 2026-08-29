@@ -9,12 +9,54 @@ function stripMeta<K extends FeatureKey>(full: (typeof FEATURE_DEFAULTS)[K]): Om
   return copy as Omit<typeof full, (typeof FEATURE_META_KEYS)[number]>;
 }
 
+// Строки таблицы целиком, с коротким кэшем.
+//
+// Флаги читаются на горячих путях: forexAccess() и recommendationsAccess()
+// спрашивают по ДВА флага, а /api/forex дёргает их на каждом опросе (раз в
+// 3 секунды на открытую вкладку). Без кэша это два запроса в БД на тик ради
+// значения, которое меняется раз в месяц кнопкой в админке.
+//
+// Кэшируем всю таблицу, а не отдельный ключ: строк в ней единицы, один
+// findMany дешевле любой выборки по одному ключу и сразу закрывает
+// getAllFeatureConfigs.
+const CACHE_MS = 15_000;
+type FeatureRows = Map<string, { enabled: boolean; config: string | null }>;
+let cache: { at: number; rows: FeatureRows } | null = null;
+// Запрос «в полёте»: getAllFeatureConfigs спрашивает все ключи через
+// Promise.all, и на холодном кэше каждый увидел бы пустоту одновременно —
+// столько же findMany, сколько флагов. Общий промис делает из них один.
+let inflight: Promise<FeatureRows> | null = null;
+
+async function featureRows(): Promise<FeatureRows> {
+  const now = Date.now();
+  if (cache && now - cache.at < CACHE_MS) return cache.rows;
+  if (inflight) return inflight;
+  inflight = prisma.featureConfig
+    .findMany({ select: { key: true, enabled: true, config: true } })
+    .then((rows) => {
+      const map: FeatureRows = new Map(
+        rows.map((r) => [r.key, { enabled: r.enabled, config: r.config }]),
+      );
+      cache = { at: Date.now(), rows: map };
+      return map;
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+/** Сбросить кэш — после правки из админки значение должно примениться сразу. */
+export function invalidateFeatureCache(): void {
+  cache = null;
+}
+
 // Effective config for a feature: DB row (if any) merged over the static
 // defaults. No row = feature enabled with defaults (new features are on by
 // default, same pattern as ExchangeToggle).
 export async function getFeatureConfig<K extends FeatureKey>(key: K): Promise<FeatureConfigValue<K>> {
   const defaults = stripMeta(FEATURE_DEFAULTS[key]);
-  const row = await prisma.featureConfig.findUnique({ where: { key } });
+  const row = (await featureRows()).get(key);
   if (!row) return { enabled: true, ...defaults } as FeatureConfigValue<K>;
   let overrides: Record<string, unknown> = {};
   if (row.config) {
@@ -67,4 +109,6 @@ export async function setFeatureConfig(
       ...(patch.config !== undefined ? { config: JSON.stringify(patch.config) } : {}),
     },
   });
+  // Иначе тумблер в админке «не срабатывал» бы до 15 секунд.
+  invalidateFeatureCache();
 }

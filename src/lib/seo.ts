@@ -104,7 +104,7 @@ export async function pageMetadata(page: SeoPage, locale: Locale): Promise<Metad
 export async function siteJsonLd(locale: Locale): Promise<string> {
   const base = await siteUrl();
   const page = SEO_PAGES.home;
-  return JSON.stringify({
+  return jsonForScriptTag({
     "@context": "https://schema.org",
     "@type": "WebApplication",
     name: "TradeStats",
@@ -115,4 +115,23 @@ export async function siteJsonLd(locale: Locale): Promise<string> {
     description: page.description[locale],
     offers: { "@type": "Offer", price: "0", priceCurrency: "RUB" },
   });
+}
+
+/**
+ * JSON для вставки внутрь <script> через dangerouslySetInnerHTML.
+ *
+ * JSON.stringify НЕ экранирует "<" и ">", поэтому строка вида
+ * `</script><script>…` внутри любого значения закрывает тег и превращается в
+ * исполняемый код. Здесь единственное такое значение — адрес сайта, а он
+ * берётся из заголовка запроса (см. lib/siteUrl.ts): там стоит проверка на имя
+ * хоста, это второй рубеж на случай, если данные в разметку добавятся ещё
+ * откуда-то. Экранирование в \\uXXXX не меняет разбор JSON.
+ */
+export function jsonForScriptTag(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }

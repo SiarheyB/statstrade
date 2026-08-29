@@ -27,6 +27,9 @@ const RESEED_AFTER_MS = 24 * 60 * 60 * 1000;
 
 type DemoUser = { id: string; email: string; tokenVersion: number };
 
+/** Идёт ли прямо сейчас пересев демо-данных (см. ensureDemoUser). */
+let seeding = false;
+
 /**
  * Демо-пользователь с посеянными сделками. Создаётся при первом заходе и
  * переиспользуется дальше; данные обновляются раз в сутки, чтобы «последние
@@ -63,8 +66,17 @@ export async function ensureDemoUser(now = Date.now()): Promise<DemoUser> {
   // balanceAt проставляет сам seedDemoData в конце посева — используем его как
   // отметку «когда демо наполнялось в последний раз», отдельного поля не заводим.
   const seededAt = account.balanceAt?.getTime() ?? 0;
-  if (now - seededAt > RESEED_AFTER_MS) {
-    await seedDemoData(account.id, DEMO_EXCHANGE, user.id);
+  if (now - seededAt > RESEED_AFTER_MS && !seeding) {
+    // Гость на границе суток может прийти не один: без флага десяток
+    // одновременных заходов запустил бы десяток пересевов ~140 сделок разом.
+    // Опоздавшие просто получают сессию — данные у них прежние, но валидные,
+    // а следующий заход увидит уже пересеянные.
+    seeding = true;
+    try {
+      await seedDemoData(account.id, DEMO_EXCHANGE, user.id);
+    } finally {
+      seeding = false;
+    }
   }
 
   return user;

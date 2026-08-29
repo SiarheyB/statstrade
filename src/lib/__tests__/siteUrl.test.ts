@@ -5,7 +5,7 @@ vi.mock("next/headers", () => ({
   headers: async () => ({ get: (k: string) => headerStore.get(k.toLowerCase()) ?? null }),
 }));
 
-import { siteUrl } from "@/lib/siteUrl";
+import { siteUrl, isHostname } from "@/lib/siteUrl";
 
 function setHeaders(h: Record<string, string>) {
   headerStore.clear();
@@ -41,5 +41,45 @@ describe("siteUrl", () => {
 
   it("falls back to localhost when no host header is present", async () => {
     expect(await siteUrl()).toBe("http://localhost:3000");
+  });
+
+  // Заголовок приходит от клиента: nginx отдаёт Host как есть и не трогает
+  // x-forwarded-host. Отсюда значение попадает в robots.txt, sitemap.xml и в
+  // JSON-LD на каждой странице, а JSON.stringify не экранирует "<".
+  it("не пускает в адрес мусор из заголовка — откатывается на дефолт", async () => {
+    setHeaders({ "x-forwarded-host": 'a"}</script><script>alert(1)</script>' });
+    expect(await siteUrl()).toBe("http://localhost:3000");
+
+    setHeaders({ host: "evil.com/path" });
+    expect(await siteUrl()).toBe("http://localhost:3000");
+
+    setHeaders({ host: "with space.example" });
+    expect(await siteUrl()).toBe("http://localhost:3000");
+  });
+
+  it("нормальные хосты по-прежнему проходят", async () => {
+    setHeaders({ host: "tradingstat.ru" });
+    expect(await siteUrl()).toBe("https://tradingstat.ru");
+    setHeaders({ host: "sub.domain-with-dash.example:8443" });
+    expect(await siteUrl()).toBe("https://sub.domain-with-dash.example:8443");
+  });
+});
+
+describe("isHostname", () => {
+  it("пропускает имя хоста с портом и без", () => {
+    expect(isHostname("tradingstat.ru")).toBe(true);
+    expect(isHostname("localhost:3000")).toBe(true);
+    expect(isHostname("127.0.0.1:3000")).toBe(true);
+    expect(isHostname("a-b.c-d.example")).toBe(true);
+  });
+
+  it("отвергает всё, чем можно выйти за пределы значения", () => {
+    for (const bad of [
+      "", " ", "evil.com/path", "a\"b", "a<b", "a>b", "a b",
+      "-leading.dash", "trailing.dash-", "host:99999999",
+      "a\n b", "javascript:alert(1)", "x".repeat(254),
+    ]) {
+      expect(isHostname(bad), bad).toBe(false);
+    }
   });
 });

@@ -3,6 +3,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Hoisted mocks to avoid initialization errors
 const mocks = vi.hoisted(() => ({
   upsertMock: vi.fn().mockResolvedValue({ id: 'test-id' }),
+  executeRawMock: vi.fn().mockImplementation((q: { values?: unknown[] }) =>
+    Promise.resolve(Math.floor((q?.values?.length ?? 0) / EVENT_COLUMNS)),
+  ),
   findFirstMock: vi.fn().mockResolvedValue(null),
   findManyMock: vi.fn().mockResolvedValue([]),
   groupByMock: vi.fn().mockResolvedValue([]),
@@ -10,8 +13,14 @@ const mocks = vi.hoisted(() => ({
   updateManyMock: vi.fn().mockResolvedValue({ count: 0 }),
 }));
 
+// Событие пишется одним INSERT … ON CONFLICT пачками, а не upsert'ом в цикле
+// (см. upsertEvents в lib/econcal.ts): в Sql-объект уходит по столько значений
+// на событие. Отсюда же тесты достают, что именно записалось.
+const EVENT_COLUMNS = 10;
+
 vi.mock('@/lib/db', () => ({
   prisma: {
+    $executeRaw: mocks.executeRawMock,
     economicEvent: {
       upsert: mocks.upsertMock,
       findFirst: mocks.findFirstMock,
@@ -64,6 +73,7 @@ describe('econcal module', () => {
     mocks.findFirstMock.mockResolvedValue(null);
     mocks.findManyMock.mockResolvedValue([]);
     mocks.upsertMock.mockResolvedValue({ id: 'test-id' });
+    mocks.executeRawMock.mockClear();
     mocks.groupByMock.mockResolvedValue([]);
     mocks.deleteManyMock.mockResolvedValue({ count: 0 });
     mocks.updateManyMock.mockResolvedValue({ count: 0 });
@@ -103,7 +113,7 @@ describe('econcal module', () => {
       expect(results[0].feed).toBe('ff_calendar_thisweek.json');
       expect(results[0].upserted).toBe(2);
       expect(results[0].error).toBeUndefined();
-      expect(mocks.upsertMock).toHaveBeenCalledTimes(2);
+      expect(mocks.executeRawMock).toHaveBeenCalledTimes(1); // одна пачка, а не два запроса
     });
 
     it('handles fetch errors gracefully', async () => {
@@ -123,7 +133,19 @@ describe('econcal module', () => {
         vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(items) }),
       );
 
-    const upserted = () => mocks.upsertMock.mock.calls.map((c) => c[0].create);
+    // Значения из всех пачек идут подряд: по EVENT_COLUMNS на событие,
+    // в том же порядке, что колонки в INSERT.
+    const upserted = () =>
+      mocks.executeRawMock.mock.calls.flatMap((c) => {
+        const values = (c[0] as { values: unknown[] }).values ?? [];
+        const out: Record<string, unknown>[] = [];
+        for (let i = 0; i < values.length; i += EVENT_COLUMNS) {
+          const [, time, currency, country, title, impact, category, forecast, previous, actual] =
+            values.slice(i, i + EVENT_COLUMNS);
+          out.push({ time, currency, country, title, impact, category, forecast, previous, actual });
+        }
+        return out;
+      });
 
     it('skips rows without a title, currency or a valid date', async () => {
       feedOf([
@@ -133,7 +155,7 @@ describe('econcal module', () => {
         { title: 'Bad date', country: 'USD', date: 'не дата' },
       ]);
       await refreshCalendar();
-      expect(mocks.upsertMock).not.toHaveBeenCalled();
+      expect(mocks.executeRawMock).not.toHaveBeenCalled();
     });
 
     it('survives a feed that is not an array', async () => {
@@ -242,7 +264,7 @@ describe('econcal module', () => {
       await getCalendar({});
 
       // Данные отдаются из базы, upsert'ы фида в этот запрос не попадают.
-      expect(mocks.upsertMock).not.toHaveBeenCalled();
+      expect(mocks.executeRawMock).not.toHaveBeenCalled();
     });
 
     it('ждёт обход фида, когда показывать нечего', async () => {
@@ -259,7 +281,7 @@ describe('econcal module', () => {
 
       await freshGetCalendar({});
 
-      expect(mocks.upsertMock).toHaveBeenCalled();
+      expect(mocks.executeRawMock).toHaveBeenCalled();
     });
 
     it('fetches events when stale', async () => {

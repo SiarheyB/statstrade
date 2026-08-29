@@ -7,6 +7,7 @@ import { z } from "zod";
 import { recordHit } from "@/lib/traffic/ingest";
 import { maybeRunFastAlerts } from "@/lib/traffic/alerts";
 import { ingestKey } from "@/lib/traffic/track";
+import { secretEquals } from "@/lib/crypto";
 import type { TrafficHit } from "@/lib/traffic/hit";
 
 export const runtime = "nodejs";
@@ -41,7 +42,7 @@ const schema = z.object({
 });
 
 export async function POST(req: Request) {
-  if (req.headers.get("x-analytics-key") !== (await ingestKey())) {
+  if (!secretEquals(req.headers.get("x-analytics-key"), await ingestKey())) {
     // Не 401: снаружи этого роута как бы не существует.
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }

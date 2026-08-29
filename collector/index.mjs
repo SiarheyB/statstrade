@@ -7,6 +7,7 @@
 // Конфиг через ENV — см. .env.example.
 
 import http from "node:http";
+import crypto from "node:crypto";
 import pg from "pg";
 import { createOrderBook } from "./orderbook.mjs"; // binance futures/spot
 import { createBybitBook } from "./bybit.mjs";
@@ -59,6 +60,19 @@ const cfg = {
 if (!cfg.databaseUrl) {
   console.error("[fatal] DATABASE_URL не задан");
   process.exit(1);
+}
+
+/**
+ * Сравнение bearer-токена за постоянное время: обычный `!==` выходит из
+ * сравнения на первом несовпавшем символе, то есть время ответа подсказывает,
+ * сколько символов угадано. Разная длина отвергается сразу — timingSafeEqual
+ * на буферах разной длины бросает исключение, а длина секретом не является.
+ */
+function bearerOk(header, token) {
+  if (!token) return false;
+  const got = Buffer.from(String(header ?? ""), "utf8");
+  const want = Buffer.from(`Bearer ${token}`, "utf8");
+  return got.length === want.length && crypto.timingSafeEqual(got, want);
 }
 
 const pool = new pg.Pool({ connectionString: cfg.databaseUrl, max: 4 });
@@ -1171,8 +1185,7 @@ const server = http.createServer(async (req, res) => {
     // эндпоинт, чтобы уровни считались по только что закрытому бару, а не по
     // тому, что осталось от прошлого прохода суточного таймера.
     // Защита — тот же bearer-токен, что у /metrics.
-    const auth = req.headers["authorization"] ?? "";
-    if (!cfg.metricsToken || auth !== `Bearer ${cfg.metricsToken}`) {
+    if (!bearerOk(req.headers["authorization"], cfg.metricsToken)) {
       res.writeHead(cfg.metricsToken ? 401 : 404);
       res.end();
       return;
@@ -1189,8 +1202,7 @@ const server = http.createServer(async (req, res) => {
   } else if (url === "/metrics") {
     // Защищённый эндпоинт для админ-панели Next.js (раздел «Карта ордеров»).
     // Bearer-токен COLLECTOR_METRICS_TOKEN. Если токен не задан — 404 (закрыто).
-    const auth = req.headers["authorization"] ?? "";
-    if (!cfg.metricsToken || auth !== `Bearer ${cfg.metricsToken}`) {
+    if (!bearerOk(req.headers["authorization"], cfg.metricsToken)) {
       res.writeHead(cfg.metricsToken ? 401 : 404);
       res.end();
       return;

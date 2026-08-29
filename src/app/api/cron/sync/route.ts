@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { secretEquals } from "@/lib/crypto";
 import { runDueSyncs } from "@/lib/sync";
 
 export const maxDuration = 60;
@@ -9,7 +10,7 @@ export const maxDuration = 60;
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return req.headers.get("authorization") === `Bearer ${secret}`;
+  return secretEquals(req.headers.get("authorization"), `Bearer ${secret}`);
 }
 
 async function handle(req: Request) {

@@ -9,12 +9,35 @@
 
 import { headers } from "next/headers";
 
+/**
+ * Похоже ли это на имя хоста (с необязательным портом).
+ *
+ * Намеренно узко: буквы, цифры, точка, дефис и `:порт`. Ни кавычек, ни
+ * угловых скобок, ни пробелов, ни слэшей — то есть ничего, чем можно выйти
+ * за пределы значения при вставке в URL или в JSON внутри <script>.
+ */
+export function isHostname(value: string): boolean {
+  if (!value || value.length > 253) return false;
+  return /^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?(:\d{1,5})?$/.test(value);
+}
+
 export async function siteUrl(): Promise<string> {
   const env = process.env.SITE_URL?.trim();
   if (env) return env.replace(/\/$/, "");
 
   const h = await headers();
-  const host = h.get("x-forwarded-host") || h.get("host") || "localhost:3000";
+  // Хост приходит из заголовка, то есть от клиента: nginx передаёт `Host` как
+  // есть, а `x-forwarded-host` не переписывает вовсе. Отсюда он попадает в
+  // robots.txt, sitemap.xml и в JSON-LD на КАЖДОЙ странице — а JSON.stringify
+  // не экранирует "<", так что значение вида `a"}</script><script>…`
+  // разрывало бы тег (CSP это не ловит: в script-src стоит 'unsafe-inline').
+  // Браузер такой заголовок сам не пошлёт, но промежуточный кэш превращает это
+  // в отравление страницы для всех, а поисковику подсовывает чужой домен.
+  //
+  // Поэтому: только то, что вообще может быть именем хоста. Всё остальное —
+  // на дефолт, как будто заголовка не было.
+  const raw = h.get("x-forwarded-host") || h.get("host") || "";
+  const host = isHostname(raw) ? raw : "localhost:3000";
   // Наружу сайт живёт только по HTTPS (HSTS в next.config.ts), поэтому
   // заголовку прокси здесь доверять нельзя: Cloudflare в режиме Flexible
   // ходит к origin по HTTP и проставляет x-forwarded-proto: http. Из-за этого

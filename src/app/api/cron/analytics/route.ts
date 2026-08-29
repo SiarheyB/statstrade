@@ -3,9 +3,11 @@
 // (см. docs/SELF_HOSTING.md). Без этой задачи таблица PageView растёт вечно.
 
 import { NextResponse } from "next/server";
+import { secretEquals } from "@/lib/crypto";
 import { rollupTraffic } from "@/lib/traffic/rollup";
 import { recordCronRun } from "@/lib/cronHeartbeat";
 import { runTrafficAlerts } from "@/lib/traffic/alerts";
+import { pruneErrorLog } from "@/lib/errorLog";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -13,7 +15,7 @@ export const maxDuration = 120;
 function authorized(req: Request): boolean {
   const secret = process.env.CRON_SECRET;
   if (!secret) return false;
-  return req.headers.get("authorization") === `Bearer ${secret}`;
+  return secretEquals(req.headers.get("authorization"), `Bearer ${secret}`);
 }
 
 async function handle(req: Request) {
@@ -29,8 +31,11 @@ async function handle(req: Request) {
   // Суточные проверки (в т.ч. обвал посещаемости) — здесь: сравнение с
   // недельным средним имеет смысл раз в сутки, а не на каждом событии.
   const alerts = await runTrafficAlerts("daily");
+  // Заодно подрезаем журнал ошибок: своей задачи у него не было, а пишет туда
+  // не только serverError(), но и оповещения о трафике (см. lib/errorLog.ts).
+  const errorsPruned = await pruneErrorLog();
   await recordCronRun("analytics.rollup", "cron");
-  return NextResponse.json({ ok: true, ...result, alerts: alerts.map((a) => a.kind) });
+  return NextResponse.json({ ok: true, ...result, errorsPruned, alerts: alerts.map((a) => a.kind) });
 }
 
 export async function GET(req: Request) {
