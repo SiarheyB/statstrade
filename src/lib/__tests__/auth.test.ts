@@ -9,7 +9,7 @@ vi.mock('bcrypt', () => ({
   default: { hash, compare },
 }));
 
-// --- Мок prisma (для handleLogin + token-version cache) ---
+// --- Мок prisma (кэш версии токена) ---
 const findUnique = vi.fn();
 vi.mock('@/lib/db', () => ({
   prisma: { user: { findUnique: (...a: any[]) => findUnique(...a) } },
@@ -59,10 +59,6 @@ import {
   verifyPassword,
   signSession,
   verifySession,
-  generateToken,
-  verifyToken,
-  handleLogin,
-  handleLogout,
   createSessionCookie,
   clearSessionCookie,
   getSession,
@@ -113,49 +109,6 @@ describe('auth', () => {
 
     it('verifySession возвращает null для битого токена', async () => {
       expect(await verifySession('not.a.jwt')).toBeNull();
-    });
-  });
-
-  describe('generateToken / verifyToken (proxies)', () => {
-    it('round-trip возвращает userId', async () => {
-      findUnique.mockResolvedValue({ tokenVersion: 0 });
-      const token = await generateToken('tester');
-      expect(await verifyToken(token)).toBe('tester');
-    });
-    it('verifyToken возвращает null для невалидного токена', async () => {
-      expect(await verifyToken('bad.token')).toBeNull();
-    });
-  });
-
-  describe('handleLogin', () => {
-    it('успех: ставит сессионную куку', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
-      compare.mockResolvedValue(true);
-      const result = await handleLogin({ username: 'user@x.com', password: 'pw' });
-      expect(result).toEqual({ isSuccess: true });
-      expect(cookieStore.has(COOKIE_NAME)).toBe(true);
-    });
-    it('провал: пользователь не найден', async () => {
-      findUnique.mockResolvedValue(null);
-      const result = await handleLogin({ username: 'ghost', password: 'pw' });
-      expect(result).toEqual({ isSuccess: false });
-    });
-    it('провал: неверный пароль', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
-      compare.mockResolvedValue(false);
-      const result = await handleLogin({ username: 'user@x.com', password: 'bad' });
-      expect(result).toEqual({ isSuccess: false });
-    });
-  });
-
-  describe('handleLogout', () => {
-    it('удаляет сессионную куку', async () => {
-      findUnique.mockResolvedValue({ id: 'u1', email: 'user@x.com', password: 'h', tokenVersion: 0 });
-      compare.mockResolvedValue(true);
-      await handleLogin({ username: 'user@x.com', password: 'pw' });
-      expect(cookieStore.has(COOKIE_NAME)).toBe(true);
-      await handleLogout();
-      expect(cookieStore.has(COOKIE_NAME)).toBe(false);
     });
   });
 

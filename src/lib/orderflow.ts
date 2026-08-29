@@ -9,6 +9,14 @@ import { Prisma } from "@prisma/client";
 // Сколько свечей вставлять за один batch (чтобы не перегружать Prisma/$executeRaw).
 const CANDLE_INSERT_BATCH = 100;
 
+// Таймауты на запросы к бирже. Без них запрос висел до proxy_read_timeout
+// nginx (75 с), занимая соединение и слот пула Prisma, — а это самый частый
+// внешний вызов в приложении: он идёт на КАЖДЫЙ опрос свечей открытой
+// вкладкой. Из одиннадцати внешних fetch в src/ таймаут стоял у девяти;
+// не было именно у этих двух.
+const LIVE_CANDLE_TIMEOUT_MS = 4000;   // добор формирующейся свечи (2 бара)
+const HISTORY_FETCH_TIMEOUT_MS = 12_000; // добор истории (до 1500 баров)
+
 export type ObHeatmap = {
   priceMin: number;
   priceMax: number;
@@ -155,7 +163,9 @@ export async function fetchOrderflowCandles(
     if (live && result.length > 0 && urlBase) {
       try {
         const latestUrl = `${urlBase}?symbol=${symbol}&interval=${interval}&limit=2`;
-        const latestRes = await fetch(latestUrl);
+        const latestRes = await fetch(latestUrl, {
+          signal: AbortSignal.timeout(LIVE_CANDLE_TIMEOUT_MS),
+        });
         if (latestRes.ok) {
           const latestRaw = await latestRes.json() as (string | number)[][];
           if (latestRaw.length > 0) {
@@ -204,7 +214,7 @@ export async function fetchOrderflowCandles(
     const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
       + `&startTime=${fromMs}&endTime=${toMs}&limit=1500`;
     try {
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(HISTORY_FETCH_TIMEOUT_MS) });
       if (res.ok) {
         const raw = await res.json() as (string | number)[][];
         // ═══════════════════════════════════════════════════════════════════
@@ -333,7 +343,7 @@ export async function fetchOrderflowCandlesBefore(
     try {
       const url = `${urlBase}?symbol=${symbol}&interval=${interval}`
         + `&startTime=${startTime}&endTime=${endTime}&limit=${Math.min(1500, limit)}`;
-      const res = await fetch(url);
+      const res = await fetch(url, { signal: AbortSignal.timeout(HISTORY_FETCH_TIMEOUT_MS) });
       if (res.ok) {
         const raw = (await res.json()) as (string | number)[][];
         for (const k of raw) {

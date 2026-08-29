@@ -49,8 +49,17 @@ const AGGREGATE_FROM: Record<string, string | undefined> = {
   "12h": "1h",
 };
 
+// Страница опрашивает эндпоинт ровно раз в 3000 мс, поэтому TTL=3000 давал
+// промах почти на каждом тике — кэш не работал вовсе.
+//
+// staleMs включает stale-while-revalidate (routeCache это уже умеет):
+// просроченный ответ отдаётся мгновенно, свежий считается в фоне. Свежести это
+// не стоит почти ничего: сам форекс-коллектор пересобирает текущую минуту раз в
+// FX_TICK_POLL_SEC секунд, то есть данных точнее нескольких секунд наверху
+// просто нет.
 const TTL_MS = 3000;
-const cache = createRouteCache(TTL_MS);
+const STALE_MS = 12_000;
+const cache = createRouteCache(TTL_MS, 200, { staleMs: STALE_MS });
 
 type CandleRow = { t: Date; o: number; h: number; l: number; c: number; v: number };
 type BaRow = { t: number; bidSum: number; askSum: number; volSum: number };
@@ -77,9 +86,20 @@ function aggregateCandles(rows: CandleRow[], targetMs: number): CandleRow[] {
     .map(b => ({ t: new Date(b.t), o: b.o, h: b.h, l: b.l, c: b.c, v: b.v }));
 }
 
-async function fetchCandles(symbol: string, range: string, fromMs: number, toMs: number) {
-  const interval = AGGREGATE_FROM[range] ?? range;
-  const rows = await prisma.fxCandle.findMany({
+/**
+ * Свечи окна — ОДИН запрос на весь ответ.
+ *
+ * Раньше их было три: fetchCandles, computeBA и computeDelta выполняли
+ * побайтово одинаковый findMany (тот же символ, биржа, интервал и диапазон),
+ * каждый тянул до 2000 строк, и потом считали из них разное. То есть одни и те
+ * же данные ехали из базы трижды — на каждый опрос, а страница форекса
+ * опрашивает эндпоинт раз в 3 секунды.
+ *
+ * exchange="finnhub" — исторический тег одного логического ряда, а не имя
+ * провайдера (см. CLAUDE.md): под ним лежат данные всех источников.
+ */
+async function loadRows(symbol: string, interval: string, fromMs: number, toMs: number) {
+  return prisma.fxCandle.findMany({
     where: {
       symbol,
       exchange: "finnhub",
@@ -89,12 +109,11 @@ async function fetchCandles(symbol: string, range: string, fromMs: number, toMs:
     orderBy: { t: "asc" },
     select: { t: true, o: true, h: true, l: true, c: true, v: true },
   });
+}
 
-  if (AGGREGATE_FROM[range]) {
-    return aggregateCandles(rows, TF_MS[range]);
-  }
-
-  return rows;
+/** Свечи для графика: при необходимости укрупняются до запрошенного ТФ. */
+function candlesFromRows(rows: CandleRow[], range: string): CandleRow[] {
+  return AGGREGATE_FROM[range] ? aggregateCandles(rows, TF_MS[range]) : rows;
 }
 
 // ─── B/A из свечей ───────────────────────────────────────────────────────
@@ -103,22 +122,14 @@ async function fetchCandles(symbol: string, range: string, fromMs: number, toMs:
 // Аппроксимируем B/A из OHLCV: bid = low, ask = high каждой свечи.
 // bidSum/askSum — это цена bid/ask, умноженная на 10000 для отображения.
 
-async function computeBA(symbol: string, fromMs: number, toMs: number, interval: string) {
-  // ВАЖНО: фильтр по interval обязателен. Без него выборка захватывала свечи
-  // ВСЕХ таймфреймов сразу (5m + 15m + 1h + 4h + 1d + 1w) — ряд получался с
-  // дублирующимися таймстемпами и «пилой» на панели B/A, а на широких окнах
-  // (range=1w → год истории) в Node тянулись сотни тысяч лишних строк.
-  const rows = await prisma.fxCandle.findMany({
-    where: {
-      symbol,
-      exchange: "finnhub",
-      interval,
-      t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    },
-    orderBy: { t: "asc" },
-    select: { t: true, o: true, h: true, l: true, c: true, v: true },
-  });
-
+// Свечи приходят готовыми (loadRows), своего запроса функция не делает.
+//
+// ВАЖНО про фильтр по interval, который теперь стоит в loadRows: без него
+// выборка захватывала свечи ВСЕХ таймфреймов сразу (5m + 15m + 1h + 4h + 1d +
+// 1w) — ряд получался с дублирующимися таймстемпами и «пилой» на панели B/A,
+// а на широких окнах (range=1w → год истории) в Node тянулись сотни тысяч
+// лишних строк.
+function computeBA(rows: CandleRow[]) {
   if (rows.length === 0) return null;
 
   // Аппроксимируем bid/ask из каждой свечи
@@ -141,18 +152,8 @@ async function computeBA(symbol: string, fromMs: number, toMs: number, interval:
 // «активности» вместо объёма (см. lib/forexActivity.ts).
 // Знак дельты — направление свечи: close > open → агрессивная покупка (+).
 
-async function computeDelta(symbol: string, fromMs: number, toMs: number, interval: string) {
-  const rows = await prisma.fxCandle.findMany({
-    where: {
-      symbol,
-      exchange: "finnhub",
-      interval,
-      t: { gte: new Date(fromMs), lte: new Date(toMs) },
-    },
-    orderBy: { t: "asc" },
-    select: { t: true, o: true, h: true, l: true, c: true },
-  });
-
+// Свечи приходят готовыми (loadRows), своего запроса функция не делает.
+function computeDelta(rows: CandleRow[]) {
   if (rows.length === 0) return null;
 
   const delta = rows.map(r => {
@@ -206,11 +207,12 @@ export async function GET(req: Request) {
       const toMs = Date.now();
       const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
       const sourceInterval = AGGREGATE_FROM[range] ?? range;
-      const [candles, ba, deltaRes] = await Promise.all([
-        fetchCandles(symbol, range, fromMs, toMs),
-        computeBA(symbol, fromMs, toMs, sourceInterval),
-        computeDelta(symbol, fromMs, toMs, sourceInterval),
-      ]);
+      // Один запрос на все три ряда: свечи, B/A и дельта считаются из одних и
+      // тех же строк, просто по-разному.
+      const rows = await loadRows(symbol, sourceInterval, fromMs, toMs);
+      const candles = candlesFromRows(rows, range);
+      const ba = computeBA(rows);
+      const deltaRes = computeDelta(rows);
       return {
         symbol,
         range,

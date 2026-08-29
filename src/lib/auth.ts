@@ -183,31 +183,17 @@ export async function clearPendingCookie() {
 
 export { COOKIE_NAME };
 
-// == Реализация недостающих функций для прохождения тестов ==
-
-export async function generateToken(username: string): Promise<string> {
-  const payload: SessionPayload = {
-    userId: username,
-    email: 'user@example.com'
-  };
-  return signSession(payload);
-}
-
-export async function verifyToken(token: string): Promise<string | null> {
-  const payload = await verifySession(token);
-  if (!payload) return null;
-  return payload.userId;
-}
-
-export async function handleLogin(credentials: { username: string, password: string }): Promise<{ isSuccess: boolean }> {
-  const user = await prisma.user.findUnique({ where: { email: credentials.username } });
-  if (!user) return { isSuccess: false };
-  const valid = await verifyPassword(credentials.password, user.password ?? "");
-  if (!valid) return { isSuccess: false };
-  await createSessionCookie({ userId: user.id, email: user.email });
-  return { isSuccess: true };
-}
-
-export async function handleLogout(): Promise<void> {
-  await clearSessionCookie();
-}
+// НЕ ДОБАВЛЯТЬ СЮДА «функции для тестов».
+//
+// Здесь жили generateToken / verifyToken / handleLogin / handleLogout,
+// написанные ради зелёных тестов и больше нигде не вызывавшиеся. Опасны они
+// были не тем, что мертвы, а тем, как выглядели: handleLogin — «обработчик
+// входа» в модуле аутентификации, который НЕ проверял twoFactorEnabled и
+// выдавал cookie с tokenVersion = 0 вместо настоящего. Первый же, кто
+// подключил бы её «чтобы не дублировать код», получил бы тихий обход второго
+// фактора и неотзываемую сессию. generateToken подписывала валидную сессию на
+// произвольный userId с зашитым email — при совпадении с ADMIN_EMAILS это
+// сразу админ.
+//
+// Вход целиком живёт в /api/auth/login и /api/auth/2fa/login: там и лимиты, и
+// второй фактор, и настоящий tokenVersion. Тесты проверяют их, а не копии.

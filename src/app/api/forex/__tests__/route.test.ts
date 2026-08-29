@@ -65,12 +65,21 @@ describe("GET /api/forex", () => {
     expect(body.cvd).not.toBeNull();
   });
 
-  it("filters every FxCandle query by a single interval (candles, B/A, delta)", async () => {
+  it("свечи, B/A и дельта считаются из ОДНОЙ выборки, а не из трёх одинаковых", async () => {
+    // Раньше fetchCandles, computeBA и computeDelta делали побайтово
+    // одинаковый findMany — одни и те же строки ехали из базы трижды на
+    // каждый опрос, а страница опрашивает эндпоинт раз в 3 секунды.
+    await GET(new Request(`${base}?symbol=EUR/USD&range=1h`));
+    expect(mockPrisma.fxCandle.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("выборка сужена одним интервалом — иначе в ряд попадут все таймфреймы сразу", async () => {
+    // Без фильтра по interval выборка захватывала 5m+15m+1h+4h+1d+1w: ряд с
+    // дублирующимися таймстемпами и «пила» на панели B/A.
     await GET(new Request(`${base}?symbol=EUR/USD&range=1h`));
     const intervals = mockPrisma.fxCandle.findMany.mock.calls.map(
       (c) => (c[0] as { where: { interval?: string } }).where.interval,
     );
-    expect(intervals.length).toBe(3); // свечи + B/A + delta
     expect(intervals.every((i) => i === "1h")).toBe(true);
   });
 
