@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
-import { getAuthUser, unauthorized, badRequest } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 
 // Returns exit fills for a trade — these are the partial closures.
 // For a long trade: sell fills are exits.
@@ -31,6 +31,19 @@ export async function GET(req: Request) {
   const exitSide = side === "long" ? "sell" : "buy";
 
   try {
+    // accountId приходит из query, поэтому владельца проверяем ЯВНО. Без этого
+    // любой авторизованный пользователь, подставив чужой id, читал бы чужие
+    // цены, объёмы и реализованный P&L: сессия проверялась, а принадлежность
+    // счёта — нет. Остальные роуты со счётом в параметрах (stats, calendar,
+    // monte-carlo, exit-efficiency, trade-images) это делают, здесь забыли.
+    const owned = await prisma.exchangeAccount.findFirst({
+      where: { id: accountId, userId: user.userId },
+      select: { id: true },
+    });
+    // Ответ тот же, что и для несуществующего счёта: по нему нельзя понять,
+    // существует ли чужой id вообще.
+    if (!owned) return badRequest("Аккаунт не найден");
+
     const fills = await prisma.fill.findMany({
       where: {
         accountId,
@@ -62,9 +75,9 @@ export async function GET(req: Request) {
       })),
     });
   } catch (err) {
-    return NextResponse.json(
-      { fills: [], error: (err as Error).message },
-      { status: 200 },
-    );
+    // Было: 200 с текстом ошибки Prisma в теле — наружу утекали внутренности
+    // (имена таблиц, куски запроса). serverError() пишет полное сообщение в
+    // журнал админки, а клиенту отдаёт generic-500, как везде.
+    return serverError((err as Error).message);
   }
 }
