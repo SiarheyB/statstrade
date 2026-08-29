@@ -125,11 +125,22 @@ describe("fetchOrderflowCandles: живая свеча", () => {
 });
 
 describe("computeDelta", () => {
+  // Имя таблицы приезжает значением (Prisma.raw — выбранный уровень каскада).
+  const deltaTableOf = (callIndex: number): string => {
+    const call = mocks.queryRaw.mock.calls[callIndex] ?? [];
+    const template = Array.isArray(call[0]) ? (call[0] as string[]).join(" ") : "";
+    const values = call
+      .slice(1)
+      .map((v: unknown) => (v as { strings?: string[] })?.strings?.join("") ?? "")
+      .join(" ");
+    return `${template} ${values}`;
+  };
+
   it("returns null when both the rollup and the raw fallback are empty", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]); // ObTradeRollup
-    mocks.queryRaw.mockResolvedValueOnce([]); // fallback на сырой ObTrade
+    // Три уровня каскада + сырой ObTrade.
+    mocks.queryRaw.mockResolvedValue([]);
     expect(await computeDelta("BTCUSDT", "binance", 0, 1000, 4)).toBeNull();
-    expect(mocks.queryRaw).toHaveBeenCalledTimes(2);
+    expect(mocks.queryRaw).toHaveBeenCalledTimes(4);
   });
 
   it("не трогает сырьё, когда rollup ответил", async () => {
@@ -138,11 +149,49 @@ describe("computeDelta", () => {
     expect(mocks.queryRaw).toHaveBeenCalledTimes(1);
   });
 
-  it("падает на сырой ObTrade, пока rollup не наполнен", async () => {
-    mocks.queryRaw.mockResolvedValueOnce([]); // rollup пуст
-    mocks.queryRaw.mockResolvedValueOnce([{ col: 1, buy: 7, sell: 2 }]);
+  it("падает на сырой ObTrade, пока каскад не наполнен", async () => {
+    mocks.queryRaw
+      .mockResolvedValueOnce([]) // минутный пуст
+      .mockResolvedValueOnce([]) // часовой пуст
+      .mockResolvedValueOnce([]) // дневной пуст
+      .mockResolvedValueOnce([{ col: 1, buy: 7, sell: 2 }]);
     const d = await computeDelta("BTCUSDT", "binance", 0, 1000, 4);
     expect(d!.delta).toEqual([0, 5, 0, 0]);
+  });
+
+  // Раньше дельта ЛЮБОГО таймфрейма читала только минутный слой: на 1d это
+  // 365 суток, на 1w около четырёх лет, а колонок всегда 240 — одна колонка
+  // шире недели складывалась из минутных строк. Замер на проде: 1690 мс в
+  // среднем на вызов.
+  it("узкое окно читает минутный уровень", async () => {
+    mocks.queryRaw.mockResolvedValue([{ col: 0, buy: 1, sell: 1 }]);
+    await computeDelta("BTCUSDT", "binance-futures", 0, 60 * 60_000, 240);
+    expect(deltaTableOf(0)).toContain('"ObTradeRollup"');
+  });
+
+  it("окно в месяцы читает часовой уровень", async () => {
+    mocks.queryRaw.mockResolvedValue([{ col: 0, buy: 1, sell: 1 }]);
+    const to = 40 * 86_400_000; // колонка ~4 часа
+    await computeDelta("BTCUSDT", "binance-futures", 0, to, 240);
+    expect(deltaTableOf(0)).toContain("ObTradeRollupH");
+  });
+
+  it("окно в годы читает дневной уровень", async () => {
+    mocks.queryRaw.mockResolvedValue([{ col: 0, buy: 1, sell: 1 }]);
+    const to = 4 * 365 * 86_400_000; // колонка ~6 суток
+    await computeDelta("BTCUSDT", "binance-futures", 0, to, 240);
+    expect(deltaTableOf(0)).toContain("ObTradeRollupD");
+  });
+
+  it("пока каскад догоняет историю, спускается на уровень мельче", async () => {
+    mocks.queryRaw
+      .mockResolvedValueOnce([]) // дневной ещё пуст
+      .mockResolvedValueOnce([{ col: 0, buy: 3, sell: 1 }]); // часовой отвечает
+    const to = 4 * 365 * 86_400_000;
+    const d = await computeDelta("BTCUSDT", "binance-futures", 0, to, 240);
+    expect(deltaTableOf(0)).toContain("ObTradeRollupD");
+    expect(deltaTableOf(1)).toContain("ObTradeRollupH");
+    expect(d!.buy[0]).toBe(3);
   });
 
   it("builds buy/sell/delta/cvd arrays and clamps cols", async () => {

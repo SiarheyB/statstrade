@@ -201,6 +201,54 @@ export async function rollupFootprintLevel(pool, limit) {
   return rowCount ?? 0;
 }
 
+/** Единицы, в которых умеет сворачивать каскад. Подставляются в SQL, поэтому
+ *  список закрытый — не из внешних данных. */
+const UNITS = new Set(["hour", "day"]);
+
+/**
+ * Свернуть ленту сделок на уровень крупнее: час из минут, сутки из часов.
+ *
+ * Отдельно от rollupLevel, потому что у ленты нет парной таблицы счётчиков —
+ * нормировать нечего, объёмы и число печатей просто складываются. Схема та же,
+ * что у rollupFootprintLevel: идём вперёд от последнего свёрнутого периода
+ * порциями по `limit` единиц, текущий незавершённый период переписываем на
+ * каждом прогоне (свёртка идемпотентна — DO UPDATE SET = EXCLUDED).
+ *
+ * Границы выравниваются truncUtc: без этого крайний период считался бы по
+ * остатку и затирал бы им полное значение — ровно тот баг, что уже был у
+ * стакана (см. ALIGNED_RANGE).
+ */
+export async function rollupTradeLevel(pool, src, dst, unit, limit) {
+  if (!UNITS.has(unit)) throw new Error(`неизвестная единица свёртки: ${unit}`);
+  const { rows: state } = await pool.query(
+    `SELECT (SELECT MAX("bucket") FROM "${dst}") AS done,
+            (SELECT MIN("bucket") FROM "${src}") AS first`,
+  );
+  const from = state[0]?.done ?? state[0]?.first;
+  if (!from) return 0; // источник пуст — сворачивать нечего
+
+  const t = (expr) => truncUtc(expr, `'${unit}'`);
+  const { rowCount } = await pool.query(
+    `WITH b AS (
+       SELECT ${t("$1::timestamptz")} AS lo,
+              LEAST(${t("now()")} + interval '1 ${unit}',
+                    ${t("$1::timestamptz")} + ($2 || ' ${unit}')::interval) AS hi
+     )
+     INSERT INTO "${dst}" ("symbol","exchange","bucket","buyVol","sellVol","trades")
+     SELECT s."symbol", s."exchange", ${t('s."bucket"')} AS bkt,
+            SUM(s."buyVol"), SUM(s."sellVol"), SUM(s."trades")::int
+     FROM "${src}" s, b
+     WHERE s."bucket" >= b.lo AND s."bucket" < b.hi
+     GROUP BY s."symbol", s."exchange", bkt
+     ON CONFLICT ("symbol","exchange","bucket")
+     DO UPDATE SET "buyVol" = EXCLUDED."buyVol",
+                   "sellVol" = EXCLUDED."sellVol",
+                   "trades" = EXCLUDED."trades"`,
+    [from, String(limit)],
+  );
+  return rowCount ?? 0;
+}
+
 /**
  * Полный проход каскада: час из минут, сутки из часов, часовой футпринт.
  *
@@ -221,10 +269,16 @@ export async function rollupCascade(pool, opts = {}) {
       "day", CASCADE_CHUNK_DAYS, CASCADE_TAIL_DAYS,
     );
     const fp = await rollupFootprintLevel(pool, CASCADE_CHUNK_HOURS);
-    if (h || d || fp) log.log(`[cascade] свёрнуто строк: час=${h} сутки=${d} футпринт=${fp}`);
-    return { hour: h, day: d, footprint: fp };
+    // Лента сделок: та же лестница, что у стакана. Сутки из часа, а не из
+    // минут — суммы ассоциативны, а часовой уровень уже в 60 раз меньше.
+    const th = await rollupTradeLevel(pool, "ObTradeRollup", "ObTradeRollupH", "hour", CASCADE_CHUNK_HOURS);
+    const td = await rollupTradeLevel(pool, "ObTradeRollupH", "ObTradeRollupD", "day", CASCADE_CHUNK_DAYS);
+    if (h || d || fp || th || td) {
+      log.log(`[cascade] свёрнуто строк: час=${h} сутки=${d} футпринт=${fp} лента=${th}/${td}`);
+    }
+    return { hour: h, day: d, footprint: fp, tradeHour: th, tradeDay: td };
   } catch (err) {
     log.error(`[cascade] ошибка: ${err.message}`);
-    return { hour: 0, day: 0, footprint: 0, error: err.message };
+    return { hour: 0, day: 0, footprint: 0, tradeHour: 0, tradeDay: 0, error: err.message };
   }
 }

@@ -620,6 +620,44 @@ model ObTradeRollup {
   @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
 }
 
+// Часовой и дневной уровни ленты сделок — поверх минутного ObTradeRollup, по
+// той же логике, что у стакана (ObSnapshotRollupH/D) и футпринта
+// (ObFootprintRollupH). Минутный слой при этом остаётся полным.
+//
+// Зачем. Дельта и CVD рисуются на том же окне, что и карта: на 1d это 365
+// суток, на 1w — около четырёх лет. Колонок на графике всегда 240, то есть на
+// недельном таймфрейме одна колонка шире недели, а складывалась она из
+// минутных строк. Замер на проде (pg_stat_statements): 1690 мс в среднем на
+// вызов, 25.4 секунды суммарно за 8 часов — больше, чем все остальные запросы
+// к этим таблицам вместе взятые. И это росло бы дальше: ROLLUP_RETENTION_DAYS
+// по умолчанию 0, минутный слой ленты не чистится вовсе.
+//
+// Суммы при свёртке ассоциативны, поэтому дневной уровень строится из
+// часового, а не из минутного — он уже в 60 раз меньше.
+model ObTradeRollupH {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало ЧАСА (UTC)
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+  trades   Int      @default(0)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket]) // выборка по всем биржам (exchange="all")
+}
+
+model ObTradeRollupD {
+  symbol   String
+  exchange String
+  bucket   DateTime @db.Timestamptz(3) // начало СУТОК (UTC)
+  buyVol   Float    @default(0)
+  sellVol  Float    @default(0)
+  trades   Int      @default(0)
+
+  @@id([symbol, exchange, bucket])
+  @@index([symbol, bucket])
+}
+
 // Rollup футпринта: объём покупок/продаж по ценовым уровням в ПЯТИМИНУТНОМ
 // бакете. Пять минут — наименьший таймфрейм графика, а все остальные (15m, 1h,
 // 4h, 12h, 1d, 1w) кратны ему, поэтому любой из них собирается из этих строк

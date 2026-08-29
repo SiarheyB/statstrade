@@ -6,6 +6,7 @@ import {
   rollupRange,
   rollupLevel,
   rollupFootprintLevel,
+  rollupTradeLevel,
 } from "../cascade.mjs";
 
 /** Пул-заглушка: отвечает по сценарию и запоминает запросы. */
@@ -176,5 +177,71 @@ describe("collector/cascade — rollupFootprintLevel", () => {
     );
     expect(await rollupFootprintLevel(pool, 336)).toBe(0);
     expect(pool.calls).toHaveLength(1);
+  });
+});
+
+describe("collector/cascade — rollupTradeLevel", () => {
+  const stateRows = (done, first) => ({ rows: [{ done, first }], rowCount: 1 });
+
+  it("складывает объёмы И число печатей", async () => {
+    // trades — это «скорость ленты»; если её не суммировать, панель занулится
+    // на всех широких таймфреймах.
+    const pool = makePool((sql) =>
+      sql.includes("done") ? stateRows("2026-08-25T10:00:00Z", null) : undefined,
+    );
+    await rollupTradeLevel(pool, "ObTradeRollup", "ObTradeRollupH", "hour", 336);
+    const sql = pool.calls[1].sql;
+    expect(sql).toContain('SUM(s."buyVol")');
+    expect(sql).toContain('SUM(s."sellVol")');
+    expect(sql).toContain('SUM(s."trades")');
+  });
+
+  it("границы выровнены по единице и прибиты к UTC", async () => {
+    // Невыровненная граница считала бы крайний период по остатку и затирала им
+    // полное значение — тот же баг, что был у стакана (см. ALIGNED_RANGE).
+    const pool = makePool((sql) =>
+      sql.includes("done") ? stateRows("2026-08-25T10:00:00Z", null) : undefined,
+    );
+    await rollupTradeLevel(pool, "ObTradeRollup", "ObTradeRollupH", "hour", 336);
+    const sql = pool.calls[1].sql;
+    expect(sql).toContain("AT TIME ZONE 'UTC'");
+    expect(sql).not.toMatch(/date_trunc\('hour', s\."bucket"\)/);
+    expect(sql).toContain('s."bucket" >= b.lo AND s."bucket" < b.hi');
+  });
+
+  it("перезаписывает, а не прибавляет — иначе повторный прогон задвоил бы", async () => {
+    const pool = makePool((sql) =>
+      sql.includes("done") ? stateRows("2026-08-25T10:00:00Z", null) : undefined,
+    );
+    await rollupTradeLevel(pool, "ObTradeRollup", "ObTradeRollupH", "hour", 336);
+    const sql = pool.calls[1].sql;
+    expect(sql).toContain('DO UPDATE SET "buyVol" = EXCLUDED."buyVol"');
+    expect(sql).not.toContain('+ EXCLUDED');
+  });
+
+  it("дневной уровень берётся из ЧАСОВОГО, а не из минутного", async () => {
+    const pool = makePool((sql) =>
+      sql.includes("done") ? stateRows("2026-08-25T00:00:00Z", null) : undefined,
+    );
+    await rollupTradeLevel(pool, "ObTradeRollupH", "ObTradeRollupD", "day", 90);
+    const sql = pool.calls[1].sql;
+    expect(sql).toContain('FROM "ObTradeRollupH"');
+    expect(sql).toContain('INSERT INTO "ObTradeRollupD"');
+  });
+
+  it("нечего сворачивать — в БД не идём", async () => {
+    const pool = makePool((sql) =>
+      sql.includes("done") ? stateRows(null, null) : undefined,
+    );
+    expect(await rollupTradeLevel(pool, "ObTradeRollup", "ObTradeRollupH", "hour", 336)).toBe(0);
+    expect(pool.calls).toHaveLength(1);
+  });
+
+  it("единица свёртки — только из закрытого списка", async () => {
+    // Она подставляется в SQL строкой, поэтому произвольное значение принимать
+    // нельзя даже из своего же кода.
+    const pool = makePool(() => undefined);
+    await expect(rollupTradeLevel(pool, "a", "b", "month; DROP TABLE x", 1)).rejects.toThrow();
+    expect(pool.calls).toHaveLength(0);
   });
 });

@@ -410,14 +410,28 @@ export async function computeDelta(
   const xspan = toMs - fromMs || 1;
   const exFilter = exchange === "all" ? Prisma.empty : Prisma.sql`AND "exchange" = ${exchange}`;
   const colExprR = Prisma.sql`floor((extract(epoch from "bucket") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
-  let rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
-    SELECT ${colExprR}::int AS col,
-           SUM("buyVol")::float8 AS buy,
-           SUM("sellVol")::float8 AS sell
-    FROM "ObTradeRollup"
-    WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
-    GROUP BY col
-  `;
+
+  // Уровень каскада — по ширине колонки, тем же правилом, что у карты
+  // (см. rollupLevelFor). Раньше дельта и CVD ЛЮБОГО таймфрейма читали только
+  // минутный слой: на 1d это 365 суток, на 1w около четырёх лет, а колонок
+  // всегда 240 — то есть одна колонка шире недели складывалась из минутных
+  // строк. Замер на проде: 1690 мс в среднем на вызов, 25.4 с суммарно за 8
+  // часов — больше, чем все остальные обращения к ObTrade* вместе.
+  //
+  // Порядок запасных уровней тот же, что у карты: пока каскад догоняет
+  // историю, часовой и дневной ещё пусты, и чтение честно падает на минутный.
+  let rows: { col: number; buy: number; sell: number }[] = [];
+  for (const lvl of LEVEL_FALLBACK[rollupLevelFor(fromMs, toMs, cols)]) {
+    rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
+      SELECT ${colExprR}::int AS col,
+             SUM("buyVol")::float8 AS buy,
+             SUM("sellVol")::float8 AS sell
+      FROM ${Prisma.raw(`"${TRADE_ROLLUP_TABLES[lvl]}"`)}
+      WHERE "symbol" = ${symbol} AND "bucket" >= ${new Date(fromMs)} AND "bucket" <= ${new Date(toMs)} ${exFilter}
+      GROUP BY col
+    `;
+    if (rows.length > 0) break;
+  }
   if (rows.length === 0) {
     const colExpr = Prisma.sql`floor((extract(epoch from "t") * 1000 - ${fromMs}) / ${xspan} * ${cols})`;
     rows = await prisma.$queryRaw<{ col: number; buy: number; sell: number }[]>`
@@ -737,6 +751,14 @@ export function rollupLevelFor(fromMs: number, toMs: number, cols: number): Roll
 }
 
 // Таблицы уровня: цены и парные им счётчики снапшотов.
+// Таблицы уровня для ЛЕНТЫ СДЕЛОК (дельта, CVD, скорость ленты). Парной
+// таблицы счётчиков у неё нет: нормировать нечего, объёмы складываются как есть.
+const TRADE_ROLLUP_TABLES: Record<RollupLevel, string> = {
+  minute: "ObTradeRollup",
+  hour: "ObTradeRollupH",
+  day: "ObTradeRollupD",
+};
+
 const ROLLUP_TABLES: Record<RollupLevel, { prices: string; snaps: string }> = {
   minute: { prices: "ObSnapshotRollup", snaps: "ObRollupBucket" },
   hour: { prices: "ObSnapshotRollupH", snaps: "ObRollupBucketH" },
