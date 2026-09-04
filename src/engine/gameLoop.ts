@@ -4,7 +4,7 @@
 // шаг 6 псевдокода). Шаги 1/2 (рыночные режимы/новости) всё ещё вне объёма
 // — маркерные комментарии ниже, чтобы структура функции не менялась, когда
 // эти шаги подключатся (Фаза 3).
-import type { Account, Asset, Candle, MarketRegime, Position, TradingStyleConfig } from "@/engine/entities/types";
+import type { Account, Asset, Candle, LifestyleState, MarketRegime, Position, TradingStyleConfig } from "@/engine/entities/types";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import { randomNormal, simulateTick } from "@/engine/market/priceSimulation";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
@@ -17,6 +17,7 @@ import {
 } from "@/engine/economy/marginEngine";
 import { applyXpGain, calculateXpGain, xpToNextLevel, BASE_XP } from "@/engine/player/progression";
 import { processQuarterlyDividends } from "@/engine/economy/dividends";
+import { chargeUpkeep, monthlyUpkeep } from "@/engine/economy/shop";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
@@ -38,6 +39,10 @@ export const MAX_CANDLES_PER_ASSET = 500;
 // "Игровой квартал" (раздел 4.6) — 90 игровых дней, не календарных 1/4 года
 // (спека не уточняет — простейший выбор, раздел 0 п.6).
 export const QUARTER_MS = 90 * 24 * 60 * 60 * 1000;
+// "Игровой месяц" (раздел 13) — 30 игровых дней, ровно треть квартала выше:
+// расход на образ жизни списывается втрое чаще, чем приходят дивиденды, и это
+// намеренно — содержание должно ощущаться, а не теряться на фоне купонов.
+export const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
 
 export interface GameState {
   account: Account;
@@ -49,6 +54,8 @@ export interface GameState {
   gameCalendarDay: number;
   gameElapsedMs: number; // накоплено игрового времени с начала партии
   lastDividendQuarter: number; // номер последнего игрового квартала, за который уже заплатили
+  lifestyle: LifestyleState; // покупки/косметика — раздел 13
+  lastUpkeepMonth: number; // номер последнего игрового месяца, за который уже списали содержание
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -232,6 +239,18 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     processQuarterlyDividends(account, state.activeAssets, prices);
   }
 
+  // 6b. Расход на образ жизни раз в игровой месяц (раздел 13) — зеркально
+  // дивидендам выше: тот же приём "платим за каждый пройденный период", чтобы
+  // один тик на ускорении investing (43200x) не проглатывал месяцы бесплатно.
+  const currentMonth = Math.floor(gameElapsedMs / MONTH_MS);
+  let lastUpkeepMonth = state.lastUpkeepMonth;
+  let lifestyle = state.lifestyle;
+  const upkeep = monthlyUpkeep(lifestyle);
+  while (lastUpkeepMonth < currentMonth) {
+    lastUpkeepMonth++;
+    if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
+  }
+
   // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);
 
@@ -243,5 +262,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     gameElapsedMs,
     gameCalendarDay: Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000)),
     lastDividendQuarter,
+    lifestyle,
+    lastUpkeepMonth,
   };
 }

@@ -340,7 +340,11 @@ export function drawCandlesticks(
   plotX: number,
   plotW: number,
   xspan: number,
-  opts: { clusters?: boolean; colW?: number; bodyRatio?: number } = {},
+  // up/down — необязательное переопределение цветов свечей: игровой
+  // терминал (src/components/game/PriceChart.tsx) красит их по купленной в
+  // магазине теме. Без них — те же CHART_COLORS, что и на всех остальных
+  // графиках проекта, поэтому вызывающий код форекса/ордерфлоу не меняется.
+  opts: { clusters?: boolean; colW?: number; bodyRatio?: number; up?: string; down?: string } = {},
 ) {
   if (candles.length < 2) return;
   const stepMs = candles[1].t - candles[0].t;
@@ -358,8 +362,9 @@ export function drawCandlesticks(
     const x = sx(k.t + stepMs / 2);
     if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
     const up = k.c >= k.o;
-    ctx.strokeStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
-    ctx.fillStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
+    const color = up ? (opts.up ?? CHART_COLORS.up) : (opts.down ?? CHART_COLORS.down);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x, sy(k.h));
     ctx.lineTo(x, sy(k.l));

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { candleIntervalMs, checkStopConditions, gameTick, type GameState } from "@/engine/gameLoop";
+import { candleIntervalMs, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { freshLifestyle } from "@/engine/economy/shop";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -45,6 +46,9 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     activeStyle: TRADING_STYLE_CONFIGS.day,
     gameCalendarDay: 0,
     gameElapsedMs: 0,
+    lastDividendQuarter: 0,
+    lifestyle: freshLifestyle(),
+    lastUpkeepMonth: 0,
     ...overrides,
   };
 }
@@ -427,5 +431,37 @@ describe("balance sanity (упрощённый Monte Carlo, раздел 25)", (
     // "просто так" (без сделок игрока).
     expect(bankruptAtTick).toBeNull();
     expect(state.account.equity).toBeCloseTo(10000, 5);
+  });
+});
+
+describe("расход на образ жизни (раздел 13)", () => {
+  it("списывает содержание за каждый пройденный игровой месяц, а не один раз", () => {
+    // investing (43200x): один тик реального времени перепрыгивает сразу
+    // несколько месяцев — платить надо за все, иначе яхту выгоднее держать
+    // на самом быстром стиле (бесплатно).
+    const lifestyle = { ...freshLifestyle(), ownedItemIds: ["life_studio"] }; // 900/мес
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 10_000 }) });
+    const dtRealMs = (3 * MONTH_MS) / TRADING_STYLE_CONFIGS.investing.timeAcceleration;
+    const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(3));
+    expect(next.lastUpkeepMonth).toBe(3);
+    expect(next.account.balance).toBe(10_000 - 3 * 900);
+    expect(next.lifestyle.totalUpkeepPaid).toBe(2_700);
+  });
+
+  it("без покупок баланс не трогается вовсе", () => {
+    const state = makeState({ account: makeAccount({ balance: 10_000 }) });
+    const dtRealMs = (2 * MONTH_MS) / TRADING_STYLE_CONFIGS.investing.timeAcceleration;
+    const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(4));
+    expect(next.account.balance).toBe(10_000);
+    expect(next.lastUpkeepMonth).toBe(2);
+  });
+
+  it("не уводит баланс в минус, когда на содержание не хватает", () => {
+    const lifestyle = { ...freshLifestyle(), ownedItemIds: ["life_yacht"] }; // 25 000/мес
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 1_000 }) });
+    const dtRealMs = MONTH_MS / TRADING_STYLE_CONFIGS.investing.timeAcceleration;
+    const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(5));
+    expect(next.account.balance).toBe(0);
+    expect(next.lifestyle.unpaidUpkeep).toBe(24_000);
   });
 });

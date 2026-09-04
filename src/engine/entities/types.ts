@@ -176,6 +176,40 @@ export const NEUTRAL_REGIME: MarketRegime = {
   daysInRegime: 0,
 };
 
+// ── Магазин и образ жизни трейдера (раздел 13 спеки) ────────────────────────
+// F2P-safe по построению: покупки НЕ влияют ни на RNG, ни на исполнение
+// ордеров, ни на комиссии — только на внешний вид терминала, престиж
+// (account.reputation) и ежемесячные расходы на содержание. Ни один предмет
+// не даёт торгового преимущества, поэтому «магазин» нельзя превратить в
+// pay-to-win, даже если когда-нибудь появится реальная монетизация.
+export type ShopCategory = "theme" | "gear" | "lifestyle" | "status";
+
+export interface ShopItemTheme {
+  accent: string; // подменяет --color-accent внутри терминала игры
+  up: string; // цвет растущей свечи
+  down: string; // цвет падающей свечи
+}
+
+export interface ShopItem {
+  id: string;
+  category: ShopCategory;
+  price: number;
+  upkeepPerMonth: number; // расход на содержание, списывается раз в игровой месяц
+  prestige: number; // сколько очков репутации (account.reputation) даёт покупка
+  requiresPrestige: number; // порог репутации, ниже которого предмет не продаётся
+  icon: string;
+  theme?: ShopItemTheme; // только у category === "theme"
+}
+
+export interface LifestyleState {
+  ownedItemIds: string[];
+  equippedThemeId: string | null;
+  fundName: string; // пустая строка — фонд ещё не назван (нужен предмет status_fund)
+  totalSpent: number; // суммарно потрачено на покупки — для статистики в UI
+  totalUpkeepPaid: number; // суммарно уплачено за содержание
+  unpaidUpkeep: number; // сколько не смогли списать (баланс кончился) — повод для предупреждения
+}
+
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
   savedAt: number;
@@ -198,6 +232,11 @@ export interface SaveGame {
   // заплачены дивиденды/купоны (см. gameLoop.ts, шаг 6). Без сохранения
   // каждая загрузка снова платила бы за уже оплаченный квартал.
   lastDividendQuarter: number;
+  // Раздел 13 — покупки/косметика и номер последнего игрового месяца, за
+  // который уже списаны расходы на содержание (симметрично
+  // lastDividendQuarter: дивиденды — доход, upkeep — расход).
+  lifestyle: LifestyleState;
+  lastUpkeepMonth: number;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

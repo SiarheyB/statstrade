@@ -9,7 +9,8 @@ import assetsData from "@/data/assets.json";
 import type { Account, Asset, Candle, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
-import { applyPositionClose, gameTick, type GameState } from "@/engine/gameLoop";
+import { applyPositionClose, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
 import { loadGame, saveGame } from "@/persistence/gameDb";
@@ -81,6 +82,8 @@ function freshState(): GameState {
     gameCalendarDay: 0,
     gameElapsedMs: 0,
     lastDividendQuarter: 0,
+    lifestyle: freshLifestyle(),
+    lastUpkeepMonth: 0,
   };
 }
 
@@ -101,6 +104,8 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     gameCalendarDay: state.gameCalendarDay,
     gameElapsedMs: state.gameElapsedMs,
     lastDividendQuarter: state.lastDividendQuarter,
+    lifestyle: state.lifestyle,
+    lastUpkeepMonth: state.lastUpkeepMonth,
     onboardingDone,
     disclaimerSeen,
   };
@@ -154,8 +159,17 @@ function saveToState(save: SaveGame): GameState {
     // новые всегда пишут реальное значение (см. stateToSave выше).
     gameElapsedMs: save.gameElapsedMs ?? 0,
     lastDividendQuarter: save.lastDividendQuarter ?? 0,
+    lifestyle: save.lifestyle ?? freshLifestyle(),
+    // Для сохранений, сделанных ДО магазина, отсчёт содержания начинается с
+    // ТЕКУЩЕГО игрового месяца, а не с нуля: иначе первый же тик после
+    // обновления игры списал бы разом плату за все месяцы, прожитые до
+    // покупки первой вещи (на investing-ускорении это сотни месяцев —
+    // мгновенное обнуление баланса на ровном месте).
+    lastUpkeepMonth: save.lastUpkeepMonth ?? Math.floor((save.gameElapsedMs ?? 0) / MONTH_MS),
   };
 }
+
+export type PurchaseResult = { ok: true } | { ok: false; error: PurchaseError };
 
 export type OpenPositionResult =
   | { ok: true }
@@ -181,6 +195,9 @@ interface GameStoreState {
   setStopLoss: (positionId: string, price: number | undefined) => void;
   setTakeProfit: (positionId: string, price: number | undefined) => void;
   setActiveStyle: (style: TradingStyle) => void;
+  purchaseShopItem: (itemId: string) => PurchaseResult;
+  equipShopTheme: (themeId: string) => void;
+  setFundName: (name: string) => void;
   updateJournalEntry: (entryId: string, patch: { tags?: string[]; note?: string }) => void;
   completeOnboarding: () => void;
   acceptDisclaimer: () => void;
@@ -341,6 +358,35 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         game: { ...s.game, activeStyle: config, activeAssets: [...s.game.activeAssets, ...missing], prices, candles },
       };
     });
+    void get().persistNow();
+  },
+
+  // Магазин (раздел 13). Проверка и списание — в движке
+  // (economy/shop.ts), стор только копирует account под мутацию и сразу
+  // персистит: покупка за 250 тысяч, потерянная из-за закрытой вкладки до
+  // ближайшего автосейва (раз в 60с), выглядела бы как воровство.
+  purchaseShopItem: (itemId) => {
+    const { game } = get();
+    const item = getShopItem(itemId);
+    const check = canPurchase(item, game.account.balance, game.lifestyle, game.account.reputation);
+    if (!check.ok || !item) return check.ok ? { ok: false, error: "unknown_item" } : check;
+    const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
+    const lifestyle = applyPurchase(account, game.lifestyle, item);
+    set((s) => ({ game: { ...s.game, account, lifestyle } }));
+    void get().persistNow();
+    return { ok: true };
+  },
+
+  equipShopTheme: (themeId) => {
+    set((s) => ({ game: { ...s.game, lifestyle: equipTheme(s.game.lifestyle, themeId) } }));
+    void get().persistNow();
+  },
+
+  setFundName: (name) => {
+    // Обрезаем до 40 символов на входе в стор, а не только в поле ввода:
+    // сохранение уедет в IndexedDB и потом в заголовок терминала, а
+    // ограничение input-а обходится вставкой из буфера.
+    set((s) => ({ game: { ...s.game, lifestyle: { ...s.game.lifestyle, fundName: name.trim().slice(0, 40) } } }));
     void get().persistNow();
   },
 

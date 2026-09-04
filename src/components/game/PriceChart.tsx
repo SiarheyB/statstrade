@@ -71,10 +71,14 @@ export default function PriceChart({
   candles,
   currentPrice,
   symbol,
+  candleColors,
 }: {
   candles: EngineCandle[];
   currentPrice: number | undefined;
   symbol: string;
+  // Цвета свечей купленной в магазине темы (раздел 13). undefined — цвета
+  // по умолчанию, те же, что у форекса/карты ордеров.
+  candleColors?: { up: string; down: string };
 }) {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -84,6 +88,10 @@ export default function PriceChart({
   const priceRef = useRef(currentPrice);
   const symbolRef = useRef(symbol);
   const tRef = useRef(t);
+  // Через ref, а не напрямую в замыкании: слушатели мыши навешаны один раз и
+  // зовут redrawRef.current(), поэтому цвет темы должен читаться в момент
+  // отрисовки, а не остаться в замыкании первого рендера.
+  const colorsRef = useRef(candleColors);
 
   const viewRef = useRef<View | null>(null); // null = автоподгон под всю историю
   const layoutRef = useRef<PlotLayout | null>(null);
@@ -122,6 +130,7 @@ export default function PriceChart({
     priceRef.current = currentPrice;
     symbolRef.current = symbol;
     tRef.current = t;
+    colorsRef.current = candleColors;
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -196,7 +205,10 @@ export default function PriceChart({
       }
       ctx.textAlign = "left";
 
-      drawCandlesticks(ctx, allCandles, sx, sy, layout.plotX, layout.plotW, xspan);
+      drawCandlesticks(ctx, allCandles, sx, sy, layout.plotX, layout.plotW, xspan, {
+        up: colorsRef.current?.up,
+        down: colorsRef.current?.down,
+      });
 
       const price = priceRef.current;
       if (price != null) {
@@ -233,7 +245,7 @@ export default function PriceChart({
 
     redrawRef.current = draw;
     draw();
-  }, [candles, currentPrice, symbol, t]);
+  }, [candles, currentPrice, symbol, t, candleColors]);
 
   // Эффект 2 — вешает слушатели событий и ResizeObserver ОДИН раз (пустые
   // зависимости), не пересоздаёт их на каждый тик игры.

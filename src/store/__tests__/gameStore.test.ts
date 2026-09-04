@@ -10,6 +10,8 @@ vi.mock("@/persistence/gameDb", () => ({
 }));
 
 import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS } from "@/store/gameStore";
+import { DEFAULT_THEME_ID, freshLifestyle, getShopItem } from "@/engine/economy/shop";
+import { MONTH_MS } from "@/engine/gameLoop";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const ASSET_ID = PHASE1_ASSET_IDS[0];
@@ -29,11 +31,14 @@ function resetStoreToFresh() {
         positions: [],
         journal: [],
         skills: {},
+        reputation: 0,
       },
       prices: { [ASSET_ID]: 100 },
       // setActiveStyle-тесты меняют это на другой стиль — без сброса течёт
       // в следующий тест (поймано: порядок тестов в файле влиял на результат).
       activeStyle: TRADING_STYLE_CONFIGS.day,
+      lifestyle: freshLifestyle(),
+      lastUpkeepMonth: 0,
     },
   }));
 }
@@ -354,5 +359,83 @@ describe("completeOnboarding / acceptDisclaimer", () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(mocks.saveGame).toHaveBeenCalled();
+  });
+});
+
+describe("магазин (раздел 13)", () => {
+  const CHAIR = getShopItem("gear_chair")!; // 1500, престиж 6, без порога
+
+  it("покупка списывает деньги, даёт престиж и сразу сохраняется", async () => {
+    const result = useGameStore.getState().purchaseShopItem(CHAIR.id);
+    const s = useGameStore.getState();
+    expect(result).toEqual({ ok: true });
+    expect(s.game.account.balance).toBe(10_000 - CHAIR.price);
+    expect(s.game.account.reputation).toBe(CHAIR.prestige);
+    expect(s.game.lifestyle.ownedItemIds).toContain(CHAIR.id);
+    // Персист без ожидания автосейва: покупка, потерянная при закрытии
+    // вкладки, выглядела бы как списание денег в никуда.
+    expect(mocks.saveGame).toHaveBeenCalled();
+  });
+
+  it("не продаёт дважды и не продаёт дороже баланса", () => {
+    useGameStore.getState().purchaseShopItem(CHAIR.id);
+    expect(useGameStore.getState().purchaseShopItem(CHAIR.id)).toEqual({ ok: false, error: "already_owned" });
+    expect(useGameStore.getState().purchaseShopItem("life_yacht")).toEqual({ ok: false, error: "locked" });
+    expect(useGameStore.getState().purchaseShopItem("life_studio")).toEqual({ ok: false, error: "insufficient_funds" });
+  });
+
+  it("тему можно надеть только после покупки", () => {
+    useGameStore.getState().equipShopTheme("theme_gold");
+    expect(useGameStore.getState().game.lifestyle.equippedThemeId).toBe(DEFAULT_THEME_ID);
+    useGameStore.setState((s) => ({
+      game: { ...s.game, account: { ...s.game.account, balance: 100_000 }, lifestyle: { ...s.game.lifestyle } },
+    }));
+    useGameStore.getState().purchaseShopItem("theme_matrix");
+    expect(useGameStore.getState().game.lifestyle.equippedThemeId).toBe("theme_matrix");
+    useGameStore.getState().equipShopTheme(DEFAULT_THEME_ID);
+    expect(useGameStore.getState().game.lifestyle.equippedThemeId).toBe(DEFAULT_THEME_ID);
+  });
+
+  it("имя фонда обрезается по длине и чистится от пробелов", () => {
+    useGameStore.getState().setFundName("   " + "я".repeat(60) + "   ");
+    expect(useGameStore.getState().game.lifestyle.fundName).toHaveLength(40);
+  });
+
+  it("покупки и имя фонда переживают перезагрузку", async () => {
+    useGameStore.getState().purchaseShopItem(CHAIR.id);
+    useGameStore.getState().setFundName("Фонд Полярной звезды");
+    const saved = mocks.saveGame.mock.calls.at(-1)![0];
+    expect(saved.lifestyle.ownedItemIds).toContain(CHAIR.id);
+
+    mocks.loadGame.mockResolvedValue(saved);
+    await useGameStore.getState().init();
+    const s = useGameStore.getState();
+    expect(s.game.lifestyle.fundName).toBe("Фонд Полярной звезды");
+    expect(s.game.lifestyle.ownedItemIds).toContain(CHAIR.id);
+  });
+
+  // Регрессия: сохранение, сделанное ДО появления магазина, не знает про
+  // lastUpkeepMonth. Если начать отсчёт с нуля, первый же тик спишет плату
+  // за все прожитые месяцы разом (на investing-ускорении — сотни).
+  it("старое сохранение без lastUpkeepMonth не влетает в долг за всю прошлую жизнь", async () => {
+    mocks.loadGame.mockResolvedValue({
+      version: "1.0.0-phase1",
+      savedAt: Date.now(),
+      account: { ...useGameStore.getState().game.account, balance: 10_000 },
+      marketRegime: useGameStore.getState().game.marketRegime,
+      prices: { [ASSET_ID]: 100 },
+      candleHistory: {},
+      activeAssetIds: PHASE1_ASSET_IDS,
+      activeTradingStyle: "investing",
+      unlockedStyles: ["day"],
+      unlockedMarkets: ["stock"],
+      gameCalendarDay: 900,
+      gameElapsedMs: 30 * MONTH_MS,
+      onboardingDone: true,
+      disclaimerSeen: true,
+    });
+    await useGameStore.getState().init();
+    expect(useGameStore.getState().game.lastUpkeepMonth).toBe(30);
+    expect(useGameStore.getState().game.lifestyle.ownedItemIds).toEqual([DEFAULT_THEME_ID]);
   });
 });

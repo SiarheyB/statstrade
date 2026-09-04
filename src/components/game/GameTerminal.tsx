@@ -6,17 +6,21 @@
 // OrderBook (только scalping) и Journal с метриками портфеля. Владеет
 // жизненным циклом стора: init → тик → автосейв → сохранение при уходе со
 // страницы (раздел 12).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { StatCard } from "@/components/StatCard";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { xpToNextLevel } from "@/engine/player/progression";
+import { activeTheme, monthlyUpkeep, traderRankKey } from "@/engine/economy/shop";
 import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
 import OrderTicket from "./OrderTicket";
 import OrderBook from "./OrderBook";
 import InvestingForecast from "./InvestingForecast";
+import DiversificationPanel from "./DiversificationPanel";
+import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
 import GameDisclaimer from "./GameDisclaimer";
@@ -47,6 +51,18 @@ export default function GameTerminal() {
   const setActiveStyle = useGameStore((s) => s.setActiveStyle);
 
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  // Магазин свёрнут по умолчанию: терминал — про торговлю, покупки — то, за
+  // чем приходят осознанно, и разворачивать их поверх графика на первом
+  // экране незачем.
+  const [shopOpen, setShopOpen] = useState(false);
+
+  const theme = activeTheme(game.lifestyle);
+  // Мемо, чтобы объект-литерал не менял идентичность на каждом тике игры
+  // (~4Hz) и не гонял эффект перерисовки графика вхолостую.
+  const candleColors = useMemo(
+    () => (theme ? { up: theme.up, down: theme.down } : undefined),
+    [theme],
+  );
 
   useEffect(() => {
     void init();
@@ -79,13 +95,36 @@ export default function GameTerminal() {
   // прокачиваются отдельно, а не единым общим уровнем).
   const skill = game.account.skills[currentStyle] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
 
+  const upkeep = monthlyUpkeep(game.lifestyle);
+  const rankKey = traderRankKey(game.account.reputation);
+
   return (
-    <div className="p-4 md:p-6 space-y-4">
+    // --color-accent подменяется купленной темой ТОЛЬКО внутри терминала:
+    // Tailwind v4 читает токен из переменной, поэтому bg-accent/text-accent
+    // ниже по дереву перекрашиваются сами, а остальной кабинет остаётся в
+    // штатной синей схеме проекта.
+    <div
+      className="p-4 md:p-6 space-y-4"
+      style={theme ? ({ "--color-accent": theme.accent } as React.CSSProperties) : undefined}
+    >
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
 
+      {/* Имя фонда (покупается в магазине) — заголовок терминала. Пока фонд
+          не назван, строки нет вовсе, а не пустое место с плейсхолдером. */}
+      {game.lifestyle.fundName && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-lg font-semibold">{game.lifestyle.fundName}</span>
+          <span className="text-xs text-faint">{t(`game.shop.rank.${rankKey}`)}</span>
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard label={t("game.stat.balance")} value={fmtUsd(game.account.balance)} />
+        <StatCard
+          label={t("game.stat.balance")}
+          value={fmtUsd(game.account.balance)}
+          hint={upkeep > 0 ? t("game.stat.upkeepHint", { amount: fmtUsd(upkeep) }) : undefined}
+        />
         <StatCard
           label={t("game.stat.equity")}
           value={fmtUsd(game.account.equity)}
@@ -119,7 +158,12 @@ export default function GameTerminal() {
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_300px] gap-4">
         <div className="card p-2 h-[420px]">
-          <PriceChart candles={candles} currentPrice={assetId ? game.prices[assetId] : undefined} symbol={asset?.symbol ?? ""} />
+          <PriceChart
+            candles={candles}
+            currentPrice={assetId ? game.prices[assetId] : undefined}
+            symbol={asset?.symbol ?? ""}
+            candleColors={candleColors}
+          />
         </div>
         {currentStyle === "scalping" && asset && (
           <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
@@ -141,12 +185,37 @@ export default function GameTerminal() {
 
       <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
 
+      {/* Сводка «куда вложены средства» — только в Investing: в скальпинге
+          с шестью тикерами и минутными сделками разбивка по секторам
+          бессмысленна, там портфель живёт минуты. */}
+      {currentStyle === "investing" && (
+        <DiversificationPanel
+          positions={game.account.positions}
+          assets={game.activeAssets}
+          prices={game.prices}
+          cash={game.account.balance}
+        />
+      )}
+
       <Journal
         journal={game.account.journal}
         positions={game.account.positions}
         assets={game.activeAssets}
         startingBalance={STARTING_BALANCE}
       />
+
+      <div className="space-y-3">
+        <button
+          type="button"
+          onClick={() => setShopOpen((v) => !v)}
+          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-fg transition"
+        >
+          {shopOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+          {t("game.shop.title")}
+          <span className="text-xs text-faint">{t(`game.shop.rank.${rankKey}`)}</span>
+        </button>
+        {shopOpen && <Shop />}
+      </div>
     </div>
   );
 }
