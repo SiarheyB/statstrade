@@ -20,6 +20,7 @@ import type {
 } from "@/engine/entities/types";
 import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
+import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { updateMarketRegime } from "@/engine/market/marketRegime";
@@ -104,6 +105,10 @@ export interface GameState {
   // Последний завершившийся контракт — UI показывает по нему уведомление и
   // сбрасывает поле, чтобы не показать дважды.
   lastContractResult: ContractRecord | null;
+  // Ежедневные задания и последняя порция выполненных — UI показывает по ней
+  // уведомление и очищает поле.
+  daily: DailyState;
+  lastDailyCompleted: DailyTask[];
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -164,6 +169,7 @@ export function applyPositionClose(
   commissionRate: number,
   extraFee = 0,
   xpMultiplier = 1,
+  gameDay = 0,
 ): number {
   const requiredMargin = calculateRequiredMargin(position.entryPrice, position.size, position.leverage);
   const { realizedPnl } = settleClose(position, exitPrice, commissionRate, extraFee);
@@ -181,6 +187,9 @@ export function applyPositionClose(
     id: crypto.randomUUID(),
     positionId: position.id,
     timestampClosed: Date.now(),
+    // Игровой день нужен дневным заданиям: реальное время для них не годится
+    // (на investing игровой день проходит за секунды).
+    gameDay,
     pnl: realizedPnl,
     rMultiple,
     tags: [],
@@ -301,13 +310,21 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     if (checkLiquidation(position, price, maintenanceRate)) {
       const penalty = calculateLiquidationPenalty(position.entryPrice, position.size);
       const liqPriceAdjusted = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side, maintenanceRate);
-      applyPositionClose(account, position, liqPriceAdjusted, commissionRate * perks.commissionMultiplier, penalty, xpMultiplier);
+      applyPositionClose(
+        account,
+        position,
+        liqPriceAdjusted,
+        commissionRate * perks.commissionMultiplier,
+        penalty,
+        xpMultiplier,
+        state.gameCalendarDay,
+      );
       continue;
     }
 
     const exitPrice = checkStopConditions(position, price);
     if (exitPrice == null) continue;
-    applyPositionClose(account, position, exitPrice, commissionRate * perks.commissionMultiplier, 0, xpMultiplier);
+    applyPositionClose(account, position, exitPrice, commissionRate * perks.commissionMultiplier, 0, xpMultiplier, state.gameCalendarDay);
   }
 
   // 6. Дивиденды/купоны раз в игровой квартал (раздел 4.6) — платим за
@@ -357,7 +374,25 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     }
   }
 
-  // 9. Смена игрового дня — фиксируем эквити для дневного результата.
+  // 9. Ежедневные задания: считаются от журнала и позиций, отдельных
+  // счётчиков не заводим — меньше состояния, нечему рассинхронизироваться.
+  const dailyResult = evaluateDaily(state.daily ?? freshDailyState(), {
+    day: gameCalendarDay,
+    journal: account.journal,
+    positions: account.positions,
+    assets: state.activeAssets,
+    dayStartEquity: state.dayStartEquity,
+    equity: account.equity,
+  });
+  if (dailyResult.rewardCash > 0) {
+    account.balance += dailyResult.rewardCash;
+    const style = state.activeStyle.style;
+    const current = account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
+    account.skills[style] = applyXpGain(current, dailyResult.rewardXp * xpMultiplier);
+    recalculateAccountMetrics(account, prices);
+  }
+
+  // 10. Смена игрового дня — фиксируем эквити для дневного результата.
   const dayStartEquity =
     gameCalendarDay !== state.gameCalendarDay || state.dayStartEquity == null
       ? account.equity
@@ -378,6 +413,8 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     contractPoints,
     unlockedMarkets,
     lastContractResult: evaluation.finished ?? state.lastContractResult,
+    daily: dailyResult.state,
+    lastDailyCompleted: dailyResult.completed.length > 0 ? dailyResult.completed : state.lastDailyCompleted,
     lastDividendQuarter,
     lifestyle,
     lastUpkeepMonth,

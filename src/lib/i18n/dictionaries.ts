@@ -14,6 +14,7 @@ const en: Dict = {
   "common.add": "Add",
   "common.back": "Back",
   "common.cancel": "Cancel",
+  "common.yes": "Yes",
   "common.next": "Next",
   "common.unset": "Not set",
   "common.footerTagline": "trading performance analytics",
@@ -1914,6 +1915,26 @@ const en: Dict = {
   "game.world.event.loan_defaulted": "{nickname} defaulted on {amount}",
   "game.world.claimed": "Received from the world: {amount}",
   "game.world.defaulted": "Overdue loans: {count}. Credit standing has dropped.",
+
+  // Всплывающие уведомления игры.
+  "game.notice.tradeWin": "Trade closed: +{amount}",
+  "game.notice.tradeLoss": "Trade closed: −{amount}",
+  "game.notice.contractPassed": "Challenge passed: {name}",
+  "game.notice.contractFailed": "Challenge lost: {name} ({reason})",
+  "game.screener.title": "What is moving",
+
+  // Задания дня и сброс прогресса.
+  "game.daily.title": "Today's tasks",
+  "game.daily.day": "day {day}",
+  "game.daily.done": "Tasks done: {count} · {amount}",
+  "game.daily.task.close_trades": "Close {target} trades",
+  "game.daily.task.use_stops": "Close {target} trades with a stop-loss set",
+  "game.daily.task.profit_day": "Finish the day above where it started",
+  "game.daily.task.diversify": "Hold positions in {target} different sectors",
+  "game.daily.task.survive": "Get through the day without a liquidation",
+  "game.career.reset": "Start over",
+  "game.career.resetHint": "Wipes this browser's save: money, positions, challenges, perks and purchases. Your place in the world ranking stays.",
+  "game.career.resetConfirm": "Really wipe the save and start a new run?",
 };
 
 const ru: Dict = {
@@ -1925,6 +1946,7 @@ const ru: Dict = {
   "common.add": "Добавить",
   "common.back": "Назад",
   "common.cancel": "Отмена",
+  "common.yes": "Да",
   "common.next": "Вперёд",
   "common.unset": "Не задано",
   "common.footerTagline": "аналитика торговых результатов",
@@ -3813,6 +3835,26 @@ const ru: Dict = {
   "game.world.event.loan_defaulted": "{nickname} не вернул {amount}",
   "game.world.claimed": "Получено из мира: {amount}",
   "game.world.defaulted": "Просрочено займов: {count}. Кредитная репутация упала.",
+
+  // Всплывающие уведомления игры.
+  "game.notice.tradeWin": "Сделка закрыта: +{amount}",
+  "game.notice.tradeLoss": "Сделка закрыта: −{amount}",
+  "game.notice.contractPassed": "Испытание пройдено: {name}",
+  "game.notice.contractFailed": "Испытание провалено: {name} ({reason})",
+  "game.screener.title": "Что движется",
+
+  // Задания дня и сброс прогресса.
+  "game.daily.title": "Задания дня",
+  "game.daily.day": "день {day}",
+  "game.daily.done": "Заданий выполнено: {count} · {amount}",
+  "game.daily.task.close_trades": "Закрыть {target} сделки",
+  "game.daily.task.use_stops": "Закрыть {target} сделки с выставленным стопом",
+  "game.daily.task.profit_day": "Закончить день выше, чем начал",
+  "game.daily.task.diversify": "Держать позиции в {target} разных секторах",
+  "game.daily.task.survive": "Прожить день без ликвидации",
+  "game.career.reset": "Начать заново",
+  "game.career.resetHint": "Стирает сохранение в этом браузере: деньги, позиции, испытания, перки и покупки. Место в общем рейтинге сохраняется.",
+  "game.career.resetConfirm": "Точно стереть сохранение и начать новую партию?",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

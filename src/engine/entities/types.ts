@@ -110,6 +110,9 @@ export interface JournalEntry {
   id: string;
   positionId: string;
   timestampClosed: number;
+  // Игровой день закрытия. Реального времени (timestampClosed) для дневных
+  // заданий недостаточно: игровой день на investing проходит за секунды.
+  gameDay: number;
   pnl: number;
   rMultiple: number; // PnL / initial risk
   tags: string[];
@@ -293,6 +296,8 @@ export interface PerkState {
   spentPoints: number;
 }
 
+import type { DailyState } from "@/engine/player/dailyTasks";
+
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
   savedAt: number;
@@ -329,6 +334,8 @@ export interface SaveGame {
   // Контракты и перки (ядро прогрессии).
   contracts: ContractState;
   perks: PerkState;
+  // Ежедневные задания: номер дня и что из него уже засчитано.
+  daily: DailyState;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

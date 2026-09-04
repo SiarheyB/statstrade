@@ -29,10 +29,11 @@ import {
   type StartError,
 } from "@/engine/player/contracts";
 import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkError } from "@/engine/player/perks";
+import { freshDailyState } from "@/engine/player/dailyTasks";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
-import { loadGame, saveGame } from "@/persistence/gameDb";
+import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
 import { funds as fundsApi, loans as loansApi, syncSnapshot } from "@/lib/game/worldClient";
 import { traderRankKey } from "@/engine/economy/shop";
 
@@ -136,6 +137,8 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     // INVESTING_ASSET_IDS), остальные классы — наградой за контракты.
     unlockedMarkets: ["stock"],
     lastContractResult: null,
+    daily: freshDailyState(),
+    lastDailyCompleted: [],
   };
 }
 
@@ -162,6 +165,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     dayStartEquity: state.dayStartEquity,
     contracts: state.contracts,
     perks: state.perks,
+    daily: state.daily,
     onboardingDone,
     disclaimerSeen,
   };
@@ -248,6 +252,8 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     }, 0),
     unlockedMarkets,
     lastContractResult: null,
+    daily: save.daily ?? freshDailyState(),
+    lastDailyCompleted: [],
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -260,6 +266,18 @@ export type ContractActionResult = { ok: true } | { ok: false; error: StartError
 export type PerkActionResult = { ok: true } | { ok: false; error: PerkError };
 export type WorldActionResult = { ok: true } | { ok: false; error: string };
 
+/**
+ * Всплывающие уведомления. Живут ТОЛЬКО в памяти и не попадают в сохранение:
+ * это реакция на событие «прямо сейчас», а не история — показывать при
+ * следующем заходе новость трёхдневной давности незачем.
+ */
+export type GameNoticeTone = "good" | "bad" | "info";
+export interface GameNotice {
+  id: string;
+  tone: GameNoticeTone;
+  text: string;
+}
+
 export type OpenPositionResult =
   | { ok: true }
   | { ok: false; error: "insufficient_funds" | "invalid_size" | "unknown_asset" | "invalid_leverage" };
@@ -267,6 +285,9 @@ export type OpenPositionResult =
 interface GameStoreState {
   status: "loading" | "ready";
   game: GameState;
+  notices: GameNotice[];
+  notify: (tone: GameNoticeTone, text: string) => void;
+  dismissNotice: (id: string) => void;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
   init: () => Promise<void>;
@@ -290,6 +311,7 @@ interface GameStoreState {
   abandonContract: () => void;
   unlockPerk: (perkId: string) => PerkActionResult;
   clearContractResult: () => void;
+  clearDailyCompleted: () => void;
   /**
    * Деньги, пришедшие ИЗ ОБЩЕГО МИРА (займы, выплаты фондов, проценты).
    * Единственная точка, через которую внешний мир двигает игровой баланс:
@@ -314,6 +336,8 @@ interface GameStoreState {
   completeOnboarding: () => void;
   acceptDisclaimer: () => void;
   persistNow: () => Promise<void>;
+  /** Начать заново: стирает сохранение и создаёт новую партию. */
+  resetProgress: () => Promise<void>;
 }
 
 let tickHandle: ReturnType<typeof setInterval> | null = null;
@@ -324,6 +348,15 @@ let worldSyncHandle: ReturnType<typeof setInterval> | null = null;
 export const useGameStore = create<GameStoreState>((set, get) => ({
   status: "loading",
   game: freshState(),
+  notices: [],
+
+  notify: (tone, text) => {
+    // Держим не больше четырёх штук: пятое уведомление вытесняет самое
+    // старое, иначе на быстром стиле экран заливает стопкой тостов.
+    set((s) => ({ notices: [...s.notices, { id: crypto.randomUUID(), tone, text }].slice(-4) }));
+  },
+
+  dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
   onboardingDone: false,
   disclaimerSeen: false,
 
@@ -541,6 +574,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
 
   clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
+  clearDailyCompleted: () => set((s) => ({ game: { ...s.game, lastDailyCompleted: [] } })),
 
   applyWorldCash: (amount) => {
     if (!Number.isFinite(amount) || amount === 0) return;
@@ -577,7 +611,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (!result.ok) return null;
     // Причитающиеся деньги сервер отдаёт ровно один раз — зачисляем их сразу,
     // иначе они потеряются: на сервере счётчик уже обнулён.
-    if (result.data.claimed > 0) get().applyWorldCash(result.data.claimed);
+    if (result.data.claimed > 0) {
+      get().applyWorldCash(result.data.claimed);
+      get().notify("good", `+${Math.round(result.data.claimed).toLocaleString("ru-RU")} $ из мира`);
+    }
+    if (result.data.defaulted > 0) {
+      get().notify("bad", `Просрочено займов: ${result.data.defaulted}. Репутация упала.`);
+    }
     return { claimed: result.data.claimed, defaulted: result.data.defaulted };
   },
 
@@ -709,6 +749,16 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   acceptDisclaimer: () => {
     set({ disclaimerSeen: true });
     void get().persistNow();
+  },
+
+  resetProgress: async () => {
+    // Сначала стираем слот, потом ставим свежее состояние: если сделать
+    // наоборот, автосейв успеет записать новую партию поверх — и удаление
+    // не сработает.
+    await deleteSave();
+    set({ game: freshState(get().game.tuning), onboardingDone: true, disclaimerSeen: true });
+    await get().persistNow();
+    get().notify("info", "Прогресс сброшен, новая партия началась");
   },
 
   persistNow: async () => {

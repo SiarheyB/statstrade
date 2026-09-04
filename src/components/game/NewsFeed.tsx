@@ -35,6 +35,7 @@ export default function NewsFeed({
   assets,
   gameElapsedMs,
   expanded = false,
+  radarAssetIds,
 }: {
   news: NewsEvent[];
   assets: Asset[];
@@ -42,8 +43,25 @@ export default function NewsFeed({
   // На отдельной вкладке лента занимает экран целиком, в терминале — узкую
   // карточку с внутренней прокруткой.
   expanded?: boolean;
+  // Перк «Новостной радар»: id активов открытых позиций. Новости по ним
+  // поднимаются в начало ленты и помечаются — именно они объясняют, почему
+  // прямо сейчас дёргается ТВОЙ портфель.
+  radarAssetIds?: string[];
 }) {
   const { t } = useI18n();
+
+  const radar = radarAssetIds && radarAssetIds.length > 0 ? new Set(radarAssetIds) : null;
+  const touchesMine = (item: NewsEvent) =>
+    !!radar && item.affectedAssets.some((id) => id === GLOBAL_TARGET || radar.has(id));
+  // Сортировка стабильная: сначала «мои» из ещё действующих, дальше — как
+  // пришли. Без радара порядок не меняется вовсе.
+  const ordered = radar
+    ? [...news].sort((a, b) => {
+        const aMine = touchesMine(a) && a.expiresAt > gameElapsedMs ? 1 : 0;
+        const bMine = touchesMine(b) && b.expiresAt > gameElapsedMs ? 1 : 0;
+        return bMine - aMine;
+      })
+    : news;
 
   return (
     <div className="card p-4 space-y-2">
@@ -52,14 +70,20 @@ export default function NewsFeed({
         <div className="text-xs text-faint">{t("game.news.empty")}</div>
       ) : (
         <div className={`space-y-1.5 pr-1 overflow-y-auto ${expanded ? "max-h-[70vh]" : "max-h-52"}`}>
-          {news.map((item) => {
+          {ordered.map((item) => {
             // «Живая» новость — та, чей всплеск волатильности ещё не истёк:
             // именно она объясняет, почему график сейчас дёргается сильнее
             // обычного.
             const live = item.expiresAt > gameElapsedMs;
             const up = item.priceShockPct >= 0;
+            const mine = touchesMine(item);
             return (
-              <div key={item.id} className={`flex items-start gap-2 text-xs ${live ? "" : "opacity-60"}`}>
+              <div
+                key={item.id}
+                className={`flex items-start gap-2 text-xs ${live ? "" : "opacity-60"} ${
+                  mine && live ? "rounded-md bg-accent/5 px-1 py-0.5 -mx-1" : ""
+                }`}
+              >
                 <span className={`px-1.5 py-0.5 rounded shrink-0 ${IMPACT_STYLE[item.impact]}`}>
                   {t(`game.news.impact.${item.impact}`)}
                 </span>

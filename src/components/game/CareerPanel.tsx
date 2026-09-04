@@ -7,12 +7,15 @@
 // Зачем отдельно: прогресс — главный мотиватор в любой игре, но до этого он
 // был размазан по терминалу (уровень в углу, покупки внутри магазина,
 // метрики под журналом) и не читался как «мой путь».
+import { useState } from "react";
+import { RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { xpToNextLevel, MAX_SKILL_LEVEL } from "@/engine/player/progression";
 import { calculatePortfolioMetrics } from "@/engine/player/portfolioMetrics";
 import { getShopItem, monthlyUpkeep, nextRank, traderRankKey } from "@/engine/economy/shop";
 import { SELECTABLE_STYLES } from "@/store/gameStore";
+import { useGameStore } from "@/store/gameStore";
 import type { Account, LifestyleState, TradingStyle } from "@/engine/entities/types";
 
 const STYLE_LABEL_KEY: Record<string, string> = {
@@ -32,6 +35,10 @@ export default function CareerPanel({
   startingBalance: number;
 }) {
   const { t } = useI18n();
+  const resetProgress = useGameStore((s) => s.resetProgress);
+  // Подтверждение прямо в кнопке, а не в window.confirm: браузерный диалог
+  // блокирует вкладку, а игра в это время тикает.
+  const [confirming, setConfirming] = useState(false);
   const rankKey = traderRankKey(account.reputation);
   const next = nextRank(account.reputation);
   const metrics = calculatePortfolioMetrics(account.journal, startingBalance);
@@ -127,6 +134,46 @@ export default function CareerPanel({
                 </span>
               ))}
             </div>
+          )}
+        </div>
+      </div>
+
+      <div className="card p-4 lg:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div className="text-sm font-medium">{t("game.career.reset")}</div>
+            <div className="text-xs text-faint max-w-xl">{t("game.career.resetHint")}</div>
+          </div>
+          {confirming ? (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-loss">{t("game.career.resetConfirm")}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirming(false);
+                  void resetProgress();
+                }}
+                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-loss text-white"
+              >
+                {t("common.yes")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="px-3 py-1.5 rounded-lg text-xs text-muted hover:text-fg"
+              >
+                {t("common.cancel")}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirming(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm text-muted hover:text-loss transition"
+            >
+              <RotateCcw size={14} />
+              {t("game.career.reset")}
+            </button>
           )}
         </div>
       </div>

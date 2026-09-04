@@ -59,6 +59,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     tuning: DEFAULT_TUNING,
     contracts: freshContractState(),
     perks: freshPerkState(),
+    daily: { day: 0, completedIds: [] },
+    lastDailyCompleted: [],
     contractPoints: 0,
     unlockedMarkets: ["stock"],
     lastContractResult: null,

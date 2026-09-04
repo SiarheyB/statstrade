@@ -18,9 +18,10 @@
 //
 // Владеет жизненным циклом стора: настройки баланса из админки → init →
 // тик → автосейв → сохранение при уходе со страницы (раздел 12).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Briefcase, Globe2, Newspaper, ShoppingBag, Trophy } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { fmtUsd } from "@/lib/format";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { activeTheme } from "@/engine/economy/shop";
@@ -34,9 +35,12 @@ import OrderBook from "./OrderBook";
 import InvestingForecast from "./InvestingForecast";
 import DiversificationPanel from "./DiversificationPanel";
 import NewsFeed from "./NewsFeed";
+import Screener from "./Screener";
+import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
 import WorldPanel from "./WorldPanel";
+import GameToasts from "./GameToasts";
 import ContractsPanel from "./ContractsPanel";
 import PerkTree from "./PerkTree";
 import Shop from "./Shop";
@@ -86,6 +90,12 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   const game = useGameStore((s) => s.game);
   const setActiveStyle = useGameStore((s) => s.setActiveStyle);
   const setTuning = useGameStore((s) => s.setTuning);
+  const notify = useGameStore((s) => s.notify);
+  const clearContractResult = useGameStore((s) => s.clearContractResult);
+  const clearDailyCompleted = useGameStore((s) => s.clearDailyCompleted);
+  // Длина журнала на прошлом кадре — по её приросту понимаем, что сделка
+  // закрылась (движок не рассылает событий, состояние иммутабельно).
+  const lastJournalLength = useRef(0);
 
   const [tab, setTab] = useState<Tab>("terminal");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
@@ -122,6 +132,51 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
     writeChartPrefs(PREFS_KEY, { tab, assetId: selectedAssetId });
   }, [hydrated, tab, selectedAssetId]);
 
+  // ── Живая обратная связь ────────────────────────────────────────────────
+  // Три источника событий, о которых игрок должен узнать сразу, а не по
+  // изменившимся числам: закрытая сделка, завершённое испытание и деньги,
+  // пришедшие из общего мира.
+  useEffect(() => {
+    const journal = game.account.journal;
+    if (journal.length === 0) {
+      lastJournalLength.current = 0;
+      return;
+    }
+    if (journal.length <= lastJournalLength.current) {
+      lastJournalLength.current = journal.length;
+      return;
+    }
+    // Показываем только последнюю сделку: на быстрых стилях за один тик
+    // может закрыться несколько, и стопка тостов ничего не сообщает.
+    const entry = journal[journal.length - 1];
+    lastJournalLength.current = journal.length;
+    notify(
+      entry.pnl >= 0 ? "good" : "bad",
+      t(entry.pnl >= 0 ? "game.notice.tradeWin" : "game.notice.tradeLoss", { amount: fmtUsd(Math.abs(entry.pnl)) }),
+    );
+  }, [game.account.journal, notify, t]);
+
+  useEffect(() => {
+    const result = game.lastContractResult;
+    if (!result) return;
+    const passed = result.outcome === "passed";
+    notify(
+      passed ? "good" : "bad",
+      t(passed ? "game.notice.contractPassed" : "game.notice.contractFailed", {
+        name: t(`game.contract.${result.contractId}.name`),
+        reason: t(`game.contract.outcome.${result.outcome}`),
+      }),
+    );
+    clearContractResult();
+  }, [game.lastContractResult, notify, clearContractResult, t]);
+
+  useEffect(() => {
+    if (game.lastDailyCompleted.length === 0) return;
+    const total = game.lastDailyCompleted.reduce((sum, task) => sum + task.rewardCash, 0);
+    notify("good", t("game.daily.done", { count: game.lastDailyCompleted.length, amount: fmtUsd(total) }));
+    clearDailyCompleted();
+  }, [game.lastDailyCompleted, notify, clearDailyCompleted, t]);
+
   useEffect(() => {
     if (status !== "ready") return;
     startTicking();
@@ -153,6 +208,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   // «Стакан везде»: это и есть ощутимая награда за очко навыка.
   const perks = perkEffects(game.perks);
   const showOrderBook = currentStyle === "scalping" || perks.tools.orderBookAnywhere;
+  const openPositionAssetIds = game.account.positions.filter((p) => !p.closedAt).map((p) => p.assetId);
 
   return (
     // --color-accent подменяется купленной темой ТОЛЬКО внутри терминала:
@@ -163,6 +219,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       className="p-4 md:p-6 space-y-4"
       style={theme ? ({ "--color-accent": theme.accent } as React.CSSProperties) : undefined}
     >
+      <GameToasts />
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
 
@@ -241,6 +298,26 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
             )}
 
             <div className="space-y-4">
+              <DailyTasksPanel
+                daily={game.daily}
+                ctx={{
+                  day: game.gameCalendarDay,
+                  journal: game.account.journal,
+                  positions: game.account.positions,
+                  assets: game.activeAssets,
+                  dayStartEquity: game.dayStartEquity,
+                  equity: game.account.equity,
+                }}
+              />
+              {perks.tools.screener && (
+                <Screener
+                  assets={game.activeAssets}
+                  candles={game.candles}
+                  prices={game.prices}
+                  selectedAssetId={assetId}
+                  onSelect={setSelectedAssetId}
+                />
+              )}
               {assetId && (
                 <OrderTicket
                   assets={game.activeAssets}
@@ -287,7 +364,13 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       )}
 
       {tab === "news" && (
-        <NewsFeed news={game.newsFeed} assets={game.activeAssets} gameElapsedMs={game.gameElapsedMs} expanded />
+        <NewsFeed
+          news={game.newsFeed}
+          assets={game.activeAssets}
+          gameElapsedMs={game.gameElapsedMs}
+          expanded
+          radarAssetIds={perks.tools.newsRadar ? openPositionAssetIds : undefined}
+        />
       )}
 
       {tab === "shop" && <Shop />}
