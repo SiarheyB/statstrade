@@ -41,8 +41,10 @@ import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
 import WorldPanel from "./WorldPanel";
 import GameToasts from "./GameToasts";
+import OfflineReportModal from "./OfflineReportModal";
 import ContractsPanel from "./ContractsPanel";
 import PerkTree from "./PerkTree";
+import BotsPanel from "./BotsPanel";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -220,6 +222,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       style={theme ? ({ "--color-accent": theme.accent } as React.CSSProperties) : undefined}
     >
       <GameToasts />
+      <OfflineReportModal />
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
 
@@ -386,6 +389,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
             currentDay={game.gameCalendarDay}
           />
           <PerkTree perks={game.perks} skills={game.account.skills} contractPoints={game.contractPoints} />
+          <BotsPanel bots={game.bots} perks={game.perks} assets={game.activeAssets} />
           <CareerPanel
             account={game.account}
             lifestyle={game.lifestyle}

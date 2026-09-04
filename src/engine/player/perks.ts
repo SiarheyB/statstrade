@@ -53,6 +53,7 @@ export interface PerkEffects {
   upkeepMultiplier: number;
   liquidationBuffer: number; // насколько «дальше» отодвигается цена ликвидации, доля
   loanLimitBonus: number; // насколько больше можно занять у других игроков
+  botSlots: number; // сколько алго-ботов можно держать
   tools: { orderBookAnywhere: boolean; screener: boolean; newsRadar: boolean };
   markets: AssetClass[];
 }
@@ -67,6 +68,7 @@ export function perkEffects(perks: PerkState): PerkEffects {
     upkeepMultiplier: has("PK_FRUGAL") ? 0.8 : 1,
     liquidationBuffer: has("PK_STEADY_HAND") ? 0.1 : 0,
     loanLimitBonus: has("PK_CREDIT_LINE") ? 1 : has("PK_NETWORK") ? 0.5 : 0,
+    botSlots: (has("PK_ALGO_DESK") ? 1 : 0) + (has("PK_ALGO_FARM") ? 1 : 0),
     tools: {
       orderBookAnywhere: has("PK_ORDERBOOK"),
       screener: has("PK_SCREENER"),

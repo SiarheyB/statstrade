@@ -21,6 +21,15 @@ import type {
 import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
 import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
+import {
+  botHasPosition,
+  botPositionSize,
+  botSignal,
+  botSlots,
+  botStopLoss,
+  botTakeProfit,
+  type AlgoBot,
+} from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { updateMarketRegime } from "@/engine/market/marketRegime";
@@ -109,6 +118,7 @@ export interface GameState {
   // уведомление и очищает поле.
   daily: DailyState;
   lastDailyCompleted: DailyTask[];
+  bots: AlgoBot[];
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -147,6 +157,46 @@ export function checkStopConditions(position: Position, currentPrice: number): n
     if (takeProfit != null && currentPrice <= takeProfit) return takeProfit;
   }
   return null;
+}
+
+/**
+ * Открывает позицию на счёте: резервирует маржу и кладёт позицию в список.
+ * Общая функция для ручного ордера из UI (gameStore.openPosition) и для
+ * алго-ботов — чтобы резерв маржи считался ОДИНАКОВО. Расхождение здесь
+ * означало бы, что закрытие возвращает не ту сумму, которую сняло открытие,
+ * то есть дырку в балансе.
+ *
+ * Мутирует account. Возвращает открытую позицию.
+ */
+export function applyPositionOpen(
+  account: Account,
+  input: {
+    assetId: string;
+    side: Position["side"];
+    size: number;
+    leverage: number;
+    entryPrice: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    style: Position["style"];
+  },
+): Position {
+  const position: Position = {
+    id: crypto.randomUUID(),
+    assetId: input.assetId,
+    side: input.side,
+    entryPrice: input.entryPrice,
+    size: input.size,
+    leverage: input.leverage,
+    stopLoss: input.stopLoss,
+    takeProfit: input.takeProfit,
+    openedAt: Date.now(),
+    fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
+    style: input.style,
+  };
+  account.balance -= calculateRequiredMargin(input.entryPrice, input.size, input.leverage);
+  account.positions.push(position);
+  return position;
 }
 
 /**
@@ -372,6 +422,37 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
       // на этом кадре покажет старое значение.
       recalculateAccountMetrics(account, prices);
     }
+  }
+
+  // 8b. Алго-боты (ветка перков «Автоматика»). Работают только в пределах
+  // купленных слотов: лишние боты в сохранении молча игнорируются, а не
+  // торгуют бесплатно.
+  const slots = botSlots(state.perks?.unlocked ?? []);
+  if (slots > 0) {
+    for (const bot of (state.bots ?? []).slice(0, slots)) {
+      if (!bot.enabled) continue;
+      const price = prices[bot.assetId];
+      if (price == null) continue;
+      if (botHasPosition(bot, account.positions)) continue;
+      const side = botSignal(bot, candles[bot.assetId] ?? [], price);
+      if (!side) continue;
+      const size = botPositionSize(account.balance, price, bot);
+      const cost = calculateRequiredMargin(price, size, 1);
+      // Бот не влезает в долги и не съедает баланс целиком: половина
+      // свободных денег — жёсткий предел на одну автоматическую сделку.
+      if (!(size > 0) || cost > account.balance * 0.5) continue;
+      applyPositionOpen(account, {
+        assetId: bot.assetId,
+        side,
+        size,
+        leverage: 1,
+        entryPrice: price,
+        stopLoss: botStopLoss(price, side, bot),
+        takeProfit: botTakeProfit(price, side, bot),
+        style: state.activeStyle.style,
+      });
+    }
+    recalculateAccountMetrics(account, prices);
   }
 
   // 9. Ежедневные задания: считаются от журнала и позиций, отдельных

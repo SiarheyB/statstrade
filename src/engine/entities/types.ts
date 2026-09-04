@@ -282,7 +282,7 @@ export interface ContractState {
 // улучшает исполнение в свою пользу. Перк даёт инструмент, условие
 // (комиссия, маржа), доступ к рынку или скорость роста — то есть меняет,
 // ВО ЧТО играешь, а не подкручивает результат.
-export type PerkBranch = "tools" | "terms" | "growth" | "social";
+export type PerkBranch = "tools" | "terms" | "growth" | "social" | "algo";
 
 export interface Perk {
   id: string;
@@ -297,6 +297,7 @@ export interface PerkState {
 }
 
 import type { DailyState } from "@/engine/player/dailyTasks";
+import type { AlgoBot } from "@/engine/player/algoBots";
 
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
@@ -336,6 +337,8 @@ export interface SaveGame {
   perks: PerkState;
   // Ежедневные задания: номер дня и что из него уже засчитано.
   daily: DailyState;
+  // Алго-боты: торгуют сами, в том числе во время офлайн-прогресса.
+  bots: AlgoBot[];
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

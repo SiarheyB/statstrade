@@ -19,7 +19,7 @@ import type {
 } from "@/engine/entities/types";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
-import { applyPositionClose, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { applyPositionClose, applyPositionOpen, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import {
   abandonContract,
@@ -30,6 +30,8 @@ import {
 } from "@/engine/player/contracts";
 import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkError } from "@/engine/player/perks";
 import { freshDailyState } from "@/engine/player/dailyTasks";
+import { simulateOffline, type OfflineReport } from "@/engine/offline";
+import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
@@ -139,6 +141,7 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     lastContractResult: null,
     daily: freshDailyState(),
     lastDailyCompleted: [],
+    bots: [],
   };
 }
 
@@ -166,6 +169,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     contracts: state.contracts,
     perks: state.perks,
     daily: state.daily,
+    bots: state.bots,
     onboardingDone,
     disclaimerSeen,
   };
@@ -254,6 +258,7 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     lastContractResult: null,
     daily: save.daily ?? freshDailyState(),
     lastDailyCompleted: [],
+    bots: save.bots ?? [],
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -286,6 +291,9 @@ interface GameStoreState {
   status: "loading" | "ready";
   game: GameState;
   notices: GameNotice[];
+  /** Что произошло, пока вкладка была закрыта. Показывается один раз. */
+  offlineReport: OfflineReport | null;
+  dismissOfflineReport: () => void;
   notify: (tone: GameNoticeTone, text: string) => void;
   dismissNotice: (id: string) => void;
   onboardingDone: boolean;
@@ -312,6 +320,9 @@ interface GameStoreState {
   unlockPerk: (perkId: string) => PerkActionResult;
   clearContractResult: () => void;
   clearDailyCompleted: () => void;
+  addBot: (assetId: string) => void;
+  updateBot: (id: string, patch: Partial<AlgoBot>) => void;
+  removeBot: (id: string) => void;
   /**
    * Деньги, пришедшие ИЗ ОБЩЕГО МИРА (займы, выплаты фондов, проценты).
    * Единственная точка, через которую внешний мир двигает игровой баланс:
@@ -349,6 +360,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   status: "loading",
   game: freshState(),
   notices: [],
+  offlineReport: null,
 
   notify: (tone, text) => {
     // Держим не больше четырёх штук: пятое уведомление вытесняет самое
@@ -357,6 +369,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
 
   dismissNotice: (id) => set((s) => ({ notices: s.notices.filter((n) => n.id !== id) })),
+
+  dismissOfflineReport: () => set({ offlineReport: null }),
   onboardingDone: false,
   disclaimerSeen: false,
 
@@ -370,7 +384,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const tuning = get().game.tuning ?? DEFAULT_TUNING;
     const save = await loadGame();
     if (save) {
-      set({ game: saveToState(save, tuning), onboardingDone: save.onboardingDone, disclaimerSeen: save.disclaimerSeen, status: "ready" });
+      // Мир жил и без игрока: прокручиваем симуляцию на время отсутствия
+      // (с потолком в игровых днях — см. engine/offline.ts) и показываем
+      // отчёт. Без этого возвращаться было незачем: закрыл вкладку — время
+      // остановилось.
+      const loaded = saveToState(save, tuning);
+      const away = Math.max(0, Date.now() - (save.savedAt ?? Date.now()));
+      const { state: advanced, report } = simulateOffline(loaded, away, liveRng());
+      set({
+        game: advanced,
+        offlineReport: report,
+        onboardingDone: save.onboardingDone,
+        disclaimerSeen: save.disclaimerSeen,
+        status: "ready",
+      });
+      // Сразу сохраняем прокрученное состояние: иначе при быстром закрытии
+      // вкладки офлайн-прогресс посчитался бы второй раз от того же savedAt.
+      void get().persistNow();
     } else {
       set({ game: freshState(tuning), onboardingDone: false, disclaimerSeen: false, status: "ready" });
     }
@@ -440,29 +470,20 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const cost = calculateRequiredMargin(price, size, leverage);
     if (cost > game.account.balance) return { ok: false, error: "insufficient_funds" };
 
-    const position = {
-      id: crypto.randomUUID(),
+    // Через общую функцию движка — ту же, которой открываются позиции
+    // алго-ботов: резерв маржи обязан считаться одинаково.
+    const account: Account = { ...game.account, positions: [...game.account.positions] };
+    applyPositionOpen(account, {
       assetId,
       side,
-      entryPrice: price,
       size,
       leverage,
+      entryPrice: price,
       stopLoss,
       takeProfit,
-      openedAt: Date.now(),
-      fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
       style: game.activeStyle.style,
-    };
-    set((s) => ({
-      game: {
-        ...s.game,
-        account: {
-          ...s.game.account,
-          balance: s.game.account.balance - cost,
-          positions: [...s.game.account.positions, position],
-        },
-      },
-    }));
+    });
+    set((s) => ({ game: { ...s.game, account } }));
     return { ok: true };
   },
 
@@ -575,6 +596,28 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
   clearDailyCompleted: () => set((s) => ({ game: { ...s.game, lastDailyCompleted: [] } })),
+
+  addBot: (assetId) => {
+    const { game } = get();
+    // Больше слотов, чем куплено перками, завести нельзя — иначе перк ветки
+    // «Автоматика» ничего бы не значил.
+    if (game.bots.length >= botSlots(game.perks.unlocked)) return;
+    const bot: AlgoBot = { id: crypto.randomUUID(), ...defaultBot(assetId) };
+    set((s) => ({ game: { ...s.game, bots: [...s.game.bots, bot] } }));
+    void get().persistNow();
+  },
+
+  updateBot: (id, patch) => {
+    set((s) => ({
+      game: { ...s.game, bots: s.game.bots.map((b) => (b.id === id ? { ...b, ...patch } : b)) },
+    }));
+    void get().persistNow();
+  },
+
+  removeBot: (id) => {
+    set((s) => ({ game: { ...s.game, bots: s.game.bots.filter((b) => b.id !== id) } }));
+    void get().persistNow();
+  },
 
   applyWorldCash: (amount) => {
     if (!Number.isFinite(amount) || amount === 0) return;

@@ -1935,6 +1935,39 @@ const en: Dict = {
   "game.career.reset": "Start over",
   "game.career.resetHint": "Wipes this browser's save: money, positions, challenges, perks and purchases. Your place in the world ranking stays.",
   "game.career.resetConfirm": "Really wipe the save and start a new run?",
+
+  // Отчёт «пока тебя не было».
+  "game.offline.title": "While you were away",
+  "game.offline.subtitle": "{days} game days passed without you",
+  "game.offline.balance": "Cash",
+  "game.offline.trades": "Trades closed",
+  "game.offline.news": "News released",
+  "game.offline.contractFinished": "The challenge «{name}» ended without you — check the Career tab.",
+  "game.offline.continue": "Back to trading",
+
+  // Алго-боты и ветка перков «Автоматика».
+  "game.perks.branch.algo": "Automation",
+  "game.perk.PK_ALGO_DESK.name": "Algo desk",
+  "game.perk.PK_ALGO_DESK.desc": "One slot for a bot that trades on its own — including while the tab is closed.",
+  "game.perk.PK_ALGO_FARM.name": "Second bot",
+  "game.perk.PK_ALGO_FARM.desc": "One more bot slot: two strategies can run at once.",
+  "game.bots.title": "Algo bots",
+  "game.bots.hint": "A bot trades your rule on its own and keeps working while you are away. Stop and take are mandatory — an automated strategy without a stop drains an account overnight.",
+  "game.bots.slots": "slots: {used} of {total}",
+  "game.bots.locked": "No slots yet. The «Algo desk» perk in the Automation branch opens the first one.",
+  "game.bots.add": "Add a bot",
+  "game.bots.remove": "Delete the bot",
+  "game.bots.strategy": "Strategy",
+  "game.bots.risk": "Risk, %",
+  "game.bots.stop": "Stop, %",
+  "game.bots.take": "Take, %",
+  "game.bots.enabled": "Running",
+  "game.bots.strategy.trend": "Trend following",
+  "game.bots.strategy.meanReversion": "Mean reversion",
+  "game.bots.strategy.breakout": "Breakout",
+  "game.bots.strategyHint.trend": "Buys when the fast average crosses above the slow one, sells when it crosses below.",
+  "game.bots.strategyHint.meanReversion": "Buys the dip below the average and sells the stretch above it.",
+  "game.bots.strategyHint.breakout": "Enters when price leaves the range of the last 20 candles.",
 };
 
 const ru: Dict = {
@@ -3855,6 +3888,39 @@ const ru: Dict = {
   "game.career.reset": "Начать заново",
   "game.career.resetHint": "Стирает сохранение в этом браузере: деньги, позиции, испытания, перки и покупки. Место в общем рейтинге сохраняется.",
   "game.career.resetConfirm": "Точно стереть сохранение и начать новую партию?",
+
+  // Отчёт «пока тебя не было».
+  "game.offline.title": "Пока тебя не было",
+  "game.offline.subtitle": "прошло игровых дней: {days}",
+  "game.offline.balance": "Свободные деньги",
+  "game.offline.trades": "Сделок закрылось",
+  "game.offline.news": "Вышло новостей",
+  "game.offline.contractFinished": "Испытание «{name}» завершилось без тебя — загляни во вкладку «Карьера».",
+  "game.offline.continue": "Вернуться к торговле",
+
+  // Алго-боты и ветка перков «Автоматика».
+  "game.perks.branch.algo": "Автоматика",
+  "game.perk.PK_ALGO_DESK.name": "Алго-стол",
+  "game.perk.PK_ALGO_DESK.desc": "Слот для бота, который торгует сам — в том числе пока вкладка закрыта.",
+  "game.perk.PK_ALGO_FARM.name": "Второй бот",
+  "game.perk.PK_ALGO_FARM.desc": "Ещё один слот: две стратегии могут работать одновременно.",
+  "game.bots.title": "Алго-боты",
+  "game.bots.hint": "Бот торгует твоё правило сам и продолжает работать, пока тебя нет. Стоп и тейк обязательны — автомат без стопа сливает счёт за ночь.",
+  "game.bots.slots": "слотов: {used} из {total}",
+  "game.bots.locked": "Слотов пока нет. Первый открывает перк «Алго-стол» в ветке «Автоматика».",
+  "game.bots.add": "Добавить бота",
+  "game.bots.remove": "Удалить бота",
+  "game.bots.strategy": "Стратегия",
+  "game.bots.risk": "Риск, %",
+  "game.bots.stop": "Стоп, %",
+  "game.bots.take": "Тейк, %",
+  "game.bots.enabled": "Работает",
+  "game.bots.strategy.trend": "По тренду",
+  "game.bots.strategy.meanReversion": "Возврат к среднему",
+  "game.bots.strategy.breakout": "Пробой",
+  "game.bots.strategyHint.trend": "Покупает, когда быстрая средняя выше медленной, и продаёт, когда ниже.",
+  "game.bots.strategyHint.meanReversion": "Покупает отклонение вниз от средней и продаёт отклонение вверх.",
+  "game.bots.strategyHint.breakout": "Входит, когда цена выходит за диапазон последних 20 свечей.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

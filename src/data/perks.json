@@ -1,14 +1,96 @@
 [
-  { "id": "PK_ORDERBOOK", "branch": "tools", "cost": 1, "requires": [] },
-  { "id": "PK_SCREENER", "branch": "tools", "cost": 2, "requires": ["PK_ORDERBOOK"] },
-  { "id": "PK_NEWS_RADAR", "branch": "tools", "cost": 2, "requires": [] },
-  { "id": "PK_COMMISSION_1", "branch": "terms", "cost": 1, "requires": [] },
-  { "id": "PK_COMMISSION_2", "branch": "terms", "cost": 3, "requires": ["PK_COMMISSION_1"] },
-  { "id": "PK_MARGIN_RELIEF", "branch": "terms", "cost": 2, "requires": [] },
-  { "id": "PK_STEADY_HAND", "branch": "terms", "cost": 3, "requires": ["PK_MARGIN_RELIEF"] },
-  { "id": "PK_XP_BOOST", "branch": "growth", "cost": 2, "requires": [] },
-  { "id": "PK_DIVIDEND_EDGE", "branch": "growth", "cost": 2, "requires": [] },
-  { "id": "PK_FRUGAL", "branch": "growth", "cost": 2, "requires": [] },
-  { "id": "PK_NETWORK", "branch": "social", "cost": 2, "requires": [] },
-  { "id": "PK_CREDIT_LINE", "branch": "social", "cost": 3, "requires": ["PK_NETWORK"] }
+  {
+    "id": "PK_ORDERBOOK",
+    "branch": "tools",
+    "cost": 1,
+    "requires": []
+  },
+  {
+    "id": "PK_SCREENER",
+    "branch": "tools",
+    "cost": 2,
+    "requires": [
+      "PK_ORDERBOOK"
+    ]
+  },
+  {
+    "id": "PK_NEWS_RADAR",
+    "branch": "tools",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_COMMISSION_1",
+    "branch": "terms",
+    "cost": 1,
+    "requires": []
+  },
+  {
+    "id": "PK_COMMISSION_2",
+    "branch": "terms",
+    "cost": 3,
+    "requires": [
+      "PK_COMMISSION_1"
+    ]
+  },
+  {
+    "id": "PK_MARGIN_RELIEF",
+    "branch": "terms",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_STEADY_HAND",
+    "branch": "terms",
+    "cost": 3,
+    "requires": [
+      "PK_MARGIN_RELIEF"
+    ]
+  },
+  {
+    "id": "PK_XP_BOOST",
+    "branch": "growth",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_DIVIDEND_EDGE",
+    "branch": "growth",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_FRUGAL",
+    "branch": "growth",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_NETWORK",
+    "branch": "social",
+    "cost": 2,
+    "requires": []
+  },
+  {
+    "id": "PK_CREDIT_LINE",
+    "branch": "social",
+    "cost": 3,
+    "requires": [
+      "PK_NETWORK"
+    ]
+  },
+  {
+    "id": "PK_ALGO_DESK",
+    "branch": "algo",
+    "cost": 3,
+    "requires": []
+  },
+  {
+    "id": "PK_ALGO_FARM",
+    "branch": "algo",
+    "cost": 4,
+    "requires": [
+      "PK_ALGO_DESK"
+    ]
+  }
 ]

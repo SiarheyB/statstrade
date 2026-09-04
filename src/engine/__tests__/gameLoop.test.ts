@@ -61,6 +61,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     perks: freshPerkState(),
     daily: { day: 0, completedIds: [] },
     lastDailyCompleted: [],
+    bots: [],
     contractPoints: 0,
     unlockedMarkets: ["stock"],
     lastContractResult: null,
