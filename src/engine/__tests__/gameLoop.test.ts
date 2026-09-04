@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { candleIntervalMs, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { freshLifestyle } from "@/engine/economy/shop";
+import { makeRegime } from "@/engine/market/marketRegime";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -49,6 +50,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     lastDividendQuarter: 0,
     lifestyle: freshLifestyle(),
     lastUpkeepMonth: 0,
+    activeNews: [],
+    newsFeed: [],
     ...overrides,
   };
 }
@@ -463,5 +466,90 @@ describe("расход на образ жизни (раздел 13)", () => {
     const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(5));
     expect(next.account.balance).toBe(0);
     expect(next.lifestyle.unpaidUpkeep).toBe(24_000);
+  });
+});
+
+describe("рыночные режимы и новости (Фаза 3)", () => {
+  // Тот же сид и тот же стартовый набор — разница в итоговой цене может быть
+  // только из-за режима. Нужен актив с НЕнулевым baseDrift: сверху лежит
+  // asset с drift 0, а driftModifier режима — множитель, и на нуле любой
+  // режим дал бы одинаковый снос.
+  const trending: Asset = { ...asset, baseDrift: 0.1 };
+
+  function priceAfter(regimeType: "bull" | "crisis", seed: number): number {
+    let next = makeState({
+      marketRegime: makeRegime(regimeType, 1),
+      activeAssets: [trending],
+      prices: { [trending.id]: 100 },
+    });
+    const rng = mulberry32(seed);
+    for (let i = 0; i < 400; i++) next = gameTick(1000, next, rng);
+    return next.prices[trending.id];
+  }
+
+  function median(values: number[]): number {
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.floor(sorted.length / 2)];
+  }
+
+  it("бычий режим уводит цену выше кризисного (медиана по 21 сиду)", () => {
+    // Сравниваем медианы, а не одну серию: у кризиса волатильность втрое
+    // выше, и отдельная траектория может улететь куда угодно — это и есть
+    // кризис, а не поломка теста.
+    const seeds = Array.from({ length: 21 }, (_, i) => i + 1);
+    const bull = median(seeds.map((s) => priceAfter("bull", s)));
+    const crisis = median(seeds.map((s) => priceAfter("crisis", s)));
+    expect(bull).toBeGreaterThan(crisis);
+    expect(crisis).toBeLessThan(100); // кризис в среднем именно роняет рынок
+  });
+
+  it("новость попадает в ленту и двигает цену затронутой бумаги", () => {
+    // Гоняем, пока генератор не выдаст новость (частота ~1.5 в игровой день).
+    let state = makeState();
+    const rng = mulberry32(2);
+    let ticks = 0;
+    while (state.newsFeed.length === 0 && ticks < 5_000) {
+      state = gameTick(1000, state, rng);
+      ticks++;
+    }
+    expect(state.newsFeed.length).toBeGreaterThan(0);
+    const news = state.newsFeed[0];
+    expect(news.headline).not.toContain("{");
+    expect(news.expiresAt).toBeGreaterThan(news.timestamp);
+  });
+
+  it("лента не растёт бесконечно", () => {
+    let state = makeState();
+    const rng = mulberry32(4);
+    // investing-ускорение: новости сыплются гораздо быстрее реального времени.
+    const investing = { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing };
+    state = investing;
+    for (let i = 0; i < 3_000; i++) state = gameTick(250, state, rng);
+    expect(state.newsFeed.length).toBeLessThanOrEqual(50);
+  });
+
+  it("активы одной группы корреляции ходят вместе чаще, чем врозь", () => {
+    const sibling: Asset = { ...asset, id: "STK_SIBLING", symbol: "SIB" };
+    const stranger: Asset = { ...asset, id: "STK_STRANGER", symbol: "STR", correlationGroup: "energy_stocks" };
+    let state = makeState({
+      activeAssets: [asset, sibling, stranger],
+      prices: { [asset.id]: 100, [sibling.id]: 100, [stranger.id]: 100 },
+      // Боковик с минимальным сносом: смотрим на шум, а не на общий тренд.
+      marketRegime: makeRegime("sideways", 1),
+    });
+    const rng = mulberry32(12);
+    let sameGroupAgree = 0;
+    let otherGroupAgree = 0;
+    let prev = state.prices;
+    for (let i = 0; i < 400; i++) {
+      state = gameTick(1000, state, rng);
+      const d1 = Math.sign(state.prices[asset.id] - prev[asset.id]);
+      const d2 = Math.sign(state.prices[sibling.id] - prev[sibling.id]);
+      const d3 = Math.sign(state.prices[stranger.id] - prev[stranger.id]);
+      if (d1 !== 0 && d1 === d2) sameGroupAgree++;
+      if (d1 !== 0 && d1 === d3) otherGroupAgree++;
+      prev = state.prices;
+    }
+    expect(sameGroupAgree).toBeGreaterThan(otherGroupAgree);
   });
 });

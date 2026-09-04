@@ -1,11 +1,27 @@
 // Главный тик симуляции — раздел 11 спеки. Фаза 1 добавила базовый цикл
 // (цена/SL-TP/equity), Фаза 2 — плечо/маржа/ликвидацию (4.2) и прогрессию
 // (4.5, начисляется в applyPositionClose), Фаза 5 — дивиденды/купоны (4.6,
-// шаг 6 псевдокода). Шаги 1/2 (рыночные режимы/новости) всё ещё вне объёма
-// — маркерные комментарии ниже, чтобы структура функции не менялась, когда
-// эти шаги подключатся (Фаза 3).
-import type { Account, Asset, Candle, LifestyleState, MarketRegime, Position, TradingStyleConfig } from "@/engine/entities/types";
-import { NEUTRAL_REGIME } from "@/engine/entities/types";
+// шаг 6), раздел 13 — расход на образ жизни (шаг 6b), Фаза 3 — рыночные
+// режимы (3.4, шаг 1), новости (3.5, шаг 2) и корреляцию активов внутри
+// группы (3.3, внутри шага 3).
+import type {
+  Account,
+  Asset,
+  Candle,
+  LifestyleState,
+  MarketRegime,
+  NewsEvent,
+  Position,
+  TradingStyleConfig,
+} from "@/engine/entities/types";
+import { updateMarketRegime } from "@/engine/market/marketRegime";
+import {
+  applyNewsShock,
+  maybeGenerateNews,
+  MAX_NEWS_FEED,
+  newsVolMultipliers,
+  pruneExpiredNews,
+} from "@/engine/market/newsEngine";
 import { randomNormal, simulateTick } from "@/engine/market/priceSimulation";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
 import {
@@ -43,6 +59,11 @@ export const QUARTER_MS = 90 * 24 * 60 * 60 * 1000;
 // расход на образ жизни списывается втрое чаще, чем приходят дивиденды, и это
 // намеренно — содержание должно ощущаться, а не теряться на фоне купонов.
 export const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+// Корреляция активов внутри одной correlationGroup (раздел 3.3): доля общего
+// шока в шуме каждой бумаги. 0.6 — техи ходят вместе, но не одной линией;
+// при 1 весь сектор превратился бы в один инструмент, при 0 диверсификация
+// по секторам не значила бы ничего (а сводка в DiversificationPanel — врала).
+export const GROUP_CORRELATION = 0.6;
 
 export interface GameState {
   account: Account;
@@ -56,6 +77,8 @@ export interface GameState {
   lastDividendQuarter: number; // номер последнего игрового квартала, за который уже заплатили
   lifestyle: LifestyleState; // покупки/косметика — раздел 13
   lastUpkeepMonth: number; // номер последнего игрового месяца, за который уже списали содержание
+  activeNews: NewsEvent[]; // новости, чей всплеск волатильности ещё не истёк (раздел 3.5)
+  newsFeed: NewsEvent[]; // лента для UI, новые в начале, до MAX_NEWS_FEED штук
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -171,30 +194,55 @@ function recalculateAccountMetrics(account: Account, prices: Record<string, numb
  * вызова. rng — источник случайности (сидированный в тестах, Math.random в
  * игре) — обязателен явным параметром для каждой функции движка (раздел 26).
  *
- * Шаги 1 (рыночный режим), 2 (генерация новостей) и часть шага 6
- * (дивиденды/fund fees) псевдокода раздела 11 — вне объёма (Фазы 3, 5),
- * поэтому пропущены (NEUTRAL_REGIME остаётся неизменным, новостей нет).
+ * Шаги псевдокода раздела 11 реализованы полностью, кроме психологии
+ * (раздел 4.4) — она остаётся заготовкой типов до своей фазы.
  */
 export function gameTick(dtRealMs: number, state: GameState, rng: () => number): GameState {
   const dtGameMs = dtRealMs * state.activeStyle.timeAcceleration;
   const dtYears = dtGameMs / MS_PER_YEAR;
   const gameElapsedMs = state.gameElapsedMs + dtGameMs;
 
-  // 3. Обновить цены активных активов.
-  const prices = { ...state.prices };
-  const candles = { ...state.candles };
   const intervalMs = candleIntervalMs(state.activeStyle.timeAcceleration);
+
+  // 1. Рыночный режим (раздел 3.4) — задаёт μ и σ всему рынку на недели
+  // игрового времени вперёд.
+  const marketRegime = updateMarketRegime(state.marketRegime, dtGameMs, rng);
+
+  // 2. Новости (раздел 3.5). Мгновенный скачок применяется к ценам ДО шага
+  // цены: иначе новость успела бы «опоздать» на одну свечу и на графике
+  // выглядела бы как реакция без причины.
+  let prices = { ...state.prices };
+  const fresh = maybeGenerateNews(dtGameMs, state.activeAssets, marketRegime.driftModifier, gameElapsedMs, intervalMs, rng);
+  const activeNews = pruneExpiredNews(fresh ? [...state.activeNews, fresh] : state.activeNews, gameElapsedMs);
+  const newsFeed = fresh ? [fresh, ...state.newsFeed].slice(0, MAX_NEWS_FEED) : state.newsFeed;
+  if (fresh) prices = applyNewsShock(prices, fresh);
+
+  // 3. Обновить цены активных активов.
+  const candles = { ...state.candles };
+  const assetIds = state.activeAssets.map((a) => a.id);
+  const volMultipliers = newsVolMultipliers(activeNews, gameElapsedMs, assetIds);
+  // Общий шок на группу корреляции (раздел 3.3): активы одного сектора
+  // ходят вместе, а не независимо. Разыгрывается ОДИН раз за тик на группу
+  // и подмешивается к индивидуальному шуму каждой бумаги.
+  const groupZ = new Map<string, number>();
+  for (const asset of state.activeAssets) {
+    if (!groupZ.has(asset.correlationGroup)) groupZ.set(asset.correlationGroup, randomNormal(0, 1, rng));
+  }
+  const idioWeight = Math.sqrt(1 - GROUP_CORRELATION ** 2);
   for (const asset of state.activeAssets) {
     const currentPrice = prices[asset.id];
     if (currentPrice == null) continue;
-    const z = randomNormal(0, 1, rng);
+    // Сумма коррелированной и независимой части с весами GROUP_CORRELATION и
+    // sqrt(1-p²) сохраняет единичную дисперсию Z — иначе волатильность
+    // «поехала» бы вместе с уровнем корреляции.
+    const z = GROUP_CORRELATION * (groupZ.get(asset.correlationGroup) ?? 0) + idioWeight * randomNormal(0, 1, rng);
     const newPrice = simulateTick({
       asset,
       currentPrice,
       dtYears,
-      regime: NEUTRAL_REGIME, // Фаза 3 подставит state.marketRegime
-      activeVolMultiplier: 1, // Фаза 3 учтёт активные новости
-      correlatedZ: z, // Фаза 3 коррелирует Z между активами одной группы
+      regime: marketRegime,
+      activeVolMultiplier: volMultipliers[asset.id] ?? 1,
+      correlatedZ: z,
     });
     prices[asset.id] = newPrice;
     candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs, intervalMs);
@@ -259,6 +307,9 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     prices,
     candles,
     account,
+    marketRegime,
+    activeNews,
+    newsFeed,
     gameElapsedMs,
     gameCalendarDay: Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000)),
     lastDividendQuarter,

@@ -6,8 +6,8 @@
 // формулы напрямую — только через публичные функции engine»).
 import { create } from "zustand";
 import assetsData from "@/data/assets.json";
-import type { Account, Asset, Candle, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
-import { NEUTRAL_REGIME } from "@/engine/entities/types";
+import type { Account, Asset, Candle, MarketRegime, NewsEvent, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
+import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
@@ -74,7 +74,11 @@ function freshState(): GameState {
   for (const a of activeAssets) prices[a.id] = STARTING_PRICE;
   return {
     account: freshAccount(),
-    marketRegime: NEUTRAL_REGIME,
+    // Партия начинается со спокойного боковика (раздел 3.4), а не с
+    // NEUTRAL_REGIME: у нейтрального maxDurationDays = Infinity, и рынок
+    // навсегда застрял бы в режиме без смены — до Фазы 3 это было неважно,
+    // потому что режимы вообще не работали.
+    marketRegime: makeRegime("sideways"),
     prices,
     candles: {},
     activeAssets,
@@ -84,6 +88,8 @@ function freshState(): GameState {
     lastDividendQuarter: 0,
     lifestyle: freshLifestyle(),
     lastUpkeepMonth: 0,
+    activeNews: [],
+    newsFeed: [],
   };
 }
 
@@ -106,6 +112,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     lastDividendQuarter: state.lastDividendQuarter,
     lifestyle: state.lifestyle,
     lastUpkeepMonth: state.lastUpkeepMonth,
+    newsFeed: state.newsFeed,
     onboardingDone,
     disclaimerSeen,
   };
@@ -129,6 +136,11 @@ function sanitizeCandleHistory(history: Record<string, Candle[]>): Record<string
   return result;
 }
 
+function normalizeRegime(regime: MarketRegime | undefined): MarketRegime {
+  if (!regime || !Number.isFinite(regime.maxDurationDays)) return makeRegime("sideways");
+  return regime;
+}
+
 function saveToState(save: SaveGame): GameState {
   // Набор активных активов только РАСТЁТ (раздел 26: открытые позиции нельзя
   // осиротить сменой стиля/перезагрузкой) — берём объединение базовых Фазы 1,
@@ -146,7 +158,10 @@ function saveToState(save: SaveGame): GameState {
   for (const a of activeAssets) if (prices[a.id] == null) prices[a.id] = STARTING_PRICE;
   return {
     account: save.account,
-    marketRegime: save.marketRegime,
+    // Сохранения до Фазы 3 лежат с NEUTRAL_REGIME (maxDurationDays =
+    // Infinity) — такой режим никогда не сменится, рынок остался бы вечно
+    // ровным. Переводим их в обычный боковик.
+    marketRegime: normalizeRegime(save.marketRegime),
     prices,
     candles: sanitizeCandleHistory(save.candleHistory),
     activeAssets,
@@ -166,6 +181,11 @@ function saveToState(save: SaveGame): GameState {
     // покупки первой вещи (на investing-ускорении это сотни месяцев —
     // мгновенное обнуление баланса на ровном месте).
     lastUpkeepMonth: save.lastUpkeepMonth ?? Math.floor((save.gameElapsedMs ?? 0) / MONTH_MS),
+    // Активные новости не восстанавливаем: их всплеск волатильности привязан
+    // к игровому времени и к моменту, когда игрок смотрел на график. Лента
+    // (история заголовков) переживает перезагрузку — её и читает UI.
+    activeNews: [],
+    newsFeed: (save.newsFeed ?? []) as NewsEvent[],
   };
 }
 

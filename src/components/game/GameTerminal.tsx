@@ -20,6 +20,8 @@ import OrderTicket from "./OrderTicket";
 import OrderBook from "./OrderBook";
 import InvestingForecast from "./InvestingForecast";
 import DiversificationPanel from "./DiversificationPanel";
+import NewsFeed from "./NewsFeed";
+import MarketRegimeBadge from "./MarketRegimeBadge";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -141,6 +143,7 @@ export default function GameTerminal() {
       {/* Переключатель стиля — раздел 15 Фазы 2: "переключение между
           Scalping/Day/Swing меняет timeAcceleration и видимую скорость
           движения графика" (критерий приёмки раздела 16). */}
+      <div className="flex flex-wrap items-center gap-3">
       <div className="flex items-center gap-1 card p-1 w-fit">
         {SELECTABLE_STYLES.map((style) => (
           <button
@@ -154,6 +157,11 @@ export default function GameTerminal() {
             {t(STYLE_LABEL_KEY[style])}
           </button>
         ))}
+      </div>
+        {/* Режим рынка — рядом с переключателем стиля: это два главных
+            «условия задачи» на экране (как быстро идёт время и какой сейчас
+            рынок). */}
+        <MarketRegimeBadge regime={game.marketRegime} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_300px] gap-4">
@@ -182,6 +190,8 @@ export default function GameTerminal() {
           />
         )}
       </div>
+
+      <NewsFeed news={game.newsFeed} assets={game.activeAssets} gameElapsedMs={game.gameElapsedMs} />
 
       <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
 

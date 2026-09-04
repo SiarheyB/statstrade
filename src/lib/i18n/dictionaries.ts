@@ -1723,6 +1723,22 @@ const en: Dict = {
   "game.shop.item.status_fund.desc": "Lets you name your fund — the name shows up above the terminal.",
   "game.shop.item.status_whale.name": "“Whale” title",
   "game.shop.item.status_whale.desc": "A title for someone whose order moves the market.",
+
+  // Рыночные режимы и новостная лента (разделы 3.4/3.5).
+  "game.news.title": "Market news",
+  "game.news.empty": "Quiet so far — headlines appear as the market moves.",
+  "game.news.global": "Whole market",
+  "game.news.impact.low": "Low",
+  "game.news.impact.medium": "Medium",
+  "game.news.impact.high": "High",
+  "game.news.impact.black_swan": "Black swan",
+  "game.regime.bull": "Bull market",
+  "game.regime.bear": "Bear market",
+  "game.regime.sideways": "Sideways",
+  "game.regime.high_volatility": "High volatility",
+  "game.regime.crisis": "Crisis",
+  "game.regime.daysShort": "d",
+  "game.regime.hint": "The market has been in this regime for {days} game days. A regime shifts the drift and volatility of every asset at once.",
 };
 
 const ru: Dict = {
@@ -3431,6 +3447,22 @@ const ru: Dict = {
   "game.shop.item.status_fund.desc": "Даёт право назвать свой фонд — имя появится над терминалом.",
   "game.shop.item.status_whale.name": "Титул «Кит»",
   "game.shop.item.status_whale.desc": "Звание для тех, чей ордер двигает рынок.",
+
+  // Рыночные режимы и новостная лента (разделы 3.4/3.5).
+  "game.news.title": "Новости рынка",
+  "game.news.empty": "Пока тихо — заголовки появятся, когда рынок задвигается.",
+  "game.news.global": "Весь рынок",
+  "game.news.impact.low": "Слабая",
+  "game.news.impact.medium": "Средняя",
+  "game.news.impact.high": "Сильная",
+  "game.news.impact.black_swan": "Чёрный лебедь",
+  "game.regime.bull": "Бычий рынок",
+  "game.regime.bear": "Медвежий рынок",
+  "game.regime.sideways": "Боковик",
+  "game.regime.high_volatility": "Высокая волатильность",
+  "game.regime.crisis": "Кризис",
+  "game.regime.daysShort": "д",
+  "game.regime.hint": "Рынок в этом режиме уже {days} игровых дней. Режим меняет снос и волатильность сразу у всех активов.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

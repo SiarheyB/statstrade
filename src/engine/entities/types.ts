@@ -134,12 +134,20 @@ export interface Account {
 export type NewsImpact = "low" | "medium" | "high" | "black_swan";
 export type NewsTargetType = "asset" | "sector" | "global";
 
+// Знак шока: спека оставляла его на волю генератора, но случайный знак у
+// «Аналитики ПОВЫСИЛИ прогноз» выглядел бы враньём. Поэтому у каждого шаблона
+// в newsTemplates.json проставлена полярность (размечено вручную): mixed —
+// это события, которые рынок реально может отыграть в любую сторону
+// (слияние, смена CEO, сокращение штата), только для них знак случайный.
+export type NewsPolarity = "positive" | "negative" | "mixed";
+
 export interface NewsTemplate {
   id: string;
   impact: NewsImpact;
+  polarity: NewsPolarity;
   template: string;
   targetType: NewsTargetType;
-  shockRange: [number, number]; // амплитуда шока (доля), знак выбирается при генерации
+  shockRange: [number, number]; // амплитуда шока (доля), знак — по полярности выше
 }
 
 export interface NewsEvent {
@@ -152,6 +160,17 @@ export interface NewsEvent {
   priceShockPct: number; // мгновенный скачок цены при выходе новости (со знаком)
   volatilityMultiplier: number;
   volatilityDurationCandles: number;
+  // Не из раздела 2 буквально. Длина свечи зависит от активного стиля
+  // (candleIntervalMs в gameLoop.ts), поэтому «жить N свечей» — величина,
+  // которая менялась бы у уже вышедшей новости при переключении стиля.
+  // Момент истечения фиксируется в игровом времени ОДИН раз, при генерации.
+  expiresAt: number;
+  // templateId + subject хранятся для будущей локализации ленты: сейчас
+  // headline собран из русского шаблона и лежит готовой строкой (шаблоны в
+  // newsTemplates.json только на русском), но с этими полями англоязычный
+  // файл шаблонов можно будет подставить, не теряя уже вышедшие новости.
+  templateId: string;
+  subject?: string;
 }
 
 export type MarketRegimeType = "bull" | "bear" | "sideways" | "high_volatility" | "crisis";
@@ -237,6 +256,10 @@ export interface SaveGame {
   // lastDividendQuarter: дивиденды — доход, upkeep — расход).
   lifestyle: LifestyleState;
   lastUpkeepMonth: number;
+  // Раздел 3.5 — лента заголовков для UI. Активные (ещё действующие)
+  // новости в сохранение не пишутся: всплеск волатильности привязан к
+  // игровому времени и к тому, что игрок в этот момент смотрел на график.
+  newsFeed: NewsEvent[];
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

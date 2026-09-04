@@ -42,15 +42,8 @@ import {
   type PlotLayout,
 } from "@/lib/candlestickChart";
 import type { Candle as EngineCandle } from "@/engine/entities/types";
+import { fmtGameClock } from "@/lib/gameTime";
 import { useI18n } from "@/lib/i18n/provider";
-
-function fmtGameClock(ms: number): string {
-  const totalMinutes = Math.floor(ms / 60_000);
-  const day = Math.floor(totalMinutes / (24 * 60)) + 1;
-  const hh = String(Math.floor((totalMinutes % (24 * 60)) / 60)).padStart(2, "0");
-  const mm = String(totalMinutes % 60).padStart(2, "0");
-  return `Д${day} ${hh}:${mm}`;
-}
 
 // Сортируем защитно: t0/t1 ниже и drawCandlesticks() в lib/candlestickChart.ts
 // оба предполагают строго возрастающий порядок по времени и молча рисуют
