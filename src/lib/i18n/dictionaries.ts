@@ -1597,6 +1597,10 @@ const en: Dict = {
   "game.onboarding.step6.body": "Close the position whenever you're ready — manually, or wait for the stop-loss/take-profit to trigger.",
   "game.onboarding.step7.title": "Review your trade",
   "game.onboarding.step7.body": "Your closed trade is now in the \"History\" tab below — it's a good habit to glance at what worked and what didn't after every trade.",
+  "game.onboarding.step8.title": "Take a challenge",
+  "game.onboarding.step8.body": "The Career tab holds your goal: add 5% without letting the account slide 5% from its peak. Pass it and you get money, prestige, a skill point and access to new markets.",
+  "game.onboarding.step9.title": "You are not alone here",
+  "game.onboarding.step9.body": "The World tab has other traders: a ranking, a live feed, loans between players and funds you can join or found. Money you lend comes back with interest — if the borrower repays.",
   "game.onboarding.final.title": "You made your first trade",
   "game.onboarding.final.body": "As you gain experience, new trading styles and markets will unlock — not just stocks, but forex, crypto and commodities too.",
 
@@ -1975,6 +1979,13 @@ const en: Dict = {
   "game.psy.confidence": "Confidence",
   "game.psy.discipline": "Discipline",
   "game.psy.hint": "Stress builds up from losing streaks, heavy leverage and liquidations, and it makes your fills worse. It fades with time; what you own speeds that up by {rest}.",
+
+  // Кабинет трейдера — сцена, которая растёт вместе с покупками.
+  "game.office.title": "Your office",
+  "game.office.view.wall": "a wall outside the window",
+  "game.office.view.city": "a downtown street below",
+  "game.office.view.skyline": "the skyline from above",
+  "game.office.view.sea": "the sea outside the window",
 };
 
 const ru: Dict = {
@@ -3557,6 +3568,10 @@ const ru: Dict = {
   "game.onboarding.step6.body": "Закрой позицию, когда будешь готов — вручную или дождись срабатывания стоп-лосса/тейк-профита.",
   "game.onboarding.step7.title": "Разбери сделку",
   "game.onboarding.step7.body": "Закрытая сделка теперь во вкладке «История» ниже — полезно после каждой сделки заглядывать туда и смотреть, что сработало, а что нет.",
+  "game.onboarding.step8.title": "Возьми испытание",
+  "game.onboarding.step8.body": "Во вкладке «Карьера» лежит твоя цель: сделать 5%, не дав счёту сползти на 5% от собственного пика. Пройдёшь — получишь деньги, престиж, очко навыка и доступ к новым рынкам.",
+  "game.onboarding.step9.title": "Ты здесь не один",
+  "game.onboarding.step9.body": "Во вкладке «Мир» есть другие трейдеры: рейтинг, живая лента, займы между игроками и фонды, в которые можно вступить или основать свой. Одолженные деньги возвращаются с процентом — если заёмщик рассчитается.",
   "game.onboarding.final.title": "Ты сделал первую сделку",
   "game.onboarding.final.body": "По мере опыта тебе откроются новые стили торговли и рынки — не только акции, но и форекс, крипта, товары.",
 
@@ -3935,6 +3950,13 @@ const ru: Dict = {
   "game.psy.confidence": "Уверенность",
   "game.psy.discipline": "Дисциплина",
   "game.psy.hint": "Стресс копится от серии убытков, крупного плеча и ликвидаций и портит исполнение сделок. Уходит со временем; купленный отдых ускоряет это на {rest}.",
+
+  // Кабинет трейдера — сцена, которая растёт вместе с покупками.
+  "game.office.title": "Твой кабинет",
+  "game.office.view.wall": "за окном стена",
+  "game.office.view.city": "внизу улица центра",
+  "game.office.view.skyline": "панорама города сверху",
+  "game.office.view.sea": "за окном море",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

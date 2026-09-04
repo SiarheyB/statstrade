@@ -45,6 +45,7 @@ import OfflineReportModal from "./OfflineReportModal";
 import ContractsPanel from "./ContractsPanel";
 import PerkTree from "./PerkTree";
 import BotsPanel from "./BotsPanel";
+import TraderOffice from "./TraderOffice";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -382,6 +383,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
 
       {tab === "career" && (
         <div className="space-y-4">
+          <TraderOffice lifestyle={game.lifestyle} />
           <ContractsPanel
             contracts={game.contracts}
             equity={game.account.equity}

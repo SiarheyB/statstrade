@@ -24,6 +24,11 @@ const STEPS: { kind: StepKind; titleKey: string; bodyKey: string }[] = [
   { kind: "wait-stop", titleKey: "game.onboarding.step5.title", bodyKey: "game.onboarding.step5.body" },
   { kind: "wait-close", titleKey: "game.onboarding.step6.title", bodyKey: "game.onboarding.step6.body" },
   { kind: "info", titleKey: "game.onboarding.step7.title", bodyKey: "game.onboarding.step7.body" },
+  // Восьмой и девятый шаги — про то, ради чего игра вообще существует:
+  // испытание как цель и общий мир как соперники. Без них новичок
+  // остаётся в песочнице и не догадывается заглянуть во вкладки.
+  { kind: "info", titleKey: "game.onboarding.step8.title", bodyKey: "game.onboarding.step8.body" },
+  { kind: "info", titleKey: "game.onboarding.step9.title", bodyKey: "game.onboarding.step9.body" },
   { kind: "final", titleKey: "game.onboarding.final.title", bodyKey: "game.onboarding.final.body" },
 ];
 
