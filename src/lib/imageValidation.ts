@@ -6,6 +6,10 @@
 
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024; // 10 МБ
 
+// Человекочитаемый список для подсказки в UI — единый источник с ALLOWED
+// ниже, чтобы подсказка никогда не разошлась с реальной проверкой.
+export const ALLOWED_IMAGE_LABEL = "PNG, JPEG, WEBP, GIF";
+
 const ALLOWED = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 
 // Возвращает реальный MIME по сигнатуре файла, либо null, если это не одно

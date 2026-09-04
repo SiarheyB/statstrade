@@ -5,9 +5,10 @@ import Link from "next/link";
 import { Upload, Trash2, ImageIcon, Loader2 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { buildTradeImageName } from "@/lib/tradeImageName";
+import { MAX_IMAGE_BYTES, ALLOWED_IMAGE_LABEL } from "@/lib/imageValidation";
 
-const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const ACCEPTED = "image/png,image/jpeg,image/webp,image/gif";
+const MAX_IMAGE_MB = MAX_IMAGE_BYTES / (1024 * 1024);
 
 // Ячейка колонки «Изображение» в таблице сделок. Три состояния:
 //  1. Ни один облачный провайдер не подключён → ссылка в настройки.
@@ -146,12 +147,19 @@ export default function TradeImageCell({
         type="button"
         onClick={() => inputRef.current?.click()}
         disabled={busy}
+        title={t("trades.image.formatsHint", { formats: ALLOWED_IMAGE_LABEL, maxMb: MAX_IMAGE_MB })}
         className="inline-flex items-center gap-1 text-xs text-faint hover:text-accent disabled:opacity-50 whitespace-nowrap"
       >
         {busy ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
         {t("trades.image.upload")}
       </button>
-      {error && <div className="text-[10px] text-loss mt-0.5 max-w-[120px]">{error}</div>}
+      {error ? (
+        <div className="text-[10px] text-loss mt-0.5 max-w-[160px]">{error}</div>
+      ) : (
+        <div className="text-[10px] text-faint mt-0.5 max-w-[160px]">
+          {t("trades.image.formatsHint", { formats: ALLOWED_IMAGE_LABEL, maxMb: MAX_IMAGE_MB })}
+        </div>
+      )}
     </div>
   );
 }
