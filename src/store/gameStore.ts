@@ -6,7 +6,7 @@
 // формулы напрямую — только через публичные функции engine»).
 import { create } from "zustand";
 import assetsData from "@/data/assets.json";
-import type { Account, Asset, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
+import type { Account, Asset, Candle, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, gameTick, type GameState } from "@/engine/gameLoop";
@@ -22,10 +22,25 @@ const ALL_ASSETS = assetsData as Asset[];
 export const PHASE1_ASSET_IDS = ["STK_NEXTEK", "STK_QUANTA", "STK_PIXELON", "STK_IRONCORE", "STK_PETROVA", "STK_SOLARIS"];
 
 // Фаза 2 (раздел 15): «Добавить Scalping и Swing режимы» — к day добавляются
-// ещё два. Остальные 6 стилей раздела 5 (position/investing/algo/arbitrage/
-// market_making/options) остаются вне UI до своих фаз (5-6) — данные для них
-// уже в tradingStyleConfigs.ts, но выбрать их в игре пока нельзя.
-export const SELECTABLE_STYLES: TradingStyle[] = ["scalping", "day", "swing"];
+// ещё два. Фаза 5 добавляет Investing (buy&hold, дивиденды) отдельной веткой
+// — раздел 8: «доступен с самого начала как альтернативная ветка», без
+// условий разблокировки. Остальные стили раздела 5 (position/algo/
+// arbitrage/market_making/options) остаются вне UI до своих фаз (6) — данные
+// для них уже в tradingStyleConfigs.ts, но выбрать их в игре пока нельзя.
+export const SELECTABLE_STYLES: TradingStyle[] = ["scalping", "day", "swing", "investing"];
+
+// Investing — buy&hold с дивидендами (раздел 4.6): полный список акций и
+// облигаций из assets.json (те, у кого есть dividendYield), а не 6 тикеров
+// Фазы 1 — диверсификация по секторам ЕСТЬ смысл, только когда есть из чего
+// выбирать. Форекс/крипта/товары/индексы намеренно не включены — они без
+// dividendYield (нечего "держать ради купона"), их время — Фаза 3/6.
+export const INVESTING_ASSET_IDS = ALL_ASSETS.filter((a) => a.assetClass === "stock" || a.assetClass === "bond").map(
+  (a) => a.id,
+);
+
+function assetIdsForStyle(style: TradingStyle): string[] {
+  return style === "investing" ? INVESTING_ASSET_IDS : PHASE1_ASSET_IDS;
+}
 
 export const STARTING_BALANCE = 10_000;
 // Стартовая цена всех Фазы-1 акций — спека не задаёт её явно (только
@@ -65,6 +80,7 @@ function freshState(): GameState {
     activeStyle: TRADING_STYLE_CONFIGS.day,
     gameCalendarDay: 0,
     gameElapsedMs: 0,
+    lastDividendQuarter: 0,
   };
 }
 
@@ -84,23 +100,50 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     unlockedMarkets: ["stock"],
     gameCalendarDay: state.gameCalendarDay,
     gameElapsedMs: state.gameElapsedMs,
+    lastDividendQuarter: state.lastDividendQuarter,
     onboardingDone,
     disclaimerSeen,
   };
 }
 
+// Чинит историю свечей, если она пришла из сохранения, записанного ДО
+// защиты в persistence/gameDb.ts (saveGame) и engine/gameLoop.ts
+// (appendPriceToCandles) — сортирует по времени и схлопывает дубликаты
+// бакетов (последний виденный побеждает). Идемпотентно на уже здоровых
+// данных, поэтому просто всегда прогоняем при загрузке, а не только "если
+// похоже на испорченное".
+function sanitizeCandleHistory(history: Record<string, Candle[]>): Record<string, Candle[]> {
+  const result: Record<string, Candle[]> = {};
+  for (const [assetId, candles] of Object.entries(history)) {
+    const byTimestamp = new Map<number, Candle>();
+    for (const c of [...candles].sort((a, b) => a.timestamp - b.timestamp)) {
+      byTimestamp.set(c.timestamp, c);
+    }
+    result[assetId] = Array.from(byTimestamp.values());
+  }
+  return result;
+}
+
 function saveToState(save: SaveGame): GameState {
-  // Устойчивость к смене набора активных активов между версиями (раздел 26
-  // не требует этого явно, но save.version меняется — на будущее берём
-  // текущий PHASE1_ASSET_IDS, а не список из старого сохранения).
-  const activeAssets = ALL_ASSETS.filter((a) => PHASE1_ASSET_IDS.includes(a.id));
+  // Набор активных активов только РАСТЁТ (раздел 26: открытые позиции нельзя
+  // осиротить сменой стиля/перезагрузкой) — берём объединение базовых Фазы 1,
+  // того, что уже было активно в сохранении (переживает переключение на
+  // investing и обратно), и активов открытых позиций, а не жёстко
+  // PHASE1_ASSET_IDS, как раньше (баг: смена стиля на investing не
+  // переживала перезагрузку — activeAssets откатывался к 6 тикерам).
+  const requiredIds = new Set<string>([
+    ...PHASE1_ASSET_IDS,
+    ...save.activeAssetIds,
+    ...save.account.positions.map((p) => p.assetId),
+  ]);
+  const activeAssets = ALL_ASSETS.filter((a) => requiredIds.has(a.id));
   const prices = { ...save.prices };
   for (const a of activeAssets) if (prices[a.id] == null) prices[a.id] = STARTING_PRICE;
   return {
     account: save.account,
     marketRegime: save.marketRegime,
     prices,
-    candles: save.candleHistory,
+    candles: sanitizeCandleHistory(save.candleHistory),
     activeAssets,
     // Раньше жёстко бралось .day (баг: переключение стиля не переживало
     // перезагрузку) — восстанавливаем реально сохранённый стиль, с
@@ -110,6 +153,7 @@ function saveToState(save: SaveGame): GameState {
     // ?? 0 — только для сохранений, сделанных до появления этого поля;
     // новые всегда пишут реальное значение (см. stateToSave выше).
     gameElapsedMs: save.gameElapsedMs ?? 0,
+    lastDividendQuarter: save.lastDividendQuarter ?? 0,
   };
 }
 
@@ -277,7 +321,26 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // Меняет timeAcceleration (и видимую скорость графика) со следующего
     // тика — критерий приёмки Фазы 2 (раздел 16). Открытые позиции/баланс
     // не трогает: смена стиля влияет только на будущие тики и новые ордера.
-    set((s) => ({ game: { ...s.game, activeStyle: config } }));
+    // Investing (Фаза 5) требует более широкого набора активов, чем 6
+    // тикеров Фазы 1 — ДОБАВЛЯЕМ недостающие в activeAssets/prices/candles,
+    // а не заменяем список: иначе позиции, открытые в предыдущем стиле,
+    // остались бы без ценового потока (см. saveToState — тот же принцип
+    // «только рост» применён и при восстановлении сохранения).
+    set((s) => {
+      const requiredIds = assetIdsForStyle(style);
+      const existingIds = new Set(s.game.activeAssets.map((a) => a.id));
+      const missing = ALL_ASSETS.filter((a) => requiredIds.includes(a.id) && !existingIds.has(a.id));
+      if (missing.length === 0) return { game: { ...s.game, activeStyle: config } };
+      const prices = { ...s.game.prices };
+      const candles = { ...s.game.candles };
+      for (const a of missing) {
+        prices[a.id] = STARTING_PRICE;
+        candles[a.id] = [];
+      }
+      return {
+        game: { ...s.game, activeStyle: config, activeAssets: [...s.game.activeAssets, ...missing], prices, candles },
+      };
+    });
     void get().persistNow();
   },
 

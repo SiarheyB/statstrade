@@ -1613,7 +1613,16 @@ const en: Dict = {
 
   "game.style.scalping": "Scalping",
   "game.style.swing": "Swing",
+  "game.style.investing": "Investing",
   "game.skill.level": "Level {level}",
+
+  "game.investing.title": "Investing forecast",
+  "game.investing.hint": "Buy & hold across {count} dividend-paying stocks and bonds — quarterly dividends are paid automatically while you hold a position.",
+  "game.investing.principal": "Starting capital",
+  "game.investing.annualReturn": "Assumed annual return",
+  "game.investing.years": "Years",
+  "game.investing.futureValue": "Projected value",
+  "game.investing.disclaimer": "Illustrative only — a fixed-rate projection, not a promise. Actual results depend on the simulated market.",
 };
 
 const ru: Dict = {
@@ -3212,7 +3221,16 @@ const ru: Dict = {
 
   "game.style.scalping": "Скальпинг",
   "game.style.swing": "Свинг",
+  "game.style.investing": "Инвестиции",
   "game.skill.level": "Уровень {level}",
+
+  "game.investing.title": "Прогноз инвестиций",
+  "game.investing.hint": "Купи и держи — {count} дивидендных акций и облигаций, дивиденды платятся автоматически каждый игровой квартал, пока позиция открыта.",
+  "game.investing.principal": "Стартовый капитал",
+  "game.investing.annualReturn": "Ожидаемая годовая доходность",
+  "game.investing.years": "Лет",
+  "game.investing.futureValue": "Прогнозная сумма",
+  "game.investing.disclaimer": "Только иллюстрация — прогноз по фиксированной ставке, не обещание. Реальный результат зависит от симулируемого рынка.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

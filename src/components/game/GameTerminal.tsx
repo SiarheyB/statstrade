@@ -16,6 +16,7 @@ import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
 import OrderTicket from "./OrderTicket";
 import OrderBook from "./OrderBook";
+import InvestingForecast from "./InvestingForecast";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
 import GameDisclaimer from "./GameDisclaimer";
@@ -25,8 +26,8 @@ const STYLE_LABEL_KEY: Record<TradingStyle, string> = {
   scalping: "game.style.scalping",
   day: "game.style.day",
   swing: "game.style.swing",
-  position: "game.style.day", // не выбираемы в Фазе 2 — ключи не используются
-  investing: "game.style.day",
+  investing: "game.style.investing",
+  position: "game.style.day", // не выбираемы в Фазе 2/5 — ключи не используются
   algo: "game.style.day",
   arbitrage: "game.style.day",
   market_making: "game.style.day",
@@ -122,6 +123,9 @@ export default function GameTerminal() {
         </div>
         {currentStyle === "scalping" && asset && (
           <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
+        )}
+        {currentStyle === "investing" && (
+          <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
         )}
         {assetId && (
           <OrderTicket

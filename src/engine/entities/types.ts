@@ -194,6 +194,10 @@ export interface SaveGame {
   // заново от 0 поверх старых, и график рисовал бы две дорожки друг на
   // друге (поймано вручную — см. gameStore.ts saveToState/stateToSave).
   gameElapsedMs: number;
+  // Раздел 4.6 — номер последнего игрового квартала, за который уже
+  // заплачены дивиденды/купоны (см. gameLoop.ts, шаг 6). Без сохранения
+  // каждая загрузка снова платила бы за уже оплаченный квартал.
+  lastDividendQuarter: number;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

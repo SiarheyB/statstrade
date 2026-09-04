@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CANDLE_INTERVAL_MS, checkStopConditions, gameTick, type GameState } from "@/engine/gameLoop";
+import { candleIntervalMs, checkStopConditions, gameTick, type GameState } from "@/engine/gameLoop";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -102,18 +102,66 @@ describe("gameTick", () => {
     expect(next.prices[asset.id]).toBeGreaterThan(0);
   });
 
-  it("копит свечи в бакеты по CANDLE_INTERVAL_MS, не создавая лишних баров внутри одной минуты", () => {
+  it("копит свечи в бакеты по candleIntervalMs(timeAcceleration), не создавая лишних баров внутри одного бакета", () => {
     let state = makeState();
     const rng = mulberry32(2);
-    // Дни-режим: 1 реальная секунда = 60 игровых секунд = 1 игровая минута —
-    // после первого тика уже есть минимум одна свеча.
+    // Day-режим: candleIntervalMs(60) = 60_000 игровых мс (1 игровая минута,
+    // как и раньше при захардкоженной константе) — 1 реальная секунда =
+    // 60 игровых секунд, после первого тика уже есть минимум одна свеча.
+    const interval = candleIntervalMs(TRADING_STYLE_CONFIGS.day.timeAcceleration);
+    expect(interval).toBe(60_000);
     state = gameTick(200, state, rng); // 200мс реала = 12с игровых — один бакет
     state = gameTick(200, state, rng); // ещё 12с игровых — тот же бакет (< 60с)
     expect(state.candles[asset.id].length).toBe(1);
-    expect(state.candles[asset.id][0].timestamp).toBeLessThan(CANDLE_INTERVAL_MS);
+    expect(state.candles[asset.id][0].timestamp).toBeLessThan(interval);
     state = gameTick(3000, state, rng); // +180с игровых — новый бакет
     expect(state.candles[asset.id].length).toBeGreaterThan(1);
     expect(state.candles[asset.id].length).toBeLessThanOrEqual(500);
+  });
+
+  // Регрессия: раньше свеча была ФИКСИРОВАННОЙ (1 игровая минута) вне
+  // зависимости от timeAcceleration стиля — у investing (43200x) один тик
+  // движка перепрыгивал сразу ~180 минутных бакетов, и appendPriceToCandles
+  // добавляла только ОДИН бар за тик: подряд идущие свечи в массиве
+  // оказывались на самом деле в часах друг от друга, график превращался в
+  // редкие несвязанные точки. candleIntervalMs масштабирует бакет так,
+  // чтобы на свечу всегда приходилось примерно одинаковое число тиков.
+  it("investing (43200x) не плодит один бар в час — интервал свечи растёт вместе с ускорением", () => {
+    let state = makeState({ activeStyle: TRADING_STYLE_CONFIGS.investing });
+    const rng = mulberry32(21);
+    for (let i = 0; i < 10; i++) state = gameTick(250, state, rng); // ~10 UI-тиков по 250мс
+    const candles = state.candles[asset.id];
+    // За 10 тиков должно накопиться заметно больше одной свечи (не редкие
+    // точки раз в несколько тиков), но и не 10 отдельных пустых баров —
+    // порядок величины, а не точное число (зависит от кратности округления).
+    expect(candles.length).toBeGreaterThan(1);
+    expect(candles.length).toBeLessThanOrEqual(10);
+  });
+
+  // Регрессия: два независимых тикера на одном источнике (вторая вкладка,
+  // либо в деве — осиротевший setInterval от предыдущей версии модуля после
+  // Fast Refresh) могли записать в state.candles бакет со временем МЕНЬШЕ
+  // уже сохранённого — массив переставал быть отсортированным по времени,
+  // и график рисовал "две дорожки" одна поверх другой.
+  it("не добавляет свечу с бакетом раньше уже существующего (защита от отката времени назад)", () => {
+    let state = makeState();
+    const rng = mulberry32(20);
+    state = gameTick(5000, state, rng); // копим нормальную историю вперёд
+    state = gameTick(5000, state, rng);
+    const before = state.candles[asset.id];
+    const lastTimestamp = before[before.length - 1].timestamp;
+    // Тик с отрицательным dtRealMs — единственный способ извне заставить
+    // gameElapsedMs (и, соответственно, бакет) уйти назад; в реальной игре
+    // так не бывает (dtRealMs = perfomance.now() diff, всегда ≥0), но
+    // защита должна держаться и на этом крайнем случае.
+    state = gameTick(-100_000, state, rng);
+    const after = state.candles[asset.id];
+    // Либо длина не изменилась (бакет отклонён), либо новый бакет всё равно
+    // не раньше последнего уже существующего — в любом случае убывания нет.
+    expect(after[after.length - 1].timestamp).toBeGreaterThanOrEqual(lastTimestamp);
+    for (let i = 1; i < after.length; i++) {
+      expect(after[i].timestamp).toBeGreaterThan(after[i - 1].timestamp);
+    }
   });
 
   it("закрывает позицию по SL и возвращает на баланс резерв + realizedPnl (без утечки денег)", () => {

@@ -9,7 +9,7 @@ vi.mock("@/persistence/gameDb", () => ({
   saveGame: mocks.saveGame,
 }));
 
-import { useGameStore, PHASE1_ASSET_IDS } from "@/store/gameStore";
+import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS } from "@/store/gameStore";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const ASSET_ID = PHASE1_ASSET_IDS[0];
@@ -71,6 +71,40 @@ describe("init", () => {
     expect(s.status).toBe("ready");
   });
 
+  // Регрессия: гонка двух тикеров на одном источнике (вторая вкладка, либо
+  // осиротевший таймер после Fast Refresh в деве) могла оставить в
+  // candleHistory записи не по порядку и/или с задвоенным timestamp —
+  // подчищаем при каждой загрузке, а не только когда "выглядит подозрительно".
+  it("чинит неотсортированную/задвоенную историю свечей при загрузке", async () => {
+    mocks.loadGame.mockResolvedValue({
+      version: "1.0.0-phase1",
+      savedAt: Date.now(),
+      account: useGameStore.getState().game.account,
+      marketRegime: useGameStore.getState().game.marketRegime,
+      prices: { [ASSET_ID]: 100 },
+      candleHistory: {
+        [ASSET_ID]: [
+          { timestamp: 180_000, open: 3, high: 3, low: 3, close: 3, volume: 0 },
+          { timestamp: 60_000, open: 1, high: 1, low: 1, close: 1, volume: 0 },
+          { timestamp: 120_000, open: 2, high: 2, low: 2, close: 2, volume: 0 },
+          { timestamp: 60_000, open: 1.5, high: 1.5, low: 1.5, close: 1.5, volume: 0 }, // дубль бакета — последний должен победить
+        ],
+      },
+      activeAssetIds: PHASE1_ASSET_IDS,
+      activeTradingStyle: "day",
+      unlockedStyles: ["day"],
+      unlockedMarkets: ["stock"],
+      gameCalendarDay: 0,
+      gameElapsedMs: 180_000,
+      onboardingDone: true,
+      disclaimerSeen: true,
+    });
+    await useGameStore.getState().init();
+    const candles = useGameStore.getState().game.candles[ASSET_ID];
+    expect(candles.map((c) => c.timestamp)).toEqual([60_000, 120_000, 180_000]);
+    expect(candles[0].close).toBe(1.5); // выжил ПОСЛЕДНИЙ виденный дубль, не первый
+  });
+
   // Регрессия: gameElapsedMs раньше жёстко обнулялся при загрузке (0
   // литералом в saveToState), хотя candleHistory уже содержит метки времени
   // из прошлой партии — новые свечи начинали бы бакетироваться заново от 0
@@ -101,6 +135,43 @@ describe("init", () => {
     await useGameStore.getState().persistNow();
     const saved = mocks.saveGame.mock.calls.at(-1)?.[0];
     expect(saved.gameElapsedMs).toBe(555_000);
+  });
+
+  // Регрессия: saveToState раньше жёстко брала activeAssets =
+  // PHASE1_ASSET_IDS независимо от сохранения — игрок, переключившийся на
+  // investing, после перезагрузки страницы снова видел только 6 тикеров
+  // Фазы 1, хотя activeTradingStyle в сохранении был "investing".
+  it("восстанавливает investing-активы из сохранения, а не только PHASE1_ASSET_IDS", async () => {
+    mocks.loadGame.mockResolvedValue({
+      version: "1.0.0-phase1",
+      savedAt: Date.now(),
+      account: useGameStore.getState().game.account,
+      marketRegime: useGameStore.getState().game.marketRegime,
+      prices: { [ASSET_ID]: 100 },
+      candleHistory: {},
+      activeAssetIds: [...PHASE1_ASSET_IDS, ...INVESTING_ASSET_IDS],
+      activeTradingStyle: "investing",
+      unlockedStyles: ["day", "investing"],
+      unlockedMarkets: ["stock"],
+      gameCalendarDay: 10,
+      gameElapsedMs: 1_000_000,
+      lastDividendQuarter: 2,
+      onboardingDone: true,
+      disclaimerSeen: true,
+    });
+    await useGameStore.getState().init();
+    const s = useGameStore.getState();
+    const ids = new Set(s.game.activeAssets.map((a) => a.id));
+    for (const id of INVESTING_ASSET_IDS) expect(ids.has(id)).toBe(true);
+    expect(s.game.activeStyle.style).toBe("investing");
+    expect(s.game.lastDividendQuarter).toBe(2);
+  });
+
+  it("persistNow сохраняет lastDividendQuarter", async () => {
+    useGameStore.setState((s) => ({ game: { ...s.game, lastDividendQuarter: 7 } }));
+    await useGameStore.getState().persistNow();
+    const saved = mocks.saveGame.mock.calls.at(-1)?.[0];
+    expect(saved.lastDividendQuarter).toBe(7);
   });
 
   it("без сохранения создаёт свежее состояние со стартовым балансом", async () => {
@@ -238,6 +309,38 @@ describe("setActiveStyle", () => {
     useGameStore.getState().setActiveStyle("swing");
     expect(useGameStore.getState().game.account.positions).toHaveLength(1);
     expect(useGameStore.getState().game.account.positions[0].closedAt).toBeUndefined();
+  });
+
+  // Регрессия: раньше setActiveStyle только подменяла activeStyle-конфиг —
+  // переход на investing не добавлял 35 акций/облигаций в activeAssets, и
+  // OrderTicket показывал только 6 тикеров Фазы 1, хотя investing по спеке
+  // (раздел 8) требует широкий выбор для диверсификации.
+  it("при переключении на investing ДОБАВЛЯЕТ его активы, не убирая старые", () => {
+    const before = useGameStore.getState().game.activeAssets.map((a) => a.id);
+    expect(before).toEqual(PHASE1_ASSET_IDS);
+    useGameStore.getState().setActiveStyle("investing");
+    const ids = new Set(useGameStore.getState().game.activeAssets.map((a) => a.id));
+    for (const id of PHASE1_ASSET_IDS) expect(ids.has(id)).toBe(true);
+    for (const id of INVESTING_ASSET_IDS) expect(ids.has(id)).toBe(true);
+    // Новым активам выставлена стартовая цена и пустая история свечей —
+    // иначе gameTick пропустил бы их (currentPrice == null → continue).
+    // Только те, что ДЕЙСТВИТЕЛЬНО новые: часть INVESTING_ASSET_IDS — те же
+    // 6 акций, что уже активны в Фазе 1 (investing = все акции+облигации),
+    // их prices/candles setActiveStyle не трогает (уже были активны).
+    const newlyAdded = INVESTING_ASSET_IDS.filter((id) => !PHASE1_ASSET_IDS.includes(id));
+    for (const id of newlyAdded) {
+      expect(useGameStore.getState().game.prices[id]).toBe(100);
+      expect(useGameStore.getState().game.candles[id]).toEqual([]);
+    }
+  });
+
+  it("повторное переключение на investing не пересоздаёт уже добавленные активы", () => {
+    useGameStore.getState().setActiveStyle("investing");
+    const before = useGameStore.getState().game.activeAssets;
+    useGameStore.getState().setActiveStyle("day");
+    useGameStore.getState().setActiveStyle("investing");
+    const after = useGameStore.getState().game.activeAssets;
+    expect(after).toHaveLength(before.length);
   });
 });
 

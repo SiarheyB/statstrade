@@ -43,10 +43,28 @@ export async function loadGame(): Promise<SaveGame | null> {
   return save;
 }
 
+/**
+ * Пишет сохранение, только если оно не "младше" уже лежащего в IndexedDB
+ * (по gameElapsedMs). Без этой защиты два независимых тикера на одном
+ * источнике — вторая вкладка игры, ИЛИ (в дев-режиме) осиротевший
+ * setInterval от предыдущей версии модуля после Fast Refresh правки
+ * gameStore.ts/gameLoop.ts, — периодически перезаписывали бы сохранение
+ * друг у друга более старым состоянием: следующая сессия загружала бы уже
+ * пройденный отрезок игрового времени и продолжала бы дописывать свечи с
+ * метками времени МЕНЬШЕ уже сохранённых — график полу­чал бы две (или
+ * больше) перемешанных "дорожки" истории (см. также PriceChart.tsx —
+ * защита и на чтении, на случай если что-то подобное уже записано).
+ * IndexedDB-транзакция делает read-compare-write атомарным — не гонка
+ * между параллельными saveGame() из разных вкладок.
+ */
 export async function saveGame(save: SaveGame): Promise<void> {
   const db = getDb();
   if (!db) return;
-  await db.saves.put({ ...save, id: CURRENT_SAVE_ID });
+  await db.transaction("rw", db.saves, async () => {
+    const current = await db.saves.get(CURRENT_SAVE_ID);
+    if (current && current.gameElapsedMs > save.gameElapsedMs) return;
+    await db.saves.put({ ...save, id: CURRENT_SAVE_ID });
+  });
 }
 
 export async function deleteSave(): Promise<void> {

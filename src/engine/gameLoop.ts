@@ -1,9 +1,9 @@
 // Главный тик симуляции — раздел 11 спеки. Фаза 1 добавила базовый цикл
 // (цена/SL-TP/equity), Фаза 2 — плечо/маржа/ликвидацию (4.2) и прогрессию
-// (4.5, начисляется в applyPositionClose). Шаги 1/2/6 псевдокода раздела 11
-// (рыночные режимы/новости/дивиденды) всё ещё вне объёма — маркерные
-// комментарии ниже, чтобы структура функции не менялась, когда эти шаги
-// подключатся (Фазы 3, 5).
+// (4.5, начисляется в applyPositionClose), Фаза 5 — дивиденды/купоны (4.6,
+// шаг 6 псевдокода). Шаги 1/2 (рыночные режимы/новости) всё ещё вне объёма
+// — маркерные комментарии ниже, чтобы структура функции не менялась, когда
+// эти шаги подключатся (Фаза 3).
 import type { Account, Asset, Candle, MarketRegime, Position, TradingStyleConfig } from "@/engine/entities/types";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import { randomNormal, simulateTick } from "@/engine/market/priceSimulation";
@@ -16,14 +16,28 @@ import {
   checkLiquidation,
 } from "@/engine/economy/marginEngine";
 import { applyXpGain, calculateXpGain, xpToNextLevel, BASE_XP } from "@/engine/player/progression";
+import { processQuarterlyDividends } from "@/engine/economy/dividends";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
-// Длина одной свечи в игровом времени — 1 игровая минута (день-режим торгует
-// внутри дня, минутный бар — минимальная осмысленная гранулярность для его
-// графика). Свечей на актив храним ограниченно (см. persistence/gameDb.ts).
-export const CANDLE_INTERVAL_MS = 60_000;
+// Длина одной свечи (в игровом времени) МАСШТАБИРУЕТСЯ по timeAcceleration
+// активного стиля, а не фиксирована — иначе высокоускоренные стили (swing
+// 720x, investing 43200x) успевают за ОДИН тик движка перепрыгнуть сразу
+// десятки/сотни минутных бакетов: appendPriceToCandles добавляет ровно один
+// бар за тик, так что промежуточные бакеты остаются пустыми, и график
+// превращается в редкие несвязанные точки вместо баров с телом (поймано
+// вручную на Investing — "какие-то чёрточки, цена летает непонятно где").
+// 1 реальная секунда на свечу — те же ~4 сэмпла цены на бар при
+// TICK_INTERVAL_MS=250 в сторе, что уже давал day (60x*1000=60_000ms,
+// совпадает со старым захардкоженным значением константы).
+export const CANDLE_REAL_MS = 1000;
+export function candleIntervalMs(timeAcceleration: number): number {
+  return CANDLE_REAL_MS * timeAcceleration;
+}
 export const MAX_CANDLES_PER_ASSET = 500;
+// "Игровой квартал" (раздел 4.6) — 90 игровых дней, не календарных 1/4 года
+// (спека не уточняет — простейший выбор, раздел 0 п.6).
+export const QUARTER_MS = 90 * 24 * 60 * 60 * 1000;
 
 export interface GameState {
   account: Account;
@@ -34,10 +48,11 @@ export interface GameState {
   activeStyle: TradingStyleConfig;
   gameCalendarDay: number;
   gameElapsedMs: number; // накоплено игрового времени с начала партии
+  lastDividendQuarter: number; // номер последнего игрового квартала, за который уже заплатили
 }
 
-function appendPriceToCandles(candles: Candle[], price: number, gameMs: number): Candle[] {
-  const bucketStart = Math.floor(gameMs / CANDLE_INTERVAL_MS) * CANDLE_INTERVAL_MS;
+function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
+  const bucketStart = Math.floor(gameMs / intervalMs) * intervalMs;
   const last = candles[candles.length - 1];
   if (last && last.timestamp === bucketStart) {
     last.high = Math.max(last.high, price);
@@ -45,6 +60,14 @@ function appendPriceToCandles(candles: Candle[], price: number, gameMs: number):
     last.close = price;
     return candles;
   }
+  // Защита от "отката времени назад" — не должно случаться при
+  // gameElapsedMs, монотонно растущем внутри одной вкладки, но на практике
+  // случалось: gameDb.saveGame теперь тоже это блокирует (см. её комментарий),
+  // здесь — вторая линия обороны на случай, если что-то всё же пришло не по
+  // порядку (например, уже испорченное старое сохранение). Молча
+  // игнорируем более старый бакет вместо порчи массива — свечи внутри
+  // одной вкладки должны идти строго по возрастанию времени.
+  if (last && bucketStart < last.timestamp) return candles;
   const next = [...candles, { timestamp: bucketStart, open: price, high: price, low: price, close: price, volume: 0 }];
   return next.length > MAX_CANDLES_PER_ASSET ? next.slice(next.length - MAX_CANDLES_PER_ASSET) : next;
 }
@@ -153,6 +176,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   // 3. Обновить цены активных активов.
   const prices = { ...state.prices };
   const candles = { ...state.candles };
+  const intervalMs = candleIntervalMs(state.activeStyle.timeAcceleration);
   for (const asset of state.activeAssets) {
     const currentPrice = prices[asset.id];
     if (currentPrice == null) continue;
@@ -166,7 +190,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
       correlatedZ: z, // Фаза 3 коррелирует Z между активами одной группы
     });
     prices[asset.id] = newPrice;
-    candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs);
+    candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs, intervalMs);
   }
 
   // 4. Проверить ликвидацию и SL/TP открытых позиций (авто-закрытие).
@@ -196,7 +220,19 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     applyPositionClose(account, position, exitPrice, commissionRate);
   }
 
-  // 5. Пересчитать equity/marginLevel.
+  // 6. Дивиденды/купоны раз в игровой квартал (раздел 4.6) — платим за
+  // КАЖДЫЙ пройденный квартал, а не только за факт "квартал наступил": на
+  // ускорении investing-режима (43200x) один тик может перескочить сразу
+  // несколько кварталов, и пропускать промежуточные выплаты было бы нечестно
+  // по отношению к формуле (игрок реально столько бы продержал позицию).
+  const currentQuarter = Math.floor(gameElapsedMs / QUARTER_MS);
+  let lastDividendQuarter = state.lastDividendQuarter;
+  while (lastDividendQuarter < currentQuarter) {
+    lastDividendQuarter++;
+    processQuarterlyDividends(account, state.activeAssets, prices);
+  }
+
+  // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);
 
   return {
@@ -206,5 +242,6 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     account,
     gameElapsedMs,
     gameCalendarDay: Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000)),
+    lastDividendQuarter,
   };
 }
