@@ -10,6 +10,7 @@ vi.mock("@/persistence/gameDb", () => ({
 }));
 
 import { useGameStore, PHASE1_ASSET_IDS } from "@/store/gameStore";
+import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const ASSET_ID = PHASE1_ASSET_IDS[0];
 
@@ -27,8 +28,12 @@ function resetStoreToFresh() {
         equity: 10_000,
         positions: [],
         journal: [],
+        skills: {},
       },
       prices: { [ASSET_ID]: 100 },
+      // setActiveStyle-тесты меняют это на другой стиль — без сброса течёт
+      // в следующий тест (поймано: порядок тестов в файле влиял на результат).
+      activeStyle: TRADING_STYLE_CONFIGS.day,
     },
   }));
 }
@@ -174,6 +179,65 @@ describe("setStopLoss / setTakeProfit", () => {
     const p = useGameStore.getState().game.account.positions[0];
     expect(p.stopLoss).toBe(80);
     expect(p.takeProfit).toBe(130);
+  });
+});
+
+describe("openPosition — плечо (раздел 4.2)", () => {
+  it("резервирует requiredMargin (entryPrice*size/leverage), а не полный номинал", () => {
+    const res = useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 10, leverage: 5 });
+    expect(res).toEqual({ ok: true });
+    // requiredMargin = 100*10/5 = 200, а не 1000.
+    expect(useGameStore.getState().game.account.balance).toBe(10_000 - 200);
+    expect(useGameStore.getState().game.account.positions[0].leverage).toBe(5);
+  });
+
+  it("отклоняет плечо больше maxLeverage активного стиля", () => {
+    // day.maxLeverage = 10.
+    const res = useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 1, leverage: 50 });
+    expect(res).toEqual({ ok: false, error: "invalid_leverage" });
+    expect(useGameStore.getState().game.account.positions).toHaveLength(0);
+  });
+
+  it("отклоняет плечо меньше 1", () => {
+    const res = useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 1, leverage: 0.5 });
+    expect(res).toEqual({ ok: false, error: "invalid_leverage" });
+  });
+
+  it("без leverage в аргументах ведёт себя как раньше (leverage=1, полный номинал)", () => {
+    useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 10 });
+    expect(useGameStore.getState().game.account.balance).toBe(10_000 - 1000);
+    expect(useGameStore.getState().game.account.positions[0].leverage).toBe(1);
+  });
+});
+
+describe("closePosition — комиссия по стилю ОТКРЫТИЯ, не по текущему активному", () => {
+  it("не меняется, если игрок переключил стиль между открытием и закрытием позиции", () => {
+    // Открываем под day (commissionRate 0.0008).
+    useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 10 });
+    const id = useGameStore.getState().game.account.positions[0].id;
+    // Переключаемся на scalping (commissionRate 0.0005) — ДО закрытия.
+    useGameStore.getState().setActiveStyle("scalping");
+    useGameStore.setState((s) => ({ game: { ...s.game, prices: { ...s.game.prices, [ASSET_ID]: 110 } } }));
+    useGameStore.getState().closePosition(id);
+    const closed = useGameStore.getState().game.account.positions[0];
+    const expectedFees = (100 * 10 + 110 * 10) * TRADING_STYLE_CONFIGS.day.commissionRate;
+    expect(closed.realizedPnl).toBeCloseTo((110 - 100) * 10 - expectedFees, 5);
+  });
+});
+
+describe("setActiveStyle", () => {
+  it("меняет activeStyle (и его timeAcceleration) для следующего тика", () => {
+    expect(useGameStore.getState().game.activeStyle.style).toBe("day");
+    useGameStore.getState().setActiveStyle("scalping");
+    expect(useGameStore.getState().game.activeStyle.style).toBe("scalping");
+    expect(useGameStore.getState().game.activeStyle.timeAcceleration).toBe(TRADING_STYLE_CONFIGS.scalping.timeAcceleration);
+  });
+
+  it("не открывает и не закрывает позиции сама по себе", () => {
+    useGameStore.getState().openPosition({ assetId: ASSET_ID, side: "long", size: 1 });
+    useGameStore.getState().setActiveStyle("swing");
+    expect(useGameStore.getState().game.account.positions).toHaveLength(1);
+    expect(useGameStore.getState().game.account.positions[0].closedAt).toBeUndefined();
   });
 });
 

@@ -109,6 +109,7 @@ export default function PositionsPanel({
                         <span className={p.side === "long" ? "text-profit" : "text-loss"}>
                           {p.side === "long" ? t("game.side.long") : t("game.side.short")}
                         </span>
+                        {p.leverage > 1 && <span className="text-faint text-[11px] ml-1">×{p.leverage}</span>}
                       </td>
                       <td className="py-2 pr-3 text-right tabular-nums">{p.size}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtUsd(p.entryPrice)}</td>

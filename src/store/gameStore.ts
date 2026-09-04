@@ -6,10 +6,11 @@
 // формулы напрямую — только через публичные функции engine»).
 import { create } from "zustand";
 import assetsData from "@/data/assets.json";
-import type { Account, Asset, PositionSide, SaveGame } from "@/engine/entities/types";
+import type { Account, Asset, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, gameTick, type GameState } from "@/engine/gameLoop";
+import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
 import { loadGame, saveGame } from "@/persistence/gameDb";
 
@@ -20,7 +21,13 @@ const ALL_ASSETS = assetsData as Asset[];
 // assets.json, но не активны, пока не подключатся соответствующие фазы.
 export const PHASE1_ASSET_IDS = ["STK_NEXTEK", "STK_QUANTA", "STK_PIXELON", "STK_IRONCORE", "STK_PETROVA", "STK_SOLARIS"];
 
-const STARTING_BALANCE = 10_000;
+// Фаза 2 (раздел 15): «Добавить Scalping и Swing режимы» — к day добавляются
+// ещё два. Остальные 6 стилей раздела 5 (position/investing/algo/arbitrage/
+// market_making/options) остаются вне UI до своих фаз (5-6) — данные для них
+// уже в tradingStyleConfigs.ts, но выбрать их в игре пока нельзя.
+export const SELECTABLE_STYLES: TradingStyle[] = ["scalping", "day", "swing"];
+
+export const STARTING_BALANCE = 10_000;
 // Стартовая цена всех Фазы-1 акций — спека не задаёт её явно (только
 // баз. волатильность/снос), 100 — обычный дефолт для симуляторов такого рода.
 const STARTING_PRICE = 100;
@@ -71,7 +78,9 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     candleHistory: state.candles,
     activeAssetIds: state.activeAssets.map((a) => a.id),
     activeTradingStyle: state.activeStyle.style,
-    unlockedStyles: ["day"],
+    // Фаза 4 (лицензии/скиллы) введёт реальный checkUnlock — до тех пор все
+    // стили Фазы 2 доступны сразу, разблокировок нет.
+    unlockedStyles: SELECTABLE_STYLES,
     unlockedMarkets: ["stock"],
     gameCalendarDay: state.gameCalendarDay,
     gameElapsedMs: state.gameElapsedMs,
@@ -93,7 +102,10 @@ function saveToState(save: SaveGame): GameState {
     prices,
     candles: save.candleHistory,
     activeAssets,
-    activeStyle: TRADING_STYLE_CONFIGS.day,
+    // Раньше жёстко бралось .day (баг: переключение стиля не переживало
+    // перезагрузку) — восстанавливаем реально сохранённый стиль, с
+    // фоллбэком на day для старых сохранений/повреждённого значения.
+    activeStyle: TRADING_STYLE_CONFIGS[save.activeTradingStyle] ?? TRADING_STYLE_CONFIGS.day,
     gameCalendarDay: save.gameCalendarDay,
     // ?? 0 — только для сохранений, сделанных до появления этого поля;
     // новые всегда пишут реальное значение (см. stateToSave выше).
@@ -101,7 +113,9 @@ function saveToState(save: SaveGame): GameState {
   };
 }
 
-export type OpenPositionResult = { ok: true } | { ok: false; error: "insufficient_funds" | "invalid_size" | "unknown_asset" };
+export type OpenPositionResult =
+  | { ok: true }
+  | { ok: false; error: "insufficient_funds" | "invalid_size" | "unknown_asset" | "invalid_leverage" };
 
 interface GameStoreState {
   status: "loading" | "ready";
@@ -111,10 +125,19 @@ interface GameStoreState {
   init: () => Promise<void>;
   startTicking: () => void;
   stopTicking: () => void;
-  openPosition: (input: { assetId: string; side: PositionSide; size: number; stopLoss?: number; takeProfit?: number }) => OpenPositionResult;
+  openPosition: (input: {
+    assetId: string;
+    side: PositionSide;
+    size: number;
+    leverage?: number;
+    stopLoss?: number;
+    takeProfit?: number;
+  }) => OpenPositionResult;
   closePosition: (positionId: string) => void;
   setStopLoss: (positionId: string, price: number | undefined) => void;
   setTakeProfit: (positionId: string, price: number | undefined) => void;
+  setActiveStyle: (style: TradingStyle) => void;
+  updateJournalEntry: (entryId: string, patch: { tags?: string[]; note?: string }) => void;
   completeOnboarding: () => void;
   acceptDisclaimer: () => void;
   persistNow: () => Promise<void>;
@@ -172,15 +195,17 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
 
-  openPosition: ({ assetId, side, size, stopLoss, takeProfit }) => {
+  openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit }) => {
     const { game } = get();
     if (!(size > 0)) return { ok: false, error: "invalid_size" };
+    if (!(leverage >= 1) || leverage > game.activeStyle.maxLeverage) return { ok: false, error: "invalid_leverage" };
     const asset = game.activeAssets.find((a) => a.id === assetId);
     const price = game.prices[assetId];
     if (!asset || price == null) return { ok: false, error: "unknown_asset" };
-    // Резерв = полный номинал (leverage=1 в Фазе 1) — раздел 26: сделка
-    // больше доступного баланса отклоняется, ордер не создаётся.
-    const cost = price * size;
+    // Резерв = requiredMargin (раздел 4.2) — при leverage=1 совпадает с
+    // полным номиналом, как в Фазе 1. Раздел 26: сделка дороже доступного
+    // баланса отклоняется, ордер не создаётся.
+    const cost = calculateRequiredMargin(price, size, leverage);
     if (cost > game.account.balance) return { ok: false, error: "insufficient_funds" };
 
     const position = {
@@ -189,7 +214,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       side,
       entryPrice: price,
       size,
-      leverage: 1,
+      leverage,
       stopLoss,
       takeProfit,
       openedAt: Date.now(),
@@ -216,7 +241,9 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const price = game.prices[position.assetId];
     if (price == null) return;
     const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
-    applyPositionClose(account, position, price, game.activeStyle.commissionRate);
+    // Комиссия по стилю, под которым позиция была открыта — см. комментарий
+    // у аналогичного места в gameLoop.ts (авто-закрытие по SL/TP/ликвидации).
+    applyPositionClose(account, position, price, TRADING_STYLE_CONFIGS[position.style].commissionRate);
     set((s) => ({ game: { ...s.game, account } }));
   },
 
@@ -242,6 +269,29 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         },
       },
     }));
+  },
+
+  setActiveStyle: (style) => {
+    const config = TRADING_STYLE_CONFIGS[style];
+    if (!config) return;
+    // Меняет timeAcceleration (и видимую скорость графика) со следующего
+    // тика — критерий приёмки Фазы 2 (раздел 16). Открытые позиции/баланс
+    // не трогает: смена стиля влияет только на будущие тики и новые ордера.
+    set((s) => ({ game: { ...s.game, activeStyle: config } }));
+    void get().persistNow();
+  },
+
+  updateJournalEntry: (entryId, patch) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: {
+          ...s.game.account,
+          journal: s.game.account.journal.map((e) => (e.id === entryId ? { ...e, ...patch } : e)),
+        },
+      },
+    }));
+    void get().persistNow();
   },
 
   completeOnboarding: () => {

@@ -1,13 +1,15 @@
 "use client";
 
-// Форма открытия позиции — раздел 9 спеки (<OrderTicket>), сужено под Фазу 1:
-// без плеча (leverage всегда 1), рынок — акции. Live-расчёт стоимости и
-// проверка "хватает ли баланса" — edge case раздела 26 (заявка больше
-// доступного баланса отклоняется, ордер не создаётся).
+// Форма открытия позиции — раздел 9 спеки (<OrderTicket>). Live-расчёт
+// требуемой маржи (раздел 4.2) и проверка "хватает ли баланса" — edge case
+// раздела 26 (заявка больше доступного баланса отклоняется, ордер не
+// создаётся). Плечо ограничено maxLeverage активного стиля (раздел 5).
 import { useMemo, useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
+import { calculateRequiredMargin, calculateLiquidationPrice } from "@/engine/economy/marginEngine";
+import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
 import type { Asset, PositionSide } from "@/engine/entities/types";
 
 export default function OrderTicket({
@@ -16,28 +18,43 @@ export default function OrderTicket({
   onSelectAsset,
   prices,
   balance,
+  maxLeverage,
 }: {
   assets: Asset[];
   selectedAssetId: string;
   onSelectAsset: (id: string) => void;
   prices: Record<string, number>;
   balance: number;
+  maxLeverage: number;
 }) {
   const { t } = useI18n();
   const openPosition = useGameStore((s) => s.openPosition);
   const [size, setSize] = useState("10");
+  const [leverage, setLeverage] = useState(1);
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<PositionSide | null>(null);
 
+  // Плечо активного стиля могло уменьшиться при переключении стиля —
+  // не даём висеть значению выше нового потолка.
+  const effectiveLeverage = Math.min(leverage, maxLeverage);
+
   const price = prices[selectedAssetId];
   const sizeNum = Number(size);
-  const cost = Number.isFinite(sizeNum) && price != null ? sizeNum * price : 0;
+  const cost =
+    Number.isFinite(sizeNum) && price != null ? calculateRequiredMargin(price, sizeNum, effectiveLeverage) : 0;
   const insufficient = cost > balance;
 
   const slNum = stopLoss.trim() === "" ? undefined : Number(stopLoss);
   const tpNum = takeProfit.trim() === "" ? undefined : Number(takeProfit);
+
+  // Подсказка по размеру позиции (раздел 4.3) — только рекомендация, не
+  // ограничение: показывается, когда стоп-лосс заполнен, риск 1% от баланса.
+  const suggestedSize =
+    price != null && slNum != null && Number.isFinite(slNum)
+      ? suggestPositionSize(balance, DEFAULT_RISK_PER_TRADE_PCT, price, slNum)
+      : null;
 
   function submit(side: PositionSide) {
     setError(null);
@@ -49,6 +66,7 @@ export default function OrderTicket({
       assetId: selectedAssetId,
       side,
       size: sizeNum,
+      leverage: effectiveLeverage,
       stopLoss: slNum != null && Number.isFinite(slNum) ? slNum : undefined,
       takeProfit: tpNum != null && Number.isFinite(tpNum) ? tpNum : undefined,
     });
@@ -58,7 +76,9 @@ export default function OrderTicket({
           ? t("game.order.errorFunds")
           : res.error === "invalid_size"
             ? t("game.order.errorSize")
-            : t("game.order.errorAsset"),
+            : res.error === "invalid_leverage"
+              ? t("game.order.errorLeverage")
+              : t("game.order.errorAsset"),
       );
       return;
     }
@@ -67,6 +87,11 @@ export default function OrderTicket({
   }
 
   const options = useMemo(() => assets.map((a) => ({ id: a.id, label: `${a.symbol} — ${a.name}` })), [assets]);
+
+  const longLiqPrice =
+    price != null && effectiveLeverage > 1 ? calculateLiquidationPrice(price, effectiveLeverage, "long") : null;
+  const shortLiqPrice =
+    price != null && effectiveLeverage > 1 ? calculateLiquidationPrice(price, effectiveLeverage, "short") : null;
 
   return (
     <div className="card p-4 space-y-3" data-testid="order-ticket">
@@ -101,7 +126,30 @@ export default function OrderTicket({
           onChange={(e) => setSize(e.target.value)}
           className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
         />
+        {suggestedSize != null && (
+          <div className="text-[11px] text-faint mt-1">
+            {t("game.order.suggestedSize", { size: suggestedSize.toFixed(2) })}
+          </div>
+        )}
       </div>
+
+      {maxLeverage > 1 && (
+        <div>
+          <label className="text-xs text-faint flex items-center justify-between mb-1">
+            <span>{t("game.order.leverage")}</span>
+            <span className="text-fg font-medium tabular-nums">{effectiveLeverage}x</span>
+          </label>
+          <input
+            type="range"
+            min={1}
+            max={maxLeverage}
+            step={1}
+            value={effectiveLeverage}
+            onChange={(e) => setLeverage(Number(e.target.value))}
+            className="w-full accent-accent"
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-2">
         <div>
@@ -127,6 +175,13 @@ export default function OrderTicket({
           />
         </div>
       </div>
+
+      {effectiveLeverage > 1 && longLiqPrice != null && shortLiqPrice != null && (
+        <div className="text-[11px] text-faint space-y-0.5">
+          <div>{t("game.order.liqLong", { price: fmtUsd(longLiqPrice) })}</div>
+          <div>{t("game.order.liqShort", { price: fmtUsd(shortLiqPrice) })}</div>
+        </div>
+      )}
 
       <div className="text-xs text-faint flex items-center justify-between">
         <span>{t("game.order.cost")}</span>

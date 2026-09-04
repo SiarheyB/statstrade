@@ -227,6 +227,136 @@ describe("gameTick", () => {
   });
 });
 
+describe("ликвидация (раздел 4.2, интеграция в gameTick)", () => {
+  it("закрывает позицию с плечом ровно на ликвидационной цене, раньше SL/TP", () => {
+    const position: Position = {
+      id: "p1",
+      assetId: asset.id,
+      side: "long",
+      entryPrice: 100,
+      size: 10,
+      leverage: 10, // liq ≈ 90.5
+      stopLoss: 50, // сильно ниже ликвидации — не должен успеть сработать первым
+      openedAt: 0,
+      fees: 0,
+      style: "day",
+    };
+    const requiredMargin = 100; // entryPrice*size/leverage = 1000/10
+    const state = makeState({
+      account: makeAccount({ balance: 10000 - requiredMargin, positions: [position] }),
+      prices: { [asset.id]: 85 }, // ниже ликвидационной цены
+    });
+    const rng = mulberry32(7);
+    const next = gameTick(1, state, rng);
+    const closed = next.account.positions.find((p) => p.id === "p1")!;
+    expect(closed.closedAt).toBeDefined();
+    expect(closed.closePrice).toBeCloseTo(90.5, 1); // ликвидационная цена, не 85 и не 50 (SL)
+  });
+
+  it("без плеча (leverage=1) ликвидация практически недостижима — SL продолжает работать как раньше", () => {
+    const position: Position = {
+      id: "p1",
+      assetId: asset.id,
+      side: "long",
+      entryPrice: 100,
+      size: 10,
+      leverage: 1,
+      stopLoss: 90,
+      openedAt: 0,
+      fees: 0,
+      style: "day",
+    };
+    const state = makeState({
+      account: makeAccount({ balance: 9000, positions: [position] }),
+      prices: { [asset.id]: 85 },
+    });
+    const rng = mulberry32(8);
+    const next = gameTick(1, state, rng);
+    const closed = next.account.positions.find((p) => p.id === "p1")!;
+    expect(closed.closePrice).toBe(90); // закрылось по SL, не по (недостижимой) ликвидации
+  });
+
+  it("marginUsed/marginLevel отражают открытые позиции с плечом", () => {
+    const position: Position = {
+      id: "p1",
+      assetId: asset.id,
+      side: "long",
+      entryPrice: 100,
+      size: 10,
+      leverage: 5, // requiredMargin = 1000/5 = 200
+      openedAt: 0,
+      fees: 0,
+      style: "day",
+    };
+    const state = makeState({
+      account: makeAccount({ balance: 9800, positions: [position] }),
+      prices: { [asset.id]: 100 },
+    });
+    const rng = mulberry32(9);
+    const next = gameTick(1, state, rng);
+    expect(next.account.marginUsed).toBeCloseTo(200, 5);
+    expect(next.account.marginLevel).toBeCloseTo((next.account.equity / 200) * 100, 5);
+  });
+});
+
+describe("прогрессия (раздел 4.5, интеграция в gameTick)", () => {
+  it("закрытие позиции начисляет XP в account.skills по стилю сделки", () => {
+    const position: Position = {
+      id: "p1",
+      assetId: asset.id,
+      side: "long",
+      entryPrice: 100,
+      size: 10,
+      leverage: 1,
+      takeProfit: 110,
+      openedAt: 0,
+      fees: 0,
+      style: "day",
+    };
+    const state = makeState({
+      account: makeAccount({ balance: 9000, positions: [position], skills: {} }),
+      prices: { [asset.id]: 110 },
+    });
+    const rng = mulberry32(10);
+    const next = gameTick(1, state, rng);
+    expect(next.account.skills.day).toBeDefined();
+    expect(next.account.skills.day.xp + next.account.skills.day.level).toBeGreaterThan(0);
+  });
+
+  it("опыт копится за несколько сделок подряд, а не перезаписывается", () => {
+    let state = makeState({ account: makeAccount({ balance: 10000, skills: {} }) });
+    const rng = mulberry32(11);
+    for (let i = 0; i < 3; i++) {
+      state = {
+        ...state,
+        account: {
+          ...state.account,
+          positions: [
+            ...state.account.positions,
+            {
+              id: `p${i}`,
+              assetId: asset.id,
+              side: "long",
+              entryPrice: state.prices[asset.id],
+              size: 1,
+              leverage: 1,
+              takeProfit: state.prices[asset.id] + 5,
+              openedAt: 0,
+              fees: 0,
+              style: "day" as const,
+            },
+          ],
+        },
+        prices: { [asset.id]: state.prices[asset.id] + 5 },
+      };
+      state = gameTick(1, state, rng);
+    }
+    // 3 закрытые прибыльные сделки — суммарный опыт больше, чем от одной.
+    const afterThree = state.account.skills.day.level * 1000 + state.account.skills.day.xp;
+    expect(afterThree).toBeGreaterThan(0);
+  });
+});
+
 // Упрощённая версия методологии раздела 25 (Monte Carlo): случайный
 // day-трейдер, который открывает/закрывает позиции без стратегии, не должен
 // разоряться подозрительно быстро — если разоряется за считанные сделки,

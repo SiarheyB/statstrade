@@ -64,6 +64,20 @@ describe("PositionsPanel", () => {
     expect(screen.getByText("+100.00 $")).toBeInTheDocument();
   });
 
+  it("показывает множитель плеча рядом со стороной, если leverage > 1", () => {
+    const positions = [openPosition({ leverage: 5 })];
+    resetStore(positions);
+    render(<PositionsPanel positions={positions} prices={{ [asset.id]: 110 }} assets={[asset]} />);
+    expect(screen.getByText("×5")).toBeInTheDocument();
+  });
+
+  it("не показывает множитель плеча для leverage=1 (без плеча)", () => {
+    const positions = [openPosition({ leverage: 1 })];
+    resetStore(positions);
+    render(<PositionsPanel positions={positions} prices={{ [asset.id]: 110 }} assets={[asset]} />);
+    expect(screen.queryByText("×1")).not.toBeInTheDocument();
+  });
+
   it("закрывает позицию по кнопке и убирает её из вкладки «Открытые»", () => {
     const positions = [openPosition()];
     resetStore(positions);

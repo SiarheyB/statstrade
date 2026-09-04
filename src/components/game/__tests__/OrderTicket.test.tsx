@@ -42,6 +42,7 @@ function renderTicket(overrides: Partial<Parameters<typeof OrderTicket>[0]> = {}
       onSelectAsset={() => {}}
       prices={{ [asset.id]: 100 }}
       balance={10_000}
+      maxLeverage={1}
       {...overrides}
     />,
   );
@@ -91,5 +92,41 @@ describe("OrderTicket", () => {
     const p = useGameStore.getState().game.account.positions[0];
     expect(p.stopLoss).toBe(90);
     expect(p.takeProfit).toBe(120);
+  });
+
+  it("без плеча в стиле (maxLeverage=1) не показывает слайдер плеча", () => {
+    renderTicket({ maxLeverage: 1 });
+    expect(screen.queryByText("game.order.leverage")).not.toBeInTheDocument();
+  });
+
+  it("с плечом в стиле — открывает позицию с выбранным плечом, резервируя requiredMargin", () => {
+    renderTicket({ maxLeverage: 10 });
+    const slider = screen.getByRole("slider");
+    fireEvent.change(slider, { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("buy-button"));
+    const p = useGameStore.getState().game.account.positions[0];
+    expect(p.leverage).toBe(5);
+    // requiredMargin = 100*10/5 = 200, а не 1000.
+    expect(useGameStore.getState().game.account.balance).toBe(10_000 - 200);
+  });
+
+  it("показывает цены ликвидации long/short, когда плечо больше 1", () => {
+    renderTicket({ maxLeverage: 10 });
+    const slider = screen.getByRole("slider");
+    fireEvent.change(slider, { target: { value: "5" } });
+    expect(screen.getByText("game.order.liqLong")).toBeInTheDocument();
+    expect(screen.getByText("game.order.liqShort")).toBeInTheDocument();
+  });
+
+  it("не показывает подсказку по размеру позиции, пока стоп-лосс не заполнен", () => {
+    renderTicket();
+    expect(screen.queryByText("game.order.suggestedSize")).not.toBeInTheDocument();
+  });
+
+  it("показывает рекомендуемый размер позиции после заполнения стоп-лосса", () => {
+    renderTicket();
+    const [, slInput] = screen.getAllByRole("spinbutton");
+    fireEvent.change(slInput, { target: { value: "95" } });
+    expect(screen.getByText("game.order.suggestedSize")).toBeInTheDocument();
   });
 });

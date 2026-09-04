@@ -1550,6 +1550,11 @@ const en: Dict = {
   "game.order.errorSize": "Enter a size greater than zero",
   "game.order.errorFunds": "Not enough balance for this order",
   "game.order.errorAsset": "Unknown or inactive asset",
+  "game.order.errorLeverage": "Leverage outside the allowed range for this style",
+  "game.order.leverage": "Leverage",
+  "game.order.suggestedSize": "Suggested size (1% risk): {size}",
+  "game.order.liqLong": "Liquidation if Long: {price}",
+  "game.order.liqShort": "Liquidation if Short: {price}",
 
   "game.positions.open": "Open",
   "game.positions.history": "History",
@@ -1593,6 +1598,22 @@ const en: Dict = {
   "game.onboarding.step7.body": "Your closed trade is now in the \"History\" tab below — it's a good habit to glance at what worked and what didn't after every trade.",
   "game.onboarding.final.title": "You made your first trade",
   "game.onboarding.final.body": "As you gain experience, new trading styles and markets will unlock — not just stocks, but forex, crypto and commodities too.",
+
+  "game.orderBook.title": "Order book",
+
+  "game.journal.metricsTitle": "Portfolio metrics",
+  "game.journal.winRate": "Win rate",
+  "game.journal.avgR": "Avg R",
+  "game.journal.maxDrawdown": "Max drawdown",
+  "game.journal.sharpe": "Sharpe (simplified)",
+  "game.journal.title": "Journal",
+  "game.journal.empty": "No closed trades yet — your journal fills in as you trade.",
+  "game.journal.tagsPlaceholder": "Tags (comma-separated)",
+  "game.journal.notePlaceholder": "What worked, what didn't...",
+
+  "game.style.scalping": "Scalping",
+  "game.style.swing": "Swing",
+  "game.skill.level": "Level {level}",
 };
 
 const ru: Dict = {
@@ -3128,6 +3149,11 @@ const ru: Dict = {
   "game.order.errorSize": "Укажите размер больше нуля",
   "game.order.errorFunds": "Не хватает баланса на эту сделку",
   "game.order.errorAsset": "Неизвестный или неактивный актив",
+  "game.order.errorLeverage": "Плечо вне допустимого диапазона для этого стиля",
+  "game.order.leverage": "Плечо",
+  "game.order.suggestedSize": "Рекомендуемый размер (риск 1%): {size}",
+  "game.order.liqLong": "Ликвидация в Long: {price}",
+  "game.order.liqShort": "Ликвидация в Short: {price}",
 
   "game.positions.open": "Открытые",
   "game.positions.history": "История",
@@ -3171,6 +3197,22 @@ const ru: Dict = {
   "game.onboarding.step7.body": "Закрытая сделка теперь во вкладке «История» ниже — полезно после каждой сделки заглядывать туда и смотреть, что сработало, а что нет.",
   "game.onboarding.final.title": "Ты сделал первую сделку",
   "game.onboarding.final.body": "По мере опыта тебе откроются новые стили торговли и рынки — не только акции, но и форекс, крипта, товары.",
+
+  "game.orderBook.title": "Стакан заявок",
+
+  "game.journal.metricsTitle": "Метрики портфеля",
+  "game.journal.winRate": "Win rate",
+  "game.journal.avgR": "Средний R",
+  "game.journal.maxDrawdown": "Макс. просадка",
+  "game.journal.sharpe": "Sharpe (упрощённый)",
+  "game.journal.title": "Дневник",
+  "game.journal.empty": "Закрытых сделок пока нет — дневник заполнится по ходу игры.",
+  "game.journal.tagsPlaceholder": "Теги через запятую",
+  "game.journal.notePlaceholder": "Что сработало, что нет...",
+
+  "game.style.scalping": "Скальпинг",
+  "game.style.swing": "Свинг",
+  "game.skill.level": "Уровень {level}",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };
