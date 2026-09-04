@@ -33,8 +33,7 @@ import {
   drawTwoLineSeries,
   drawHistoryStartBoundary,
   fmtPriceLabel,
-  fmtDateDM,
-  fmtTimeHM,
+  fmtCrosshairLabel,
   CHART_COLORS,
   buildTimeAxis,
   makeTimeProjection,
@@ -85,7 +84,7 @@ function parseTime(iso: string): number {
 // ─── Page ─────────────────────────────────────────────────────────────────
 
 export default function ForexView() {
-  const { t, timezone } = useI18n();
+  const { t, timezone, locale } = useI18n();
   const [symbol, setSymbol] = useState("EUR/USD");
   const [range, setRange] = useState("1h");
   const [data, setData] = useState<FxResp | null>(null);
@@ -782,19 +781,24 @@ function inferBinSize(levels: { price: number }[]): number {
 
       const stepMs = candles.length > 1 ? candles[1].t - candles[0].t : 0;
       const cndl = stepMs ? candles.find((k) => ms >= k.t && ms < k.t + stepMs) : undefined;
-      const timeLabel = cndl ? `${fmtDateDM(cndl.t, timezone)} ${fmtTimeHM(cndl.t, timezone)}` : fmtTimeHM(ms, timezone);
+      // Тот же формат, что у карты ордеров и карты ликвидаций (день недели,
+      // число, месяц, год, время) — раньше здесь была своя урезанная сборка
+      // без года, из-за неё в подсказке было "02.09 18:00" вместо "ср, 2
+      // сент. 26 г., 18:00".
+      const timeLabel = fmtCrosshairLabel(cndl ? cndl.t : ms, timezone, locale);
       drawTimeCrosshairTag(ctx, timeLabel, cx, layout);
 
       if (cndl) {
+        // Без даты/времени отдельной строкой — она уже есть в бирке под
+        // курсором (timeLabel выше), как на карте ордеров.
         const lines = [
-          `${fmtDateDM(cndl.t, timezone)} ${fmtTimeHM(cndl.t, timezone)}`,
           `O ${fmtPriceLabel(cndl.o)}  H ${fmtPriceLabel(cndl.h)}`,
           `L ${fmtPriceLabel(cndl.l)}  C ${fmtPriceLabel(cndl.c)}`,
         ];
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, getTimeAxis, range, timezone, t, symbol, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, locale, t, symbol, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
