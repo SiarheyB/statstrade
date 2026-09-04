@@ -19,7 +19,7 @@
 // Владеет жизненным циклом стора: настройки баланса из админки → init →
 // тик → автосейв → сохранение при уходе со страницы (раздел 12).
 import { useEffect, useMemo, useState } from "react";
-import { BarChart3, Briefcase, Newspaper, ShoppingBag, Trophy } from "lucide-react";
+import { BarChart3, Briefcase, Globe2, Newspaper, ShoppingBag, Trophy } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
@@ -36,6 +36,7 @@ import DiversificationPanel from "./DiversificationPanel";
 import NewsFeed from "./NewsFeed";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
+import WorldPanel from "./WorldPanel";
 import ContractsPanel from "./ContractsPanel";
 import PerkTree from "./PerkTree";
 import Shop from "./Shop";
@@ -56,7 +57,7 @@ const STYLE_LABEL_KEY: Record<TradingStyle, string> = {
   options: "game.style.day",
 };
 
-const TABS = ["terminal", "portfolio", "news", "shop", "career"] as const;
+const TABS = ["terminal", "portfolio", "news", "shop", "career", "world"] as const;
 type Tab = (typeof TABS)[number];
 
 const TAB_ICON: Record<Tab, typeof BarChart3> = {
@@ -65,6 +66,7 @@ const TAB_ICON: Record<Tab, typeof BarChart3> = {
   news: Newspaper,
   shop: ShoppingBag,
   career: Trophy,
+  world: Globe2,
 };
 
 // Одна запись настроек на страницу — тот же приём, что у форекса и карты
@@ -289,6 +291,8 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       )}
 
       {tab === "shop" && <Shop />}
+
+      {tab === "world" && <WorldPanel />}
 
       {tab === "career" && (
         <div className="space-y-4">

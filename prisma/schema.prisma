@@ -46,6 +46,7 @@ model User {
   shareLinks           ShareLink[]
   drawings             UserDrawing[]
   cloudStorageAccounts CloudStorageAccount[]
+  gamePlayer           GamePlayer?
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -1256,4 +1257,130 @@ model TrafficDaily {
 
   @@id([day, kind, scope, key])
   @@index([day])
+}
+
+
+// ─── Игра-симулятор: общий мир ─────────────────────────────────────────────
+//
+// Сама симуляция рынка живёт в браузере игрока (движок в src/engine, прогресс
+// в IndexedDB) — на сервере лежит только ОБЩИЙ слой: кто есть кто, кто чего
+// добился, кто кому должен и какие фонды собраны. Так игроки видят друг
+// друга и соревнуются, а сервер не тикает симуляцию за каждого.
+//
+// Следствие, о котором нужно помнить: показатели присылает клиент, то есть
+// теоретически их можно подделать. Поэтому (а) в рейтинге считаются
+// достижения, которые дороже подделывать, чем заработать (пройденные
+// испытания, ранг), (б) сервер режет неправдоподобные скачки при синхронизации
+// (см. src/lib/game/world.ts), (в) деньги между игроками ходят только через
+// записи GameLoan/GameFundEntry, которые ведёт сервер.
+
+model GamePlayer {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Публичное имя в мире игры. Отдельно от User.name: в игру человек может
+  // захотеть зайти под псевдонимом, а почта и настоящее имя тут ни при чём.
+  nickname        String   @unique
+  fundName        String?
+  rankKey         String   @default("retail")
+  prestige        Int      @default(0)
+  level           Int      @default(0)
+  equity          Float    @default(0)
+  peakEquity      Float    @default(0)
+  contractsPassed Int      @default(0)
+  bestContractPct Float    @default(0)
+  activeStyle     String   @default("day")
+  gameDay         Int      @default(0)
+  // Репутация заёмщика: 100 у всех новых, падает за просрочку. Ниже порога
+  // (см. lib/game/loans.ts) новые займы не выдаются.
+  reliability     Int      @default(100)
+  // Деньги, которые игроку должны вернуть, но он ещё не забрал их в игру
+  // (проценты по выданным займам, выплаты фонда). Клиент забирает их при
+  // следующей синхронизации и зачисляет на игровой баланс.
+  pendingPayout   Float    @default(0)
+  isPublic        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  lastSyncAt      DateTime @default(now())
+
+  fundId          String?
+  fund            GameFund? @relation("fundMembers", fields: [fundId], references: [id])
+  ownedFund       GameFund? @relation("fundOwner")
+  loansGiven      GameLoan[] @relation("loanLender")
+  loansTaken      GameLoan[] @relation("loanBorrower")
+  fundEntries     GameFundEntry[]
+  worldEvents     GameWorldEvent[]
+
+  @@index([prestige])
+  @@index([lastSyncAt])
+}
+
+model GameFund {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  motto       String?
+  ownerId     String   @unique
+  owner       GamePlayer @relation("fundOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  // Общий котёл: сумма взносов участников минус выплаты. Деньги приходят из
+  // игровых балансов участников (клиент списывает у себя, сервер записывает).
+  capital     Float    @default(0)
+  // Доля прибыли, которую фонд удерживает при выплате (как у настоящих).
+  feePct      Float    @default(20)
+  createdAt   DateTime @default(now())
+  members     GamePlayer[] @relation("fundMembers")
+  entries     GameFundEntry[]
+
+  @@index([capital])
+}
+
+model GameFundEntry {
+  id        String   @id @default(cuid())
+  fundId    String
+  fund      GameFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // deposit — участник внёс, withdraw — забрал своё, payout — фонд выплатил долю прибыли.
+  kind      String
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@index([fundId, createdAt])
+  @@index([playerId])
+}
+
+model GameLoan {
+  id          String   @id @default(cuid())
+  lenderId    String?
+  lender      GamePlayer? @relation("loanLender", fields: [lenderId], references: [id], onDelete: SetNull)
+  borrowerId  String
+  borrower    GamePlayer  @relation("loanBorrower", fields: [borrowerId], references: [id], onDelete: Cascade)
+  amount      Float
+  interestPct Float
+  // Срок считается в ИГРОВЫХ днях заёмщика: у каждого своё игровое время, и
+  // привязывать долг к реальным дням было бы нечестно — на investing игровой
+  // месяц проходит за минуту.
+  dueGameDay  Int
+  // offered — предложение висит на бирже займов, active — деньги выданы,
+  // repaid — возвращены, defaulted — просрочено.
+  status      String   @default("offered")
+  createdAt   DateTime @default(now())
+  takenAt     DateTime?
+  repaidAt    DateTime?
+
+  @@index([status, createdAt])
+  @@index([borrowerId])
+  @@index([lenderId])
+}
+
+model GameWorldEvent {
+  id        String   @id @default(cuid())
+  playerId  String?
+  player    GamePlayer? @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // contract_passed | contract_failed | rank_up | fund_created | fund_joined |
+  // loan_offered | loan_taken | loan_repaid | loan_defaulted | big_win
+  kind      String
+  // JSON с деталями события — из него собирается строка в ленте мира.
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

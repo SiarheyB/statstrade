@@ -33,6 +33,8 @@ import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, ty
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
 import { loadGame, saveGame } from "@/persistence/gameDb";
+import { funds as fundsApi, loans as loansApi, syncSnapshot } from "@/lib/game/worldClient";
+import { traderRankKey } from "@/engine/economy/shop";
 
 const ALL_ASSETS = assetsData as Asset[];
 
@@ -80,6 +82,10 @@ export const STARTING_BALANCE = DEFAULT_TUNING.startingBalance;
 const STARTING_PRICE = 100;
 const TICK_INTERVAL_MS = 250; // ~4Hz — плавно на глаз, не грузит вкладку
 const AUTOSAVE_INTERVAL_MS = 60_000; // раздел 12: «каждые 60 секунд реального времени»
+// Синхронизация с общим миром — раз в минуту, тем же ритмом, что автосейв:
+// чаще незачем (в рейтинге сравниваются достижения, а не секунды), реже —
+// и другие игроки видели бы устаревший профиль.
+const WORLD_SYNC_INTERVAL_MS = 60_000;
 const SAVE_VERSION = "1.0.0-phase1";
 
 function freshAccount(startingBalance = STARTING_BALANCE): Account {
@@ -252,6 +258,7 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
 export type PurchaseResult = { ok: true } | { ok: false; error: PurchaseError };
 export type ContractActionResult = { ok: true } | { ok: false; error: StartError };
 export type PerkActionResult = { ok: true } | { ok: false; error: PerkError };
+export type WorldActionResult = { ok: true } | { ok: false; error: string };
 
 export type OpenPositionResult =
   | { ok: true }
@@ -283,6 +290,23 @@ interface GameStoreState {
   abandonContract: () => void;
   unlockPerk: (perkId: string) => PerkActionResult;
   clearContractResult: () => void;
+  /**
+   * Деньги, пришедшие ИЗ ОБЩЕГО МИРА (займы, выплаты фондов, проценты).
+   * Единственная точка, через которую внешний мир двигает игровой баланс:
+   * сервер не хранит деньги игрока, он хранит обязательства.
+   */
+  applyWorldCash: (amount: number) => void;
+  syncWorld: () => Promise<{ claimed: number; defaulted: number } | null>;
+  offerLoan: (amount: number, interestPct: number, termDays: number) => Promise<WorldActionResult>;
+  cancelLoanOffer: (loanId: string) => Promise<WorldActionResult>;
+  takeLoan: (loanId: string) => Promise<WorldActionResult>;
+  repayLoan: (loanId: string, amountDue: number) => Promise<WorldActionResult>;
+  createFund: (name: string, motto: string, feePct: number) => Promise<WorldActionResult>;
+  joinFund: (fundId: string) => Promise<WorldActionResult>;
+  leaveFund: () => Promise<WorldActionResult>;
+  depositToFund: (amount: number) => Promise<WorldActionResult>;
+  withdrawFromFund: (amount: number) => Promise<WorldActionResult>;
+  payoutFund: (amount: number) => Promise<WorldActionResult>;
   purchaseShopItem: (itemId: string) => PurchaseResult;
   equipShopTheme: (themeId: string) => void;
   setFundName: (name: string) => void;
@@ -295,6 +319,7 @@ interface GameStoreState {
 let tickHandle: ReturnType<typeof setInterval> | null = null;
 let lastTickAt = 0;
 let autosaveHandle: ReturnType<typeof setInterval> | null = null;
+let worldSyncHandle: ReturnType<typeof setInterval> | null = null;
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
   status: "loading",
@@ -338,6 +363,16 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         void get().persistNow();
       }, AUTOSAVE_INTERVAL_MS);
     }
+
+    if (!worldSyncHandle) {
+      // Первая синхронизация — сразу: игрок должен увидеть себя в мире, не
+      // дожидаясь минуты, и забрать причитающиеся деньги.
+      void get().syncWorld();
+      worldSyncHandle = setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        void get().syncWorld();
+      }, WORLD_SYNC_INTERVAL_MS);
+    }
   },
 
   stopTicking: () => {
@@ -348,6 +383,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (autosaveHandle) {
       clearInterval(autosaveHandle);
       autosaveHandle = null;
+    }
+    if (worldSyncHandle) {
+      clearInterval(worldSyncHandle);
+      worldSyncHandle = null;
     }
   },
 
@@ -403,7 +442,18 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
     // Комиссия по стилю, под которым позиция была открыта — см. комментарий
     // у аналогичного места в gameLoop.ts (авто-закрытие по SL/TP/ликвидации).
-    applyPositionClose(account, position, price, TRADING_STYLE_CONFIGS[position.style].commissionRate, 0, game.tuning.xpMultiplier);
+    // Комиссия и опыт — с учётом перков, ровно как при авто-закрытии в
+    // движке: ручное закрытие не должно стоить дороже, чем срабатывание
+    // стопа по той же позиции.
+    const effects = perkEffects(game.perks);
+    applyPositionClose(
+      account,
+      position,
+      price,
+      TRADING_STYLE_CONFIGS[position.style].commissionRate * effects.commissionMultiplier,
+      0,
+      game.tuning.xpMultiplier * effects.xpMultiplier,
+    );
     set((s) => ({ game: { ...s.game, account } }));
   },
 
@@ -491,6 +541,123 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   },
 
   clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
+
+  applyWorldCash: (amount) => {
+    if (!Number.isFinite(amount) || amount === 0) return;
+    set((s) => ({
+      game: {
+        ...s.game,
+        // Баланс не уходит в минус: если игрок успел потратить деньги до
+        // возврата займа, недостающее просто не списывается — долг при этом
+        // на сервере уже закрыт, а «отрицательный кошелёк» сломал бы весь
+        // остальной движок (см. chargeUpkeep — там то же правило).
+        account: { ...s.game.account, balance: Math.max(0, s.game.account.balance + amount) },
+      },
+    }));
+    void get().persistNow();
+  },
+
+  syncWorld: async () => {
+    const { game } = get();
+    const levels = Object.values(game.account.skills).map((s) => s.level);
+    const best = game.contracts.history
+      .filter((r) => r.outcome === "passed")
+      .reduce((max, r) => Math.max(max, r.resultPct), 0);
+    const result = await syncSnapshot({
+      fundName: game.lifestyle.fundName || null,
+      rankKey: traderRankKey(game.account.reputation),
+      prestige: Math.round(game.account.reputation),
+      level: levels.length > 0 ? Math.max(...levels) : 0,
+      equity: game.account.equity,
+      contractsPassed: game.contracts.completedIds.length,
+      bestContractPct: best,
+      activeStyle: game.activeStyle.style,
+      gameDay: game.gameCalendarDay,
+    });
+    if (!result.ok) return null;
+    // Причитающиеся деньги сервер отдаёт ровно один раз — зачисляем их сразу,
+    // иначе они потеряются: на сервере счётчик уже обнулён.
+    if (result.data.claimed > 0) get().applyWorldCash(result.data.claimed);
+    return { claimed: result.data.claimed, defaulted: result.data.defaulted };
+  },
+
+  offerLoan: async (amount, interestPct, termDays) => {
+    const { game } = get();
+    if (amount > game.account.balance) return { ok: false, error: "Недостаточно денег на балансе" };
+    const result = await loansApi.offer(amount, interestPct, termDays);
+    if (!result.ok) return { ok: false, error: result.error };
+    // Деньги «уходят на биржу» сразу — иначе один и тот же миллион можно
+    // было бы предложить десяти игрокам.
+    get().applyWorldCash(-amount);
+    return { ok: true };
+  },
+
+  cancelLoanOffer: async (loanId) => {
+    const result = await loansApi.cancel(loanId);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(result.data.refund);
+    return { ok: true };
+  },
+
+  takeLoan: async (loanId) => {
+    const { game } = get();
+    const bonus = perkEffects(game.perks).loanLimitBonus;
+    const result = await loansApi.take(loanId, game.gameCalendarDay, bonus);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(result.data.amount);
+    return { ok: true };
+  },
+
+  repayLoan: async (loanId, amountDue) => {
+    const { game } = get();
+    if (amountDue > game.account.balance) return { ok: false, error: "Недостаточно денег, чтобы вернуть долг" };
+    const result = await loansApi.repay(loanId);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(-result.data.paid);
+    return { ok: true };
+  },
+
+  createFund: async (name, motto, feePct) => {
+    const result = await fundsApi.create(name, motto, feePct);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(-result.data.cost);
+    return { ok: true };
+  },
+
+  joinFund: async (fundId) => {
+    const result = await fundsApi.join(fundId);
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  },
+
+  leaveFund: async () => {
+    const result = await fundsApi.leave();
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(result.data.refund);
+    return { ok: true };
+  },
+
+  depositToFund: async (amount) => {
+    const { game } = get();
+    if (amount > game.account.balance) return { ok: false, error: "Недостаточно денег на балансе" };
+    const result = await fundsApi.deposit(amount);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(-amount);
+    return { ok: true };
+  },
+
+  withdrawFromFund: async (amount) => {
+    const result = await fundsApi.withdraw(amount);
+    if (!result.ok) return { ok: false, error: result.error };
+    get().applyWorldCash(result.data.amount);
+    return { ok: true };
+  },
+
+  payoutFund: async (amount) => {
+    // Выплату распределяет сервер: доля каждого участника падает ему в
+    // pendingPayout, включая владельца. Свой баланс здесь не трогаем.
+    const result = await fundsApi.payout(amount);
+    return result.ok ? { ok: true } : { ok: false, error: result.error };
+  },
 
   // Магазин (раздел 13). Проверка и списание — в движке
   // (economy/shop.ts), стор только копирует account под мутацию и сразу
