@@ -16,6 +16,10 @@ export function fmtGameClock(ms: number): string {
  * подписать её фиксированной строкой («1 минута») нельзя.
  */
 export function fmtGameDuration(ms: number): string {
+  // В скальпинге игровое время идёт почти как реальное (ускорение 1x), и
+  // свеча там короче минуты — без секунд все четыре таймфрейма
+  // подписывались одинаковым «0м».
+  if (ms < 60_000) return `${trim(ms / 1000)}с`;
   const minutes = ms / 60_000;
   if (minutes < 60) return `${trim(minutes)}м`;
   const hours = minutes / 60;

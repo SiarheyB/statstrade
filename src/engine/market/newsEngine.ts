@@ -59,10 +59,29 @@ function pick<T>(items: T[], rng: () => number): T {
   return items[Math.min(items.length - 1, Math.floor(rng() * items.length))];
 }
 
-export function pickImpact(rng: () => number): NewsImpact {
+/**
+ * Веса важности с подменённой долей чёрных лебедей (настройка из админки).
+ * Остальные три уровня пересчитываются пропорционально, чтобы сумма
+ * оставалась единицей — иначе смена одного веса тихо перекашивала бы всю
+ * раскладку.
+ */
+export function impactWeights(blackSwanWeight?: number): Record<NewsImpact, number> {
+  if (blackSwanWeight == null || blackSwanWeight === IMPACT_WEIGHTS.black_swan) return IMPACT_WEIGHTS;
+  const bs = Math.min(1, Math.max(0, blackSwanWeight));
+  const restBefore = 1 - IMPACT_WEIGHTS.black_swan;
+  const scale = restBefore > 0 ? (1 - bs) / restBefore : 0;
+  return {
+    low: IMPACT_WEIGHTS.low * scale,
+    medium: IMPACT_WEIGHTS.medium * scale,
+    high: IMPACT_WEIGHTS.high * scale,
+    black_swan: bs,
+  };
+}
+
+export function pickImpact(rng: () => number, blackSwanWeight?: number): NewsImpact {
   const roll = rng();
   let acc = 0;
-  for (const [impact, weight] of Object.entries(IMPACT_WEIGHTS) as [NewsImpact, number][]) {
+  for (const [impact, weight] of Object.entries(impactWeights(blackSwanWeight)) as [NewsImpact, number][]) {
     acc += weight;
     if (roll < acc) return impact;
   }
@@ -128,9 +147,10 @@ export function generateNews(
   gameElapsedMs: number,
   candleIntervalMs: number,
   rng: () => number,
+  blackSwanWeight?: number,
 ): NewsEvent | null {
   if (assets.length === 0) return null;
-  const impact = pickImpact(rng);
+  const impact = pickImpact(rng, blackSwanWeight);
   const direction = pickDirection(driftModifier, rng);
   const template = pickTemplate(impact, direction, rng);
   if (!template) return null;
@@ -200,13 +220,16 @@ export function maybeGenerateNews(
   gameElapsedMs: number,
   candleIntervalMs: number,
   rng: () => number,
+  tuning?: { perGameDay?: number; blackSwanWeight?: number },
 ): NewsEvent | null {
   const days = dtGameMs / (24 * 60 * 60 * 1000);
   if (!(days > 0)) return null;
-  const lambda = NEWS_PER_GAME_DAY * days;
+  const perDay = tuning?.perGameDay ?? NEWS_PER_GAME_DAY;
+  if (perDay <= 0) return null; // админ выключил новости совсем
+  const lambda = perDay * days;
   const probability = 1 - Math.exp(-lambda);
   if (rng() >= probability) return null;
-  return generateNews(assets, driftModifier, gameElapsedMs, candleIntervalMs, rng);
+  return generateNews(assets, driftModifier, gameElapsedMs, candleIntervalMs, rng, tuning?.blackSwanWeight);
 }
 
 export function newsAffectsAsset(news: NewsEvent, assetId: string): boolean {

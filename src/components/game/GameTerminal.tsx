@@ -1,20 +1,31 @@
 "use client";
 
-// Композиция главного экрана — раздел 9/23.1 спеки. Фаза 1 дала базовый
-// терминал (PriceChart + OrderTicket + PositionsPanel), Фаза 2 добавила
-// переключатель стиля (Scalping/Day/Swing — меняет timeAcceleration),
-// OrderBook (только scalping) и Journal с метриками портфеля. Владеет
-// жизненным циклом стора: init → тик → автосейв → сохранение при уходе со
-// страницы (раздел 12).
+// Композиция экрана игры. Раньше это была одна длинная страница, на которой
+// всё лежало подряд — график, тикет, позиции, метрики, журнал, магазин: к
+// стакану приходилось скроллить, а главные цифры уезжали за верх экрана.
+//
+// Теперь как в браузерных экономических играх и в настоящих терминалах:
+//   • НЕподвижная шапка-HUD (GameHeader) — деньги, день, режим рынка, опыт;
+//   • переключатель стиля торговли под ней — «скорость игры»;
+//   • вкладки: Терминал / Портфель / Новости / Магазин / Карьера. Каждая —
+//     самостоятельный экран, а не очередной блок в бесконечной ленте.
+//
+// Вкладки сделаны состоянием, а НЕ отдельными роутами: движок игры живёт в
+// сторе и тикает, пока смонтирован этот компонент. Отдельные страницы
+// перемонтировали бы его на каждом переходе — прогресс сохранился бы (стор
+// модульный), но тик и автосейв пришлось бы поднимать заново на каждом
+// клике по вкладке.
+//
+// Владеет жизненным циклом стора: настройки баланса из админки → init →
+// тик → автосейв → сохранение при уходе со страницы (раздел 12).
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
-import { StatCard } from "@/components/StatCard";
+import { BarChart3, Briefcase, Newspaper, ShoppingBag, Trophy } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import { fmtUsd } from "@/lib/format";
+import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
-import { xpToNextLevel } from "@/engine/player/progression";
-import { activeTheme, monthlyUpkeep, traderRankKey } from "@/engine/economy/shop";
+import { activeTheme } from "@/engine/economy/shop";
 import { candleIntervalMs } from "@/engine/gameLoop";
+import type { GameTuning } from "@/engine/entities/tuning";
 import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
 import OrderTicket from "./OrderTicket";
@@ -22,7 +33,8 @@ import OrderBook from "./OrderBook";
 import InvestingForecast from "./InvestingForecast";
 import DiversificationPanel from "./DiversificationPanel";
 import NewsFeed from "./NewsFeed";
-import MarketRegimeBadge from "./MarketRegimeBadge";
+import GameHeader from "./GameHeader";
+import CareerPanel from "./CareerPanel";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -41,7 +53,23 @@ const STYLE_LABEL_KEY: Record<TradingStyle, string> = {
   options: "game.style.day",
 };
 
-export default function GameTerminal() {
+const TABS = ["terminal", "portfolio", "news", "shop", "career"] as const;
+type Tab = (typeof TABS)[number];
+
+const TAB_ICON: Record<Tab, typeof BarChart3> = {
+  terminal: BarChart3,
+  portfolio: Briefcase,
+  news: Newspaper,
+  shop: ShoppingBag,
+  career: Trophy,
+};
+
+// Одна запись настроек на страницу — тот же приём, что у форекса и карты
+// ордеров (lib/chartPrefs.ts): вернувшись в игру, человек ждёт ту же
+// вкладку и тот же инструмент, что оставил.
+const PREFS_KEY = "game.settings";
+
+export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   const { t } = useI18n();
   const status = useGameStore((s) => s.status);
   const init = useGameStore((s) => s.init);
@@ -52,24 +80,42 @@ export default function GameTerminal() {
   const onboardingDone = useGameStore((s) => s.onboardingDone);
   const game = useGameStore((s) => s.game);
   const setActiveStyle = useGameStore((s) => s.setActiveStyle);
+  const setTuning = useGameStore((s) => s.setTuning);
 
+  const [tab, setTab] = useState<Tab>("terminal");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  // Магазин свёрнут по умолчанию: терминал — про торговлю, покупки — то, за
-  // чем приходят осознанно, и разворачивать их поверх графика на первом
-  // экране незачем.
-  const [shopOpen, setShopOpen] = useState(false);
+  // Пока настройки не прочитаны, ничего не пишем обратно — иначе первый же
+  // рендер затёр бы сохранённую вкладку дефолтом (тот же гейт, что у
+  // форекса: см. CLAUDE.md, раздел про панель графика).
+  const [hydrated, setHydrated] = useState(false);
 
   const theme = activeTheme(game.lifestyle);
   // Мемо, чтобы объект-литерал не менял идентичность на каждом тике игры
   // (~4Hz) и не гонял эффект перерисовки графика вхолостую.
-  const candleColors = useMemo(
-    () => (theme ? { up: theme.up, down: theme.down } : undefined),
-    [theme],
-  );
+  const candleColors = useMemo(() => (theme ? { up: theme.up, down: theme.down } : undefined), [theme]);
 
   useEffect(() => {
+    // Настройки баланса — ДО init(): новая партия должна создаваться уже с
+    // тем стартовым капиталом, который стоит в админке.
+    setTuning(tuning);
     void init();
-  }, [init]);
+  }, [init, setTuning, tuning]);
+
+  useEffect(() => {
+    // localStorage читаем только в эффекте: страница рендерится и на сервере.
+    /* eslint-disable react-hooks/set-state-in-effect -- localStorage читается только на клиенте */
+    const prefs = readChartPrefs(PREFS_KEY);
+    const savedTab = prefString(prefs.tab, TABS);
+    if (savedTab) setTab(savedTab);
+    if (typeof prefs.assetId === "string") setSelectedAssetId(prefs.assetId);
+    setHydrated(true);
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    writeChartPrefs(PREFS_KEY, { tab, assetId: selectedAssetId });
+  }, [hydrated, tab, selectedAssetId]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -89,17 +135,15 @@ export default function GameTerminal() {
     return <div className="p-6 text-sm text-faint">{t("game.loading")}</div>;
   }
 
-  const assetId = selectedAssetId ?? game.activeAssets[0]?.id;
+  // Сохранённого инструмента может уже не быть в активном наборе (сменился
+  // стиль) — откатываемся на первый доступный, иначе селектор пустой.
+  const assetId = game.activeAssets.some((a) => a.id === selectedAssetId)
+    ? (selectedAssetId as string)
+    : game.activeAssets[0]?.id;
   const asset = game.activeAssets.find((a) => a.id === assetId);
   const candles = assetId ? (game.candles[assetId] ?? []) : [];
   const currentStyle = game.activeStyle.style;
-  // "развитие трейдера" (раздел 4.5) — уровень/опыт по СТИЛЮ, которым сейчас
-  // торгует игрок; у каждого стиля свой прогресс (day/scalping/swing и т.д.
-  // прокачиваются отдельно, а не единым общим уровнем).
-  const skill = game.account.skills[currentStyle] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
-
-  const upkeep = monthlyUpkeep(game.lifestyle);
-  const rankKey = traderRankKey(game.account.reputation);
+  const unreadNews = game.newsFeed.filter((n) => n.expiresAt > game.gameElapsedMs).length;
 
   return (
     // --color-accent подменяется купленной темой ТОЛЬКО внутри терминала:
@@ -113,130 +157,139 @@ export default function GameTerminal() {
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
 
-      {/* Имя фонда (покупается в магазине) — заголовок терминала. Пока фонд
-          не назван, строки нет вовсе, а не пустое место с плейсхолдером. */}
-      {game.lifestyle.fundName && (
-        <div className="flex items-baseline gap-2">
-          <span className="text-lg font-semibold">{game.lifestyle.fundName}</span>
-          <span className="text-xs text-faint">{t(`game.shop.rank.${rankKey}`)}</span>
-        </div>
-      )}
+      <GameHeader game={game} styleLabel={t(STYLE_LABEL_KEY[currentStyle])} />
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <StatCard
-          label={t("game.stat.balance")}
-          value={fmtUsd(game.account.balance)}
-          hint={upkeep > 0 ? t("game.stat.upkeepHint", { amount: fmtUsd(upkeep) }) : undefined}
-        />
-        <StatCard
-          label={t("game.stat.equity")}
-          value={fmtUsd(game.account.equity)}
-          tone={game.account.equity >= game.account.balance ? "profit" : "loss"}
-        />
-        <StatCard label={t("game.stat.day")} value={String(game.gameCalendarDay + 1)} />
-        <StatCard
-          label={t("game.skill.level", { level: skill.level })}
-          // XP дробный (calculateXpGain умножает базу на коэффициенты стиля
-          // и R:R) — в карточке он светился как "20.400709590188455 / 100 XP".
-          value={`${Math.round(skill.xp)} / ${skill.xpToNextLevel} XP`}
-          hint={t(STYLE_LABEL_KEY[currentStyle])}
-        />
+      <div className="flex flex-wrap items-center gap-3">
+        {/* Стиль торговли — это скорость игры (timeAcceleration) и доступное
+            плечо, поэтому он рядом со вкладками, а не спрятан внутри одной. */}
+        <div className="flex items-center gap-1 card p-1 w-fit">
+          {SELECTABLE_STYLES.map((style) => (
+            <button
+              key={style}
+              type="button"
+              onClick={() => setActiveStyle(style)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                currentStyle === style ? "bg-accent text-white" : "text-muted hover:text-fg"
+              }`}
+            >
+              {t(STYLE_LABEL_KEY[style])}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1 card p-1 w-fit">
+          {TABS.map((name) => {
+            const Icon = TAB_ICON[name];
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => setTab(name)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                  tab === name ? "bg-accent text-white" : "text-muted hover:text-fg"
+                }`}
+              >
+                <Icon size={14} />
+                {t(`game.tab.${name}`)}
+                {name === "news" && unreadNews > 0 && (
+                  <span
+                    className={`rounded-full px-1.5 text-[10px] tabular-nums ${
+                      tab === name ? "bg-white/20" : "bg-accent/20 text-accent"
+                    }`}
+                  >
+                    {unreadNews}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Переключатель стиля — раздел 15 Фазы 2: "переключение между
-          Scalping/Day/Swing меняет timeAcceleration и видимую скорость
-          движения графика" (критерий приёмки раздела 16). */}
-      <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-1 card p-1 w-fit">
-        {SELECTABLE_STYLES.map((style) => (
-          <button
-            key={style}
-            type="button"
-            onClick={() => setActiveStyle(style)}
-            className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-              currentStyle === style ? "bg-accent text-white" : "text-muted hover:text-fg"
+      {tab === "terminal" && (
+        <div className="space-y-4">
+          {/* График — главный элемент экрана. Стакан (только скальпинг)
+              стоит ВПЛОТНУЮ к графику справа, как DOM в биржевом терминале:
+              в скальпинге по нему принимают решение вместе со свечами, а не
+              «где-то ниже по странице». */}
+          <div
+            className={`grid grid-cols-1 gap-4 ${
+              currentStyle === "scalping" ? "xl:grid-cols-[minmax(0,1fr)_200px_320px]" : "xl:grid-cols-[minmax(0,1fr)_330px]"
             }`}
           >
-            {t(STYLE_LABEL_KEY[style])}
-          </button>
-        ))}
-      </div>
-        {/* Режим рынка — рядом с переключателем стиля: это два главных
-            «условия задачи» на экране (как быстро идёт время и какой сейчас
-            рынок). */}
-        <MarketRegimeBadge regime={game.marketRegime} />
-      </div>
+            <div className="card p-3 h-[clamp(420px,64vh,820px)]">
+              <PriceChart
+                candles={candles}
+                currentPrice={assetId ? game.prices[assetId] : undefined}
+                symbol={asset?.symbol ?? ""}
+                candleColors={candleColors}
+                baseIntervalMs={candleIntervalMs(game.activeStyle.timeAcceleration)}
+              />
+            </div>
 
-      {/* График — главный элемент экрана, поэтому он занимает всю ширину за
-          вычетом узкой колонки ордера, а не треть строки, как раньше
-          (замечание пользователя: «как в этом маленьком окошке можно
-          анализировать рынок»). Высота тянется за окном, но не разъезжается
-          на маленьких экранах и не улетает на больших. */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
-        <div className="card p-3 h-[clamp(420px,64vh,820px)]">
-          <PriceChart
-            candles={candles}
-            currentPrice={assetId ? game.prices[assetId] : undefined}
-            symbol={asset?.symbol ?? ""}
-            candleColors={candleColors}
-            baseIntervalMs={candleIntervalMs(game.activeStyle.timeAcceleration)}
-          />
+            {currentStyle === "scalping" && asset && (
+              <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
+            )}
+
+            <div className="space-y-4">
+              {assetId && (
+                <OrderTicket
+                  assets={game.activeAssets}
+                  selectedAssetId={assetId}
+                  onSelectAsset={setSelectedAssetId}
+                  prices={game.prices}
+                  balance={game.account.balance}
+                  maxLeverage={
+                    game.tuning.maxLeverageCap > 0
+                      ? Math.min(game.activeStyle.maxLeverage, game.tuning.maxLeverageCap)
+                      : game.activeStyle.maxLeverage
+                  }
+                />
+              )}
+              {currentStyle === "investing" && (
+                <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
+              )}
+            </div>
+          </div>
+
+          {/* Открытые позиции — под графиком: они нужны ровно там, где по
+              ним принимают решение (закрыть, подвинуть стоп). Полная
+              история и метрики живут во вкладке «Портфель». */}
+          <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
         </div>
-        <div className="space-y-4">
-          {assetId && (
-            <OrderTicket
-              assets={game.activeAssets}
-              selectedAssetId={assetId}
-              onSelectAsset={setSelectedAssetId}
-              prices={game.prices}
-              balance={game.account.balance}
-              maxLeverage={game.activeStyle.maxLeverage}
-            />
-          )}
-          {currentStyle === "scalping" && asset && (
-            <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
-          )}
-          {currentStyle === "investing" && (
-            <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
-          )}
-        </div>
-      </div>
-
-      <NewsFeed news={game.newsFeed} assets={game.activeAssets} gameElapsedMs={game.gameElapsedMs} />
-
-      <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
-
-      {/* Сводка «куда вложены средства» — только в Investing: в скальпинге
-          с шестью тикерами и минутными сделками разбивка по секторам
-          бессмысленна, там портфель живёт минуты. */}
-      {currentStyle === "investing" && (
-        <DiversificationPanel
-          positions={game.account.positions}
-          assets={game.activeAssets}
-          prices={game.prices}
-          cash={game.account.balance}
-        />
       )}
 
-      <Journal
-        journal={game.account.journal}
-        positions={game.account.positions}
-        assets={game.activeAssets}
-        startingBalance={STARTING_BALANCE}
-      />
+      {tab === "portfolio" && (
+        <div className="space-y-4">
+          <DiversificationPanel
+            positions={game.account.positions}
+            assets={game.activeAssets}
+            prices={game.prices}
+            cash={game.account.balance}
+          />
+          <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
+          <Journal
+            journal={game.account.journal}
+            positions={game.account.positions}
+            assets={game.activeAssets}
+            startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
+          />
+        </div>
+      )}
 
-      <div className="space-y-3">
-        <button
-          type="button"
-          onClick={() => setShopOpen((v) => !v)}
-          className="flex items-center gap-2 text-sm font-medium text-muted hover:text-fg transition"
-        >
-          {shopOpen ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-          {t("game.shop.title")}
-          <span className="text-xs text-faint">{t(`game.shop.rank.${rankKey}`)}</span>
-        </button>
-        {shopOpen && <Shop />}
-      </div>
+      {tab === "news" && (
+        <NewsFeed news={game.newsFeed} assets={game.activeAssets} gameElapsedMs={game.gameElapsedMs} expanded />
+      )}
+
+      {tab === "shop" && <Shop />}
+
+      {tab === "career" && (
+        <CareerPanel
+          account={game.account}
+          lifestyle={game.lifestyle}
+          startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
+        />
+      )}
     </div>
   );
 }

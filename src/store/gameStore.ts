@@ -10,6 +10,7 @@ import type { Account, Asset, Candle, MarketRegime, NewsEvent, PositionSide, Sav
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
@@ -43,7 +44,10 @@ function assetIdsForStyle(style: TradingStyle): string[] {
   return style === "investing" ? INVESTING_ASSET_IDS : PHASE1_ASSET_IDS;
 }
 
-export const STARTING_BALANCE = 10_000;
+// Стартовый баланс по умолчанию. Реальное значение приходит из настроек
+// админки (tuning.startingBalance) — эта константа остаётся дефолтом движка
+// и точкой отсчёта для метрик портфеля в старых сохранениях.
+export const STARTING_BALANCE = DEFAULT_TUNING.startingBalance;
 // Стартовая цена всех Фазы-1 акций — спека не задаёт её явно (только
 // баз. волатильность/снос), 100 — обычный дефолт для симуляторов такого рода.
 const STARTING_PRICE = 100;
@@ -51,11 +55,11 @@ const TICK_INTERVAL_MS = 250; // ~4Hz — плавно на глаз, не гр�
 const AUTOSAVE_INTERVAL_MS = 60_000; // раздел 12: «каждые 60 секунд реального времени»
 const SAVE_VERSION = "1.0.0-phase1";
 
-function freshAccount(): Account {
+function freshAccount(startingBalance = STARTING_BALANCE): Account {
   return {
     id: "player",
-    balance: STARTING_BALANCE,
-    equity: STARTING_BALANCE,
+    balance: startingBalance,
+    equity: startingBalance,
     positions: [],
     pendingOrders: [],
     marginUsed: 0,
@@ -68,12 +72,12 @@ function freshAccount(): Account {
   };
 }
 
-function freshState(): GameState {
+function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
   const activeAssets = ALL_ASSETS.filter((a) => PHASE1_ASSET_IDS.includes(a.id));
   const prices: Record<string, number> = {};
   for (const a of activeAssets) prices[a.id] = STARTING_PRICE;
   return {
-    account: freshAccount(),
+    account: freshAccount(tuning.startingBalance),
     // Партия начинается со спокойного боковика (раздел 3.4), а не с
     // NEUTRAL_REGIME: у нейтрального maxDurationDays = Infinity, и рынок
     // навсегда застрял бы в режиме без смены — до Фазы 3 это было неважно,
@@ -90,6 +94,8 @@ function freshState(): GameState {
     lastUpkeepMonth: 0,
     activeNews: [],
     newsFeed: [],
+    dayStartEquity: tuning.startingBalance,
+    tuning,
   };
 }
 
@@ -113,6 +119,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     lifestyle: state.lifestyle,
     lastUpkeepMonth: state.lastUpkeepMonth,
     newsFeed: state.newsFeed,
+    dayStartEquity: state.dayStartEquity,
     onboardingDone,
     disclaimerSeen,
   };
@@ -141,7 +148,7 @@ function normalizeRegime(regime: MarketRegime | undefined): MarketRegime {
   return regime;
 }
 
-function saveToState(save: SaveGame): GameState {
+function saveToState(save: SaveGame, tuning: GameTuning): GameState {
   // Набор активных активов только РАСТЁТ (раздел 26: открытые позиции нельзя
   // осиротить сменой стиля/перезагрузкой) — берём объединение базовых Фазы 1,
   // того, что уже было активно в сохранении (переживает переключение на
@@ -186,6 +193,11 @@ function saveToState(save: SaveGame): GameState {
     // (история заголовков) переживает перезагрузку — её и читает UI.
     activeNews: [],
     newsFeed: (save.newsFeed ?? []) as NewsEvent[],
+    dayStartEquity: save.dayStartEquity ?? save.account.equity,
+    // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
+    // загрузке страницы, иначе правка в админке не действовала бы на тех, у
+    // кого уже есть сохранение.
+    tuning,
   };
 }
 
@@ -201,6 +213,8 @@ interface GameStoreState {
   onboardingDone: boolean;
   disclaimerSeen: boolean;
   init: () => Promise<void>;
+  /** Настройки баланса из админки — вызывается страницей ДО init(). */
+  setTuning: (tuning: GameTuning) => void;
   startTicking: () => void;
   stopTicking: () => void;
   openPosition: (input: {
@@ -234,12 +248,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   onboardingDone: false,
   disclaimerSeen: false,
 
+  setTuning: (tuning) => {
+    // До init() — просто подменяем настройки в свежем состоянии; после —
+    // накатываем на текущее (админ мог поменять баланс, пока вкладка жила).
+    set((s) => ({ game: { ...s.game, tuning } }));
+  },
+
   init: async () => {
+    const tuning = get().game.tuning ?? DEFAULT_TUNING;
     const save = await loadGame();
     if (save) {
-      set({ game: saveToState(save), onboardingDone: save.onboardingDone, disclaimerSeen: save.disclaimerSeen, status: "ready" });
+      set({ game: saveToState(save, tuning), onboardingDone: save.onboardingDone, disclaimerSeen: save.disclaimerSeen, status: "ready" });
     } else {
-      set({ game: freshState(), onboardingDone: false, disclaimerSeen: false, status: "ready" });
+      set({ game: freshState(tuning), onboardingDone: false, disclaimerSeen: false, status: "ready" });
     }
   },
 
@@ -279,7 +300,11 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit }) => {
     const { game } = get();
     if (!(size > 0)) return { ok: false, error: "invalid_size" };
-    if (!(leverage >= 1) || leverage > game.activeStyle.maxLeverage) return { ok: false, error: "invalid_leverage" };
+    // Потолок плеча — минимум из стиля и настройки админки (0 = не ограничивать).
+    const cap = game.tuning.maxLeverageCap > 0
+      ? Math.min(game.activeStyle.maxLeverage, game.tuning.maxLeverageCap)
+      : game.activeStyle.maxLeverage;
+    if (!(leverage >= 1) || leverage > cap) return { ok: false, error: "invalid_leverage" };
     const asset = game.activeAssets.find((a) => a.id === assetId);
     const price = game.prices[assetId];
     if (!asset || price == null) return { ok: false, error: "unknown_asset" };
@@ -324,7 +349,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
     // Комиссия по стилю, под которым позиция была открыта — см. комментарий
     // у аналогичного места в gameLoop.ts (авто-закрытие по SL/TP/ликвидации).
-    applyPositionClose(account, position, price, TRADING_STYLE_CONFIGS[position.style].commissionRate);
+    applyPositionClose(account, position, price, TRADING_STYLE_CONFIGS[position.style].commissionRate, 0, game.tuning.xpMultiplier);
     set((s) => ({ game: { ...s.game, account } }));
   },
 

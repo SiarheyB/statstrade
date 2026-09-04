@@ -14,6 +14,7 @@ import type {
   Position,
   TradingStyleConfig,
 } from "@/engine/entities/types";
+import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { updateMarketRegime } from "@/engine/market/marketRegime";
 import {
   applyNewsShock,
@@ -77,8 +78,16 @@ export interface GameState {
   lastDividendQuarter: number; // номер последнего игрового квартала, за который уже заплатили
   lifestyle: LifestyleState; // покупки/косметика — раздел 13
   lastUpkeepMonth: number; // номер последнего игрового месяца, за который уже списали содержание
+  // Эквити на начало текущего игрового дня — из неё считается дневной
+  // результат в шапке терминала. Хранить историю эквити ради одной цифры
+  // было бы дороже: снимок обновляется раз в игровой день.
+  dayStartEquity: number;
   activeNews: NewsEvent[]; // новости, чей всплеск волатильности ещё не истёк (раздел 3.5)
   newsFeed: NewsEvent[]; // лента для UI, новые в начале, до MAX_NEWS_FEED штук
+  // Настройки баланса из админки. Живут в состоянии, а не в модульной
+  // переменной движка: формулы обязаны оставаться чистыми и тестируемыми
+  // (раздел 26 — никакого скрытого глобального состояния).
+  tuning: GameTuning;
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -138,6 +147,7 @@ export function applyPositionClose(
   exitPrice: number,
   commissionRate: number,
   extraFee = 0,
+  xpMultiplier = 1,
 ): number {
   const requiredMargin = calculateRequiredMargin(position.entryPrice, position.size, position.leverage);
   const { realizedPnl } = settleClose(position, exitPrice, commissionRate, extraFee);
@@ -164,7 +174,7 @@ export function applyPositionClose(
   // независимо от результата (даже убыточная по плану чему-то учит).
   const style = position.style;
   const current = account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
-  account.skills[style] = applyXpGain(current, calculateXpGain(BASE_XP, rMultiple, style));
+  account.skills[style] = applyXpGain(current, calculateXpGain(BASE_XP, rMultiple, style) * xpMultiplier);
 
   const idx = account.positions.findIndex((p) => p.id === position.id);
   const closed: Position = { ...position, closedAt: Date.now(), closePrice: exitPrice, realizedPnl };
@@ -198,6 +208,7 @@ function recalculateAccountMetrics(account: Account, prices: Record<string, numb
  * (раздел 4.4) — она остаётся заготовкой типов до своей фазы.
  */
 export function gameTick(dtRealMs: number, state: GameState, rng: () => number): GameState {
+  const tuning = state.tuning ?? DEFAULT_TUNING;
   const dtGameMs = dtRealMs * state.activeStyle.timeAcceleration;
   const dtYears = dtGameMs / MS_PER_YEAR;
   const gameElapsedMs = state.gameElapsedMs + dtGameMs;
@@ -212,7 +223,10 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   // цены: иначе новость успела бы «опоздать» на одну свечу и на графике
   // выглядела бы как реакция без причины.
   let prices = { ...state.prices };
-  const fresh = maybeGenerateNews(dtGameMs, state.activeAssets, marketRegime.driftModifier, gameElapsedMs, intervalMs, rng);
+  const fresh = maybeGenerateNews(dtGameMs, state.activeAssets, marketRegime.driftModifier, gameElapsedMs, intervalMs, rng, {
+    perGameDay: tuning.newsPerGameDay,
+    blackSwanWeight: tuning.blackSwanWeight,
+  });
   const activeNews = pruneExpiredNews(fresh ? [...state.activeNews, fresh] : state.activeNews, gameElapsedMs);
   const newsFeed = fresh ? [fresh, ...state.newsFeed].slice(0, MAX_NEWS_FEED) : state.newsFeed;
   if (fresh) prices = applyNewsShock(prices, fresh);
@@ -241,7 +255,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
       currentPrice,
       dtYears,
       regime: marketRegime,
-      activeVolMultiplier: volMultipliers[asset.id] ?? 1,
+      activeVolMultiplier: (volMultipliers[asset.id] ?? 1) * tuning.volatilityMultiplier,
       correlatedZ: z,
     });
     prices[asset.id] = newPrice;
@@ -266,13 +280,13 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     if (checkLiquidation(position, price)) {
       const liqPrice = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side);
       const penalty = calculateLiquidationPenalty(position.entryPrice, position.size);
-      applyPositionClose(account, position, liqPrice, commissionRate, penalty);
+      applyPositionClose(account, position, liqPrice, commissionRate, penalty, tuning.xpMultiplier);
       continue;
     }
 
     const exitPrice = checkStopConditions(position, price);
     if (exitPrice == null) continue;
-    applyPositionClose(account, position, exitPrice, commissionRate);
+    applyPositionClose(account, position, exitPrice, commissionRate, 0, tuning.xpMultiplier);
   }
 
   // 6. Дивиденды/купоны раз в игровой квартал (раздел 4.6) — платим за
@@ -284,7 +298,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   let lastDividendQuarter = state.lastDividendQuarter;
   while (lastDividendQuarter < currentQuarter) {
     lastDividendQuarter++;
-    processQuarterlyDividends(account, state.activeAssets, prices);
+    processQuarterlyDividends(account, state.activeAssets, prices, tuning.dividendMultiplier);
   }
 
   // 6b. Расход на образ жизни раз в игровой месяц (раздел 13) — зеркально
@@ -293,7 +307,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   const currentMonth = Math.floor(gameElapsedMs / MONTH_MS);
   let lastUpkeepMonth = state.lastUpkeepMonth;
   let lifestyle = state.lifestyle;
-  const upkeep = monthlyUpkeep(lifestyle);
+  const upkeep = monthlyUpkeep(lifestyle) * tuning.upkeepMultiplier;
   while (lastUpkeepMonth < currentMonth) {
     lastUpkeepMonth++;
     if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
@@ -301,6 +315,13 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
 
   // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);
+
+  // 8. Смена игрового дня — фиксируем эквити для дневного результата.
+  const gameCalendarDay = Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000));
+  const dayStartEquity =
+    gameCalendarDay !== state.gameCalendarDay || state.dayStartEquity == null
+      ? account.equity
+      : state.dayStartEquity;
 
   return {
     ...state,
@@ -311,7 +332,8 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     activeNews,
     newsFeed,
     gameElapsedMs,
-    gameCalendarDay: Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000)),
+    gameCalendarDay,
+    dayStartEquity,
     lastDividendQuarter,
     lifestyle,
     lastUpkeepMonth,

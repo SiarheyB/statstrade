@@ -34,10 +34,14 @@ export default function NewsFeed({
   news,
   assets,
   gameElapsedMs,
+  expanded = false,
 }: {
   news: NewsEvent[];
   assets: Asset[];
   gameElapsedMs: number;
+  // На отдельной вкладке лента занимает экран целиком, в терминале — узкую
+  // карточку с внутренней прокруткой.
+  expanded?: boolean;
 }) {
   const { t } = useI18n();
 
@@ -47,7 +51,7 @@ export default function NewsFeed({
       {news.length === 0 ? (
         <div className="text-xs text-faint">{t("game.news.empty")}</div>
       ) : (
-        <div className="max-h-52 overflow-y-auto space-y-1.5 pr-1">
+        <div className={`space-y-1.5 pr-1 overflow-y-auto ${expanded ? "max-h-[70vh]" : "max-h-52"}`}>
           {news.map((item) => {
             // «Живая» новость — та, чей всплеск волатильности ещё не истёк:
             // именно она объясняет, почему график сейчас дёргается сильнее

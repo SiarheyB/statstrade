@@ -4,6 +4,7 @@ import { getSession } from "@/lib/auth";
 import { isAdminSession } from "@/lib/admin";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import GameTerminal from "@/components/game/GameTerminal";
+import { tuningFromConfig } from "@/engine/entities/tuning";
 
 export const dynamic = "force-dynamic";
 
@@ -45,5 +46,9 @@ export default async function GamePage() {
     return <AccessDenied text="Раздел «Игра» пока недоступен для обычных пользователей." />;
   }
 
-  return <GameTerminal />;
+  // Настройки баланса читаются на сервере и уезжают в клиентский движок
+  // пропсом: игра целиком клиентская, но её баланс должен подчиняться
+  // админке (/admin/game) без передеплоя и без правок в чужих сохранениях.
+  const { enabled: _enabled, ...raw } = game;
+  return <GameTerminal tuning={tuningFromConfig(raw as Record<string, number>)} />;
 }

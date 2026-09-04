@@ -57,7 +57,10 @@ describe("aggregateCandles", () => {
 });
 
 describe("подписи игрового времени", () => {
-  it("длительность свечи подписывается в минутах, часах или днях", () => {
+  it("длительность свечи подписывается в секундах, минутах, часах или днях", () => {
+    // Скальпинг идёт почти в реальном времени — там свеча короче минуты.
+    expect(fmtGameDuration(1_000)).toBe("1с");
+    expect(fmtGameDuration(15_000)).toBe("15с");
     expect(fmtGameDuration(MIN)).toBe("1м");
     expect(fmtGameDuration(15 * MIN)).toBe("15м");
     expect(fmtGameDuration(60 * MIN)).toBe("1ч");

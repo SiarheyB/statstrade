@@ -85,13 +85,28 @@ export function aggregateCandles(candles: ChartCandle[], baseIntervalMs: number,
   return out;
 }
 
-type View = { t0: number; t1: number };
+// Окно просмотра — как на форексе и карте ордеров (ChartView в
+// lib/useChartInteractions.ts): ЦЕНОВАЯ ось входит в окно наравне со
+// временем. Раньше игровой график подгонял цену под видимые свечи на каждом
+// кадре — при живом тике (4 раза в секунду) вертикальный масштаб дёргался
+// сам по себе, и свечи «дышали», хотя пользователь ничего не делал.
+type View = { t0: number; t1: number; y0: number; y1: number };
 
 const TF_FACTORS = [1, 5, 15, 60];
-const DEFAULT_VISIBLE_CANDLES = 90; // сколько баров видно в режиме слежения
+// Столько баров видно в режиме слежения. На форексе это 300-480 (VISIBLE_CANDLES
+// в ForexView.tsx) — берём тот же порядок, чтобы свечи были такой же
+// «плотности», а не в три раза толще, как было при 90.
+const DEFAULT_VISIBLE_CANDLES = 260;
 const MIN_VISIBLE_CANDLES = 8; // ближе не зумим — дальше это уже не график
 const MAX_VISIBLE_CANDLES = 1200; // дальше некуда: истории всё равно 500 баров
 const PAD_LEFT = 6; // вместо 84px пустоты из computePlotLayout
+// Тело свечи занимает 40% шага — ровно как на форексе (drawCandlesticks
+// вызывается там с bodyRatio: 0.4). При дефолтных 0.7 свечи выглядели
+// толстыми и «игрушечными» рядом с остальными графиками проекта.
+const BODY_RATIO = 0.4;
+// Насколько ценовое окно шире реального диапазона свечей при автоподгоне.
+const PRICE_PADDING = 0.08;
+const PRICE_ZOOM_LIMIT = 12; // во столько раз можно растянуть/сжать цену
 
 export default function PriceChart({
   candles,
@@ -133,7 +148,7 @@ export default function PriceChart({
   const layoutRef = useRef<PlotLayout | null>(null);
   const stepRef = useRef(baseIntervalMs); // шаг ВИДИМЫХ (агрегированных) свечей
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
-  const dragRef = useRef<{ mx: number; startView: View } | null>(null);
+  const dragRef = useRef<{ mx: number; my: number; startView: View } | null>(null);
   const redrawRef = useRef<() => void>(() => {});
 
   /** Видимые свечи текущего таймфрейма. */
@@ -141,12 +156,28 @@ export default function PriceChart({
     return aggregateCandles(toChartCandles(candlesRef.current), baseIntervalRef.current, tfRef.current);
   }, []);
 
-  /** Окно в режиме слежения: последние DEFAULT_VISIBLE_CANDLES баров. */
+  /** Диапазон цен по свечам, попавшим в окно [t0, t1], с полями сверху и снизу. */
+  const priceRange = useCallback((all: ChartCandle[], t0: number, t1: number, stepMs: number): { y0: number; y1: number } => {
+    const visible = all.filter((k) => k.t + stepMs >= t0 && k.t <= t1);
+    const forRange = visible.length > 0 ? visible : all;
+    if (forRange.length === 0) return { y0: 0, y1: 1 };
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const k of forRange) {
+      lo = Math.min(lo, k.l);
+      hi = Math.max(hi, k.h);
+    }
+    const pad = (hi - lo) * PRICE_PADDING || hi * 0.01 || 1;
+    return { y0: lo - pad, y1: hi + pad };
+  }, []);
+
+  /** Окно в режиме слежения: последние DEFAULT_VISIBLE_CANDLES баров, цена — по ним же. */
   const followView = useCallback((all: ChartCandle[], stepMs: number): View => {
     const lastT = all.length > 0 ? all[all.length - 1].t : 0;
     const t1 = lastT + stepMs;
-    return { t0: t1 - stepMs * DEFAULT_VISIBLE_CANDLES, t1 };
-  }, []);
+    const t0 = t1 - stepMs * DEFAULT_VISIBLE_CANDLES;
+    return { t0, t1, ...priceRange(all, t0, t1, stepMs) };
+  }, [priceRange]);
 
   const clampView = useCallback((v: View): View => {
     const all = visibleCandles();
@@ -171,8 +202,17 @@ export default function PriceChart({
         t0 = t1 - span;
       }
     }
-    return { t0, t1 };
-  }, [visibleCandles]);
+    // Цену тоже ограничиваем — иначе колесом можно «сплющить» окно в линию
+    // или растянуть так, что свечи превращаются в точку у края.
+    const natural = priceRange(all, t0, t1, stepMs);
+    const naturalSpan = natural.y1 - natural.y0 || 1;
+    const center = (v.y0 + v.y1) / 2;
+    const pSpan = Math.min(
+      naturalSpan * PRICE_ZOOM_LIMIT,
+      Math.max(naturalSpan / PRICE_ZOOM_LIMIT, v.y1 - v.y0 || naturalSpan),
+    );
+    return { t0, t1, y0: center - pSpan / 2, y1: center + pSpan / 2 };
+  }, [priceRange, visibleCandles]);
 
   /** Текущее окно как конкретные числа — с материализацией режима слежения. */
   const materializeView = useCallback((): View => {
@@ -186,10 +226,16 @@ export default function PriceChart({
 
   const zoomBy = useCallback((factor: number) => {
     const v = materializeView();
-    const span = v.t1 - v.t0;
-    const center = (v.t0 + v.t1) / 2;
-    const newSpan = span * factor;
-    viewRef.current = clampView({ t0: center - newSpan / 2, t1: center + newSpan / 2 });
+    const tCenter = (v.t0 + v.t1) / 2;
+    const tSpan = (v.t1 - v.t0) * factor;
+    const pCenter = (v.y0 + v.y1) / 2;
+    const pSpan = (v.y1 - v.y0) * factor;
+    viewRef.current = clampView({
+      t0: tCenter - tSpan / 2,
+      t1: tCenter + tSpan / 2,
+      y0: pCenter - pSpan / 2,
+      y1: pCenter + pSpan / 2,
+    });
     redrawRef.current();
   }, [clampView, materializeView]);
 
@@ -245,21 +291,16 @@ export default function PriceChart({
       const stepMs = allCandles[1].t - allCandles[0].t || baseIntervalMs * tfFactor;
       stepRef.current = stepMs;
 
+      // В режиме слежения окно (и время, и цена) пересчитывается каждый кадр —
+      // график едет за рынком. Как только пользователь его тронул, окно
+      // фиксируется целиком, включая вертикальный масштаб: свечи перестают
+      // «дышать» под каждую новую вершину, как на форексе.
       const view = viewRef.current ?? followView(allCandles, stepMs);
       const xspan = view.t1 - view.t0 || 1;
       const sx = (ms: number) => layout.plotX + ((ms - view.t0) / xspan) * layout.plotW;
 
-      const visible = allCandles.filter((k) => k.t + stepMs >= view.t0 && k.t <= view.t1);
-      const forRange = visible.length > 0 ? visible : allCandles;
-      let yMin = Infinity;
-      let yMax = -Infinity;
-      for (const k of forRange) {
-        yMin = Math.min(yMin, k.l);
-        yMax = Math.max(yMax, k.h);
-      }
-      const pad = (yMax - yMin) * 0.08 || yMax * 0.01 || 1;
-      yMin -= pad;
-      yMax += pad;
+      const yMin = view.y0;
+      const yMax = view.y1;
       const yspan = yMax - yMin || 1;
       const sy = (p: number) => layout.plotH - ((p - yMin) / yspan) * layout.plotH;
 
@@ -284,10 +325,19 @@ export default function PriceChart({
       }
       ctx.textAlign = "left";
 
+      // Свечи рисуем в отсечении по области графика: при ручном ценовом
+      // масштабе часть баров уходит за верх/низ окна, и без clip они
+      // рисовались бы поверх ценовой шкалы и подписей времени.
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(layout.plotX, 0, layout.plotW, layout.plotH);
+      ctx.clip();
       drawCandlesticks(ctx, allCandles, sx, sy, layout.plotX, layout.plotW, xspan, {
+        bodyRatio: BODY_RATIO,
         up: colorsRef.current?.up,
         down: colorsRef.current?.down,
       });
+      ctx.restore();
 
       const price = priceRef.current;
       if (price != null) drawLastPriceTag(ctx, price, sy(price), layout);
@@ -345,7 +395,16 @@ export default function PriceChart({
       if (drag && lay) {
         const span = drag.startView.t1 - drag.startView.t0;
         const dt = ((mx - drag.mx) / lay.plotW) * span;
-        viewRef.current = clampView({ t0: drag.startView.t0 - dt, t1: drag.startView.t1 - dt });
+        // Вертикаль тоже тянется — на форексе/ордерфлоу перетаскивание
+        // двигает оба окна сразу, и мышечная память должна совпадать.
+        const pspan = drag.startView.y1 - drag.startView.y0;
+        const dp = ((my - drag.my) / lay.plotH) * pspan;
+        viewRef.current = clampView({
+          t0: drag.startView.t0 - dt,
+          t1: drag.startView.t1 - dt,
+          y0: drag.startView.y0 + dp,
+          y1: drag.startView.y1 + dp,
+        });
       }
       redrawRef.current();
     };
@@ -353,7 +412,7 @@ export default function PriceChart({
       const rect = canvas.getBoundingClientRect();
       // Материализуем окно — в режиме слежения его ещё нет, и раньше именно
       // здесь панорама молча ничего не делала.
-      dragRef.current = { mx: e.clientX - rect.left, startView: { ...materializeView() } };
+      dragRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top, startView: { ...materializeView() } };
       canvas.style.cursor = "grabbing";
     };
     const onUp = () => {
@@ -377,14 +436,22 @@ export default function PriceChart({
       const v = materializeView();
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
-      const span = v.t1 - v.t0;
-      const factor = e.deltaY > 0 ? 1.15 : 0.87;
-      // Зумим «вокруг курсора»: точка под мышкой остаётся на месте — так
-      // ведут себя все биржевые терминалы.
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY > 0 ? 1.1 : 0.9;
+      // Зум держит под курсором ту же точку графика — и по времени, и по
+      // цене, ровно как useChartInteractions на форексе/карте ордеров. Shift
+      // сжимает только время (там та же клавиша).
       const fx = Math.min(1, Math.max(0, (mx - lay.plotX) / lay.plotW));
-      const tCursor = v.t0 + fx * span;
-      const newSpan = span * factor;
-      viewRef.current = clampView({ t0: tCursor - fx * newSpan, t1: tCursor + (1 - fx) * newSpan });
+      const fy = Math.min(1, Math.max(0, my / lay.plotH));
+      const tCursor = v.t0 + fx * (v.t1 - v.t0);
+      const tSpan = (v.t1 - v.t0) * factor;
+      let next: View = { ...v, t0: tCursor - fx * tSpan, t1: tCursor + (1 - fx) * tSpan };
+      if (!e.shiftKey) {
+        const pCursor = v.y1 - fy * (v.y1 - v.y0);
+        const pSpan = (v.y1 - v.y0) * factor;
+        next = { ...next, y1: pCursor + fy * pSpan, y0: pCursor - (1 - fy) * pSpan };
+      }
+      viewRef.current = clampView(next);
       redrawRef.current();
     };
 

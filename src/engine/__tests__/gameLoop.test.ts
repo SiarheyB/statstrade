@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { candleIntervalMs, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { freshLifestyle } from "@/engine/economy/shop";
+import { DEFAULT_TUNING } from "@/engine/entities/tuning";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
@@ -52,6 +53,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     lastUpkeepMonth: 0,
     activeNews: [],
     newsFeed: [],
+    dayStartEquity: 10_000,
+    tuning: DEFAULT_TUNING,
     ...overrides,
   };
 }
@@ -551,5 +554,63 @@ describe("рыночные режимы и новости (Фаза 3)", () => {
       prev = state.prices;
     }
     expect(sameGroupAgree).toBeGreaterThan(otherGroupAgree);
+  });
+});
+
+describe("настройки баланса из админки (tuning)", () => {
+  it("newsPerGameDay = 0 полностью выключает новости", () => {
+    let state = makeState({ tuning: { ...DEFAULT_TUNING, newsPerGameDay: 0 } });
+    const rng = mulberry32(8);
+    for (let i = 0; i < 2_000; i++) state = gameTick(250, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, rng);
+    expect(state.newsFeed).toEqual([]);
+  });
+
+  it("множитель расходов масштабирует списание за образ жизни", () => {
+    const lifestyle = { ...freshLifestyle(), ownedItemIds: ["life_studio"] }; // 900/мес
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 10_000 }), tuning: { ...DEFAULT_TUNING, upkeepMultiplier: 0.5 } });
+    const dtRealMs = MONTH_MS / TRADING_STYLE_CONFIGS.investing.timeAcceleration;
+    const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(9));
+    expect(next.account.balance).toBe(10_000 - 450);
+  });
+
+  it("множитель волатильности расширяет размах цены", () => {
+    function spread(volatilityMultiplier: number): number {
+      let state = makeState({ tuning: { ...DEFAULT_TUNING, volatilityMultiplier, newsPerGameDay: 0 } });
+      const rng = mulberry32(21);
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (let i = 0; i < 500; i++) {
+        state = gameTick(1000, state, rng);
+        lo = Math.min(lo, state.prices[asset.id]);
+        hi = Math.max(hi, state.prices[asset.id]);
+      }
+      return hi - lo;
+    }
+    expect(spread(2)).toBeGreaterThan(spread(0.5));
+  });
+
+  it("множитель опыта ускоряет прокачку", () => {
+    function xpAfterClose(xpMultiplier: number): number {
+      const position: Position = {
+        id: "p1",
+        assetId: asset.id,
+        side: "long",
+        entryPrice: 100,
+        size: 10,
+        leverage: 1,
+        stopLoss: 95,
+        openedAt: 0,
+        fees: 0,
+        style: "day",
+      };
+      const state = makeState({
+        account: makeAccount({ positions: [position] }),
+        prices: { [asset.id]: 94 }, // ниже стопа — закроется на этом же тике
+        tuning: { ...DEFAULT_TUNING, xpMultiplier },
+      });
+      const next = gameTick(250, state, mulberry32(2));
+      return next.account.skills.day?.xp ?? 0;
+    }
+    expect(xpAfterClose(2)).toBeGreaterThan(xpAfterClose(1));
   });
 });

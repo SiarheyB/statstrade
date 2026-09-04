@@ -27,7 +27,12 @@ export function calculateDividendPayment(
  * "holdingSize" формулы: если игрок докупал этот актив несколькими сделками,
  * дивиденды считаются с суммарного пакета, а не только с последней покупки.
  */
-export function processQuarterlyDividends(account: Account, assets: Asset[], prices: Record<string, number>): number {
+export function processQuarterlyDividends(
+  account: Account,
+  assets: Asset[],
+  prices: Record<string, number>,
+  multiplier = 1,
+): number {
   const holdingsByAsset = new Map<string, number>();
   for (const p of account.positions) {
     if (p.closedAt != null || p.side !== "long") continue;
@@ -42,6 +47,7 @@ export function processQuarterlyDividends(account: Account, assets: Asset[], pri
     totalPaid += calculateDividendPayment(holdingSize, price, asset.dividendYield);
   }
 
+  totalPaid *= multiplier; // множитель из настроек баланса (админка)
   account.balance += totalPaid;
   return totalPaid;
 }

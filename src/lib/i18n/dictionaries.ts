@@ -1528,7 +1528,7 @@ const en: Dict = {
   "nav.game": "Game",
   "admin.nav.game": "Game",
   "admin.game.title": "Trading Game",
-  "admin.game.subtitle": "Access switches for the trading simulator (Phase 1). The engine runs entirely in the player's browser — no server data is affected by these toggles.",
+  "admin.game.subtitle": "Access to the trading simulator and its balance settings. The engine runs entirely in the player's browser — nobody's saved progress is touched; balance values reach the player on the next page load.",
 
   "game.loading": "Loading…",
   "game.chart.loading": "Collecting price data…",
@@ -1748,7 +1748,24 @@ const en: Dict = {
   "game.chart.live": "Live",
   "game.chart.backToPrice": "Back to price",
   "game.chart.resetHint": "Return to the live price (or double-click the chart)",
-  "game.chart.hint": "Scroll to zoom · drag to pan · double-click to return to the live price",
+  "game.chart.hint": "Scroll to zoom both axes (Shift — time only) · drag to pan · double-click to return to the live price",
+
+  // Вкладки терминала, шапка-HUD и вкладка «Карьера».
+  "game.tab.terminal": "Terminal",
+  "game.tab.portfolio": "Portfolio",
+  "game.tab.news": "News",
+  "game.tab.shop": "Shop",
+  "game.tab.career": "Career",
+  "game.header.independentTrader": "Independent trader",
+  "game.header.toNextRank": "{prestige} prestige to the next rank",
+  "game.header.today": "Today {amount} ({pct})",
+  "game.header.marginUsed": "{amount} in margin",
+  "game.career.rank": "Your rank",
+  "game.career.skills": "Skills by trading style",
+  "game.career.results": "Results",
+  "game.career.tradesClosed": "Trades closed",
+  "game.career.belongings": "What you own",
+  "game.career.nothingOwned": "Nothing bought yet — the shop is on the neighbouring tab.",
 };
 
 const ru: Dict = {
@@ -3262,7 +3279,7 @@ const ru: Dict = {
   "nav.game": "Игра",
   "admin.nav.game": "Игра",
   "admin.game.title": "Игра-симулятор трейдера",
-  "admin.game.subtitle": "Переключатели доступа к симулятору трейдинга (Фаза 1). Движок игры полностью клиентский — эти тумблеры не затрагивают ничьи сохранения на сервере.",
+  "admin.game.subtitle": "Доступ к симулятору трейдинга и настройки его баланса. Движок игры полностью клиентский — ничьи сохранения не трогаются, а числа баланса приезжают к игроку при следующей загрузке страницы игры.",
 
   "game.loading": "Загрузка…",
   "game.chart.loading": "Копим данные по цене…",
@@ -3482,7 +3499,24 @@ const ru: Dict = {
   "game.chart.live": "Онлайн",
   "game.chart.backToPrice": "К текущей цене",
   "game.chart.resetHint": "Вернуться к текущей цене (или двойной клик по графику)",
-  "game.chart.hint": "Колесо — масштаб · перетаскивание — сдвиг · двойной клик — вернуться к текущей цене",
+  "game.chart.hint": "Колесо — масштаб по обеим осям (Shift — только время) · перетаскивание — сдвиг · двойной клик — к текущей цене",
+
+  // Вкладки терминала, шапка-HUD и вкладка «Карьера».
+  "game.tab.terminal": "Терминал",
+  "game.tab.portfolio": "Портфель",
+  "game.tab.news": "Новости",
+  "game.tab.shop": "Магазин",
+  "game.tab.career": "Карьера",
+  "game.header.independentTrader": "Частный трейдер",
+  "game.header.toNextRank": "до следующего ранга {prestige} престижа",
+  "game.header.today": "За день {amount} ({pct})",
+  "game.header.marginUsed": "в марже {amount}",
+  "game.career.rank": "Твой ранг",
+  "game.career.skills": "Навыки по стилям торговли",
+  "game.career.results": "Результаты",
+  "game.career.tradesClosed": "Сделок закрыто",
+  "game.career.belongings": "Что у тебя есть",
+  "game.career.nothingOwned": "Пока ничего не куплено — магазин на соседней вкладке.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

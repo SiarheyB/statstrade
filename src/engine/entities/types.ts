@@ -260,6 +260,8 @@ export interface SaveGame {
   // новости в сохранение не пишутся: всплеск волатильности привязан к
   // игровому времени и к тому, что игрок в этот момент смотрел на график.
   newsFeed: NewsEvent[];
+  // Эквити на начало текущего игрового дня — дневной результат в шапке.
+  dayStartEquity: number;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }
