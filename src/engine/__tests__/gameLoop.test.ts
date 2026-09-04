@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import { candleIntervalMs, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { freshLifestyle } from "@/engine/economy/shop";
 import { DEFAULT_TUNING } from "@/engine/entities/tuning";
+import { freshContractState } from "@/engine/player/contracts";
+import { freshPerkState } from "@/engine/player/perks";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
@@ -55,6 +57,11 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     newsFeed: [],
     dayStartEquity: 10_000,
     tuning: DEFAULT_TUNING,
+    contracts: freshContractState(),
+    perks: freshPerkState(),
+    contractPoints: 0,
+    unlockedMarkets: ["stock"],
+    lastContractResult: null,
     ...overrides,
   };
 }

@@ -33,9 +33,23 @@ export function calculateLiquidationPrice(
     : entryPrice * (1 + 1 / leverage - maintenanceMarginRate);
 }
 
-/** true, если currentPrice уже пересекла ликвидационную цену позиции. */
-export function checkLiquidation(position: Position, currentPrice: number): boolean {
-  const liqPrice = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side);
+/**
+ * true, если currentPrice уже пересекла ликвидационную цену позиции.
+ *
+ * maintenanceMarginRate можно понизить перками («послабление по марже»,
+ * «твёрдая рука»): это отодвигает цену ликвидации ДАЛЬШЕ от входа. Эффект
+ * считается на лету от текущего набора перков и ничего не накапливает —
+ * поэтому купленный перк не создаёт задним числом «бесплатных денег», в
+ * отличие от идеи скидывать сам резерв маржи (он снимается при открытии
+ * позиции и возвращается при закрытии — там расхождение было бы прямой
+ * дыркой в балансе).
+ */
+export function checkLiquidation(
+  position: Position,
+  currentPrice: number,
+  maintenanceMarginRate: number = DEFAULT_MAINTENANCE_MARGIN_RATE,
+): boolean {
+  const liqPrice = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side, maintenanceMarginRate);
   return position.side === "long" ? currentPrice <= liqPrice : currentPrice >= liqPrice;
 }
 

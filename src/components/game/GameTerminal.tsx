@@ -24,6 +24,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { activeTheme } from "@/engine/economy/shop";
+import { perkEffects } from "@/engine/player/perks";
 import { candleIntervalMs } from "@/engine/gameLoop";
 import type { GameTuning } from "@/engine/entities/tuning";
 import type { TradingStyle } from "@/engine/entities/types";
@@ -35,6 +36,8 @@ import DiversificationPanel from "./DiversificationPanel";
 import NewsFeed from "./NewsFeed";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
+import ContractsPanel from "./ContractsPanel";
+import PerkTree from "./PerkTree";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -144,6 +147,10 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   const candles = assetId ? (game.candles[assetId] ?? []) : [];
   const currentStyle = game.activeStyle.style;
   const unreadNews = game.newsFeed.filter((n) => n.expiresAt > game.gameElapsedMs).length;
+  // Стакан — в скальпинге всегда, в остальных стилях только с перком
+  // «Стакан везде»: это и есть ощутимая награда за очко навыка.
+  const perks = perkEffects(game.perks);
+  const showOrderBook = currentStyle === "scalping" || perks.tools.orderBookAnywhere;
 
   return (
     // --color-accent подменяется купленной темой ТОЛЬКО внутри терминала:
@@ -214,7 +221,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
               «где-то ниже по странице». */}
           <div
             className={`grid grid-cols-1 gap-4 ${
-              currentStyle === "scalping" ? "xl:grid-cols-[minmax(0,1fr)_200px_320px]" : "xl:grid-cols-[minmax(0,1fr)_330px]"
+              showOrderBook ? "xl:grid-cols-[minmax(0,1fr)_200px_320px]" : "xl:grid-cols-[minmax(0,1fr)_330px]"
             }`}
           >
             <div className="card p-3 h-[clamp(420px,64vh,820px)]">
@@ -227,7 +234,7 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
               />
             </div>
 
-            {currentStyle === "scalping" && asset && (
+            {showOrderBook && asset && (
               <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
             )}
 
@@ -284,11 +291,20 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       {tab === "shop" && <Shop />}
 
       {tab === "career" && (
-        <CareerPanel
-          account={game.account}
-          lifestyle={game.lifestyle}
-          startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
-        />
+        <div className="space-y-4">
+          <ContractsPanel
+            contracts={game.contracts}
+            equity={game.account.equity}
+            balance={game.account.balance}
+            currentDay={game.gameCalendarDay}
+          />
+          <PerkTree perks={game.perks} skills={game.account.skills} contractPoints={game.contractPoints} />
+          <CareerPanel
+            account={game.account}
+            lifestyle={game.lifestyle}
+            startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
+          />
+        </div>
       )}
     </div>
   );

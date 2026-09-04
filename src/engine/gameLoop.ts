@@ -7,13 +7,20 @@
 import type {
   Account,
   Asset,
+  AssetClass,
   Candle,
+  ContractRecord,
+  ContractState,
   LifestyleState,
   MarketRegime,
   NewsEvent,
+  PerkState,
   Position,
   TradingStyleConfig,
 } from "@/engine/entities/types";
+import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
+import { perkEffects } from "@/engine/player/perks";
+import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { updateMarketRegime } from "@/engine/market/marketRegime";
 import {
@@ -88,6 +95,15 @@ export interface GameState {
   // переменной движка: формулы обязаны оставаться чистыми и тестируемыми
   // (раздел 26 — никакого скрытого глобального состояния).
   tuning: GameTuning;
+  // Прогрессия: контракты (цели), перки (во что тратится опыт), очки за
+  // пройденные контракты и открытые рынки.
+  contracts: ContractState;
+  perks: PerkState;
+  contractPoints: number;
+  unlockedMarkets: AssetClass[];
+  // Последний завершившийся контракт — UI показывает по нему уведомление и
+  // сбрасывает поле, чтобы не показать дважды.
+  lastContractResult: ContractRecord | null;
 }
 
 function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
@@ -209,6 +225,11 @@ function recalculateAccountMetrics(account: Account, prices: Record<string, numb
  */
 export function gameTick(dtRealMs: number, state: GameState, rng: () => number): GameState {
   const tuning = state.tuning ?? DEFAULT_TUNING;
+  const perks = perkEffects(state.perks);
+  // Перки складываются с настройками админки, а не заменяют их: админ задаёт
+  // «мир», перк — личное преимущество игрока внутри этого мира.
+  const xpMultiplier = tuning.xpMultiplier * perks.xpMultiplier;
+  const maintenanceRate = DEFAULT_MAINTENANCE_MARGIN_RATE * (perks.marginMultiplier - perks.liquidationBuffer);
   const dtGameMs = dtRealMs * state.activeStyle.timeAcceleration;
   const dtYears = dtGameMs / MS_PER_YEAR;
   const gameElapsedMs = state.gameElapsedMs + dtGameMs;
@@ -277,16 +298,16 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     // по тарифу swing только потому, что игрок сейчас смотрит другой режим.
     const commissionRate = TRADING_STYLE_CONFIGS[position.style].commissionRate;
 
-    if (checkLiquidation(position, price)) {
-      const liqPrice = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side);
+    if (checkLiquidation(position, price, maintenanceRate)) {
       const penalty = calculateLiquidationPenalty(position.entryPrice, position.size);
-      applyPositionClose(account, position, liqPrice, commissionRate, penalty, tuning.xpMultiplier);
+      const liqPriceAdjusted = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side, maintenanceRate);
+      applyPositionClose(account, position, liqPriceAdjusted, commissionRate * perks.commissionMultiplier, penalty, xpMultiplier);
       continue;
     }
 
     const exitPrice = checkStopConditions(position, price);
     if (exitPrice == null) continue;
-    applyPositionClose(account, position, exitPrice, commissionRate, 0, tuning.xpMultiplier);
+    applyPositionClose(account, position, exitPrice, commissionRate * perks.commissionMultiplier, 0, xpMultiplier);
   }
 
   // 6. Дивиденды/купоны раз в игровой квартал (раздел 4.6) — платим за
@@ -298,7 +319,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   let lastDividendQuarter = state.lastDividendQuarter;
   while (lastDividendQuarter < currentQuarter) {
     lastDividendQuarter++;
-    processQuarterlyDividends(account, state.activeAssets, prices, tuning.dividendMultiplier);
+    processQuarterlyDividends(account, state.activeAssets, prices, tuning.dividendMultiplier * perks.dividendMultiplier);
   }
 
   // 6b. Расход на образ жизни раз в игровой месяц (раздел 13) — зеркально
@@ -307,7 +328,7 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   const currentMonth = Math.floor(gameElapsedMs / MONTH_MS);
   let lastUpkeepMonth = state.lastUpkeepMonth;
   let lifestyle = state.lifestyle;
-  const upkeep = monthlyUpkeep(lifestyle) * tuning.upkeepMultiplier;
+  const upkeep = monthlyUpkeep(lifestyle) * tuning.upkeepMultiplier * perks.upkeepMultiplier;
   while (lastUpkeepMonth < currentMonth) {
     lastUpkeepMonth++;
     if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
@@ -316,8 +337,27 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);
 
-  // 8. Смена игрового дня — фиксируем эквити для дневного результата.
+  // 8. Контракт (цель игрока) — проверяется каждый тик по свежей эквити.
   const gameCalendarDay = Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000));
+  const evaluation = evaluateContract(state.contracts, account.equity, gameCalendarDay);
+  let contractPoints = state.contractPoints;
+  let unlockedMarkets = state.unlockedMarkets;
+  if (evaluation.finished?.outcome === "passed") {
+    const contract = getContract(evaluation.finished.contractId);
+    if (contract) {
+      applyContractReward(account, contract);
+      contractPoints += contract.reward.skillPoints;
+      // Новые рынки — главная награда: 41 инструмент лежит в assets.json и
+      // ждёт разблокировки, это готовый контент, а не новая разработка.
+      const merged = new Set<AssetClass>([...unlockedMarkets, ...contract.reward.unlockMarkets]);
+      unlockedMarkets = Array.from(merged);
+      // Награда меняет баланс — пересчитываем метрики ещё раз, иначе эквити
+      // на этом кадре покажет старое значение.
+      recalculateAccountMetrics(account, prices);
+    }
+  }
+
+  // 9. Смена игрового дня — фиксируем эквити для дневного результата.
   const dayStartEquity =
     gameCalendarDay !== state.gameCalendarDay || state.dayStartEquity == null
       ? account.equity
@@ -334,6 +374,10 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     gameElapsedMs,
     gameCalendarDay,
     dayStartEquity,
+    contracts: evaluation.state,
+    contractPoints,
+    unlockedMarkets,
+    lastContractResult: evaluation.finished ?? state.lastContractResult,
     lastDividendQuarter,
     lifestyle,
     lastUpkeepMonth,

@@ -6,11 +6,29 @@
 // формулы напрямую — только через публичные функции engine»).
 import { create } from "zustand";
 import assetsData from "@/data/assets.json";
-import type { Account, Asset, Candle, MarketRegime, NewsEvent, PositionSide, SaveGame, TradingStyle } from "@/engine/entities/types";
+import type {
+  Account,
+  Asset,
+  AssetClass,
+  Candle,
+  MarketRegime,
+  NewsEvent,
+  PositionSide,
+  SaveGame,
+  TradingStyle,
+} from "@/engine/entities/types";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
+import {
+  abandonContract,
+  CONTRACTS,
+  freshContractState,
+  startContract,
+  type StartError,
+} from "@/engine/player/contracts";
+import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkError } from "@/engine/player/perks";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { liveRng } from "@/engine/rng";
@@ -42,6 +60,15 @@ export const INVESTING_ASSET_IDS = ALL_ASSETS.filter((a) => a.assetClass === "st
 
 function assetIdsForStyle(style: TradingStyle): string[] {
   return style === "investing" ? INVESTING_ASSET_IDS : PHASE1_ASSET_IDS;
+}
+
+/**
+ * Инструменты открытых рынков. Акции доступны с начала, остальные классы
+ * (крипта, форекс, товары, индексы) приходят наградой за контракты — это и
+ * есть ощутимая награда за прогресс, а не «плюс десять процентов к чему-то».
+ */
+export function assetIdsForMarkets(markets: AssetClass[]): string[] {
+  return ALL_ASSETS.filter((a) => markets.includes(a.assetClass) && a.assetClass !== "stock").map((a) => a.id);
 }
 
 // Стартовый баланс по умолчанию. Реальное значение приходит из настроек
@@ -96,6 +123,13 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     newsFeed: [],
     dayStartEquity: tuning.startingBalance,
     tuning,
+    contracts: freshContractState(),
+    perks: freshPerkState(),
+    contractPoints: 0,
+    // Только акции. Облигации приходят вместе со стилем Investing (см.
+    // INVESTING_ASSET_IDS), остальные классы — наградой за контракты.
+    unlockedMarkets: ["stock"],
+    lastContractResult: null,
   };
 }
 
@@ -112,7 +146,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     // Фаза 4 (лицензии/скиллы) введёт реальный checkUnlock — до тех пор все
     // стили Фазы 2 доступны сразу, разблокировок нет.
     unlockedStyles: SELECTABLE_STYLES,
-    unlockedMarkets: ["stock"],
+    unlockedMarkets: state.unlockedMarkets,
     gameCalendarDay: state.gameCalendarDay,
     gameElapsedMs: state.gameElapsedMs,
     lastDividendQuarter: state.lastDividendQuarter,
@@ -120,6 +154,8 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     lastUpkeepMonth: state.lastUpkeepMonth,
     newsFeed: state.newsFeed,
     dayStartEquity: state.dayStartEquity,
+    contracts: state.contracts,
+    perks: state.perks,
     onboardingDone,
     disclaimerSeen,
   };
@@ -155,10 +191,12 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
   // investing и обратно), и активов открытых позиций, а не жёстко
   // PHASE1_ASSET_IDS, как раньше (баг: смена стиля на investing не
   // переживала перезагрузку — activeAssets откатывался к 6 тикерам).
+  const unlockedMarkets = (save.unlockedMarkets ?? ["stock"]) as AssetClass[];
   const requiredIds = new Set<string>([
     ...PHASE1_ASSET_IDS,
     ...save.activeAssetIds,
     ...save.account.positions.map((p) => p.assetId),
+    ...assetIdsForMarkets(unlockedMarkets),
   ]);
   const activeAssets = ALL_ASSETS.filter((a) => requiredIds.has(a.id));
   const prices = { ...save.prices };
@@ -194,6 +232,16 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     activeNews: [],
     newsFeed: (save.newsFeed ?? []) as NewsEvent[],
     dayStartEquity: save.dayStartEquity ?? save.account.equity,
+    contracts: save.contracts ?? freshContractState(),
+    perks: save.perks ?? freshPerkState(),
+    // Очки за контракты восстанавливаем из истории: отдельно их хранить
+    // незачем, а пересчёт по пройденным ступеням защищает от рассинхрона.
+    contractPoints: (save.contracts?.completedIds ?? []).reduce((sum, id) => {
+      const contract = CONTRACTS.find((c) => c.id === id);
+      return sum + (contract?.reward.skillPoints ?? 0);
+    }, 0),
+    unlockedMarkets,
+    lastContractResult: null,
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -202,6 +250,8 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
 }
 
 export type PurchaseResult = { ok: true } | { ok: false; error: PurchaseError };
+export type ContractActionResult = { ok: true } | { ok: false; error: StartError };
+export type PerkActionResult = { ok: true } | { ok: false; error: PerkError };
 
 export type OpenPositionResult =
   | { ok: true }
@@ -229,6 +279,10 @@ interface GameStoreState {
   setStopLoss: (positionId: string, price: number | undefined) => void;
   setTakeProfit: (positionId: string, price: number | undefined) => void;
   setActiveStyle: (style: TradingStyle) => void;
+  startContract: (contractId: string) => ContractActionResult;
+  abandonContract: () => void;
+  unlockPerk: (perkId: string) => PerkActionResult;
+  clearContractResult: () => void;
   purchaseShopItem: (itemId: string) => PurchaseResult;
   equipShopTheme: (themeId: string) => void;
   setFundName: (name: string) => void;
@@ -389,7 +443,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // остались бы без ценового потока (см. saveToState — тот же принцип
     // «только рост» применён и при восстановлении сохранения).
     set((s) => {
-      const requiredIds = assetIdsForStyle(style);
+      // К набору стиля добавляем инструменты открытых рынков: разблокировав
+      // крипту контрактом, игрок должен увидеть её в тикете, а не искать,
+      // где она включается.
+      const requiredIds = [...assetIdsForStyle(style), ...assetIdsForMarkets(s.game.unlockedMarkets)];
       const existingIds = new Set(s.game.activeAssets.map((a) => a.id));
       const missing = ALL_ASSETS.filter((a) => requiredIds.includes(a.id) && !existingIds.has(a.id));
       if (missing.length === 0) return { game: { ...s.game, activeStyle: config } };
@@ -405,6 +462,35 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     });
     void get().persistNow();
   },
+
+  // Контракты — цель игрока. Взнос списывается сразу и не возвращается:
+  // испытание, которое ничего не стоит, не создаёт напряжения.
+  startContract: (contractId) => {
+    const { game } = get();
+    const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
+    const result = startContract(account, game.contracts, contractId, game.gameCalendarDay);
+    if (!result.ok) return result;
+    set((s) => ({ game: { ...s.game, account, contracts: result.state } }));
+    void get().persistNow();
+    return { ok: true };
+  },
+
+  abandonContract: () => {
+    set((s) => ({ game: { ...s.game, contracts: abandonContract(s.game.contracts, s.game.gameCalendarDay) } }));
+    void get().persistNow();
+  },
+
+  unlockPerk: (perkId) => {
+    const { game } = get();
+    const points = availablePoints(game.account.skills, game.contractPoints, game.perks);
+    const result = unlockPerk(game.perks, perkId, points);
+    if (!result.ok) return result;
+    set((s) => ({ game: { ...s.game, perks: result.perks } }));
+    void get().persistNow();
+    return { ok: true };
+  },
+
+  clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
 
   // Магазин (раздел 13). Проверка и списание — в движке
   // (economy/shop.ts), стор только копирует account под мутацию и сразу

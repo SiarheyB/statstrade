@@ -229,6 +229,70 @@ export interface LifestyleState {
   unpaidUpkeep: number; // сколько не смогли списать (баланс кончился) — повод для предупреждения
 }
 
+// ── Контракты (испытания) — ядро игрового цикла ────────────────────────────
+// Формат заимствован у prop-firm челленджей: игроку дают цель по доходности
+// и ЖЁСТКИЙ лимит просадки на ограниченный срок. Именно лимит просадки
+// превращает риск-менеджмент из теории в единственный способ пройти дальше:
+// «заработал 100% и чуть не слил» здесь объективно проигрывает «сделал 8%
+// ровно».
+export interface ContractReward {
+  cash: number;
+  prestige: number;
+  skillPoints: number;
+  unlockMarkets: AssetClass[];
+}
+
+export interface Contract {
+  id: string;
+  tier: number;
+  targetPct: number; // цель по доходности от стартовой эквити, %
+  maxDrawdownPct: number; // допустимая просадка от пика эквити, %
+  durationDays: number; // срок в игровых днях
+  entryFee: number; // взнос, сгорает при провале
+  reward: ContractReward;
+}
+
+export type ContractOutcome = "passed" | "failed_drawdown" | "failed_expired" | "abandoned";
+
+export interface ActiveContract {
+  contractId: string;
+  startedDay: number;
+  startEquity: number;
+  peakEquity: number; // максимум эквити с начала контракта — от него считается просадка
+}
+
+export interface ContractRecord {
+  contractId: string;
+  outcome: ContractOutcome;
+  finishedDay: number;
+  resultPct: number;
+}
+
+export interface ContractState {
+  active: ActiveContract | null;
+  history: ContractRecord[];
+  completedIds: string[]; // пройденные — второй раз не выдаются
+}
+
+// ── Перки ──────────────────────────────────────────────────────────────────
+// Правило, которое нельзя нарушать: НИ ОДИН перк не предсказывает цену и не
+// улучшает исполнение в свою пользу. Перк даёт инструмент, условие
+// (комиссия, маржа), доступ к рынку или скорость роста — то есть меняет,
+// ВО ЧТО играешь, а не подкручивает результат.
+export type PerkBranch = "tools" | "terms" | "growth" | "social";
+
+export interface Perk {
+  id: string;
+  branch: PerkBranch;
+  cost: number; // очков навыка
+  requires: string[]; // id перков, без которых не открыть
+}
+
+export interface PerkState {
+  unlocked: string[];
+  spentPoints: number;
+}
+
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
   savedAt: number;
@@ -262,6 +326,9 @@ export interface SaveGame {
   newsFeed: NewsEvent[];
   // Эквити на начало текущего игрового дня — дневной результат в шапке.
   dayStartEquity: number;
+  // Контракты и перки (ядро прогрессии).
+  contracts: ContractState;
+  perks: PerkState;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

@@ -16,6 +16,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { xpToNextLevel } from "@/engine/player/progression";
 import { nextRank, traderRankKey } from "@/engine/economy/shop";
+import { contractProgress } from "@/engine/player/contracts";
 import type { GameState } from "@/engine/gameLoop";
 import type { TradingStyle } from "@/engine/entities/types";
 import MarketRegimeBadge from "./MarketRegimeBadge";
@@ -50,6 +51,13 @@ export default function GameHeader({
 
   const rankKey = traderRankKey(game.account.reputation);
   const next = nextRank(game.account.reputation);
+
+  const contract = game.contracts.active
+    ? contractProgress(game.contracts.active, game.account.equity, game.gameCalendarDay)
+    : null;
+  // Красим просадку, когда до провала осталось меньше четверти лимита —
+  // это единственное место, где игре уместно повысить голос.
+  const dangerZone = contract ? contract.drawdownPct > contract.contract.maxDrawdownPct * 0.75 : false;
 
   const dayPnl = game.account.equity - (game.dayStartEquity || game.account.equity);
   const dayPnlPct = game.dayStartEquity ? (dayPnl / game.dayStartEquity) * 100 : 0;
@@ -107,6 +115,39 @@ export default function GameHeader({
           <MarketRegimeBadge regime={game.marketRegime} />
         </div>
       </div>
+
+      {/* Активное испытание — вторая строка HUD. Цель игрока должна быть
+          перед глазами всегда, а не в отдельной вкладке: именно от неё
+          зависит каждое решение по риску. */}
+      {contract && (
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs">
+          <span className="font-medium text-accent">{t(`game.contract.${contract.contract.id}.name`)}</span>
+          <span className="text-muted">
+            {t("game.contract.hudTarget")}:{" "}
+            <span className={`tabular-nums ${contract.profitPct >= 0 ? "text-profit" : "text-loss"}`}>
+              {contract.profitPct >= 0 ? "+" : ""}
+              {contract.profitPct.toFixed(2)}%
+            </span>
+            <span className="text-faint"> / +{contract.contract.targetPct}%</span>
+          </span>
+          <span className="text-muted">
+            {t("game.contract.hudDrawdown")}:{" "}
+            <span className={`tabular-nums ${dangerZone ? "text-loss font-semibold" : ""}`}>
+              −{contract.drawdownPct.toFixed(2)}%
+            </span>
+            <span className="text-faint"> / −{contract.contract.maxDrawdownPct}%</span>
+          </span>
+          <span className="text-muted tabular-nums">
+            {t("game.contract.daysLeft")}: {contract.daysLeft}
+          </span>
+          <div className="flex-1 min-w-[120px] h-1.5 rounded-full bg-surface-2 overflow-hidden">
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-500"
+              style={{ width: `${Math.max(0, Math.min(100, (contract.profitPct / contract.contract.targetPct) * 100))}%` }}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

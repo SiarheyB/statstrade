@@ -1,0 +1,80 @@
+[
+  {
+    "id": "CT_DEMO",
+    "tier": 1,
+    "targetPct": 5,
+    "maxDrawdownPct": 5,
+    "durationDays": 20,
+    "entryFee": 0,
+    "reward": {
+      "cash": 2000,
+      "prestige": 5,
+      "skillPoints": 1,
+      "unlockMarkets": []
+    }
+  },
+  {
+    "id": "CT_TRIAL_I",
+    "tier": 2,
+    "targetPct": 8,
+    "maxDrawdownPct": 5,
+    "durationDays": 30,
+    "entryFee": 500,
+    "reward": {
+      "cash": 6000,
+      "prestige": 12,
+      "skillPoints": 1,
+      "unlockMarkets": [
+        "crypto"
+      ]
+    }
+  },
+  {
+    "id": "CT_TRIAL_II",
+    "tier": 3,
+    "targetPct": 10,
+    "maxDrawdownPct": 5,
+    "durationDays": 45,
+    "entryFee": 2000,
+    "reward": {
+      "cash": 20000,
+      "prestige": 25,
+      "skillPoints": 2,
+      "unlockMarkets": [
+        "forex"
+      ]
+    }
+  },
+  {
+    "id": "CT_PRO",
+    "tier": 4,
+    "targetPct": 12,
+    "maxDrawdownPct": 8,
+    "durationDays": 60,
+    "entryFee": 8000,
+    "reward": {
+      "cash": 60000,
+      "prestige": 45,
+      "skillPoints": 2,
+      "unlockMarkets": [
+        "commodity"
+      ]
+    }
+  },
+  {
+    "id": "CT_FUND",
+    "tier": 5,
+    "targetPct": 15,
+    "maxDrawdownPct": 8,
+    "durationDays": 90,
+    "entryFee": 25000,
+    "reward": {
+      "cash": 200000,
+      "prestige": 90,
+      "skillPoints": 3,
+      "unlockMarkets": [
+        "index"
+      ]
+    }
+  }
+]
