@@ -18,7 +18,7 @@ export default function InvestingForecast({ principal, assetCount }: { principal
   const futureValue = calculateFutureValue(principal, annualReturnPct / 100, years);
 
   return (
-    <div className="card p-4 space-y-3 w-full lg:w-[260px] shrink-0">
+    <div className="card p-4 space-y-3 w-full">
       <div className="text-sm font-medium">{t("game.investing.title")}</div>
       <div className="text-xs text-faint">{t("game.investing.hint", { count: assetCount })}</div>
 

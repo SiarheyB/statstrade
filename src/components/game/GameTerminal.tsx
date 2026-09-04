@@ -14,6 +14,7 @@ import { fmtUsd } from "@/lib/format";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { xpToNextLevel } from "@/engine/player/progression";
 import { activeTheme, monthlyUpkeep, traderRankKey } from "@/engine/economy/shop";
+import { candleIntervalMs } from "@/engine/gameLoop";
 import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
 import OrderTicket from "./OrderTicket";
@@ -135,7 +136,9 @@ export default function GameTerminal() {
         <StatCard label={t("game.stat.day")} value={String(game.gameCalendarDay + 1)} />
         <StatCard
           label={t("game.skill.level", { level: skill.level })}
-          value={`${skill.xp} / ${skill.xpToNextLevel} XP`}
+          // XP дробный (calculateXpGain умножает базу на коэффициенты стиля
+          // и R:R) — в карточке он светился как "20.400709590188455 / 100 XP".
+          value={`${Math.round(skill.xp)} / ${skill.xpToNextLevel} XP`}
           hint={t(STYLE_LABEL_KEY[currentStyle])}
         />
       </div>
@@ -164,31 +167,39 @@ export default function GameTerminal() {
         <MarketRegimeBadge regime={game.marketRegime} />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-[1fr_auto_300px] gap-4">
-        <div className="card p-2 h-[420px]">
+      {/* График — главный элемент экрана, поэтому он занимает всю ширину за
+          вычетом узкой колонки ордера, а не треть строки, как раньше
+          (замечание пользователя: «как в этом маленьком окошке можно
+          анализировать рынок»). Высота тянется за окном, но не разъезжается
+          на маленьких экранах и не улетает на больших. */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_330px]">
+        <div className="card p-3 h-[clamp(420px,64vh,820px)]">
           <PriceChart
             candles={candles}
             currentPrice={assetId ? game.prices[assetId] : undefined}
             symbol={asset?.symbol ?? ""}
             candleColors={candleColors}
+            baseIntervalMs={candleIntervalMs(game.activeStyle.timeAcceleration)}
           />
         </div>
-        {currentStyle === "scalping" && asset && (
-          <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
-        )}
-        {currentStyle === "investing" && (
-          <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
-        )}
-        {assetId && (
-          <OrderTicket
-            assets={game.activeAssets}
-            selectedAssetId={assetId}
-            onSelectAsset={setSelectedAssetId}
-            prices={game.prices}
-            balance={game.account.balance}
-            maxLeverage={game.activeStyle.maxLeverage}
-          />
-        )}
+        <div className="space-y-4">
+          {assetId && (
+            <OrderTicket
+              assets={game.activeAssets}
+              selectedAssetId={assetId}
+              onSelectAsset={setSelectedAssetId}
+              prices={game.prices}
+              balance={game.account.balance}
+              maxLeverage={game.activeStyle.maxLeverage}
+            />
+          )}
+          {currentStyle === "scalping" && asset && (
+            <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
+          )}
+          {currentStyle === "investing" && (
+            <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
+          )}
+        </div>
       </div>
 
       <NewsFeed news={game.newsFeed} assets={game.activeAssets} gameElapsedMs={game.gameElapsedMs} />

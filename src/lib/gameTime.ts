@@ -9,3 +9,21 @@ export function fmtGameClock(ms: number): string {
   const mm = String(totalMinutes % 60).padStart(2, "0");
   return `Д${day} ${hh}:${mm}`;
 }
+
+/**
+ * Длительность игрового времени короткой подписью: «1м», «4ч», «30д». Нужна
+ * для таймфреймов графика — длина свечи зависит от ускорения стиля, поэтому
+ * подписать её фиксированной строкой («1 минута») нельзя.
+ */
+export function fmtGameDuration(ms: number): string {
+  const minutes = ms / 60_000;
+  if (minutes < 60) return `${trim(minutes)}м`;
+  const hours = minutes / 60;
+  if (hours < 24) return `${trim(hours)}ч`;
+  return `${trim(hours / 24)}д`;
+}
+
+function trim(value: number): string {
+  // 2.5д читается, 2.50д — нет; целые показываем без хвоста.
+  return Number.isInteger(value) ? String(value) : value.toFixed(1).replace(/\.0$/, "");
+}

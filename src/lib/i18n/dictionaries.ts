@@ -1739,6 +1739,16 @@ const en: Dict = {
   "game.regime.crisis": "Crisis",
   "game.regime.daysShort": "d",
   "game.regime.hint": "The market has been in this regime for {days} game days. A regime shifts the drift and volatility of every asset at once.",
+
+  // Панель графика: таймфреймы и управление масштабом.
+  "game.chart.tfLabel": "candle timeframe (game time)",
+  "game.chart.tfHint": "One candle = {duration} of game time",
+  "game.chart.zoomIn": "Zoom in",
+  "game.chart.zoomOut": "Zoom out",
+  "game.chart.live": "Live",
+  "game.chart.backToPrice": "Back to price",
+  "game.chart.resetHint": "Return to the live price (or double-click the chart)",
+  "game.chart.hint": "Scroll to zoom · drag to pan · double-click to return to the live price",
 };
 
 const ru: Dict = {
@@ -3463,6 +3473,16 @@ const ru: Dict = {
   "game.regime.crisis": "Кризис",
   "game.regime.daysShort": "д",
   "game.regime.hint": "Рынок в этом режиме уже {days} игровых дней. Режим меняет снос и волатильность сразу у всех активов.",
+
+  // Панель графика: таймфреймы и управление масштабом.
+  "game.chart.tfLabel": "таймфрейм свечи (игровое время)",
+  "game.chart.tfHint": "Одна свеча = {duration} игрового времени",
+  "game.chart.zoomIn": "Приблизить",
+  "game.chart.zoomOut": "Отдалить",
+  "game.chart.live": "Онлайн",
+  "game.chart.backToPrice": "К текущей цене",
+  "game.chart.resetHint": "Вернуться к текущей цене (или двойной клик по графику)",
+  "game.chart.hint": "Колесо — масштаб · перетаскивание — сдвиг · двойной клик — вернуться к текущей цене",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

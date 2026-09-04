@@ -24,7 +24,7 @@ export default function OrderBook({ midPrice, tickSize }: { midPrice: number | u
   const maxSize = Math.max(...book.bids.map((b) => b.size), ...book.asks.map((a) => a.size), 1);
 
   return (
-    <div className="card p-3 w-full lg:w-[220px] shrink-0">
+    <div className="card p-3 w-full">
       <div className="text-[11px] uppercase tracking-wide text-faint mb-2">{t("game.orderBook.title")}</div>
       <div className="space-y-0.5">
         {[...book.asks].reverse().map((level, i) => (
