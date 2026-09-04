@@ -36,7 +36,9 @@ describe("пресеты режимов", () => {
 
 describe("switchProbabilityPerDay", () => {
   it("до минимального срока режим не меняется вовсе", () => {
-    expect(switchProbabilityPerDay(makeRegime("bull", 10))).toBe(0);
+    // Берём срок из пресета, а не число: длительности режимов перебалансированы
+    // под реальное время и ещё будут меняться.
+    expect(switchProbabilityPerDay(makeRegime("bull", REGIME_PRESETS.bull.minDurationDays - 0.5))).toBe(0);
   });
 
   it("на максимальном сроке смена гарантирована", () => {
@@ -44,7 +46,7 @@ describe("switchProbabilityPerDay", () => {
   });
 
   it("между минимумом и максимумом вероятность растёт", () => {
-    const early = switchProbabilityPerDay(makeRegime("bear", REGIME_PRESETS.bear.minDurationDays + 1));
+    const early = switchProbabilityPerDay(makeRegime("bear", REGIME_PRESETS.bear.minDurationDays + 0.5));
     const late = switchProbabilityPerDay(makeRegime("bear", REGIME_PRESETS.bear.maxDurationDays - 1));
     expect(late).toBeGreaterThan(early);
     expect(early).toBeGreaterThan(0);
@@ -61,7 +63,8 @@ describe("updateMarketRegime", () => {
   it("не меняет режим раньше минимального срока ни при каком броске", () => {
     // rng = 0 — самый «удачный» бросок для смены; до minDuration он не должен
     // ничего менять вообще.
-    const next = updateMarketRegime(makeRegime("bull", 5), MS_PER_DAY, () => 0);
+    const young = Math.max(0, REGIME_PRESETS.bull.minDurationDays - 2);
+    const next = updateMarketRegime(makeRegime("bull", young), MS_PER_DAY / 4, () => 0);
     expect(next.type).toBe("bull");
   });
 
@@ -74,7 +77,7 @@ describe("updateMarketRegime", () => {
     expect(next.volModifier).toBe(REGIME_PRESETS[next.type].volModifier);
   });
 
-  it("длинный тик (investing: трое суток) не меняет режим по нескольку раз", () => {
+  it("длинный шаг (офлайн-прогресс перескакивает сутки) не меняет режим по нескольку раз", () => {
     const next = updateMarketRegime(makeRegime("bull", 100), 3 * MS_PER_DAY, mulberry32(3));
     expect(next.daysInRegime === 0 || next.type === "bull").toBe(true);
   });

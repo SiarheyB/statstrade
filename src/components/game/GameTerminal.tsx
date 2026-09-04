@@ -389,7 +389,6 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
             equity={game.account.equity}
             balance={game.account.balance}
             currentDay={game.gameCalendarDay}
-            timeAcceleration={game.activeStyle.timeAcceleration}
           />
           <PerkTree perks={game.perks} skills={game.account.skills} contractPoints={game.contractPoints} />
           <BotsPanel bots={game.bots} perks={game.perks} assets={game.activeAssets} />

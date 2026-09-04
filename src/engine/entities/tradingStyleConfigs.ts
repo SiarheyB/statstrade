@@ -4,8 +4,19 @@
 // выбираемы в UI и не обрабатываются gameLoop, пока не подключены
 // соответствующие фазы (2, 6).
 //
-// minHoldTimeMs — в игровых мс. timeAcceleration — множитель игрового
-// времени к реальному (dtGame = dtReal * timeAcceleration).
+// minHoldTimeMs — в игровых мс.
+//
+// timeAcceleration у ВСЕХ стилей равен 1: игровое время идёт вровень с
+// реальным, минута в минуту (решение пользователя). Раньше стиль был ещё и
+// «скоростью» (day 60x, investing 43200x), и это ломало всё, что считается в
+// днях: срок испытания на дейтрейдинге означал восемь реальных часов, а на
+// инвестициях — минуту, у каждого игрока был свой календарь, и сравнивать
+// результаты в общем мире было не с чем.
+//
+// Поле оставлено в конфиге (спека, раздел 5) и умножение в gameTick тоже —
+// на случай, если когда-нибудь понадобится режим ускоренной перемотки. Но
+// стили теперь различаются тем, чем и должны: плечом, комиссией, спредом и
+// минимальным временем удержания.
 import type { TradingStyle, TradingStyleConfig } from "./types";
 
 const SEC = 1000;
@@ -27,7 +38,7 @@ export const TRADING_STYLE_CONFIGS: Record<TradingStyle, TradingStyleConfig> = {
   day: {
     style: "day",
     minHoldTimeMs: 1 * MIN,
-    timeAcceleration: 60,
+    timeAcceleration: 1,
     maxLeverage: 10,
     commissionRate: 0.0008,
     spreadMultiplier: 1.0,
@@ -38,7 +49,7 @@ export const TRADING_STYLE_CONFIGS: Record<TradingStyle, TradingStyleConfig> = {
   swing: {
     style: "swing",
     minHoldTimeMs: 1 * HOUR,
-    timeAcceleration: 720,
+    timeAcceleration: 1,
     maxLeverage: 5,
     commissionRate: 0.001,
     spreadMultiplier: 0.8,
@@ -47,7 +58,7 @@ export const TRADING_STYLE_CONFIGS: Record<TradingStyle, TradingStyleConfig> = {
   position: {
     style: "position",
     minHoldTimeMs: 1 * DAY,
-    timeAcceleration: 4320,
+    timeAcceleration: 1,
     maxLeverage: 3,
     commissionRate: 0.0012,
     spreadMultiplier: 0.6,
@@ -56,7 +67,7 @@ export const TRADING_STYLE_CONFIGS: Record<TradingStyle, TradingStyleConfig> = {
   investing: {
     style: "investing",
     minHoldTimeMs: 1 * WEEK,
-    timeAcceleration: 43200,
+    timeAcceleration: 1,
     maxLeverage: 1,
     commissionRate: 0.0015,
     spreadMultiplier: 0.5,

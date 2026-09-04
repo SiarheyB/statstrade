@@ -35,12 +35,21 @@ export interface OfflineReport {
 
 export interface OfflineResult {
   state: GameState;
-  report: OfflineReport | null; // null — отсутствие было слишком коротким, показывать нечего
+  // null — либо перерыв был совсем коротким (ничего не считали), либо
+  // недостаточно длинным, чтобы показывать окно (рынок при этом досчитан).
+  report: OfflineReport | null;
 }
 
-// Меньше этого игрок и не заметил бы: перезагрузка страницы, переход между
-// вкладками. Отчёт про «прошло 4 минуты» только раздражает.
-export const MIN_OFFLINE_GAME_MS = 6 * 60 * 60 * 1000; // 6 игровых часов
+// Отчёт показываем только после заметного перерыва: «прошло 4 минуты» —
+// это не новость, а раздражение.
+export const MIN_REPORT_GAME_MS = 6 * 60 * 60 * 1000; // 6 часов
+
+// А вот СИМУЛИРОВАТЬ надо любой перерыв длиннее полуминуты: время в игре
+// идёт вровень с реальным, и если пропускать короткие отлучки, игровой
+// календарь начнёт отставать от настоящего — день в игре перестанет
+// означать день. Полминуты — порог, ниже которого это просто перезагрузка
+// страницы.
+export const MIN_SIMULATE_MS = 30 * 1000;
 
 /**
  * Прокручивает симуляцию на время отсутствия. realElapsedMs — сколько
@@ -51,7 +60,7 @@ export function simulateOffline(state: GameState, realElapsedMs: number, rng: ()
   const acceleration = state.activeStyle.timeAcceleration;
   const wantedGameMs = realElapsedMs * acceleration;
   const cappedGameMs = Math.min(wantedGameMs, MAX_OFFLINE_GAME_DAYS * MS_PER_DAY);
-  if (cappedGameMs < MIN_OFFLINE_GAME_MS) return { state, report: null };
+  if (cappedGameMs < MIN_SIMULATE_MS) return { state, report: null };
 
   const equityBefore = state.account.equity;
   const balanceBefore = state.account.balance;
@@ -67,6 +76,10 @@ export function simulateOffline(state: GameState, realElapsedMs: number, rng: ()
 
   const contractFinished =
     contractBefore && next.contracts.active?.contractId !== contractBefore ? contractBefore : null;
+
+  // Короткая отлучка симулируется молча: рынок сходится с реальным временем,
+  // но окном «пока тебя не было» игрока не дёргаем.
+  if (cappedGameMs < MIN_REPORT_GAME_MS) return { state: next, report: null };
 
   return {
     state: next,

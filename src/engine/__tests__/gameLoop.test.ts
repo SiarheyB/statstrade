@@ -113,49 +113,46 @@ describe("checkStopConditions", () => {
 });
 
 describe("gameTick", () => {
-  it("двигает игровое время на dtReal * timeAcceleration и обновляет цену активного актива", () => {
+  it("двигает игровое время вровень с реальным и обновляет цену активного актива", () => {
     const state = makeState();
     const rng = mulberry32(1);
-    const next = gameTick(1000, state, rng); // 1 реальная секунда, day = x60
-    expect(next.gameElapsedMs).toBe(60_000);
+    const next = gameTick(1000, state, rng); // 1 реальная секунда = 1 игровая
+    expect(next.gameElapsedMs).toBe(1000);
     expect(next.prices[asset.id]).not.toBe(100);
     expect(next.prices[asset.id]).toBeGreaterThan(0);
   });
 
-  it("копит свечи в бакеты по candleIntervalMs(timeAcceleration), не создавая лишних баров внутри одного бакета", () => {
+  it("копит свечи в минутные бакеты, не создавая лишних баров внутри одного", () => {
     let state = makeState();
     const rng = mulberry32(2);
-    // Day-режим: candleIntervalMs(60) = 60_000 игровых мс (1 игровая минута,
-    // как и раньше при захардкоженной константе) — 1 реальная секунда =
-    // 60 игровых секунд, после первого тика уже есть минимум одна свеча.
-    const interval = candleIntervalMs(TRADING_STYLE_CONFIGS.day.timeAcceleration);
+    // Время идёт вровень с реальным: свеча — ровно одна минута жизни.
+    const interval = candleIntervalMs();
     expect(interval).toBe(60_000);
-    state = gameTick(200, state, rng); // 200мс реала = 12с игровых — один бакет
-    state = gameTick(200, state, rng); // ещё 12с игровых — тот же бакет (< 60с)
+    state = gameTick(200, state, rng);
+    state = gameTick(200, state, rng); // те же 0.4 секунды — тот же бакет
     expect(state.candles[asset.id].length).toBe(1);
     expect(state.candles[asset.id][0].timestamp).toBeLessThan(interval);
-    state = gameTick(3000, state, rng); // +180с игровых — новый бакет
+    state = gameTick(3 * 60 * 1000, state, rng); // +3 минуты — новые бакеты
     expect(state.candles[asset.id].length).toBeGreaterThan(1);
     expect(state.candles[asset.id].length).toBeLessThanOrEqual(500);
   });
 
-  // Регрессия: раньше свеча была ФИКСИРОВАННОЙ (1 игровая минута) вне
-  // зависимости от timeAcceleration стиля — у investing (43200x) один тик
-  // движка перепрыгивал сразу ~180 минутных бакетов, и appendPriceToCandles
-  // добавляла только ОДИН бар за тик: подряд идущие свечи в массиве
-  // оказывались на самом деле в часах друг от друга, график превращался в
-  // редкие несвязанные точки. candleIntervalMs масштабирует бакет так,
-  // чтобы на свечу всегда приходилось примерно одинаковое число тиков.
-  it("investing (43200x) не плодит один бар в час — интервал свечи растёт вместе с ускорением", () => {
-    let state = makeState({ activeStyle: TRADING_STYLE_CONFIGS.investing });
+  // Регрессия того же места с обратной стороны: длинный шаг (офлайн-прогресс
+  // перескакивает часы за один вызов) добавляет ОДНУ свечу за шаг, а не
+  // заполняет каждый пропущенный бакет — история остаётся связной, но
+  // редеет. Это осознанный размен: заполнять минутками неделю отсутствия
+  // значит держать в памяти десять тысяч баров ради истории, которую всё
+  // равно обрежет MAX_CANDLES_PER_ASSET.
+  it("длинный шаг добавляет одну свечу, а не тысячу пустых", () => {
+    let state = makeState();
     const rng = mulberry32(21);
-    for (let i = 0; i < 10; i++) state = gameTick(250, state, rng); // ~10 UI-тиков по 250мс
+    for (let i = 0; i < 10; i++) state = gameTick(60 * 60 * 1000, state, rng); // 10 шагов по часу
     const candles = state.candles[asset.id];
-    // За 10 тиков должно накопиться заметно больше одной свечи (не редкие
-    // точки раз в несколько тиков), но и не 10 отдельных пустых баров —
-    // порядок величины, а не точное число (зависит от кратности округления).
-    expect(candles.length).toBeGreaterThan(1);
-    expect(candles.length).toBeLessThanOrEqual(10);
+    expect(candles.length).toBe(10);
+    // И они идут строго по возрастанию времени — график не «двоится».
+    for (let i = 1; i < candles.length; i++) {
+      expect(candles[i].timestamp).toBeGreaterThan(candles[i - 1].timestamp);
+    }
   });
 
   // Регрессия: два независимых тикера на одном источнике (вторая вкладка,
@@ -496,7 +493,9 @@ describe("рыночные режимы и новости (Фаза 3)", () => {
       prices: { [trending.id]: 100 },
     });
     const rng = mulberry32(seed);
-    for (let i = 0; i < 400; i++) next = gameTick(1000, next, rng);
+    // Шагаем часами: время теперь реальное, и на секундных шагах разница
+    // между режимами тонет в шуме округления до тика цены.
+    for (let i = 0; i < 240; i++) next = gameTick(60 * 60 * 1000, next, rng);
     return next.prices[trending.id];
   }
 

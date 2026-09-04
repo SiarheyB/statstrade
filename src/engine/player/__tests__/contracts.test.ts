@@ -106,42 +106,45 @@ describe("evaluateContract", () => {
   });
 
   it("копит пик эквити — от него считается просадка", () => {
-    const next = evaluateContract(started(), 10_400, 1);
+    // Растём, но до цели не дотягиваем: +1% при цели +2%.
+    const next = evaluateContract(started(), 10_100, 1);
     expect(next.finished).toBeNull();
-    expect(next.state.active?.peakEquity).toBe(10_400);
+    expect(next.state.active?.peakEquity).toBe(10_100);
   });
 
   it("засчитывает победу при достижении цели", () => {
-    const next = evaluateContract(started(), 10_500, 3); // CT_DEMO: +5%
+    const target = getContract("CT_DEMO")!.targetPct;
+    const next = evaluateContract(started(), 10_000 * (1 + target / 100), 1);
     expect(next.finished?.outcome).toBe("passed");
     expect(next.state.completedIds).toContain("CT_DEMO");
     expect(next.state.active).toBeNull();
   });
 
   it("проваливает при превышении лимита просадки от ПИКА, а не от старта", () => {
-    // Выросли до 10 400 (+4%, до цели не дотянули), потом сползли до 9 800:
-    // от старта это −2%, а от пика −5.8% — и вот это уже провал (CT_DEMO: 5%).
-    const grown = evaluateContract(started(), 10_400, 2).state;
-    expect(grown.active?.peakEquity).toBe(10_400);
-    const next = evaluateContract(grown, 9_800, 3);
+    // Выросли до 10 100 (+1%, до цели не дотянули), потом сползли до 9 850:
+    // от старта это −1.5%, а от пика −2.5% — и вот это уже провал (лимит 2%).
+    const grown = evaluateContract(started(), 10_100, 1).state;
+    expect(grown.active?.peakEquity).toBe(10_100);
+    const next = evaluateContract(grown, 9_850, 2);
     expect(next.finished?.outcome).toBe("failed_drawdown");
   });
 
   it("плавание внутри лимита не завершает контракт", () => {
-    const grown = evaluateContract(started(), 10_400, 2).state;
-    const next = evaluateContract(grown, 10_100, 3); // −2.9% от пика, лимит 5%
+    const grown = evaluateContract(started(), 10_100, 1).state;
+    const next = evaluateContract(grown, 10_050, 2); // −0.5% от пика, лимит 2%
     expect(next.finished).toBeNull();
     expect(next.state.active).not.toBeNull();
   });
 
   it("проваливает по истечении срока", () => {
-    const next = evaluateContract(started(0), 10_100, 20); // CT_DEMO: 20 дней
+    const duration = getContract("CT_DEMO")!.durationDays;
+    const next = evaluateContract(started(0), 10_050, duration);
     expect(next.finished?.outcome).toBe("failed_expired");
   });
 
   it("история ограничена и новые записи идут первыми", () => {
     let state = started();
-    const first = evaluateContract(state, 10_500, 3);
+    const first = evaluateContract(state, 10_000 * (1 + getContract("CT_DEMO")!.targetPct / 100), 1);
     state = first.state;
     expect(state.history[0].contractId).toBe("CT_DEMO");
     expect(state.history.length).toBe(1);
@@ -150,11 +153,11 @@ describe("evaluateContract", () => {
 
 describe("contractProgress", () => {
   it("считает результат, просадку и остаток срока", () => {
-    const state = evaluateContract(started(0), 10_400, 2).state;
-    const progress = contractProgress(state.active!, 10_192, 5);
-    expect(progress!.profitPct).toBeCloseTo(1.92, 5);
-    expect(progress!.drawdownPct).toBeCloseTo(2, 5); // от пика 10 400
-    expect(progress!.daysLeft).toBe(15);
+    const state = evaluateContract(started(0), 10_100, 1).state;
+    const progress = contractProgress(state.active!, 10_050, 1);
+    expect(progress!.profitPct).toBeCloseTo(0.5, 5);
+    expect(progress!.drawdownPct).toBeCloseTo(0.495, 3); // от пика 10 100
+    expect(progress!.daysLeft).toBe(getContract("CT_DEMO")!.durationDays - 1);
   });
 });
 

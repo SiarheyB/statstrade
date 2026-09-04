@@ -5,11 +5,13 @@
 // Показываем ОДНУ активную цель крупно и одну следующую ступень: список из
 // десяти задач размывает фокус, а испытание должно быть ровно одно — как в
 // prop-firm челленджах, с которых списан формат.
+//
+// Срок указан в днях и это РЕАЛЬНЫЕ дни: игровое время идёт вровень с
+// реальным, поэтому трёхдневное испытание — это три дня жизни, а не
+// «три дня на дейтрейдинге, минута на инвестициях», как было при ускорении.
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { availableContracts, contractProgress, getContract } from "@/engine/player/contracts";
-import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
-import { SELECTABLE_STYLES } from "@/store/gameStore";
 import { useGameStore } from "@/store/gameStore";
 import type { ContractState } from "@/engine/entities/types";
 
@@ -25,37 +27,16 @@ function Bar({ value, limit, tone }: { value: number; limit: number; tone: "good
   );
 }
 
-/**
- * Сколько РЕАЛЬНОГО времени займут игровые дни на текущей скорости.
- *
- * Это не украшение: срок испытания задан в игровых днях (одинаковый кусок
- * рынка для всех), а игровое время идёт с разной скоростью — двадцать
- * игровых дней это восемь часов на дейтрейдинге и сорок секунд на
- * инвестициях. Не показать это — значит дать игроку взять испытание вслепую.
- */
-function realTimeEstimate(days: number, acceleration: number): { value: number; unit: "min" | "hour" | "day" } {
-  const realMs = (days * 24 * 60 * 60 * 1000) / acceleration;
-  const minutes = realMs / 60_000;
-  if (minutes < 90) return { value: Math.max(1, Math.round(minutes)), unit: "min" };
-  const hours = minutes / 60;
-  if (hours < 48) return { value: Math.round(hours), unit: "hour" };
-  return { value: Math.round(hours / 24), unit: "day" };
-}
-
 export default function ContractsPanel({
   contracts,
   equity,
   balance,
   currentDay,
-  timeAcceleration,
 }: {
   contracts: ContractState;
   equity: number;
   balance: number;
   currentDay: number;
-  // Ускорение активного стиля — нужно, чтобы перевести игровые дни в реальное
-  // время и показать, на что игрок подписывается.
-  timeAcceleration: number;
 }) {
   const { t } = useI18n();
   const start = useGameStore((s) => s.startContract);
@@ -111,13 +92,6 @@ export default function ContractsPanel({
                 <span className="text-muted">{t("game.contract.daysLeft")}</span>
                 <span className="tabular-nums">
                   {progress.daysLeft} / {progress.contract.durationDays}
-                  <span className="text-faint">
-                    {" · "}
-                    {(() => {
-                      const estimate = realTimeEstimate(progress.daysLeft, timeAcceleration);
-                      return t(`game.contract.realTime.${estimate.unit}`, { value: estimate.value });
-                    })()}
-                  </span>
                 </span>
               </div>
               <Bar
@@ -156,34 +130,11 @@ export default function ContractsPanel({
             <div>
               <div className="text-[11px] text-muted">{t("game.contract.duration")}</div>
               <div className="tabular-nums">{next.durationDays}</div>
-              <div className="text-[11px] text-faint">
-                {(() => {
-                  const estimate = realTimeEstimate(next.durationDays, timeAcceleration);
-                  return t(`game.contract.realTime.${estimate.unit}`, { value: estimate.value });
-                })()}
-              </div>
             </div>
             <div>
               <div className="text-[11px] text-muted">{t("game.contract.fee")}</div>
               <div className="tabular-nums">{next.entryFee === 0 ? t("game.shop.free") : fmtUsd(next.entryFee)}</div>
             </div>
-          </div>
-
-          {/* Сколько это в реальном времени на каждой скорости: срок задан в
-              игровых днях (одинаковый кусок рынка для всех), а скорость
-              выбирает игрок — и разница между стилями стократная. */}
-          <div className="text-[11px] text-faint">
-            {t("game.contract.speedHint")}{" "}
-            {SELECTABLE_STYLES.map((style, i) => {
-              const estimate = realTimeEstimate(next.durationDays, TRADING_STYLE_CONFIGS[style].timeAcceleration);
-              return (
-                <span key={style}>
-                  {i > 0 && " · "}
-                  {t(`game.style.${style === "day" ? "day" : style}`)}:{" "}
-                  {t(`game.contract.realTimeShort.${estimate.unit}`, { value: estimate.value })}
-                </span>
-              );
-            })}
           </div>
 
           <div className="text-xs text-faint">
@@ -193,7 +144,12 @@ export default function ContractsPanel({
               points: next.reward.skillPoints,
             })}
             {next.reward.unlockMarkets.length > 0 && (
-              <> · {t("game.contract.unlocks", { markets: next.reward.unlockMarkets.map((m) => t(`game.assetClass.${m}`)).join(", ") })}</>
+              <>
+                {" · "}
+                {t("game.contract.unlocks", {
+                  markets: next.reward.unlockMarkets.map((m) => t(`game.assetClass.${m}`)).join(", "),
+                })}
+              </>
             )}
           </div>
 
@@ -222,10 +178,10 @@ export default function ContractsPanel({
                   <span className={`px-1.5 py-0.5 rounded ${passed ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"}`}>
                     {t(`game.contract.outcome.${record.outcome}`)}
                   </span>
-                  <span className="flex-1 truncate">{contract ? t(`game.contract.${contract.id}.name`) : record.contractId}</span>
-                  <span className="text-faint tabular-nums">
-                    {t("game.contract.onDay", { day: record.finishedDay + 1 })}
+                  <span className="flex-1 truncate">
+                    {contract ? t(`game.contract.${contract.id}.name`) : record.contractId}
                   </span>
+                  <span className="text-faint tabular-nums">{t("game.contract.onDay", { day: record.finishedDay + 1 })}</span>
                   <span className={`tabular-nums w-16 text-right ${record.resultPct >= 0 ? "text-profit" : "text-loss"}`}>
                     {record.resultPct >= 0 ? "+" : ""}
                     {record.resultPct.toFixed(1)}%

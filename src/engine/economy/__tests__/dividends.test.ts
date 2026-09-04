@@ -57,17 +57,20 @@ describe("calculateDividendPayment", () => {
     expect(calculateDividendPayment(10, 100, 0.04, 4)).toBeCloseTo(10, 5);
   });
 
-  it("по умолчанию PAYMENTS_PER_YEAR=4 (квартал)", () => {
+  it("по умолчанию платим еженедельно (PAYMENTS_PER_YEAR=52)", () => {
+    expect(PAYMENTS_PER_YEAR).toBe(52);
     expect(calculateDividendPayment(10, 100, 0.04)).toBeCloseTo(calculateDividendPayment(10, 100, 0.04, PAYMENTS_PER_YEAR), 10);
   });
 });
 
-describe("processQuarterlyDividends", () => {
+describe("processDividends", () => {
   it("платит по открытым long-позициям с dividendYield и добавляет на баланс", () => {
     const account = makeAccount({ positions: [makePosition({ size: 10 })] });
     const paid = processQuarterlyDividends(account, [makeAsset()], { STK_TEST: 100 });
-    expect(paid).toBeCloseTo(10, 5); // 10*100*(0.04/4)
-    expect(account.balance).toBeCloseTo(10010, 5);
+    // 10 бумаг * 100 $ * (4% / 52 недели)
+    const weekly = (10 * 100 * 0.04) / PAYMENTS_PER_YEAR;
+    expect(paid).toBeCloseTo(weekly, 5);
+    expect(account.balance).toBeCloseTo(10_000 + weekly, 5);
   });
 
   it("НЕ платит по short-позициям", () => {
@@ -95,7 +98,7 @@ describe("processQuarterlyDividends", () => {
     });
     const paid = processQuarterlyDividends(account, [makeAsset()], { STK_TEST: 100 });
     // (10+5)*100*(0.04/4) = 15
-    expect(paid).toBeCloseTo(15, 5);
+    expect(paid).toBeCloseTo((15 * 100 * 0.04) / PAYMENTS_PER_YEAR, 5);
   });
 
   it("платит отдельно по каждому активу с холдингом", () => {
@@ -108,6 +111,6 @@ describe("processQuarterlyDividends", () => {
     const assets = [makeAsset({ id: "A", dividendYield: 0.04 }), makeAsset({ id: "B", dividendYield: 0.08 })];
     const paid = processQuarterlyDividends(account, assets, { A: 100, B: 50 });
     // A: 10*100*0.01=10; B: 4*50*0.02=4 → 14
-    expect(paid).toBeCloseTo(14, 5);
+    expect(paid).toBeCloseTo((10 * 100 * 0.04 + 10 * 100 * 0.016) / PAYMENTS_PER_YEAR, 5);
   });
 });

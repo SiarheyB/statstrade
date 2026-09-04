@@ -21,7 +21,7 @@ export interface GameTuning {
 
 export const DEFAULT_TUNING: GameTuning = {
   startingBalance: 10_000,
-  newsPerGameDay: 1.5,
+  newsPerGameDay: 24,
   blackSwanWeight: 0.001,
   volatilityMultiplier: 1,
   dividendMultiplier: 1,

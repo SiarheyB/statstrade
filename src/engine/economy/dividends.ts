@@ -4,11 +4,14 @@
 //
 // dividendPayment (за период) = holdingSize * currentPrice * (dividendYield / paymentsPerYear)
 //
-// Выплаты — раз в игровой "квартал" (см. QUARTER_MS в gameLoop.ts), по всем
-// активам с dividendYield, автоматически, без действий игрока.
+// Выплаты — раз в игровую неделю (см. DIVIDEND_PERIOD_MS в gameLoop.ts), по
+// всем активам с dividendYield, автоматически, без действий игрока.
 import type { Account, Asset } from "@/engine/entities/types";
 
-export const PAYMENTS_PER_YEAR = 4; // квартальная выплата
+// Еженедельная выплата: время в игре идёт вровень с реальным, и при
+// квартальной периодичности дивиденды не увидел бы никто. Годовая сумма от
+// этого не меняется — делим ту же доходность на 52 вместо 4.
+export const PAYMENTS_PER_YEAR = 52;
 
 export function calculateDividendPayment(
   holdingSize: number,

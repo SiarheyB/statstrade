@@ -23,12 +23,17 @@ export interface RegimePreset {
 // проигрывать, а buy&hold-стиль (Investing) становится ловушкой. Проверено
 // прогоном на 3 игровых года по 15 сидам (см. историю правок): бычьих и
 // боковых периодов больше, чем медвежьих, кризис короткий и редкий.
+//
+// Сроки заданы в ИГРОВЫХ днях, а игровой день теперь равен реальному. Взяты
+// не биржевые (бычий рынок годами), а игровые: режим, который не меняется
+// месяцами реального времени, для игрока просто не существует. Ориентир —
+// увидеть смену обстановки за несколько заходов, а не за сезон.
 export const REGIME_PRESETS: Record<MarketRegimeType, RegimePreset> = {
-  bull: { driftModifier: 2.5, volModifier: 0.9, minDurationDays: 60, maxDurationDays: 220 },
-  bear: { driftModifier: -1.2, volModifier: 1.35, minDurationDays: 40, maxDurationDays: 150 },
-  sideways: { driftModifier: 0.5, volModifier: 0.75, minDurationDays: 30, maxDurationDays: 120 },
-  high_volatility: { driftModifier: 0.5, volModifier: 2.2, minDurationDays: 10, maxDurationDays: 45 },
-  crisis: { driftModifier: -3, volModifier: 2.5, minDurationDays: 5, maxDurationDays: 30 },
+  bull: { driftModifier: 2.5, volModifier: 0.9, minDurationDays: 4, maxDurationDays: 14 },
+  bear: { driftModifier: -1.2, volModifier: 1.35, minDurationDays: 3, maxDurationDays: 10 },
+  sideways: { driftModifier: 0.5, volModifier: 0.75, minDurationDays: 2, maxDurationDays: 8 },
+  high_volatility: { driftModifier: 0.5, volModifier: 2.2, minDurationDays: 1, maxDurationDays: 4 },
+  crisis: { driftModifier: -3, volModifier: 2.5, minDurationDays: 1, maxDurationDays: 3 },
 };
 
 // Куда режим может перейти и с какими весами. Матрица НЕ симметрична и это
