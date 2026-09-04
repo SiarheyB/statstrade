@@ -4,7 +4,7 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { rateLimit, clientIp } from "@/lib/ratelimit";
 import { detectImageType, isAllowedImageType, extForMime, MAX_IMAGE_BYTES } from "@/lib/imageValidation";
-import { getValidCloudToken, firstConnectedProvider } from "@/lib/integrations/cloudStorage";
+import { getValidCloudToken, firstConnectedProvider, type CloudProvider } from "@/lib/integrations/cloudStorage";
 import {
   uploadImage,
   makeFilePublic,
@@ -89,11 +89,28 @@ export async function POST(req: Request) {
     return badRequest(`Файл слишком большой (максимум ${MAX_IMAGE_BYTES / (1024 * 1024)} МБ)`);
   }
 
-  const provider = await firstConnectedProvider(user.userId);
-  if (!provider) {
-    return badRequest("Облачное хранилище не подключено — подключите его в настройках");
+  let provider: CloudProvider | null = null;
+  let accessToken: string | null;
+  try {
+    provider = await firstConnectedProvider(user.userId);
+    if (!provider) {
+      return badRequest("Облачное хранилище не подключено — подключите его в настройках");
+    }
+    accessToken = await getValidCloudToken(user.userId, provider);
+  } catch (err) {
+    // Сеть до OAuth-эндпоинта провайдера (обновление токена) недоступна — без
+    // этого catch исключение улетало мимо try/catch ниже необработанным:
+    // фреймворк отдавал не-JSON 500, клиент падал на res.json() и показывал
+    // общее "Upload failed", а в логе оставалось голое "TypeError: fetch
+    // failed" без причины (cause) и без стека — serverError() их не передаёт.
+    const e = err as Error & { cause?: unknown };
+    const cause = e.cause instanceof Error ? e.cause.message : typeof e.cause === "string" ? e.cause : null;
+    logError(`${provider ?? "cloud"} token refresh failed: ${e.message}${cause ? ` (${cause})` : ""}`, {
+      path: "/api/trade-images",
+      stack: e.stack,
+    });
+    return badRequest("Не удалось обновить доступ к облаку, попробуйте позже");
   }
-  const accessToken = await getValidCloudToken(user.userId, provider);
   if (!accessToken) {
     return badRequest("Облачное хранилище не подключено — подключите его в настройках");
   }
