@@ -17,6 +17,25 @@ export function randomNormal(mean: number, stdDev: number, rng: () => number): n
   return mean + stdDev * z0;
 }
 
+// Базовый объём одного тика движка — условные «лоты». Абсолютная величина
+// значения не имеет: объём в игре нужен как ОТНОСИТЕЛЬНАЯ характеристика
+// («здесь торговали активнее, чем там»), поэтому важна только форма
+// распределения, а не единицы измерения.
+export const BASE_TICK_VOLUME = 40;
+
+/**
+ * Объём, наторгованный за один тик. Складывается из двух частей: постоянного
+ * фона (рынок торгуется всегда) и всплеска, пропорционального движению цены —
+ * так работает и настоящий рынок: резкое движение это всегда всплеск объёма,
+ * а не тихий дрейф. Плюс случайный множитель, иначе гистограмма объёма
+ * выглядела бы копией графика цены.
+ */
+export function tickVolume(returnPct: number, rng: () => number): number {
+  const move = Math.abs(returnPct);
+  const spike = 1 + move * 400;
+  return BASE_TICK_VOLUME * spike * (0.4 + rng() * 1.2);
+}
+
 /** Округление к шагу цены актива (tickSize). */
 export function roundToTickSize(price: number, tickSize: number): number {
   if (!Number.isFinite(tickSize) || tickSize <= 0) return price;

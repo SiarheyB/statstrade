@@ -11,6 +11,7 @@ import type {
   Candle,
   ContractRecord,
   ContractState,
+  GameDrawing,
   LifestyleState,
   MarketRegime,
   NewsEvent,
@@ -40,7 +41,7 @@ import {
   newsVolMultipliers,
   pruneExpiredNews,
 } from "@/engine/market/newsEngine";
-import { randomNormal, simulateTick } from "@/engine/market/priceSimulation";
+import { randomNormal, simulateTick, tickVolume } from "@/engine/market/priceSimulation";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
 import {
   calculateLiquidationPenalty,
@@ -127,15 +128,23 @@ export interface GameState {
   daily: DailyState;
   lastDailyCompleted: DailyTask[];
   bots: AlgoBot[];
+  drawings: Record<string, GameDrawing[]>;
 }
 
-function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, intervalMs: number): Candle[] {
+function appendPriceToCandles(
+  candles: Candle[],
+  price: number,
+  gameMs: number,
+  intervalMs: number,
+  volume: number,
+): Candle[] {
   const bucketStart = Math.floor(gameMs / intervalMs) * intervalMs;
   const last = candles[candles.length - 1];
   if (last && last.timestamp === bucketStart) {
     last.high = Math.max(last.high, price);
     last.low = Math.min(last.low, price);
     last.close = price;
+    last.volume += volume;
     return candles;
   }
   // Защита от "отката времени назад" — не должно случаться при
@@ -146,7 +155,7 @@ function appendPriceToCandles(candles: Candle[], price: number, gameMs: number, 
   // игнорируем более старый бакет вместо порчи массива — свечи внутри
   // одной вкладки должны идти строго по возрастанию времени.
   if (last && bucketStart < last.timestamp) return candles;
-  const next = [...candles, { timestamp: bucketStart, open: price, high: price, low: price, close: price, volume: 0 }];
+  const next = [...candles, { timestamp: bucketStart, open: price, high: price, low: price, close: price, volume }];
   return next.length > MAX_CANDLES_PER_ASSET ? next.slice(next.length - MAX_CANDLES_PER_ASSET) : next;
 }
 
@@ -358,7 +367,8 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
       correlatedZ: z,
     });
     prices[asset.id] = newPrice;
-    candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs, intervalMs);
+    const volume = tickVolume((newPrice - currentPrice) / currentPrice, rng);
+    candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs, intervalMs, volume);
   }
 
   // 4. Проверить ликвидацию и SL/TP открытых позиций (авто-закрытие).

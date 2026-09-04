@@ -303,6 +303,28 @@ export interface PerkState {
 import type { DailyState } from "@/engine/player/dailyTasks";
 import type { AlgoBot } from "@/engine/player/algoBots";
 
+// ── Разметка на графике ────────────────────────────────────────────────────
+// Свои рисунки игрока: трендовая линия, горизонтальный уровень,
+// прямоугольник. Хранятся В САМОЙ ИГРЕ (IndexedDB вместе с сохранением), а не
+// в таблице UserDrawing, как на форексе: та привязана к реальному инструменту
+// и реальному времени, а здесь и то и другое — игровое.
+//
+// Точки хранятся в координатах ДАННЫХ (игровое время + цена), а не в
+// пикселях: иначе разметка разъезжалась бы при любом зуме и смене размера
+// окна.
+export type GameDrawingKind = "trend" | "level" | "rect";
+
+export interface GameDrawingPoint {
+  t: number;
+  price: number;
+}
+
+export interface GameDrawing {
+  id: string;
+  kind: GameDrawingKind;
+  points: GameDrawingPoint[];
+}
+
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
   savedAt: number;
@@ -343,6 +365,8 @@ export interface SaveGame {
   daily: DailyState;
   // Алго-боты: торгуют сами, в том числе во время офлайн-прогресса.
   bots: AlgoBot[];
+  // Разметка игрока по инструментам.
+  drawings: Record<string, GameDrawing[]>;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

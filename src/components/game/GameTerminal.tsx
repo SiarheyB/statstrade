@@ -96,6 +96,8 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   const notify = useGameStore((s) => s.notify);
   const clearContractResult = useGameStore((s) => s.clearContractResult);
   const clearDailyCompleted = useGameStore((s) => s.clearDailyCompleted);
+  const addDrawing = useGameStore((s) => s.addDrawing);
+  const removeDrawing = useGameStore((s) => s.removeDrawing);
   // Длина журнала на прошлом кадре — по её приросту понимаем, что сделка
   // закрылась (движок не рассылает событий, состояние иммутабельно).
   const lastJournalLength = useRef(0);
@@ -293,7 +295,10 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
                 currentPrice={assetId ? game.prices[assetId] : undefined}
                 symbol={asset?.symbol ?? ""}
                 candleColors={candleColors}
-                baseIntervalMs={candleIntervalMs(game.activeStyle.timeAcceleration)}
+                baseIntervalMs={candleIntervalMs()}
+                drawings={assetId ? (game.drawings[assetId] ?? []) : []}
+                onAddDrawing={(drawing) => assetId && addDrawing(assetId, drawing)}
+                onRemoveDrawing={(id) => assetId && removeDrawing(assetId, id)}
               />
             </div>
 

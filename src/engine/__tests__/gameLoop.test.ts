@@ -62,6 +62,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     daily: { day: 0, completedIds: [] },
     lastDailyCompleted: [],
     bots: [],
+    drawings: {},
     contractPoints: 0,
     unlockedMarkets: ["stock"],
     lastContractResult: null,

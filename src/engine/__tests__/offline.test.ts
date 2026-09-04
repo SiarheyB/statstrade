@@ -66,6 +66,7 @@ function state(overrides: Partial<GameState> = {}): GameState {
     daily: freshDailyState(),
     lastDailyCompleted: [],
     bots: [],
+    drawings: {},
     ...overrides,
   };
 }

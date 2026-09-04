@@ -1,39 +1,35 @@
 "use client";
 
-// Canvas-график цены игрового терминала. Переиспользует примитивы
+// Canvas-график игрового терминала. Переиспользует примитивы
 // src/lib/candlestickChart.ts (свечи, сетка, crosshair, бирки цены), а НЕ
 // TradingView lightweight-charts из спеки (ADJUSTED FROM SPEC, раздел 0 п.6):
-// свой canvas-движок в проекте уже есть, третья ~45kb зависимость ради
-// одного графика неоправданна.
+// свой canvas-движок в проекте уже есть.
 //
-// Что здесь СВОЁ и почему (переделано после разбора с пользователем: «в
-// график нельзя растянуть, стянуть, переместить, какие-то большие отступы
-// слева, какие это таймфреймы непонятно»):
+// Что здесь СВОЁ и почему:
 //
-// 1. Окно просмотра (view) имеет ДВА состояния: null = «следим за рынком»
-//    (окно едет за последней свечой) и заданное = «пользователь сам увёл
-//    график». Раньше окно один раз выставлялось по всей истории и потом не
-//    двигалось: новые свечи уезжали за правый край, график выглядел
-//    замершим, а обработчики зума/панорамы выходили по `if (!viewRef.current)
-//    return` — то есть на живом графике зум и панорама не работали ВООБЩЕ.
-//    Теперь любое взаимодействие сначала материализует текущее окно
-//    (viewFromFollow) и только потом его двигает.
-// 2. Пустая полоса слева убрана: computePlotLayout() резервирует под ценовую
+// 1. Окно просмотра имеет два состояния: null = «следим за рынком» (окно
+//    едет за последней свечой) и заданное = «пользователь сам увёл график».
+//    Любое взаимодействие сначала материализует текущее окно и только потом
+//    его двигает — иначе на живом графике (перерисовка 4 раза в секунду)
+//    зум и панорама молча не работали, как было в первой версии.
+// 2. Масштаб тянется ЗА ОСИ, как в биржевых терминалах: потянул вверх по
+//    правой шкале — свечи растянулись по вертикали, потянул вбок по нижней —
+//    график сжался или растянулся по времени. Плюс колесо (обе оси сразу,
+//    Shift — только время) и перетаскивание по полю (панорама).
+// 3. Пустая полоса слева убрана: computePlotLayout() резервирует под ценовую
 //    шкалу 76px СЛЕВА (это нужно другим страницам проекта), а подписи цен
-//    рисуются справа — на игровом графике эти 84px были просто пустотой.
-//    Здесь раскладка считается своя, с минимальным левым отступом.
-// 3. Таймфрейм: свеча движка привязана к ускорению стиля, поэтому «1 бар» в
-//    скальпинге и в инвестициях — это разное игровое время. Селектор
-//    агрегирует базовые свечи по 1/5/15/60 и подписывает результат в
-//    игровом времени (1м, 15м, 1ч, 12ч, 30д), чтобы вопрос «какой это
-//    таймфрейм» вообще не возникал.
+//    рисуются справа.
+// 4. Свеча равна минуте реального времени; более крупные таймфреймы
+//    собираются из минуток агрегацией (aggregateCandles).
+// 5. Объём, скользящие средние, RSI и разметка (трендовая, уровень,
+//    прямоугольник) — здесь же: игроку нужен один инструмент анализа, а не
+//    вкладка настроек.
 //
 // Слушатели мыши/колеса навешаны ОДИН раз (эффект без зависимостей) и не
-// перевешиваются на каждый тик игры (~4Hz) — иначе драг рвался бы посреди
-// перетаскивания. Функция отрисовки живёт в redrawRef и обновляется отдельным
-// эффектом, поэтому листенеры не ловят устаревшее замыкание.
+// перевешиваются на каждый тик игры — иначе драг рвался бы посреди
+// перетаскивания. Функция отрисовки живёт в redrawRef.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Maximize2, Minus, Plus, Radio } from "lucide-react";
+import { Eraser, Maximize2, Minus, Minus as LevelIcon, MousePointer2, Plus, Radio, Square, TrendingUp } from "lucide-react";
 import {
   CHART_COLORS,
   drawCandlesticks,
@@ -44,69 +40,75 @@ import {
   drawTimeCrosshairTag,
   drawTooltipBox,
   fmtPriceLabel,
-  PADB,
   PADR,
   type Candle as ChartCandle,
   type PlotLayout,
 } from "@/lib/candlestickChart";
-import type { Candle as EngineCandle } from "@/engine/entities/types";
+import { ema, rsi, sma } from "@/engine/market/indicators";
+import type { Candle as EngineCandle, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
 import { fmtGameClock, fmtGameDuration } from "@/lib/gameTime";
 import { useI18n } from "@/lib/i18n/provider";
 
 // Сортируем защитно: проекция времени и drawCandlesticks предполагают строго
-// возрастающий порядок и молча рисуют мусор, если это не так (см. фиксы в
-// gameStore.ts/gameLoop.ts — это вторая линия обороны).
-function toChartCandles(candles: EngineCandle[]): ChartCandle[] {
+// возрастающий порядок и молча рисуют мусор, если это не так.
+function toChartCandles(candles: EngineCandle[]): (ChartCandle & { v: number })[] {
   return [...candles]
     .sort((a, b) => a.timestamp - b.timestamp)
-    .map((c) => ({ t: c.timestamp, o: c.open, h: c.high, l: c.low, c: c.close }));
+    .map((c) => ({ t: c.timestamp, o: c.open, h: c.high, l: c.low, c: c.close, v: c.volume }));
 }
 
 /** Склейка базовых свечей по `factor` штук в одну (таймфрейм графика). */
-export function aggregateCandles(candles: ChartCandle[], baseIntervalMs: number, factor: number): ChartCandle[] {
+export function aggregateCandles(
+  candles: (ChartCandle & { v: number })[],
+  baseIntervalMs: number,
+  factor: number,
+): (ChartCandle & { v: number })[] {
   if (factor <= 1 || candles.length === 0) return candles;
   const bucketMs = baseIntervalMs * factor;
-  const out: ChartCandle[] = [];
-  let current: ChartCandle | null = null;
+  const out: (ChartCandle & { v: number })[] = [];
+  let current: (ChartCandle & { v: number }) | null = null;
   let currentBucket = NaN;
   for (const k of candles) {
     const bucket = Math.floor(k.t / bucketMs) * bucketMs;
     if (!current || bucket !== currentBucket) {
       if (current) out.push(current);
-      current = { t: bucket, o: k.o, h: k.h, l: k.l, c: k.c };
+      current = { t: bucket, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v };
       currentBucket = bucket;
       continue;
     }
     current.h = Math.max(current.h, k.h);
     current.l = Math.min(current.l, k.l);
     current.c = k.c;
+    current.v += k.v;
   }
   if (current) out.push(current);
   return out;
 }
 
-// Окно просмотра — как на форексе и карте ордеров (ChartView в
-// lib/useChartInteractions.ts): ЦЕНОВАЯ ось входит в окно наравне со
-// временем. Раньше игровой график подгонял цену под видимые свечи на каждом
-// кадре — при живом тике (4 раза в секунду) вертикальный масштаб дёргался
-// сам по себе, и свечи «дышали», хотя пользователь ничего не делал.
 type View = { t0: number; t1: number; y0: number; y1: number };
+type Tool = "cursor" | "trend" | "level" | "rect" | "erase";
+type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
 
 const TF_FACTORS = [1, 5, 15, 60];
-// Столько баров видно в режиме слежения. На форексе это 300-480 (VISIBLE_CANDLES
-// в ForexView.tsx) — берём тот же порядок, чтобы свечи были такой же
-// «плотности», а не в три раза толще, как было при 90.
 const DEFAULT_VISIBLE_CANDLES = 260;
-const MIN_VISIBLE_CANDLES = 8; // ближе не зумим — дальше это уже не график
-const MAX_VISIBLE_CANDLES = 1200; // дальше некуда: истории всё равно 500 баров
-const PAD_LEFT = 6; // вместо 84px пустоты из computePlotLayout
-// Тело свечи занимает 40% шага — ровно как на форексе (drawCandlesticks
-// вызывается там с bodyRatio: 0.4). При дефолтных 0.7 свечи выглядели
-// толстыми и «игрушечными» рядом с остальными графиками проекта.
+const MIN_VISIBLE_CANDLES = 8;
+const MAX_VISIBLE_CANDLES = 1200;
+const PAD_LEFT = 6;
+const PAD_BOTTOM = 26; // полоса оси времени: за неё же тянут горизонтальный масштаб
 const BODY_RATIO = 0.4;
-// Насколько ценовое окно шире реального диапазона свечей при автоподгоне.
 const PRICE_PADDING = 0.08;
-const PRICE_ZOOM_LIMIT = 12; // во столько раз можно растянуть/сжать цену
+const PRICE_ZOOM_LIMIT = 12;
+const VOLUME_SHARE = 0.18; // какую долю высоты занимает гистограмма объёма
+const RSI_HEIGHT = 84;
+const HIT_TOLERANCE = 6; // насколько близко надо кликнуть, чтобы попасть в разметку
+
+const TOOLS: { id: Tool; Icon: typeof MousePointer2 }[] = [
+  { id: "cursor", Icon: MousePointer2 },
+  { id: "trend", Icon: TrendingUp },
+  { id: "level", Icon: LevelIcon },
+  { id: "rect", Icon: Square },
+  { id: "erase", Icon: Eraser },
+];
 
 export default function PriceChart({
   candles,
@@ -114,27 +116,29 @@ export default function PriceChart({
   symbol,
   candleColors,
   baseIntervalMs,
+  drawings,
+  onAddDrawing,
+  onRemoveDrawing,
 }: {
   candles: EngineCandle[];
   currentPrice: number | undefined;
   symbol: string;
-  // Цвета свечей купленной в магазине темы (раздел 13). undefined — цвета по
-  // умолчанию, те же, что у форекса/карты ордеров.
   candleColors?: { up: string; down: string };
-  // Сколько ИГРОВОГО времени в одной базовой свече — зависит от ускорения
-  // активного стиля (candleIntervalMs в gameLoop.ts). Нужен только для
-  // подписи таймфрейма и агрегации.
   baseIntervalMs: number;
+  drawings: GameDrawing[];
+  onAddDrawing: (drawing: GameDrawing) => void;
+  onRemoveDrawing: (id: string) => void;
 }) {
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [tfFactor, setTfFactor] = useState(1);
-  // Только для кнопки «вернуться к рынку»: сам режим слежения живёт в
-  // viewRef (перерисовка идёт вне React, состояние — чтобы перерисовать
-  // панель инструментов).
   const [following, setFollowing] = useState(true);
+  const [tool, setTool] = useState<Tool>("cursor");
+  const [showMa, setShowMa] = useState(true);
+  const [showVolume, setShowVolume] = useState(true);
+  const [showRsi, setShowRsi] = useState(false);
 
   const candlesRef = useRef(candles);
   const priceRef = useRef(currentPrice);
@@ -143,21 +147,26 @@ export default function PriceChart({
   const colorsRef = useRef(candleColors);
   const tfRef = useRef(tfFactor);
   const baseIntervalRef = useRef(baseIntervalMs);
+  const drawingsRef = useRef(drawings);
+  const toolRef = useRef(tool);
+  const addRef = useRef(onAddDrawing);
+  const removeRef = useRef(onRemoveDrawing);
+  const optionsRef = useRef({ showMa, showVolume, showRsi });
 
-  const viewRef = useRef<View | null>(null); // null = следим за последней свечой
+  const viewRef = useRef<View | null>(null);
   const layoutRef = useRef<PlotLayout | null>(null);
-  const stepRef = useRef(baseIntervalMs); // шаг ВИДИМЫХ (агрегированных) свечей
+  const stepRef = useRef(baseIntervalMs);
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
-  const dragRef = useRef<{ mx: number; my: number; startView: View } | null>(null);
+  const dragRef = useRef<{ mode: DragMode; mx: number; my: number; startView: View } | null>(null);
+  const draftRef = useRef<GameDrawing | null>(null);
   const redrawRef = useRef<() => void>(() => {});
 
-  /** Видимые свечи текущего таймфрейма. */
-  const visibleCandles = useCallback((): ChartCandle[] => {
-    return aggregateCandles(toChartCandles(candlesRef.current), baseIntervalRef.current, tfRef.current);
-  }, []);
+  const visibleCandles = useCallback(
+    () => aggregateCandles(toChartCandles(candlesRef.current), baseIntervalRef.current, tfRef.current),
+    [],
+  );
 
-  /** Диапазон цен по свечам, попавшим в окно [t0, t1], с полями сверху и снизу. */
-  const priceRange = useCallback((all: ChartCandle[], t0: number, t1: number, stepMs: number): { y0: number; y1: number } => {
+  const priceRange = useCallback((all: ChartCandle[], t0: number, t1: number, stepMs: number) => {
     const visible = all.filter((k) => k.t + stepMs >= t0 && k.t <= t1);
     const forRange = visible.length > 0 ? visible : all;
     if (forRange.length === 0) return { y0: 0, y1: 1 };
@@ -171,73 +180,72 @@ export default function PriceChart({
     return { y0: lo - pad, y1: hi + pad };
   }, []);
 
-  /** Окно в режиме слежения: последние DEFAULT_VISIBLE_CANDLES баров, цена — по ним же. */
-  const followView = useCallback((all: ChartCandle[], stepMs: number): View => {
-    const lastT = all.length > 0 ? all[all.length - 1].t : 0;
-    const t1 = lastT + stepMs;
-    const t0 = t1 - stepMs * DEFAULT_VISIBLE_CANDLES;
-    return { t0, t1, ...priceRange(all, t0, t1, stepMs) };
-  }, [priceRange]);
+  const followView = useCallback(
+    (all: ChartCandle[], stepMs: number): View => {
+      const lastT = all.length > 0 ? all[all.length - 1].t : 0;
+      const t1 = lastT + stepMs;
+      const t0 = t1 - stepMs * DEFAULT_VISIBLE_CANDLES;
+      return { t0, t1, ...priceRange(all, t0, t1, stepMs) };
+    },
+    [priceRange],
+  );
 
-  const clampView = useCallback((v: View): View => {
-    const all = visibleCandles();
-    const stepMs = stepRef.current || 1;
-    const span = Math.min(
-      stepMs * MAX_VISIBLE_CANDLES,
-      Math.max(stepMs * MIN_VISIBLE_CANDLES, v.t1 - v.t0),
-    );
-    let t0 = v.t0;
-    let t1 = t0 + span;
-    if (all.length > 0) {
-      const fullT0 = all[0].t;
-      const fullT1 = all[all.length - 1].t + stepMs;
-      // Не даём уехать дальше, чем на пол-экрана за пределы истории: график,
-      // улетевший в пустоту, выглядит как поломка.
-      if (t0 < fullT0 - span / 2) {
-        t0 = fullT0 - span / 2;
-        t1 = t0 + span;
+  const clampView = useCallback(
+    (v: View): View => {
+      const all = visibleCandles();
+      const stepMs = stepRef.current || 1;
+      const span = Math.min(stepMs * MAX_VISIBLE_CANDLES, Math.max(stepMs * MIN_VISIBLE_CANDLES, v.t1 - v.t0));
+      let t0 = v.t0;
+      let t1 = t0 + span;
+      if (all.length > 0) {
+        const fullT0 = all[0].t;
+        const fullT1 = all[all.length - 1].t + stepMs;
+        if (t0 < fullT0 - span / 2) {
+          t0 = fullT0 - span / 2;
+          t1 = t0 + span;
+        }
+        if (t1 > fullT1 + span / 2) {
+          t1 = fullT1 + span / 2;
+          t0 = t1 - span;
+        }
       }
-      if (t1 > fullT1 + span / 2) {
-        t1 = fullT1 + span / 2;
-        t0 = t1 - span;
-      }
-    }
-    // Цену тоже ограничиваем — иначе колесом можно «сплющить» окно в линию
-    // или растянуть так, что свечи превращаются в точку у края.
-    const natural = priceRange(all, t0, t1, stepMs);
-    const naturalSpan = natural.y1 - natural.y0 || 1;
-    const center = (v.y0 + v.y1) / 2;
-    const pSpan = Math.min(
-      naturalSpan * PRICE_ZOOM_LIMIT,
-      Math.max(naturalSpan / PRICE_ZOOM_LIMIT, v.y1 - v.y0 || naturalSpan),
-    );
-    return { t0, t1, y0: center - pSpan / 2, y1: center + pSpan / 2 };
-  }, [priceRange, visibleCandles]);
+      const natural = priceRange(all, t0, t1, stepMs);
+      const naturalSpan = natural.y1 - natural.y0 || 1;
+      const center = (v.y0 + v.y1) / 2;
+      const pSpan = Math.min(
+        naturalSpan * PRICE_ZOOM_LIMIT,
+        Math.max(naturalSpan / PRICE_ZOOM_LIMIT, v.y1 - v.y0 || naturalSpan),
+      );
+      return { t0, t1, y0: center - pSpan / 2, y1: center + pSpan / 2 };
+    },
+    [priceRange, visibleCandles],
+  );
 
-  /** Текущее окно как конкретные числа — с материализацией режима слежения. */
   const materializeView = useCallback((): View => {
     if (viewRef.current) return viewRef.current;
-    const all = visibleCandles();
-    const view = followView(all, stepRef.current || baseIntervalRef.current);
+    const view = followView(visibleCandles(), stepRef.current || baseIntervalRef.current);
     viewRef.current = view;
     setFollowing(false);
     return view;
   }, [followView, visibleCandles]);
 
-  const zoomBy = useCallback((factor: number) => {
-    const v = materializeView();
-    const tCenter = (v.t0 + v.t1) / 2;
-    const tSpan = (v.t1 - v.t0) * factor;
-    const pCenter = (v.y0 + v.y1) / 2;
-    const pSpan = (v.y1 - v.y0) * factor;
-    viewRef.current = clampView({
-      t0: tCenter - tSpan / 2,
-      t1: tCenter + tSpan / 2,
-      y0: pCenter - pSpan / 2,
-      y1: pCenter + pSpan / 2,
-    });
-    redrawRef.current();
-  }, [clampView, materializeView]);
+  const zoomBy = useCallback(
+    (factor: number) => {
+      const v = materializeView();
+      const tCenter = (v.t0 + v.t1) / 2;
+      const tSpan = (v.t1 - v.t0) * factor;
+      const pCenter = (v.y0 + v.y1) / 2;
+      const pSpan = (v.y1 - v.y0) * factor;
+      viewRef.current = clampView({
+        t0: tCenter - tSpan / 2,
+        t1: tCenter + tSpan / 2,
+        y0: pCenter - pSpan / 2,
+        y1: pCenter + pSpan / 2,
+      });
+      redrawRef.current();
+    },
+    [clampView, materializeView],
+  );
 
   const resetView = useCallback(() => {
     viewRef.current = null;
@@ -245,8 +253,7 @@ export default function PriceChart({
     redrawRef.current();
   }, []);
 
-  // Эффект 1 — пересоздаёт функцию отрисовки и рисует немедленно на каждое
-  // изменение данных (~4Hz тик игры). Слушатели событий сюда НЕ входят.
+  // ── Отрисовка ───────────────────────────────────────────────────────────
   useEffect(() => {
     candlesRef.current = candles;
     priceRef.current = currentPrice;
@@ -255,6 +262,11 @@ export default function PriceChart({
     colorsRef.current = candleColors;
     tfRef.current = tfFactor;
     baseIntervalRef.current = baseIntervalMs;
+    drawingsRef.current = drawings;
+    toolRef.current = tool;
+    addRef.current = onAddDrawing;
+    removeRef.current = onRemoveDrawing;
+    optionsRef.current = { showMa, showVolume, showRsi };
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -273,9 +285,14 @@ export default function PriceChart({
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
 
-      // Своя раскладка вместо computePlotLayout(): слева только маленький
-      // отступ, справа — место под подписи цены (их рисует drawPriceGrid).
-      const layout: PlotLayout = { plotX: PAD_LEFT, plotW: Math.max(10, W - PAD_LEFT - PADR), plotH: H - PADB, W, H };
+      const rsiH = optionsRef.current.showRsi ? RSI_HEIGHT : 0;
+      const layout: PlotLayout = {
+        plotX: PAD_LEFT,
+        plotW: Math.max(10, W - PAD_LEFT - PADR),
+        plotH: H - PAD_BOTTOM - rsiH,
+        W,
+        H,
+      };
       layoutRef.current = layout;
 
       const allCandles = aggregateCandles(toChartCandles(candles), baseIntervalMs, tfFactor);
@@ -291,23 +308,19 @@ export default function PriceChart({
       const stepMs = allCandles[1].t - allCandles[0].t || baseIntervalMs * tfFactor;
       stepRef.current = stepMs;
 
-      // В режиме слежения окно (и время, и цена) пересчитывается каждый кадр —
-      // график едет за рынком. Как только пользователь его тронул, окно
-      // фиксируется целиком, включая вертикальный масштаб: свечи перестают
-      // «дышать» под каждую новую вершину, как на форексе.
       const view = viewRef.current ?? followView(allCandles, stepMs);
       const xspan = view.t1 - view.t0 || 1;
       const sx = (ms: number) => layout.plotX + ((ms - view.t0) / xspan) * layout.plotW;
-
       const yMin = view.y0;
       const yMax = view.y1;
       const yspan = yMax - yMin || 1;
       const sy = (p: number) => layout.plotH - ((p - yMin) / yspan) * layout.plotH;
+      const invX = (x: number) => view.t0 + ((x - layout.plotX) / layout.plotW) * xspan;
+      const invY = (y: number) => yMin + (1 - y / layout.plotH) * yspan;
 
       drawPriceGrid(ctx, layout, yMin, yMax, sy);
 
-      // Своя (не drawTimeGrid) вертикальная сетка: ось X — игровое время
-      // симуляции, а не календарные даты пользователя.
+      // Вертикальная сетка: ось X — игровое время симуляции.
       ctx.strokeStyle = CHART_COLORS.gridWeak;
       ctx.fillStyle = CHART_COLORS.axisTextWeak;
       ctx.font = "10px ui-sans-serif, system-ui";
@@ -321,22 +334,89 @@ export default function PriceChart({
         ctx.moveTo(x, 0);
         ctx.lineTo(x, layout.plotH);
         ctx.stroke();
-        ctx.fillText(fmtGameClock(ms), x, layout.H - 6);
+        ctx.fillText(fmtGameClock(ms), x, layout.plotH + 16);
       }
       ctx.textAlign = "left";
 
-      // Свечи рисуем в отсечении по области графика: при ручном ценовом
-      // масштабе часть баров уходит за верх/низ окна, и без clip они
-      // рисовались бы поверх ценовой шкалы и подписей времени.
       ctx.save();
       ctx.beginPath();
       ctx.rect(layout.plotX, 0, layout.plotW, layout.plotH);
       ctx.clip();
+
+      // Объём — под свечами, полупрозрачной гистограммой в нижней части поля.
+      if (optionsRef.current.showVolume) {
+        const visible = allCandles.filter((k) => k.t + stepMs >= view.t0 && k.t <= view.t1);
+        const maxVolume = visible.reduce((max, k) => Math.max(max, k.v), 0);
+        if (maxVolume > 0) {
+          const zone = layout.plotH * VOLUME_SHARE;
+          const width = Math.max(1, (stepMs / xspan) * layout.plotW * BODY_RATIO);
+          for (const k of visible) {
+            const height = (k.v / maxVolume) * zone;
+            const up = k.c >= k.o;
+            ctx.fillStyle = up ? (colorsRef.current?.up ?? CHART_COLORS.up) : (colorsRef.current?.down ?? CHART_COLORS.down);
+            ctx.globalAlpha = 0.25;
+            ctx.fillRect(sx(k.t + stepMs / 2) - width / 2, layout.plotH - height, width, height);
+          }
+          ctx.globalAlpha = 1;
+        }
+      }
+
       drawCandlesticks(ctx, allCandles, sx, sy, layout.plotX, layout.plotW, xspan, {
         bodyRatio: BODY_RATIO,
         up: colorsRef.current?.up,
         down: colorsRef.current?.down,
       });
+
+      // Скользящие средние поверх свечей.
+      if (optionsRef.current.showMa) {
+        const lines: [ReturnType<typeof sma>, string][] = [
+          [sma(allCandles, 20), "#38bdf8"],
+          [ema(allCandles, 50), "#f59e0b"],
+        ];
+        for (const [points, color] of lines) {
+          if (points.length < 2) continue;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          points.forEach((point, i) => {
+            const x = sx(point.t + stepMs / 2);
+            const y = sy(point.value);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+        }
+        ctx.lineWidth = 1;
+      }
+
+      // Разметка игрока + черновик под курсором.
+      const items = [...drawingsRef.current];
+      if (draftRef.current) items.push(draftRef.current);
+      for (const item of items) {
+        ctx.strokeStyle = CHART_COLORS.drawing;
+        ctx.lineWidth = 1.5;
+        if (item.kind === "level" && item.points[0]) {
+          const y = sy(item.points[0].price);
+          ctx.beginPath();
+          ctx.moveTo(layout.plotX, y);
+          ctx.lineTo(layout.plotX + layout.plotW, y);
+          ctx.stroke();
+        } else if (item.kind === "trend" && item.points.length === 2) {
+          ctx.beginPath();
+          ctx.moveTo(sx(item.points[0].t), sy(item.points[0].price));
+          ctx.lineTo(sx(item.points[1].t), sy(item.points[1].price));
+          ctx.stroke();
+        } else if (item.kind === "rect" && item.points.length === 2) {
+          const x0 = sx(item.points[0].t);
+          const x1 = sx(item.points[1].t);
+          const y0 = sy(item.points[0].price);
+          const y1 = sy(item.points[1].price);
+          ctx.fillStyle = "rgba(56,189,248,0.10)";
+          ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+          ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
+        }
+      }
+      ctx.lineWidth = 1;
       ctx.restore();
 
       const price = priceRef.current;
@@ -347,14 +427,53 @@ export default function PriceChart({
       ctx.textAlign = "left";
       ctx.fillText(symbolRef.current, layout.plotX + 10, 20);
 
-      // Crosshair + OHLC-подсказка под курсором — те же примитивы, что на
-      // форексе/карте ордеров/карте ликвидаций.
+      // RSI отдельной полосой снизу: накладывать осциллятор на цену нельзя,
+      // у него своя шкала 0-100.
+      if (optionsRef.current.showRsi) {
+        const top = layout.plotH + PAD_BOTTOM;
+        const points = rsi(allCandles, 14);
+        ctx.strokeStyle = CHART_COLORS.gridWeak;
+        ctx.beginPath();
+        ctx.moveTo(layout.plotX, top);
+        ctx.lineTo(layout.plotX + layout.plotW, top);
+        ctx.stroke();
+        const ry = (value: number) => top + 8 + (1 - value / 100) * (RSI_HEIGHT - 16);
+        for (const level of [30, 70]) {
+          ctx.strokeStyle = CHART_COLORS.gridWeak;
+          ctx.setLineDash([3, 3]);
+          ctx.beginPath();
+          ctx.moveTo(layout.plotX, ry(level));
+          ctx.lineTo(layout.plotX + layout.plotW, ry(level));
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = CHART_COLORS.axisTextWeak;
+          ctx.font = "9px ui-sans-serif, system-ui";
+          ctx.fillText(String(level), layout.plotX + layout.plotW + 5, ry(level) + 3);
+        }
+        if (points.length > 1) {
+          ctx.strokeStyle = "#a855f7";
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          points.forEach((point, i) => {
+            const x = sx(point.t + stepMs / 2);
+            const y = ry(point.value);
+            if (i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+          });
+          ctx.stroke();
+          ctx.lineWidth = 1;
+        }
+        ctx.fillStyle = CHART_COLORS.axisTextWeak;
+        ctx.font = "10px ui-sans-serif, system-ui";
+        ctx.fillText("RSI 14", layout.plotX + 6, top + 12);
+      }
+
+      // Crosshair + OHLC-подсказка.
       const hov = hoverRef.current;
       if (hov && hov.mx >= layout.plotX && hov.mx <= layout.plotX + layout.plotW && hov.my >= 0 && hov.my <= layout.plotH) {
         drawCrosshair(ctx, hov.mx, hov.my, layout);
-        const priceH = yMin + (1 - hov.my / layout.plotH) * yspan;
-        drawPriceCrosshairTag(ctx, priceH, hov.my, layout);
-        const ms = view.t0 + ((hov.mx - layout.plotX) / layout.plotW) * xspan;
+        drawPriceCrosshairTag(ctx, invY(hov.my), hov.my, layout);
+        const ms = invX(hov.mx);
         const candle = allCandles.find((k) => ms >= k.t && ms < k.t + stepMs);
         drawTimeCrosshairTag(ctx, fmtGameClock(candle ? candle.t : ms), hov.mx, layout);
         if (candle) {
@@ -363,6 +482,7 @@ export default function PriceChart({
             [
               `O ${fmtPriceLabel(candle.o)}  H ${fmtPriceLabel(candle.h)}`,
               `L ${fmtPriceLabel(candle.l)}  C ${fmtPriceLabel(candle.c)}`,
+              `V ${Math.round(candle.v).toLocaleString("ru-RU")}`,
             ],
             hov.mx,
             hov.my,
@@ -374,9 +494,25 @@ export default function PriceChart({
 
     redrawRef.current = draw;
     draw();
-  }, [candles, currentPrice, symbol, t, candleColors, tfFactor, baseIntervalMs, followView]);
+  }, [
+    candles,
+    currentPrice,
+    symbol,
+    t,
+    candleColors,
+    tfFactor,
+    baseIntervalMs,
+    followView,
+    drawings,
+    tool,
+    onAddDrawing,
+    onRemoveDrawing,
+    showMa,
+    showVolume,
+    showRsi,
+  ]);
 
-  // Эффект 2 — слушатели и ResizeObserver, ровно один раз.
+  // ── Взаимодействие ──────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -385,6 +521,61 @@ export default function PriceChart({
     const ro = new ResizeObserver(() => redrawRef.current());
     ro.observe(container);
 
+    /** Где именно нажали: поле, ценовая шкала справа или ось времени снизу. */
+    const zoneOf = (mx: number, my: number): DragMode => {
+      const lay = layoutRef.current;
+      if (!lay) return "pan";
+      if (mx > lay.plotX + lay.plotW) return "scaleY";
+      if (my > lay.plotH && my <= lay.plotH + PAD_BOTTOM) return "scaleX";
+      return "pan";
+    };
+
+    const dataAt = (mx: number, my: number) => {
+      const lay = layoutRef.current;
+      const view = viewRef.current;
+      if (!lay || !view) return null;
+      const xspan = view.t1 - view.t0 || 1;
+      const yspan = view.y1 - view.y0 || 1;
+      return {
+        t: view.t0 + ((mx - lay.plotX) / lay.plotW) * xspan,
+        price: view.y0 + (1 - my / lay.plotH) * yspan,
+      };
+    };
+
+    /** Ближайшая разметка к точке — для ластика. */
+    const hitDrawing = (mx: number, my: number): GameDrawing | null => {
+      const lay = layoutRef.current;
+      const view = viewRef.current;
+      if (!lay || !view) return null;
+      const xspan = view.t1 - view.t0 || 1;
+      const yspan = view.y1 - view.y0 || 1;
+      const sx = (ms: number) => lay.plotX + ((ms - view.t0) / xspan) * lay.plotW;
+      const sy = (p: number) => lay.plotH - ((p - view.y0) / yspan) * lay.plotH;
+      for (const item of [...drawingsRef.current].reverse()) {
+        if (item.kind === "level" && item.points[0]) {
+          if (Math.abs(sy(item.points[0].price) - my) <= HIT_TOLERANCE) return item;
+        } else if (item.kind === "trend" && item.points.length === 2) {
+          const x1 = sx(item.points[0].t);
+          const y1 = sy(item.points[0].price);
+          const x2 = sx(item.points[1].t);
+          const y2 = sy(item.points[1].price);
+          const dx = x2 - x1;
+          const dy = y2 - y1;
+          const lengthSq = dx * dx + dy * dy || 1;
+          const u = Math.max(0, Math.min(1, ((mx - x1) * dx + (my - y1) * dy) / lengthSq));
+          const dist = Math.hypot(mx - (x1 + u * dx), my - (y1 + u * dy));
+          if (dist <= HIT_TOLERANCE) return item;
+        } else if (item.kind === "rect" && item.points.length === 2) {
+          const xs = [sx(item.points[0].t), sx(item.points[1].t)].sort((a, b) => a - b);
+          const ys = [sy(item.points[0].price), sy(item.points[1].price)].sort((a, b) => a - b);
+          if (mx >= xs[0] - HIT_TOLERANCE && mx <= xs[1] + HIT_TOLERANCE && my >= ys[0] - HIT_TOLERANCE && my <= ys[1] + HIT_TOLERANCE) {
+            return item;
+          }
+        }
+      }
+      return null;
+    };
+
     const onMove = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
@@ -392,43 +583,111 @@ export default function PriceChart({
       hoverRef.current = { mx, my };
       const drag = dragRef.current;
       const lay = layoutRef.current;
+
+      if (!drag && lay) {
+        // Курсор подсказывает, что произойдёт при нажатии.
+        const zone = zoneOf(mx, my);
+        canvas.style.cursor =
+          toolRef.current !== "cursor" ? "crosshair" : zone === "scaleY" ? "ns-resize" : zone === "scaleX" ? "ew-resize" : "crosshair";
+      }
+
       if (drag && lay) {
-        const span = drag.startView.t1 - drag.startView.t0;
-        const dt = ((mx - drag.mx) / lay.plotW) * span;
-        // Вертикаль тоже тянется — на форексе/ордерфлоу перетаскивание
-        // двигает оба окна сразу, и мышечная память должна совпадать.
-        const pspan = drag.startView.y1 - drag.startView.y0;
-        const dp = ((my - drag.my) / lay.plotH) * pspan;
-        viewRef.current = clampView({
-          t0: drag.startView.t0 - dt,
-          t1: drag.startView.t1 - dt,
-          y0: drag.startView.y0 + dp,
-          y1: drag.startView.y1 + dp,
-        });
+        if (drag.mode === "pan") {
+          const span = drag.startView.t1 - drag.startView.t0;
+          const dt = ((mx - drag.mx) / lay.plotW) * span;
+          const pspan = drag.startView.y1 - drag.startView.y0;
+          const dp = ((my - drag.my) / lay.plotH) * pspan;
+          viewRef.current = clampView({
+            t0: drag.startView.t0 - dt,
+            t1: drag.startView.t1 - dt,
+            y0: drag.startView.y0 + dp,
+            y1: drag.startView.y1 + dp,
+          });
+        } else if (drag.mode === "scaleY") {
+          // Тянем вверх по ценовой шкале — окно цен сужается, свечи
+          // растягиваются по вертикали. Экспонента, чтобы движение
+          // ощущалось одинаково в любом масштабе.
+          const factor = Math.exp((my - drag.my) / 220);
+          const span = (drag.startView.y1 - drag.startView.y0) * factor;
+          const center = (drag.startView.y0 + drag.startView.y1) / 2;
+          viewRef.current = clampView({ ...drag.startView, y0: center - span / 2, y1: center + span / 2 });
+        } else if (drag.mode === "scaleX") {
+          // По оси времени: вправо — растягиваем (свечей меньше, они шире),
+          // влево — сжимаем и видим больше истории.
+          const factor = Math.exp((drag.mx - mx) / 220);
+          const span = (drag.startView.t1 - drag.startView.t0) * factor;
+          // Правый край (текущая цена) остаётся на месте — так ведут себя
+          // биржевые терминалы.
+          viewRef.current = clampView({ ...drag.startView, t0: drag.startView.t1 - span });
+        } else if (drag.mode === "draw" && draftRef.current) {
+          const point = dataAt(mx, my);
+          if (point) {
+            const draft = draftRef.current;
+            draft.points = draft.kind === "level" ? [point] : [draft.points[0], point];
+          }
+        }
       }
       redrawRef.current();
     };
+
     const onDown = (e: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
-      // Материализуем окно — в режиме слежения его ещё нет, и раньше именно
-      // здесь панорама молча ничего не делала.
-      dragRef.current = { mx: e.clientX - rect.left, my: e.clientY - rect.top, startView: { ...materializeView() } };
-      canvas.style.cursor = "grabbing";
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const view = materializeView();
+      const active = toolRef.current;
+
+      if (active === "erase") {
+        const hit = hitDrawing(mx, my);
+        if (hit) removeRef.current(hit.id);
+        redrawRef.current();
+        return;
+      }
+
+      if (active !== "cursor") {
+        const point = dataAt(mx, my);
+        if (point) {
+          draftRef.current = {
+            id: crypto.randomUUID(),
+            kind: active as GameDrawingKind,
+            points: active === "level" ? [point] : [point, point],
+          };
+          dragRef.current = { mode: "draw", mx, my, startView: { ...view } };
+        }
+        return;
+      }
+
+      dragRef.current = { mode: zoneOf(mx, my), mx, my, startView: { ...view } };
+      if (dragRef.current.mode === "pan") canvas.style.cursor = "grabbing";
     };
+
     const onUp = () => {
+      const draft = draftRef.current;
+      if (draft) {
+        // Случайный клик тем же инструментом не должен оставлять точку
+        // нулевой длины: у линии и прямоугольника концы обязаны различаться.
+        const meaningful =
+          draft.kind === "level" ||
+          (draft.points.length === 2 && (draft.points[0].t !== draft.points[1].t || draft.points[0].price !== draft.points[1].price));
+        if (meaningful) addRef.current(draft);
+        draftRef.current = null;
+      }
       dragRef.current = null;
       canvas.style.cursor = "crosshair";
-    };
-    const onLeave = () => {
-      hoverRef.current = null;
-      dragRef.current = null;
       redrawRef.current();
     };
+
+    const onLeave = () => {
+      hoverRef.current = null;
+      redrawRef.current();
+    };
+
     const onDouble = () => {
       viewRef.current = null;
       setFollowing(true);
       redrawRef.current();
     };
+
     const onWheel = (e: WheelEvent) => {
       const lay = layoutRef.current;
       if (!lay) return;
@@ -438,9 +697,6 @@ export default function PriceChart({
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
       const factor = e.deltaY > 0 ? 1.1 : 0.9;
-      // Зум держит под курсором ту же точку графика — и по времени, и по
-      // цене, ровно как useChartInteractions на форексе/карте ордеров. Shift
-      // сжимает только время (там та же клавиша).
       const fx = Math.min(1, Math.max(0, (mx - lay.plotX) / lay.plotW));
       const fy = Math.min(1, Math.max(0, my / lay.plotH));
       const tCursor = v.t0 + fx * (v.t1 - v.t0);
@@ -474,7 +730,7 @@ export default function PriceChart({
     };
   }, [clampView, materializeView]);
 
-  const toolButton = "px-2 py-1 rounded-md text-xs font-medium text-muted hover:text-fg hover:bg-surface-2 transition";
+  const toolButton = "px-2 py-1 rounded-md text-xs font-medium transition";
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -495,18 +751,50 @@ export default function PriceChart({
           ))}
         </div>
 
-        <span className="text-[11px] text-faint">{t("game.chart.tfLabel")}</span>
+        {/* Инструменты разметки — те же, что на форексе и карте ордеров. */}
+        <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
+          {TOOLS.map(({ id, Icon }) => (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setTool(id)}
+              title={t(`game.chart.tool.${id}`)}
+              className={`${toolButton} ${tool === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+            >
+              <Icon size={13} />
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
+          {(
+            [
+              ["ma", showMa, setShowMa],
+              ["volume", showVolume, setShowVolume],
+              ["rsi", showRsi, setShowRsi],
+            ] as const
+          ).map(([key, value, set]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => set(!value)}
+              className={`${toolButton} ${value ? "bg-accent/20 text-accent" : "text-muted hover:text-fg"}`}
+            >
+              {t(`game.chart.indicator.${key}`)}
+            </button>
+          ))}
+        </div>
 
         <div className="ml-auto flex items-center gap-1">
-          <button type="button" className={toolButton} onClick={() => zoomBy(1.4)} title={t("game.chart.zoomOut")}>
+          <button type="button" className={`${toolButton} text-muted hover:text-fg`} onClick={() => zoomBy(1.4)} title={t("game.chart.zoomOut")}>
             <Minus size={14} />
           </button>
-          <button type="button" className={toolButton} onClick={() => zoomBy(0.7)} title={t("game.chart.zoomIn")}>
+          <button type="button" className={`${toolButton} text-muted hover:text-fg`} onClick={() => zoomBy(0.7)} title={t("game.chart.zoomIn")}>
             <Plus size={14} />
           </button>
           <button
             type="button"
-            className={`${toolButton} inline-flex items-center gap-1 ${following ? "text-accent" : ""}`}
+            className={`${toolButton} inline-flex items-center gap-1 ${following ? "text-accent" : "text-muted hover:text-fg"}`}
             onClick={resetView}
             title={t("game.chart.resetHint")}
           >

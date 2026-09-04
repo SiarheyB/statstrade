@@ -11,6 +11,7 @@ import type {
   Asset,
   AssetClass,
   Candle,
+  GameDrawing,
   MarketRegime,
   NewsEvent,
   PositionSide,
@@ -142,6 +143,7 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     daily: freshDailyState(),
     lastDailyCompleted: [],
     bots: [],
+    drawings: {},
   };
 }
 
@@ -170,6 +172,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     perks: state.perks,
     daily: state.daily,
     bots: state.bots,
+    drawings: state.drawings,
     onboardingDone,
     disclaimerSeen,
   };
@@ -259,6 +262,7 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     daily: save.daily ?? freshDailyState(),
     lastDailyCompleted: [],
     bots: save.bots ?? [],
+    drawings: save.drawings ?? {},
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -321,6 +325,9 @@ interface GameStoreState {
   clearContractResult: () => void;
   clearDailyCompleted: () => void;
   addBot: (assetId: string) => void;
+  addDrawing: (assetId: string, drawing: GameDrawing) => void;
+  removeDrawing: (assetId: string, id: string) => void;
+  clearDrawings: (assetId: string) => void;
   updateBot: (id: string, patch: Partial<AlgoBot>) => void;
   removeBot: (id: string) => void;
   /**
@@ -596,6 +603,33 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
   clearDailyCompleted: () => set((s) => ({ game: { ...s.game, lastDailyCompleted: [] } })),
+
+  // Разметка графика. Живёт в сохранении игры: инструменты и время здесь
+  // игровые, и в общей таблице рисунков проекта им не место.
+  addDrawing: (assetId, drawing) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        drawings: { ...s.game.drawings, [assetId]: [...(s.game.drawings[assetId] ?? []), drawing] },
+      },
+    }));
+    void get().persistNow();
+  },
+
+  removeDrawing: (assetId, id) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        drawings: { ...s.game.drawings, [assetId]: (s.game.drawings[assetId] ?? []).filter((d) => d.id !== id) },
+      },
+    }));
+    void get().persistNow();
+  },
+
+  clearDrawings: (assetId) => {
+    set((s) => ({ game: { ...s.game, drawings: { ...s.game.drawings, [assetId]: [] } } }));
+    void get().persistNow();
+  },
 
   addBot: (assetId) => {
     const { game } = get();
