@@ -30,6 +30,7 @@ import {
   NotebookPen,
   PanelLeftClose,
   PanelLeftOpen,
+  Gamepad2,
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
@@ -75,6 +76,7 @@ const SERVICE_CHILDREN = [
   // "forexPublicAccess" выключен (админ видит раздел в любом случае).
   { href: "/dashboard/forex", key: "nav.forex", icon: TrendingUp, featureKey: "forex", userOnlyFeatureKey: "forexPublicAccess" },
   { href: "/dashboard/settings/risk", key: "nav.risk", icon: ShieldAlert },
+  { href: "/dashboard/game", key: "nav.game", icon: Gamepad2, featureKey: "game", userOnlyFeatureKey: "gamePublicAccess" },
 ];
 
 function isServiceRoute(pathname: string): boolean {
@@ -83,7 +85,8 @@ function isServiceRoute(pathname: string): boolean {
     pathname.startsWith("/dashboard/forex") ||
     pathname.startsWith("/dashboard/orderflow") ||
     pathname.startsWith("/dashboard/recommendations") ||
-    pathname.startsWith("/dashboard/settings/risk")
+    pathname.startsWith("/dashboard/settings/risk") ||
+    pathname.startsWith("/dashboard/game")
   );
 }
 

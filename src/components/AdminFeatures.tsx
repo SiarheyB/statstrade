@@ -23,11 +23,14 @@ type FeatureRow = {
 // tradeRecommendations/tradeRecommendationsPublicAccess: свой дублирующий UI
 // на /admin/recommendations (AdminRecommendations.tsx), рядом со статусом
 // пересчёта и кнопкой «Пересчитать сейчас» — тот же принцип, что у forex выше.
+// game/gamePublicAccess: свой дублирующий UI на /admin/game (AdminGameConfig.tsx).
 const HIDDEN_HERE = new Set([
   "forex",
   "forexPublicAccess",
   "tradeRecommendations",
   "tradeRecommendationsPublicAccess",
+  "game",
+  "gamePublicAccess",
 ]);
 
 export default function AdminFeatures() {

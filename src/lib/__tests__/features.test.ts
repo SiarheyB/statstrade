@@ -27,16 +27,25 @@ describe('features - FEATURE_DEFAULTS', () => {
       'imbalanceIndicator',
       'tradeRecommendations',
       'tradeRecommendationsPublicAccess',
+      'game',
+      'gamePublicAccess',
     ]);
   });
 
   // forex/forexPublicAccess (админ-переключатели раздела «Форекс», см.
-  // /admin/forex) и tradeRecommendationsPublicAccess (тот же приём для
-  // «Рекомендаций», см. /admin/recommendations) — единственные фичи без
-  // тюнинговых полей: только enabled/disabled, никаких числовых параметров.
-  // Поэтому "at least one numeric field" проверяем не для всех фич подряд,
-  // а с явным исключением.
-  const PURE_TOGGLE_KEYS = new Set<FeatureKey>(['forex', 'forexPublicAccess', 'tradeRecommendationsPublicAccess']);
+  // /admin/forex), tradeRecommendationsPublicAccess (тот же приём для
+  // «Рекомендаций», см. /admin/recommendations) и game/gamePublicAccess (тот
+  // же приём для «Игры», см. /admin/game) — единственные фичи без тюнинговых
+  // полей: только enabled/disabled, никаких числовых параметров. Поэтому "at
+  // least one numeric field" проверяем не для всех фич подряд, а с явным
+  // исключением.
+  const PURE_TOGGLE_KEYS = new Set<FeatureKey>([
+    'forex',
+    'forexPublicAccess',
+    'tradeRecommendationsPublicAccess',
+    'game',
+    'gamePublicAccess',
+  ]);
 
   it('each feature has required fields: enabled, numeric params, meta', () => {
     for (const key of Object.keys(FEATURE_DEFAULTS) as FeatureKey[]) {
@@ -71,6 +80,13 @@ describe('features - FEATURE_DEFAULTS', () => {
   it('tradeRecommendationsPublicAccess is a pure on/off toggle with no tunable params', () => {
     expect(FEATURE_DEFAULTS.tradeRecommendationsPublicAccess.label).toBeTruthy();
     expect(FEATURE_DEFAULTS.tradeRecommendationsPublicAccess.description).toBeTruthy();
+  });
+
+  it('game and gamePublicAccess are pure on/off toggles with no tunable params', () => {
+    expect(FEATURE_DEFAULTS.game.label).toBeTruthy();
+    expect(FEATURE_DEFAULTS.game.description).toBeTruthy();
+    expect(FEATURE_DEFAULTS.gamePublicAccess.label).toBeTruthy();
+    expect(FEATURE_DEFAULTS.gamePublicAccess.description).toBeTruthy();
   });
 
   it('exitEfficiency has correct defaults', () => {

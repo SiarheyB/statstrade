@@ -1,0 +1,87 @@
+[
+  { "id": "STK_NEXTEK", "symbol": "NXTK", "name": "Nextek Systems", "assetClass": "stock", "sector": "tech", "correlationGroup": "tech_stocks", "baseVolatility": 0.32, "baseDrift": 0.09, "dividendYield": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_QUANTA", "symbol": "QNTA", "name": "Quanta Cloud", "assetClass": "stock", "sector": "tech", "correlationGroup": "tech_stocks", "baseVolatility": 0.35, "baseDrift": 0.11, "dividendYield": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_PIXELON", "symbol": "PXLN", "name": "Pixelon Interactive", "assetClass": "stock", "sector": "tech", "correlationGroup": "tech_stocks", "baseVolatility": 0.38, "baseDrift": 0.08, "dividendYield": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_IRONCORE", "symbol": "IRNC", "name": "Ironcore Industries", "assetClass": "stock", "sector": "energy", "correlationGroup": "energy_stocks", "baseVolatility": 0.28, "baseDrift": 0.05, "dividendYield": 0.035, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_PETROVA", "symbol": "PTRV", "name": "Petrova Energy Group", "assetClass": "stock", "sector": "energy", "correlationGroup": "energy_stocks", "baseVolatility": 0.30, "baseDrift": 0.04, "dividendYield": 0.04, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_SOLARIS", "symbol": "SLRS", "name": "Solaris Renewables", "assetClass": "stock", "sector": "energy", "correlationGroup": "energy_stocks", "baseVolatility": 0.34, "baseDrift": 0.07, "dividendYield": 0.01, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_MEDIVEX", "symbol": "MDVX", "name": "Medivex Pharma", "assetClass": "stock", "sector": "healthcare", "correlationGroup": "healthcare_stocks", "baseVolatility": 0.22, "baseDrift": 0.06, "dividendYield": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_BIOGENIX", "symbol": "BGNX", "name": "Biogenix Labs", "assetClass": "stock", "sector": "healthcare", "correlationGroup": "healthcare_stocks", "baseVolatility": 0.29, "baseDrift": 0.07, "dividendYield": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_CARELINE", "symbol": "CRLN", "name": "Careline Health", "assetClass": "stock", "sector": "healthcare", "correlationGroup": "healthcare_stocks", "baseVolatility": 0.18, "baseDrift": 0.05, "dividendYield": 0.03, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_HAVENBANK", "symbol": "HVBK", "name": "Haven Bank Corp", "assetClass": "stock", "sector": "financials", "correlationGroup": "financial_stocks", "baseVolatility": 0.20, "baseDrift": 0.05, "dividendYield": 0.045, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_TRUSTCAP", "symbol": "TRCP", "name": "Trustcap Holdings", "assetClass": "stock", "sector": "financials", "correlationGroup": "financial_stocks", "baseVolatility": 0.19, "baseDrift": 0.04, "dividendYield": 0.05, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_MERIDIAN", "symbol": "MRDN", "name": "Meridian Financial", "assetClass": "stock", "sector": "financials", "correlationGroup": "financial_stocks", "baseVolatility": 0.21, "baseDrift": 0.045, "dividendYield": 0.04, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_URBANWEAR", "symbol": "URBW", "name": "Urbanwear Retail", "assetClass": "stock", "sector": "consumer", "correlationGroup": "consumer_stocks", "baseVolatility": 0.25, "baseDrift": 0.06, "dividendYield": 0.015, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_FEASTCO", "symbol": "FSTC", "name": "Feastco Dining", "assetClass": "stock", "sector": "consumer", "correlationGroup": "consumer_stocks", "baseVolatility": 0.24, "baseDrift": 0.07, "dividendYield": 0.01, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_JOYMART", "symbol": "JOYM", "name": "Joymart Commerce", "assetClass": "stock", "sector": "consumer", "correlationGroup": "consumer_stocks", "baseVolatility": 0.27, "baseDrift": 0.08, "dividendYield": 0.005, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_FORGEWORKS", "symbol": "FRGW", "name": "Forgeworks Manufacturing", "assetClass": "stock", "sector": "industrials", "correlationGroup": "industrial_stocks", "baseVolatility": 0.22, "baseDrift": 0.05, "dividendYield": 0.025, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_TRANSLOGIX", "symbol": "TRLX", "name": "Translogix Freight", "assetClass": "stock", "sector": "industrials", "correlationGroup": "industrial_stocks", "baseVolatility": 0.24, "baseDrift": 0.055, "dividendYield": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_AEROVANE", "symbol": "AERV", "name": "Aerovane Aerostructures", "assetClass": "stock", "sector": "industrials", "correlationGroup": "industrial_stocks", "baseVolatility": 0.26, "baseDrift": 0.06, "dividendYield": 0.015, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_METROREIT", "symbol": "MTRR", "name": "Metro REIT", "assetClass": "stock", "sector": "real_estate", "correlationGroup": "real_estate_stocks", "baseVolatility": 0.18, "baseDrift": 0.04, "dividendYield": 0.06, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_HARBORPROP", "symbol": "HRBP", "name": "Harbor Properties", "assetClass": "stock", "sector": "real_estate", "correlationGroup": "real_estate_stocks", "baseVolatility": 0.17, "baseDrift": 0.035, "dividendYield": 0.055, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_SKYLINEEST", "symbol": "SKLE", "name": "Skyline Estates", "assetClass": "stock", "sector": "real_estate", "correlationGroup": "real_estate_stocks", "baseVolatility": 0.20, "baseDrift": 0.045, "dividendYield": 0.05, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_CONNECTIS", "symbol": "CNCT", "name": "Connectis Telecom", "assetClass": "stock", "sector": "telecom", "correlationGroup": "telecom_stocks", "baseVolatility": 0.15, "baseDrift": 0.03, "dividendYield": 0.055, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_WAVECOM", "symbol": "WVCM", "name": "Wavecom Networks", "assetClass": "stock", "sector": "telecom", "correlationGroup": "telecom_stocks", "baseVolatility": 0.14, "baseDrift": 0.025, "dividendYield": 0.06, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_LINKSPAN", "symbol": "LKSP", "name": "Linkspan Communications", "assetClass": "stock", "sector": "telecom", "correlationGroup": "telecom_stocks", "baseVolatility": 0.17, "baseDrift": 0.035, "dividendYield": 0.05, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_ORECORE", "symbol": "ORCR", "name": "Orecore Mining", "assetClass": "stock", "sector": "materials", "correlationGroup": "materials_stocks", "baseVolatility": 0.27, "baseDrift": 0.04, "dividendYield": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_CHEMBRIDGE", "symbol": "CHMB", "name": "ChemBridge Materials", "assetClass": "stock", "sector": "materials", "correlationGroup": "materials_stocks", "baseVolatility": 0.23, "baseDrift": 0.045, "dividendYield": 0.025, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_ALLOYWORKS", "symbol": "ALYW", "name": "AlloyWorks Metals", "assetClass": "stock", "sector": "materials", "correlationGroup": "materials_stocks", "baseVolatility": 0.25, "baseDrift": 0.04, "dividendYield": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "STK_GRIDPOWER", "symbol": "GRDP", "name": "GridPower Utilities", "assetClass": "stock", "sector": "utilities", "correlationGroup": "utility_stocks", "baseVolatility": 0.12, "baseDrift": 0.03, "dividendYield": 0.05, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_AQUAFLOW", "symbol": "AQFL", "name": "AquaFlow Water Utility", "assetClass": "stock", "sector": "utilities", "correlationGroup": "utility_stocks", "baseVolatility": 0.11, "baseDrift": 0.028, "dividendYield": 0.048, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "STK_BRIGHTGAS", "symbol": "BRGS", "name": "BrightGas Energy Utility", "assetClass": "stock", "sector": "utilities", "correlationGroup": "utility_stocks", "baseVolatility": 0.14, "baseDrift": 0.032, "dividendYield": 0.045, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "FX_USDEUR", "symbol": "USD/EUR", "name": "USD/EUR", "assetClass": "forex", "correlationGroup": "fx_usd_pairs", "baseVolatility": 0.08, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_USDJPY", "symbol": "USD/JPY", "name": "USD/JPY", "assetClass": "forex", "correlationGroup": "fx_usd_pairs", "baseVolatility": 0.09, "baseDrift": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "FX_GBPUSD", "symbol": "GBP/USD", "name": "GBP/USD", "assetClass": "forex", "correlationGroup": "fx_usd_pairs", "baseVolatility": 0.10, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_AUDUSD", "symbol": "AUD/USD", "name": "AUD/USD", "assetClass": "forex", "correlationGroup": "fx_commodity_pairs", "baseVolatility": 0.11, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_USDCAD", "symbol": "USD/CAD", "name": "USD/CAD", "assetClass": "forex", "correlationGroup": "fx_commodity_pairs", "baseVolatility": 0.09, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_EURJPY", "symbol": "EUR/JPY", "name": "EUR/JPY", "assetClass": "forex", "correlationGroup": "fx_jpy_crosses", "baseVolatility": 0.10, "baseDrift": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "FX_USDCHF", "symbol": "USD/CHF", "name": "USD/CHF", "assetClass": "forex", "correlationGroup": "fx_usd_pairs", "baseVolatility": 0.07, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_NZDUSD", "symbol": "NZD/USD", "name": "NZD/USD", "assetClass": "forex", "correlationGroup": "fx_commodity_pairs", "baseVolatility": 0.11, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_EURGBP", "symbol": "EUR/GBP", "name": "EUR/GBP", "assetClass": "forex", "correlationGroup": "fx_eur_cross", "baseVolatility": 0.055, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_USDCNH", "symbol": "USD/CNH", "name": "USD/CNH", "assetClass": "forex", "correlationGroup": "fx_managed", "baseVolatility": 0.04, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_EURAUD", "symbol": "EUR/AUD", "name": "EUR/AUD", "assetClass": "forex", "correlationGroup": "fx_eur_cross", "baseVolatility": 0.10, "baseDrift": 0.0, "tickSize": 0.0001, "tradingHours": "session" },
+  { "id": "FX_GBPJPY", "symbol": "GBP/JPY", "name": "GBP/JPY", "assetClass": "forex", "correlationGroup": "fx_jpy_crosses", "baseVolatility": 0.13, "baseDrift": 0.0, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "CRY_KRYPTON", "symbol": "KRYP", "name": "Krypton", "assetClass": "crypto", "correlationGroup": "crypto_majors", "baseVolatility": 0.70, "baseDrift": 0.12, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_ETHERON", "symbol": "ETRN", "name": "Etheron", "assetClass": "crypto", "correlationGroup": "crypto_majors", "baseVolatility": 0.75, "baseDrift": 0.14, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_NOVACHAIN", "symbol": "NOVA", "name": "NovaChain", "assetClass": "crypto", "correlationGroup": "crypto_alts", "baseVolatility": 0.95, "baseDrift": 0.18, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_MEMEDOGE", "symbol": "MDOGE", "name": "MemeDoge", "assetClass": "crypto", "correlationGroup": "crypto_meme", "baseVolatility": 1.20, "baseDrift": 0.05, "tickSize": 0.00001, "tradingHours": "always" },
+  { "id": "CRY_STABLEX", "symbol": "STBX", "name": "StableX", "assetClass": "crypto", "correlationGroup": "crypto_stable", "baseVolatility": 0.02, "baseDrift": 0.0, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_DEFIX", "symbol": "DFX", "name": "Defix Protocol", "assetClass": "crypto", "correlationGroup": "crypto_defi", "baseVolatility": 1.05, "baseDrift": 0.10, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_LAYERTWO", "symbol": "LYR2", "name": "LayerTwo Chain", "assetClass": "crypto", "correlationGroup": "crypto_layer2", "baseVolatility": 0.85, "baseDrift": 0.15, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_SHADOWCOIN", "symbol": "SHDW", "name": "Shadowcoin", "assetClass": "crypto", "correlationGroup": "crypto_privacy", "baseVolatility": 0.90, "baseDrift": 0.08, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_EXCHTOKEN", "symbol": "EXCT", "name": "Exchange Token", "assetClass": "crypto", "correlationGroup": "crypto_exchange", "baseVolatility": 0.60, "baseDrift": 0.12, "tickSize": 0.01, "tradingHours": "always" },
+  { "id": "CRY_PIXELQUEST", "symbol": "PXQT", "name": "PixelQuest", "assetClass": "crypto", "correlationGroup": "crypto_gaming", "baseVolatility": 1.30, "baseDrift": 0.06, "tickSize": 0.00001, "tradingHours": "always" },
+
+  { "id": "CMD_GOLD", "symbol": "XAU", "name": "Gold", "assetClass": "commodity", "correlationGroup": "precious_metals", "baseVolatility": 0.15, "baseDrift": 0.03, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_SILVER", "symbol": "XAG", "name": "Silver", "assetClass": "commodity", "correlationGroup": "precious_metals", "baseVolatility": 0.24, "baseDrift": 0.025, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_CRUDEOIL", "symbol": "OIL", "name": "Crude Oil", "assetClass": "commodity", "correlationGroup": "energy_commodities", "baseVolatility": 0.35, "baseDrift": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_WHEAT", "symbol": "WHT", "name": "Wheat", "assetClass": "commodity", "correlationGroup": "agri_commodities", "baseVolatility": 0.28, "baseDrift": 0.015, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_NATGAS", "symbol": "NATG", "name": "Natural Gas", "assetClass": "commodity", "correlationGroup": "energy_commodities", "baseVolatility": 0.48, "baseDrift": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_COPPER", "symbol": "COPR", "name": "Copper", "assetClass": "commodity", "correlationGroup": "industrial_metals", "baseVolatility": 0.30, "baseDrift": 0.04, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_CORN", "symbol": "CORN", "name": "Corn", "assetClass": "commodity", "correlationGroup": "agri_commodities", "baseVolatility": 0.26, "baseDrift": 0.015, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_COFFEE", "symbol": "COFE", "name": "Coffee", "assetClass": "commodity", "correlationGroup": "agri_commodities", "baseVolatility": 0.33, "baseDrift": 0.02, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "CMD_PLATINUM", "symbol": "PLAT", "name": "Platinum", "assetClass": "commodity", "correlationGroup": "precious_metals", "baseVolatility": 0.22, "baseDrift": 0.025, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "IDX_TECH100", "symbol": "TECH100", "name": "Tech 100 Index", "assetClass": "index", "correlationGroup": "index_tech", "compositeOf": "tech_stocks", "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "IDX_BROAD500", "symbol": "BROAD500", "name": "Broad Market 500", "assetClass": "index", "correlationGroup": "index_broad", "compositeOf": "all_stocks", "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "IDX_ENERGY50", "symbol": "ENERGY50", "name": "Energy 50 Index", "assetClass": "index", "correlationGroup": "index_energy", "compositeOf": "energy_stocks", "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "IDX_HEALTH50", "symbol": "HEALTH50", "name": "Health 50 Index", "assetClass": "index", "correlationGroup": "index_health", "compositeOf": "healthcare_stocks", "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "IDX_EMERGING", "symbol": "EMERGING", "name": "Emerging Markets Index", "assetClass": "index", "correlationGroup": "index_em", "baseVolatility": 0.25, "baseDrift": 0.08, "tickSize": 0.01, "tradingHours": "session" },
+
+  { "id": "BND_SHORT2Y", "symbol": "GOV2Y", "name": "2-Year Government Bond", "assetClass": "bond", "correlationGroup": "govt_bonds", "baseVolatility": 0.03, "baseDrift": 0.035, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "BND_MID5Y", "symbol": "GOV5Y", "name": "5-Year Government Bond", "assetClass": "bond", "correlationGroup": "govt_bonds", "baseVolatility": 0.045, "baseDrift": 0.038, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "BND_MID10Y", "symbol": "GOV10Y", "name": "10-Year Government Bond", "assetClass": "bond", "correlationGroup": "govt_bonds", "baseVolatility": 0.06, "baseDrift": 0.04, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "BND_CORP", "symbol": "CORPB", "name": "Corporate Bond Index", "assetClass": "bond", "correlationGroup": "corp_bonds", "baseVolatility": 0.08, "baseDrift": 0.05, "tickSize": 0.01, "tradingHours": "session" },
+  { "id": "BND_HIGHYIELD", "symbol": "HYCB", "name": "High-Yield Corporate Bond", "assetClass": "bond", "correlationGroup": "high_yield_bonds", "baseVolatility": 0.12, "baseDrift": 0.07, "tickSize": 0.01, "tradingHours": "session" }
+]
