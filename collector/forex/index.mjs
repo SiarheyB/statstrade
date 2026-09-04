@@ -771,15 +771,50 @@ async function hasHistoryDepth(symbol, interval, depthDays) {
   }
 }
 
+// Насколько старой может быть ПОСЛЕДНЯЯ свеча, прежде чем считать это
+// пробелом, а не нормальным ожиданием следующего бара. С запасом (в разы
+// больше самого интервала) — чтобы не дёргать бэкафилл на ровном месте.
+const DUKAS_MAX_GAP_HOURS = { "1m": 2, "5m": 3, "15m": 6, "1h": 24, "4h": 48, "1d": 72, "1w": 336 };
+
+// Есть ли пробел между последней сохранённой свечой и «сейчас».
+//
+// Отдельно от hasHistoryDepth: та смотрит на возраст САМОЙ СТАРОЙ свечи и
+// пробоя в середине ряда не видит — после многодневного простоя коллектора
+// (сеть/DNS) MIN(t) как был старым (месяцы истории), так и остался, и
+// бэкафилл молча пропускал интервал целиком, а пробел за дни простоя
+// оставался в БД навсегда, пока никто не заметил его на графике вручную.
+async function hasFreshData(symbol, interval, maxGapHours) {
+  if (isMarketClosed(Date.now())) return true; // рынок закрыт — свежих баров и не будет, это не пробел
+  try {
+    const r = await pool.query(
+      `SELECT MAX("t") AS max_t FROM "FxCandle" WHERE "symbol"=$1 AND "exchange"=$2 AND "interval"=$3`,
+      [symbol, cfg.exchange, interval],
+    );
+    const maxT = r.rows[0]?.max_t;
+    if (!maxT) return true; // истории нет вовсе — этим уже занимается hasHistoryDepth
+    return (Date.now() - new Date(maxT).getTime()) / 3_600_000 < maxGapHours;
+  } catch {
+    return true; // не смогли проверить — не долбим лишними запросами к Dukascopy
+  }
+}
+
 // Полный бэкафилл одного инструмента Dukascopy (все таймфреймы).
 async function backfillDukascopySymbol(symbol) {
   console.log(`[fx/dukas] backfill ${symbol}…`);
   for (const interval of Object.keys(DUKAS_INTERVAL)) {
     const limit = DUKAS_BACKFILL_LIMIT[interval] ?? 1000;
     const depthDays = DUKAS_ENOUGH_DEPTH_DAYS[interval] ?? 1;
-    if (await hasHistoryDepth(symbol, interval, depthDays)) {
+    const maxGapHours = DUKAS_MAX_GAP_HOURS[interval] ?? 24;
+    const enoughDepth = await hasHistoryDepth(symbol, interval, depthDays);
+    if (enoughDepth && (await hasFreshData(symbol, interval, maxGapHours))) {
       console.log(`[fx/dukas] ${symbol} ${interval}: история глубже ${depthDays}д уже есть, пропускаем`);
       continue;
+    }
+    if (enoughDepth) {
+      // Глубина в порядке, но последний бар старше maxGapHours — тянем те же
+      // limit баров назад от "сейчас": он и закроет пробел, и перезапишет
+      // хвост актуальными значениями (fetchAndStoreDukascopy — upsert).
+      console.log(`[fx/dukas] ${symbol} ${interval}: обнаружен пробел (последний бар старше ${maxGapHours}ч), дособираем`);
     }
     const stored = await fetchAndStoreDukascopy(symbol, interval, limit);
     if (stored > 0) console.log(`[fx/dukas] ${symbol} ${interval}: +${stored} свечей`);
