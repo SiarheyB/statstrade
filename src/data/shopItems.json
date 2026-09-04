@@ -1,24 +1,206 @@
 [
-  { "id": "theme_classic", "category": "theme", "price": 0, "upkeepPerMonth": 0, "prestige": 0, "requiresPrestige": 0, "icon": "🔵", "theme": { "accent": "#3b82f6", "up": "#16c784", "down": "#ea3943" } },
-  { "id": "theme_matrix", "category": "theme", "price": 500, "upkeepPerMonth": 0, "prestige": 5, "requiresPrestige": 0, "icon": "🟩", "theme": { "accent": "#22c55e", "up": "#4ade80", "down": "#b91c1c" } },
-  { "id": "theme_amber", "category": "theme", "price": 1200, "upkeepPerMonth": 0, "prestige": 10, "requiresPrestige": 0, "icon": "🟠", "theme": { "accent": "#f59e0b", "up": "#eab308", "down": "#c2410c" } },
-  { "id": "theme_neon", "category": "theme", "price": 4000, "upkeepPerMonth": 0, "prestige": 25, "requiresPrestige": 20, "icon": "🟣", "theme": { "accent": "#d946ef", "up": "#22d3ee", "down": "#f43f5e" } },
-  { "id": "theme_gold", "category": "theme", "price": 25000, "upkeepPerMonth": 0, "prestige": 60, "requiresPrestige": 60, "icon": "🟡", "theme": { "accent": "#d4af37", "up": "#facc15", "down": "#7f1d1d" } },
-
-  { "id": "gear_coffee", "category": "gear", "price": 600, "upkeepPerMonth": 25, "prestige": 3, "requiresPrestige": 0, "icon": "☕" },
-  { "id": "gear_chair", "category": "gear", "price": 1500, "upkeepPerMonth": 0, "prestige": 6, "requiresPrestige": 0, "icon": "🪑" },
-  { "id": "gear_second_monitor", "category": "gear", "price": 800, "upkeepPerMonth": 0, "prestige": 5, "requiresPrestige": 0, "icon": "🖥️" },
-  { "id": "gear_quad_setup", "category": "gear", "price": 3500, "upkeepPerMonth": 20, "prestige": 12, "requiresPrestige": 10, "icon": "🖥️🖥️" },
-  { "id": "gear_data_terminal", "category": "gear", "price": 12000, "upkeepPerMonth": 300, "prestige": 25, "requiresPrestige": 25, "icon": "📟" },
-
-  { "id": "life_studio", "category": "lifestyle", "price": 20000, "upkeepPerMonth": 900, "prestige": 20, "requiresPrestige": 0, "icon": "🏢" },
-  { "id": "life_watch", "category": "lifestyle", "price": 15000, "upkeepPerMonth": 0, "prestige": 18, "requiresPrestige": 15, "icon": "⌚" },
-  { "id": "life_car", "category": "lifestyle", "price": 90000, "upkeepPerMonth": 1500, "prestige": 45, "requiresPrestige": 40, "icon": "🏎️" },
-  { "id": "life_penthouse", "category": "lifestyle", "price": 250000, "upkeepPerMonth": 6000, "prestige": 90, "requiresPrestige": 80, "icon": "🌆" },
-  { "id": "life_seaside", "category": "lifestyle", "price": 400000, "upkeepPerMonth": 3000, "prestige": 110, "requiresPrestige": 120, "icon": "🏝️" },
-  { "id": "life_yacht", "category": "lifestyle", "price": 1200000, "upkeepPerMonth": 25000, "prestige": 200, "requiresPrestige": 200, "icon": "🛥️" },
-
-  { "id": "status_analyst", "category": "status", "price": 2000, "upkeepPerMonth": 0, "prestige": 8, "requiresPrestige": 0, "icon": "🎓" },
-  { "id": "status_fund", "category": "status", "price": 5000, "upkeepPerMonth": 150, "prestige": 15, "requiresPrestige": 10, "icon": "🏛️" },
-  { "id": "status_whale", "category": "status", "price": 150000, "upkeepPerMonth": 0, "prestige": 70, "requiresPrestige": 100, "icon": "🐋" }
+  {
+    "id": "theme_classic",
+    "category": "theme",
+    "price": 0,
+    "upkeepPerMonth": 0,
+    "prestige": 0,
+    "requiresPrestige": 0,
+    "icon": "🔵",
+    "theme": {
+      "accent": "#3b82f6",
+      "up": "#16c784",
+      "down": "#ea3943"
+    }
+  },
+  {
+    "id": "theme_matrix",
+    "category": "theme",
+    "price": 500,
+    "upkeepPerMonth": 0,
+    "prestige": 5,
+    "requiresPrestige": 0,
+    "icon": "🟩",
+    "theme": {
+      "accent": "#22c55e",
+      "up": "#4ade80",
+      "down": "#b91c1c"
+    }
+  },
+  {
+    "id": "theme_amber",
+    "category": "theme",
+    "price": 1200,
+    "upkeepPerMonth": 0,
+    "prestige": 10,
+    "requiresPrestige": 0,
+    "icon": "🟠",
+    "theme": {
+      "accent": "#f59e0b",
+      "up": "#eab308",
+      "down": "#c2410c"
+    }
+  },
+  {
+    "id": "theme_neon",
+    "category": "theme",
+    "price": 4000,
+    "upkeepPerMonth": 0,
+    "prestige": 25,
+    "requiresPrestige": 20,
+    "icon": "🟣",
+    "theme": {
+      "accent": "#d946ef",
+      "up": "#22d3ee",
+      "down": "#f43f5e"
+    }
+  },
+  {
+    "id": "theme_gold",
+    "category": "theme",
+    "price": 25000,
+    "upkeepPerMonth": 0,
+    "prestige": 60,
+    "requiresPrestige": 60,
+    "icon": "🟡",
+    "theme": {
+      "accent": "#d4af37",
+      "up": "#facc15",
+      "down": "#7f1d1d"
+    }
+  },
+  {
+    "id": "gear_coffee",
+    "category": "gear",
+    "price": 600,
+    "upkeepPerMonth": 25,
+    "prestige": 3,
+    "requiresPrestige": 0,
+    "icon": "☕",
+    "rest": 0.05
+  },
+  {
+    "id": "gear_chair",
+    "category": "gear",
+    "price": 1500,
+    "upkeepPerMonth": 0,
+    "prestige": 6,
+    "requiresPrestige": 0,
+    "icon": "🪑",
+    "rest": 0.1
+  },
+  {
+    "id": "gear_second_monitor",
+    "category": "gear",
+    "price": 800,
+    "upkeepPerMonth": 0,
+    "prestige": 5,
+    "requiresPrestige": 0,
+    "icon": "🖥️"
+  },
+  {
+    "id": "gear_quad_setup",
+    "category": "gear",
+    "price": 3500,
+    "upkeepPerMonth": 20,
+    "prestige": 12,
+    "requiresPrestige": 10,
+    "icon": "🖥️🖥️"
+  },
+  {
+    "id": "gear_data_terminal",
+    "category": "gear",
+    "price": 12000,
+    "upkeepPerMonth": 300,
+    "prestige": 25,
+    "requiresPrestige": 25,
+    "icon": "📟"
+  },
+  {
+    "id": "life_studio",
+    "category": "lifestyle",
+    "price": 20000,
+    "upkeepPerMonth": 900,
+    "prestige": 20,
+    "requiresPrestige": 0,
+    "icon": "🏢",
+    "rest": 0.1
+  },
+  {
+    "id": "life_watch",
+    "category": "lifestyle",
+    "price": 15000,
+    "upkeepPerMonth": 0,
+    "prestige": 18,
+    "requiresPrestige": 15,
+    "icon": "⌚",
+    "rest": 0.05
+  },
+  {
+    "id": "life_car",
+    "category": "lifestyle",
+    "price": 90000,
+    "upkeepPerMonth": 1500,
+    "prestige": 45,
+    "requiresPrestige": 40,
+    "icon": "🏎️",
+    "rest": 0.1
+  },
+  {
+    "id": "life_penthouse",
+    "category": "lifestyle",
+    "price": 250000,
+    "upkeepPerMonth": 6000,
+    "prestige": 90,
+    "requiresPrestige": 80,
+    "icon": "🌆",
+    "rest": 0.2
+  },
+  {
+    "id": "life_seaside",
+    "category": "lifestyle",
+    "price": 400000,
+    "upkeepPerMonth": 3000,
+    "prestige": 110,
+    "requiresPrestige": 120,
+    "icon": "🏝️",
+    "rest": 0.35
+  },
+  {
+    "id": "life_yacht",
+    "category": "lifestyle",
+    "price": 1200000,
+    "upkeepPerMonth": 25000,
+    "prestige": 200,
+    "requiresPrestige": 200,
+    "icon": "🛥️",
+    "rest": 0.25
+  },
+  {
+    "id": "status_analyst",
+    "category": "status",
+    "price": 2000,
+    "upkeepPerMonth": 0,
+    "prestige": 8,
+    "requiresPrestige": 0,
+    "icon": "🎓"
+  },
+  {
+    "id": "status_fund",
+    "category": "status",
+    "price": 5000,
+    "upkeepPerMonth": 150,
+    "prestige": 15,
+    "requiresPrestige": 10,
+    "icon": "🏛️"
+  },
+  {
+    "id": "status_whale",
+    "category": "status",
+    "price": 150000,
+    "upkeepPerMonth": 0,
+    "prestige": 70,
+    "requiresPrestige": 100,
+    "icon": "🐋"
+  }
 ]

@@ -51,7 +51,8 @@ import {
 } from "@/engine/economy/marginEngine";
 import { applyXpGain, calculateXpGain, xpToNextLevel, BASE_XP } from "@/engine/player/progression";
 import { processQuarterlyDividends } from "@/engine/economy/dividends";
-import { chargeUpkeep, monthlyUpkeep } from "@/engine/economy/shop";
+import { chargeUpkeep, monthlyUpkeep, restFactor } from "@/engine/economy/shop";
+import { applySlippage, applyTradeOutcome, recoverOverTime } from "@/engine/player/psychology";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
@@ -181,11 +182,12 @@ export function applyPositionOpen(
     style: Position["style"];
   },
 ): Position {
+  const entryPrice = applySlippage(input.entryPrice, input.side, true, account.psychology.stress);
   const position: Position = {
     id: crypto.randomUUID(),
     assetId: input.assetId,
     side: input.side,
-    entryPrice: input.entryPrice,
+    entryPrice,
     size: input.size,
     leverage: input.leverage,
     stopLoss: input.stopLoss,
@@ -194,7 +196,7 @@ export function applyPositionOpen(
     fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
     style: input.style,
   };
-  account.balance -= calculateRequiredMargin(input.entryPrice, input.size, input.leverage);
+  account.balance -= calculateRequiredMargin(entryPrice, input.size, input.leverage);
   account.positions.push(position);
   return position;
 }
@@ -222,7 +224,10 @@ export function applyPositionClose(
   gameDay = 0,
 ): number {
   const requiredMargin = calculateRequiredMargin(position.entryPrice, position.size, position.leverage);
-  const { realizedPnl } = settleClose(position, exitPrice, commissionRate, extraFee);
+  // Стресс портит исполнение — нервный трейдер жмёт кнопку хуже. Эффект
+  // всегда НЕ в пользу игрока и предсказуем по величине (см. psychology.ts).
+  const filled = applySlippage(exitPrice, position.side, false, account.psychology.stress);
+  const { realizedPnl } = settleClose(position, filled, commissionRate, extraFee);
   // requiredMargin — тот же резерв, что openPosition() в gameStore.ts снял с
   // баланса при открытии (раздел 4.2; при leverage=1 совпадает с полным
   // номиналом — старое поведение Фазы 1 не меняется).
@@ -252,6 +257,13 @@ export function applyPositionClose(
   account.skills[style] = applyXpGain(current, calculateXpGain(BASE_XP, rMultiple, style) * xpMultiplier);
 
   const idx = account.positions.findIndex((p) => p.id === position.id);
+  account.psychology = applyTradeOutcome(account.psychology, {
+    pnl: realizedPnl,
+    hadStop: position.stopLoss != null,
+    leverage: position.leverage,
+    liquidated: extraFee > 0, // штраф сверх комиссии бывает только при ликвидации
+  });
+
   const closed: Position = { ...position, closedAt: Date.now(), closePrice: exitPrice, realizedPnl };
   if (idx >= 0) account.positions[idx] = closed;
   return realizedPnl;
@@ -423,6 +435,12 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
       recalculateAccountMetrics(account, prices);
     }
   }
+
+  // 8a. Психология: стресс сходит со временем, а купленный отдых ускоряет
+  // это. Считается от игрового времени, а не от реального: на investing
+  // «неделя отдыха» проходит за секунды, и это правильно — там и торговый
+  // день короче.
+  account.psychology = recoverOverTime(account.psychology, dtGameMs, restFactor(lifestyle));
 
   // 8b. Алго-боты (ветка перков «Автоматика»). Работают только в пределах
   // купленных слотов: лишние боты в сохранении молча игнорируются, а не

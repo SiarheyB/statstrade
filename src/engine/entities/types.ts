@@ -221,6 +221,10 @@ export interface ShopItem {
   requiresPrestige: number; // порог репутации, ниже которого предмет не продаётся
   icon: string;
   theme?: ShopItemTheme; // только у category === "theme"
+  // Насколько предмет ускоряет восстановление от стресса (раздел 4.4).
+  // Это ЕДИНСТВЕННОЕ влияние покупок на игру: они возвращают игрока в
+  // норму, но не делают сильнее нормы, и на сам рынок не влияют никак.
+  rest?: number;
 }
 
 export interface LifestyleState {

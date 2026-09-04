@@ -1968,6 +1968,13 @@ const en: Dict = {
   "game.bots.strategyHint.trend": "Buys when the fast average crosses above the slow one, sells when it crosses below.",
   "game.bots.strategyHint.meanReversion": "Buys the dip below the average and sells the stretch above it.",
   "game.bots.strategyHint.breakout": "Enters when price leaves the range of the last 20 candles.",
+
+  // Психология трейдера (раздел 4.4).
+  "game.psy.title": "Your state",
+  "game.psy.stress": "Stress",
+  "game.psy.confidence": "Confidence",
+  "game.psy.discipline": "Discipline",
+  "game.psy.hint": "Stress builds up from losing streaks, heavy leverage and liquidations, and it makes your fills worse. It fades with time; what you own speeds that up by {rest}.",
 };
 
 const ru: Dict = {
@@ -3921,6 +3928,13 @@ const ru: Dict = {
   "game.bots.strategyHint.trend": "Покупает, когда быстрая средняя выше медленной, и продаёт, когда ниже.",
   "game.bots.strategyHint.meanReversion": "Покупает отклонение вниз от средней и продаёт отклонение вверх.",
   "game.bots.strategyHint.breakout": "Входит, когда цена выходит за диапазон последних 20 свечей.",
+
+  // Психология трейдера (раздел 4.4).
+  "game.psy.title": "Твоё состояние",
+  "game.psy.stress": "Стресс",
+  "game.psy.confidence": "Уверенность",
+  "game.psy.discipline": "Дисциплина",
+  "game.psy.hint": "Стресс копится от серии убытков, крупного плеча и ликвидаций и портит исполнение сделок. Уходит со временем; купленный отдых ускоряет это на {rest}.",
 };
 
 export const dictionaries: Record<Locale, Dict> = { en, ru };

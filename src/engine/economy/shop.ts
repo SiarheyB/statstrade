@@ -100,6 +100,17 @@ export function activeTheme(lifestyle: LifestyleState) {
   return item?.theme ?? getShopItem(DEFAULT_THEME_ID)?.theme;
 }
 
+/**
+ * Суммарный множитель восстановления от стресса: 1 — обычная скорость, выше
+ * — быстрее. Складывается из купленного (кресло, кофе, дом у моря): отдых
+ * помогает прийти в себя, а не обыграть рынок.
+ */
+export function restFactor(lifestyle: LifestyleState): number {
+  let bonus = 0;
+  for (const id of lifestyle.ownedItemIds) bonus += getShopItem(id)?.rest ?? 0;
+  return 1 + bonus;
+}
+
 /** Суммарный расход на содержание за один игровой месяц. */
 export function monthlyUpkeep(lifestyle: LifestyleState): number {
   let total = 0;

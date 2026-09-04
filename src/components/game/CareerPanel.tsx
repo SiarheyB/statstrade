@@ -13,7 +13,8 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { xpToNextLevel, MAX_SKILL_LEVEL } from "@/engine/player/progression";
 import { calculatePortfolioMetrics } from "@/engine/player/portfolioMetrics";
-import { getShopItem, monthlyUpkeep, nextRank, traderRankKey } from "@/engine/economy/shop";
+import { getShopItem, monthlyUpkeep, nextRank, restFactor, traderRankKey } from "@/engine/economy/shop";
+import { stressLevel } from "@/engine/player/psychology";
 import { SELECTABLE_STYLES } from "@/store/gameStore";
 import { useGameStore } from "@/store/gameStore";
 import type { Account, LifestyleState, TradingStyle } from "@/engine/entities/types";
@@ -114,6 +115,30 @@ export default function CareerPanel({
             <div className={`tabular-nums font-medium ${upkeep > 0 ? "text-loss" : ""}`}>
               {upkeep > 0 ? `−${fmtUsd(upkeep)}` : fmtUsd(0)}
             </div>
+          </div>
+        </div>
+
+        <div>
+          <div className="text-sm font-medium mb-1">{t("game.psy.title")}</div>
+          <div className="space-y-2">
+            {([
+              ["stress", account.psychology.stress, stressLevel(account.psychology.stress) === "high" ? "bg-loss" : "bg-accent"],
+              ["confidence", account.psychology.confidence, "bg-accent"],
+              ["discipline", account.psychology.discipline, "bg-profit"],
+            ] as const).map(([key, value, color]) => (
+              <div key={key}>
+                <div className="flex items-baseline justify-between text-xs">
+                  <span className="text-muted">{t(`game.psy.${key}`)}</span>
+                  <span className="tabular-nums text-faint">{Math.round(value)}</span>
+                </div>
+                <div className="mt-1 h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+                  <div className={`h-full rounded-full ${color}`} style={{ width: `${Math.min(100, value)}%` }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-1.5 text-[11px] text-faint">
+            {t("game.psy.hint", { rest: `${Math.round((restFactor(lifestyle) - 1) * 100)}%` })}
           </div>
         </div>
 

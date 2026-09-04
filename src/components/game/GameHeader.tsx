@@ -17,6 +17,7 @@ import { fmtUsd } from "@/lib/format";
 import { xpToNextLevel } from "@/engine/player/progression";
 import { nextRank, traderRankKey } from "@/engine/economy/shop";
 import { contractProgress } from "@/engine/player/contracts";
+import { stressLevel } from "@/engine/player/psychology";
 import type { GameState } from "@/engine/gameLoop";
 import type { TradingStyle } from "@/engine/entities/types";
 import MarketRegimeBadge from "./MarketRegimeBadge";
@@ -58,6 +59,8 @@ export default function GameHeader({
   // Красим просадку, когда до провала осталось меньше четверти лимита —
   // это единственное место, где игре уместно повысить голос.
   const dangerZone = contract ? contract.drawdownPct > contract.contract.maxDrawdownPct * 0.75 : false;
+
+  const stress = stressLevel(game.account.psychology.stress);
 
   const dayPnl = game.account.equity - (game.dayStartEquity || game.account.equity);
   const dayPnlPct = game.dayStartEquity ? (dayPnl / game.dayStartEquity) * 100 : 0;
@@ -110,6 +113,25 @@ export default function GameHeader({
             <div className="h-full rounded-full bg-accent transition-[width] duration-500" style={{ width: `${xpPct}%` }} />
           </div>
         </div>
+
+        {/* Стресс показывается, только когда он уже влияет на исполнение:
+            спокойному игроку эта шкала не нужна и только шумит. */}
+        {stress !== "calm" && (
+          <div className="min-w-[110px]">
+            <div className="flex items-baseline justify-between gap-2">
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted">{t("game.psy.stress")}</span>
+              <span className={`text-[11px] tabular-nums ${stress === "high" ? "text-loss" : "text-muted"}`}>
+                {Math.round(game.account.psychology.stress)}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+              <div
+                className={`h-full rounded-full ${stress === "high" ? "bg-loss" : "bg-accent"}`}
+                style={{ width: `${Math.min(100, game.account.psychology.stress)}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="ml-auto">
           <MarketRegimeBadge regime={game.marketRegime} />

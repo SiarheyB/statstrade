@@ -46,11 +46,16 @@ function item(overrides: Partial<ShopItem> = {}): ShopItem {
 }
 
 describe("каталог магазина", () => {
-  it("ни один предмет не влияет на торговлю (F2P-safe: только цена/содержание/престиж)", () => {
+  it("ни один предмет не влияет на рынок и на исполнение (F2P-safe)", () => {
     // Страховка от будущей правки данных: если в shopItems.json когда-нибудь
-    // добавят поле вроде commissionDiscount/luck — тест упадёт, и это ровно
-    // то, что нужно (раздел 13 запрещает предметы, дающие преимущество).
-    const allowed = new Set(["id", "category", "price", "upkeepPerMonth", "prestige", "requiresPrestige", "icon", "theme"]);
+    // добавят поле вроде commissionDiscount/priceEdge/luck — тест упадёт, и
+    // это ровно то, что нужно.
+    //
+    // rest в списке разрешённых намеренно: он ускоряет восстановление от
+    // стресса (раздел 4.4), то есть возвращает игрока в НОРМУ, но не делает
+    // сильнее нормы и рынка не касается. Это единственное влияние покупок на
+    // игру, и оно осознанное — см. docs/game/CONCEPT.md, решение по развилке 1.
+    const allowed = new Set(["id", "category", "price", "upkeepPerMonth", "prestige", "requiresPrestige", "icon", "theme", "rest"]);
     for (const shopItem of SHOP_ITEMS) {
       for (const key of Object.keys(shopItem)) expect(allowed).toContain(key);
     }
