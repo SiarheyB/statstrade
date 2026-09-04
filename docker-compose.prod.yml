@@ -148,6 +148,15 @@ services:
       - ./backup/tmp:/app/backup/tmp
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    # Встроенный DNS Docker (127.0.0.11) проксирует запросы на апстримы,
+    # которые он захватил из хоста при старте демона/сети (см. `ExtServers` в
+    # /etc/resolv.conf контейнера) — 2026-09 они перестали отвечать
+    # (ESERVFAIL/EAI_AGAIN на oauth2.googleapis.com), хотя те же домены
+    # штатно резолвились с самого хоста и напрямую через 1.1.1.1 внутри
+    # контейнера. Публичные резолверы в обход застрявшего проксирования.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - tradestats
 
@@ -224,6 +233,11 @@ services:
         max-file: "3"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    # См. комментарий у dns: в сервисе app — тот же битый апстрим встроенного
+    # DNS Docker бил и по бирже (fetch к Binance).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - tradestats
 
@@ -283,6 +297,11 @@ services:
         max-file: "3"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
+    # См. комментарий у dns: в сервисе app — тот же битый апстрим ронял и
+    # Dukascopy (ECONNRESET на середине TLS, не сразу на резолве).
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - tradestats
 
@@ -305,6 +324,11 @@ services:
       WATCHTOWER_POLL_INTERVAL: "120"
       DOCKER_API_VERSION: "1.40"
     command: ["--label-enable", "--cleanup", "--interval", "120", "--stop-timeout", "30s"]
+    # См. комментарий у dns: в сервисе app — без него watchtower тоже не
+    # достучится до ghcr.io и авто-деплой молча встанет.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     networks:
       - tradestats
 
