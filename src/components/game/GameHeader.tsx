@@ -41,9 +41,13 @@ function Metric({ label, value, tone, hint }: { label: string; value: string; to
 export default function GameHeader({
   game,
   styleLabel,
+  playerName,
 }: {
   game: GameState;
   styleLabel: string;
+  // Имя из профиля проекта. Пока фонд не зарегистрирован, в шапке стоит оно —
+  // человек должен видеть в игре себя, а не безличное «частный трейдер».
+  playerName: string | null;
 }) {
   const { t } = useI18n();
   const style: TradingStyle = game.activeStyle.style;
@@ -74,7 +78,7 @@ export default function GameHeader({
       <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold truncate">
-            {game.lifestyle.fundName || t("game.header.independentTrader")}
+            {game.lifestyle.fundName || playerName || t("game.header.independentTrader")}
           </div>
           <div className="text-[11px] text-accent">
             {t(`game.shop.rank.${rankKey}`)}

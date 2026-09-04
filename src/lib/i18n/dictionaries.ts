@@ -1770,6 +1770,15 @@ const en: Dict = {
   "game.tab.shop": "Shop",
   "game.tab.career": "Career",
   "game.header.independentTrader": "Independent trader",
+
+  // Окно «представься» — вход в игру для пользователя без имени.
+  "game.nameGate.title": "How should we call you?",
+  "game.nameGate.body": "This name stands above your terminal and next to your results in the world ranking. It is saved to your profile, so you only enter it once.",
+  "game.nameGate.placeholder": "Your name",
+  "game.nameGate.rules": "3 to 20 characters: letters, digits, space, hyphen.",
+  "game.nameGate.tooShort": "At least 3 characters",
+  "game.nameGate.submit": "Into the game",
+  "game.nameGate.failed": "Could not save the name",
   "game.header.toNextRank": "{prestige} prestige to the next rank",
   "game.header.today": "Today {amount} ({pct})",
   "game.header.marginUsed": "{amount} in margin",
@@ -3756,6 +3765,15 @@ const ru: Dict = {
   "game.tab.shop": "Магазин",
   "game.tab.career": "Карьера",
   "game.header.independentTrader": "Частный трейдер",
+
+  // Окно «представься» — вход в игру для пользователя без имени.
+  "game.nameGate.title": "Как тебя зовут?",
+  "game.nameGate.body": "Это имя стоит над твоим терминалом и рядом с результатом в общем рейтинге. Оно сохраняется в профиль, так что вводить его нужно один раз.",
+  "game.nameGate.placeholder": "Твоё имя",
+  "game.nameGate.rules": "От 3 до 20 символов: буквы, цифры, пробел, дефис.",
+  "game.nameGate.tooShort": "Минимум 3 символа",
+  "game.nameGate.submit": "В игру",
+  "game.nameGate.failed": "Не удалось сохранить имя",
   "game.header.toNextRank": "до следующего ранга {prestige} престижа",
   "game.header.today": "За день {amount} ({pct})",
   "game.header.marginUsed": "в марже {amount}",

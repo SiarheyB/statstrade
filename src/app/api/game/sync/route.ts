@@ -3,6 +3,7 @@ import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { syncPlayer } from "@/lib/game/world";
+import { prisma } from "@/lib/db";
 import { markOverdue } from "@/lib/game/loans";
 
 export const dynamic = "force-dynamic";
@@ -38,10 +39,15 @@ export async function POST(req: Request) {
     const parsed = schema.safeParse(await req.json());
     if (!parsed.success) return badRequest("Проверьте данные");
 
-    const { player, claimed } = await syncPlayer(user.userId, user.email, {
-      ...parsed.data,
-      fundName: parsed.data.fundName ?? null,
-    });
+    // Имя из профиля проекта: при первом создании игрового профиля ник
+    // берётся из него, а не из почты.
+    const profile = await prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+    const { player, claimed } = await syncPlayer(
+      user.userId,
+      user.email,
+      { ...parsed.data, fundName: parsed.data.fundName ?? null },
+      profile?.name ?? null,
+    );
     // Просрочку считаем здесь же: срок займа живёт в ИГРОВЫХ днях заёмщика,
     // а их знает только его клиент — сервер узнаёт о них ровно в этот момент.
     const defaulted = await markOverdue(player.id, player.nickname, player.gameDay);

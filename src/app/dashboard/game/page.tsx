@@ -3,6 +3,7 @@ import { ShieldAlert } from "lucide-react";
 import { getSession } from "@/lib/auth";
 import { isAdminSession } from "@/lib/admin";
 import { getFeatureConfig } from "@/lib/featureConfig";
+import { prisma } from "@/lib/db";
 import GameTerminal from "@/components/game/GameTerminal";
 import { tuningFromConfig } from "@/engine/entities/tuning";
 
@@ -34,9 +35,13 @@ export default async function GamePage() {
   if (!session) redirect("/login");
   const admin = isAdminSession(session);
 
-  const [game, gamePublicAccess] = await Promise.all([
+  const [game, gamePublicAccess, profile] = await Promise.all([
     getFeatureConfig("game"),
     getFeatureConfig("gamePublicAccess"),
+    // Имя игрока берём из профиля проекта: в игре оно стоит в шапке
+    // терминала и в общем рейтинге. Если его нет — терминал сначала
+    // покажет окно «представься» (см. PlayerNameGate).
+    prisma.user.findUnique({ where: { id: session.userId }, select: { name: true } }),
   ]);
 
   if (!game.enabled) {
@@ -50,5 +55,5 @@ export default async function GamePage() {
   // пропсом: игра целиком клиентская, но её баланс должен подчиняться
   // админке (/admin/game) без передеплоя и без правок в чужих сохранениях.
   const { enabled: _enabled, ...raw } = game;
-  return <GameTerminal tuning={tuningFromConfig(raw as Record<string, number>)} />;
+  return <GameTerminal tuning={tuningFromConfig(raw as Record<string, number>)} playerName={profile?.name ?? null} />;
 }

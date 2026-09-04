@@ -41,6 +41,7 @@ import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
 import WorldPanel from "./WorldPanel";
 import GameToasts from "./GameToasts";
+import PlayerNameGate from "./PlayerNameGate";
 import OfflineReportModal from "./OfflineReportModal";
 import ContractsPanel from "./ContractsPanel";
 import PerkTree from "./PerkTree";
@@ -81,7 +82,7 @@ const TAB_ICON: Record<Tab, typeof BarChart3> = {
 // вкладку и тот же инструмент, что оставил.
 const PREFS_KEY = "game.settings";
 
-export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
+export default function GameTerminal({ tuning, playerName }: { tuning: GameTuning; playerName: string | null }) {
   const { t } = useI18n();
   const status = useGameStore((s) => s.status);
   const init = useGameStore((s) => s.init);
@@ -102,6 +103,9 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
   // закрылась (движок не рассылает событий, состояние иммутабельно).
   const lastJournalLength = useRef(0);
 
+  // Имя приходит с сервера; после сохранения в окне «представься» держим
+  // его здесь, чтобы не перезагружать страницу и не терять тик игры.
+  const [name, setName] = useState<string | null>(playerName);
   const [tab, setTab] = useState<Tab>("terminal");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   // Пока настройки не прочитаны, ничего не пишем обратно — иначе первый же
@@ -225,11 +229,14 @@ export default function GameTerminal({ tuning }: { tuning: GameTuning }) {
       style={theme ? ({ "--color-accent": theme.accent } as React.CSSProperties) : undefined}
     >
       <GameToasts />
+      {/* Без имени в игру не пускаем: оно стоит в шапке и в общем рейтинге.
+          Окно перекрывает всё, включая дисклеймер и обучение. */}
+      {!name && <PlayerNameGate onSaved={setName} />}
       <OfflineReportModal />
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
 
-      <GameHeader game={game} styleLabel={t(STYLE_LABEL_KEY[currentStyle])} />
+      <GameHeader game={game} styleLabel={t(STYLE_LABEL_KEY[currentStyle])} playerName={name} />
 
       <div className="flex flex-wrap items-center gap-3">
         {/* Стиль торговли — это скорость игры (timeAcceleration) и доступное

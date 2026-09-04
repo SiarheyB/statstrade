@@ -18,7 +18,8 @@ export async function GET() {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const player = await ensurePlayer(user.userId, user.email);
+    const profile = await prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
+    const player = await ensurePlayer(user.userId, user.email, profile?.name ?? null);
     const [board, feed, funds, loans, myFund] = await Promise.all([
       leaderboard(),
       worldFeed(),

@@ -128,3 +128,18 @@ describe("название фонда", () => {
     expect(FUND_CREATION_COST).toBeGreaterThan(0);
   });
 });
+
+describe("имя из профиля в мире", () => {
+  it("нормализованное имя пользователя годится как ник", () => {
+    // Ник в мире по умолчанию — имя из профиля проекта, а не строка из почты.
+    expect(normalizeNickname("Сергей")).toBe("Сергей");
+    expect(normalizeNickname("Warren B")).toBe("Warren B");
+  });
+
+  it("непригодное имя откатывается на ник из почты, а не ломает создание профиля", () => {
+    // normalizeNickname вернёт null — вызывающий код (ensurePlayer) в этом
+    // случае берёт defaultNickname.
+    expect(normalizeNickname("!!")).toBeNull();
+    expect(defaultNickname("someone@example.com", "abcd1234")).toContain("someone");
+  });
+});

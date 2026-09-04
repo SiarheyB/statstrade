@@ -55,16 +55,31 @@ export function normalizeNickname(raw: string): string | null {
   return value;
 }
 
-export async function ensurePlayer(userId: string, email: string) {
+/**
+ * Имя в мире по умолчанию — то, под которым человек зарегистрирован в
+ * проекте. Ник из почты остаётся только запасным вариантом: игрок должен
+ * узнавать себя в рейтинге, а не строку вида «trader-0zt1».
+ *
+ * Занятое имя дополняем коротким суффиксом, а не отказываем: заставлять
+ * человека придумывать другое имя из-за тёзки в игре — плохой первый опыт.
+ */
+async function freeNickname(preferred: string, userId: string): Promise<string> {
+  const base = normalizeNickname(preferred) ?? defaultNickname(preferred, userId);
+  const taken = await prisma.gamePlayer.findUnique({ where: { nickname: base }, select: { id: true } });
+  if (!taken) return base;
+  const suffix = userId.slice(-4);
+  return `${base.slice(0, 20 - suffix.length - 1)}-${suffix}`;
+}
+
+export async function ensurePlayer(userId: string, email: string, displayName?: string | null) {
   const existing = await prisma.gamePlayer.findUnique({ where: { userId } });
   if (existing) return existing;
+  const nickname = await freeNickname(displayName?.trim() || email, userId);
   // Гонка двух вкладок на первом заходе: обе видят пустоту и обе создают
   // профиль. Уникальный индекс по userId ловит второго — отдаём ему то, что
   // уже создала первая вкладка, вместо 500-й ошибки.
   try {
-    return await prisma.gamePlayer.create({
-      data: { userId, nickname: defaultNickname(email, userId) },
-    });
+    return await prisma.gamePlayer.create({ data: { userId, nickname } });
   } catch {
     const player = await prisma.gamePlayer.findUnique({ where: { userId } });
     if (player) return player;
@@ -103,8 +118,8 @@ export async function recordEvent(playerId: string | null, kind: string, payload
  * игру (проценты по выданным займам и выплаты фонда копятся на сервере,
  * пока игрок не появится).
  */
-export async function syncPlayer(userId: string, email: string, snapshot: PlayerSnapshot) {
-  const player = await ensurePlayer(userId, email);
+export async function syncPlayer(userId: string, email: string, snapshot: PlayerSnapshot, displayName?: string | null) {
+  const player = await ensurePlayer(userId, email, displayName);
   const clean = clampSnapshot(snapshot, player.equity || snapshot.equity);
 
   // События мира — только на переходах, а не на каждом синке: лента должна
