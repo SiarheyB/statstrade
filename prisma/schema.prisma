@@ -1299,6 +1299,13 @@ model GamePlayer {
   // следующей синхронизации и зачисляет на игровой баланс.
   pendingPayout   Float    @default(0)
   isPublic        Boolean  @default(true)
+  // Сезон: в каком идёт зачёт и с какой эквити игрок в него вошёл. Считается
+  // РОСТ от этой отметки, а не абсолютные деньги — иначе сезон выигрывал бы
+  // тот, кто просто дольше играет.
+  seasonId          String?
+  season            GameSeason? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  seasonStartEquity Float?
+  seasonResults     GameSeasonResult[]
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
 
@@ -1470,6 +1477,39 @@ model GameChatMessage {
   createdAt DateTime @default(now())
 
   @@index([channel, createdAt])
+}
+
+// Сезоны: вечный рейтинг мёртв для новичка — пришедший через месяц не
+// догонит первых никогда. Сезон считает только то, что сделано за его срок,
+// и заканчивается: это и повод начать, и повод вернуться к дате. Общий
+// прогресс (престиж, испытания, перки) сезон не трогает.
+model GameSeason {
+  id        String    @id @default(cuid())
+  index     Int       @unique
+  startedAt DateTime
+  endsAt    DateTime
+  // Проставляется, когда итоги подведены и награды разосланы.
+  closedAt  DateTime?
+  players   GamePlayer[]
+  results   GameSeasonResult[]
+
+  @@index([endsAt])
+}
+
+model GameSeasonResult {
+  id        String   @id @default(cuid())
+  seasonId  String
+  season    GameSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  rank      Int
+  returnPct Float
+  equity    Float
+  reward    Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([seasonId, playerId])
+  @@index([playerId])
 }
 
 model GameStrategy {

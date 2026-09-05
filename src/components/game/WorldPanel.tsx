@@ -9,8 +9,9 @@
 // (gameStore.applyWorldCash). Если сервер отказал — в игре ничего не
 // изменилось.
 import { useCallback, useEffect, useState } from "react";
-import { Coins, Crown, Landmark, MessagesSquare, RefreshCw, ScrollText, ShieldCheck, Store } from "lucide-react";
+import { Coins, Crown, Landmark, MessagesSquare, RefreshCw, ScrollText, ShieldCheck, Store, Trophy } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import SeasonPanel from "./SeasonPanel";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { fetchWorld, updateProfile, type WorldState } from "@/lib/game/worldClient";
@@ -18,11 +19,12 @@ import type { GameDrawing } from "@/engine/entities/types";
 import ChatPanel from "./ChatPanel";
 import StrategyMarket from "./StrategyMarket";
 
-const SECTIONS = ["ranking", "chat", "strategies", "loans", "funds", "feed"] as const;
+const SECTIONS = ["ranking", "season", "chat", "strategies", "loans", "funds", "feed"] as const;
 type Section = (typeof SECTIONS)[number];
 
 const SECTION_ICON: Record<Section, typeof Crown> = {
   ranking: Crown,
+  season: Trophy,
   chat: MessagesSquare,
   strategies: Store,
   loans: Coins,
@@ -218,6 +220,8 @@ export default function WorldPanel({
           );
         })}
       </div>
+
+      {section === "season" && <SeasonPanel nickname={world.me?.nickname ?? null} />}
 
       {section === "ranking" && (
         <div className="card p-4">

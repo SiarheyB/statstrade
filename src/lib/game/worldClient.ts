@@ -289,6 +289,28 @@ export async function fetchStrategies(): Promise<StrategyOffer[]> {
   }
 }
 
+export interface SeasonStandings {
+  season: { index: number; startedAt: number; endsAt: number; players: number; minPlayers: number };
+  rows: Array<{
+    id: string;
+    nickname: string;
+    rankKey: string;
+    activeStyle: string;
+    contractsPassed: number;
+    returnPct: number;
+  }>;
+}
+
+export async function fetchSeason(): Promise<SeasonStandings | null> {
+  try {
+    const res = await fetch("/api/game/season");
+    if (!res.ok) return null;
+    return (await res.json()) as SeasonStandings;
+  } catch {
+    return null;
+  }
+}
+
 export const strategies = {
   publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"]; botId?: string }) =>
     post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),

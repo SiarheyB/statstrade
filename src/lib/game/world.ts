@@ -16,6 +16,7 @@
 //      которые ведёт сервер: соврав про свою эквити, чужие деньги не
 //      получишь — можно лишь надуть свой рейтинг.
 import { prisma } from "@/lib/db";
+import { joinSeason } from "@/lib/game/seasons";
 
 export const LEADERBOARD_SIZE = 25;
 export const FEED_SIZE = 30;
@@ -134,6 +135,10 @@ export async function syncPlayer(userId: string, email: string, snapshot: Player
   if (clean.rankKey !== player.rankKey && clean.prestige > player.prestige) {
     await recordEvent(player.id, "rank_up", { nickname: player.nickname, rankKey: clean.rankKey });
   }
+
+  // Записываем игрока в текущий сезон при первой же синхронизации: входная
+  // эквити фиксируется тогда, с неё и считается сезонный рост.
+  await joinSeason(player.id, clean.equity);
 
   const claimed = player.pendingPayout;
   return {
