@@ -4,6 +4,7 @@ import { freshLifestyle } from "@/engine/economy/shop";
 import { DEFAULT_TUNING } from "@/engine/entities/tuning";
 import { freshContractState } from "@/engine/player/contracts";
 import { freshPerkState } from "@/engine/player/perks";
+import { freshStreak } from "@/engine/player/achievements";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -65,6 +66,11 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     contractPoints: 0,
     unlockedMarkets: ["stock"],
     lastContractResult: null,
+    sponsor: null,
+    wipedOut: false,
+    achievements: [],
+    lastAchievements: [],
+    streak: freshStreak(),
     ...overrides,
   };
 }

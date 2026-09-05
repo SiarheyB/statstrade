@@ -12,6 +12,7 @@ vi.mock("@/persistence/gameDb", () => ({
 import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS } from "@/store/gameStore";
 import { DEFAULT_THEME_ID, freshLifestyle, getShopItem } from "@/engine/economy/shop";
 import { gameTick, MONTH_MS } from "@/engine/gameLoop";
+import { streakReward } from "@/engine/player/achievements";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const ASSET_ID = PHASE1_ASSET_IDS[0];
@@ -69,7 +70,10 @@ describe("init", () => {
     });
     await useGameStore.getState().init();
     const s = useGameStore.getState();
-    expect(s.game.account.balance).toBe(4242);
+    // Загрузка отмечает заход и сразу платит за серию: первый день серии —
+    // одна дневная награда сверх сохранённого баланса.
+    expect(s.game.account.balance).toBe(4242 + streakReward(1));
+    expect(s.game.streak.days).toBe(1);
     expect(s.game.prices[ASSET_ID]).toBe(55);
     expect(s.onboardingDone).toBe(true);
     expect(s.disclaimerSeen).toBe(true);

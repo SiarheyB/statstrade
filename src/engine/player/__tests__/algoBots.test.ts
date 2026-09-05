@@ -8,6 +8,7 @@ import {
   botTakeProfit,
   defaultBot,
   MIN_CANDLES_FOR_SIGNAL,
+  botRecord,
   type AlgoBot,
 } from "@/engine/player/algoBots";
 import type { Candle, Position } from "@/engine/entities/types";
@@ -99,5 +100,47 @@ describe("ограничения ботов", () => {
     expect(botSlots([])).toBe(0);
     expect(botSlots(["PK_ALGO_DESK"])).toBe(1);
     expect(botSlots(["PK_ALGO_DESK", "PK_ALGO_FARM"])).toBe(2);
+  });
+});
+
+describe("трек-рекорд бота", () => {
+  const pos = (patch: Partial<Position>): Position => ({
+    id: crypto.randomUUID(),
+    assetId: "A",
+    side: "long",
+    entryPrice: 100,
+    size: 1,
+    leverage: 1,
+    openedAt: 0,
+    fees: 0,
+    style: "day",
+    ...patch,
+  });
+
+  it("считает только сделки этого бота — иначе в отчёт попала бы ручная торговля", () => {
+    const positions = [
+      pos({ botId: "b1", closedAt: 1, realizedPnl: 100 }),
+      pos({ botId: "b1", closedAt: 2, realizedPnl: -50 }),
+      pos({ botId: "b2", closedAt: 3, realizedPnl: 1000 }),
+      pos({ closedAt: 4, realizedPnl: 5000 }), // рукой
+    ];
+    const record = botRecord(positions, "b1");
+    expect(record.trades).toBe(2);
+    expect(record.wins).toBe(1);
+    expect(record.totalPnl).toBe(50);
+    expect(record.avgPnl).toBe(25);
+    expect(record.winRate).toBe(0.5);
+  });
+
+  it("открытые позиции в итог не идут — результат считается по закрытым", () => {
+    const positions = [pos({ botId: "b1", closedAt: 1, realizedPnl: 100 }), pos({ botId: "b1" })];
+    expect(botRecord(positions, "b1").trades).toBe(1);
+  });
+
+  it("у бота без сделок пустой, но валидный результат", () => {
+    const record = botRecord([], "b1");
+    expect(record.trades).toBe(0);
+    expect(record.avgPnl).toBe(0);
+    expect(record.winRate).toBe(0);
   });
 });

@@ -21,6 +21,8 @@ import type {
 } from "@/engine/entities/types";
 import { validateOrder } from "@/engine/player/pendingOrders";
 import { sponsorOffer, WIPEOUT_PRESTIGE_PENALTY } from "@/engine/player/bailout";
+import { freshStreak, streakReward, touchStreak } from "@/engine/player/achievements";
+import { botRecord } from "@/engine/player/algoBots";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, applyPositionOpen, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
@@ -39,7 +41,14 @@ import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
-import { fetchCandles, fetchQuotes, funds as fundsApi, loans as loansApi, syncSnapshot } from "@/lib/game/worldClient";
+import {
+  fetchCandles,
+  fetchQuotes,
+  funds as fundsApi,
+  loans as loansApi,
+  strategies as strategiesApi,
+  syncSnapshot,
+} from "@/lib/game/worldClient";
 import { traderRankKey } from "@/engine/economy/shop";
 
 const ALL_ASSETS = assetsData as Asset[];
@@ -160,6 +169,10 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     drawings: {},
     sponsor: null,
     wipedOut: false,
+    achievements: [],
+    lastAchievements: [],
+    streak: freshStreak(),
+    publishedStrategies: [],
   };
 }
 
@@ -191,6 +204,9 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     drawings: state.drawings,
     sponsor: state.sponsor,
     wipedOut: state.wipedOut,
+    achievements: state.achievements,
+    streak: state.streak,
+    publishedStrategies: state.publishedStrategies,
     onboardingDone,
     disclaimerSeen,
   };
@@ -284,6 +300,10 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     // нет долга и нет разорения.
     sponsor: save.sponsor ?? null,
     wipedOut: save.wipedOut ?? false,
+    achievements: save.achievements ?? [],
+    lastAchievements: [],
+    streak: save.streak ?? freshStreak(),
+    publishedStrategies: save.publishedStrategies ?? [],
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -318,6 +338,11 @@ interface GameStoreState {
   notices: GameNotice[];
   /** Что произошло, пока вкладка была закрыта. Показывается один раз. */
   offlineReport: OfflineReport | null;
+  /** Награда за серию заходов — UI показывает её и гасит. */
+  streakBonus: { days: number; amount: number } | null;
+  clearStreakBonus: () => void;
+  /** Полученные достижения показаны — очистить. */
+  clearAchievements: () => void;
   dismissOfflineReport: () => void;
   notify: (tone: GameNoticeTone, text: string) => void;
   dismissNotice: (id: string) => void;
@@ -352,6 +377,8 @@ interface GameStoreState {
     trailingPct?: number;
   }) => OpenPositionResult;
   cancelOrder: (orderId: string) => void;
+  /** Запомнить опубликованную стратегию, чтобы слать по ней трек-рекорд. */
+  rememberStrategy: (strategyId: string, botId: string) => void;
   /** Принять деньги спонсора после разорения. */
   acceptSponsor: () => void;
   /** Отказаться: счёт остаётся как есть, предложение больше не всплывает. */
@@ -413,6 +440,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   game: freshState(),
   notices: [],
   offlineReport: null,
+  streakBonus: null,
 
   notify: (tone, text) => {
     // Держим не больше четырёх штук: пятое уведомление вытесняет самое
@@ -518,18 +546,38 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         elapsedMs: away,
         now: Date.now(),
       });
+      // Серия заходов отмечается один раз за календарные сутки и сразу
+      // платит: смысл серии в том, что награда приходит за сам факт
+      // прихода, а не за сделку, которую игрок ещё не сделал.
+      const streak = touchStreak(advanced.streak, Date.now());
+      const streakPaid = streak !== advanced.streak;
+      const bonus = streakPaid ? streakReward(streak.days) : 0;
       set({
-        game: advanced,
+        game: {
+          ...advanced,
+          streak,
+          account: bonus > 0 ? { ...advanced.account, balance: advanced.account.balance + bonus } : advanced.account,
+        },
         offlineReport: report,
         onboardingDone: save.onboardingDone,
         disclaimerSeen: save.disclaimerSeen,
         status: "ready",
       });
+      // Уведомление рисует GameTerminal: перевод живёт там, у стора его нет.
+      if (bonus > 0) set({ streakBonus: { days: streak.days, amount: bonus } });
       // Сразу сохраняем догнанное состояние: иначе при быстром закрытии
       // вкладки те же события применились бы второй раз.
       void get().persistNow();
     } else {
-      set({ game: freshState(tuning), onboardingDone: false, disclaimerSeen: false, status: "ready" });
+      // Новая партия — первый день серии сразу засчитан, но без выплаты:
+      // деньги за «зашёл в первый раз» это стартовый капитал, а не бонус.
+      const fresh = freshState(tuning);
+      set({
+        game: { ...fresh, streak: touchStreak(fresh.streak, Date.now()) },
+        onboardingDone: false,
+        disclaimerSeen: false,
+        status: "ready",
+      });
     }
   },
 
@@ -701,6 +749,18 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return { ok: true };
   },
 
+  rememberStrategy: (strategyId, botId) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        publishedStrategies: [
+          ...s.game.publishedStrategies.filter((p) => p.strategyId !== strategyId),
+          { strategyId, botId },
+        ],
+      },
+    }));
+  },
+
   acceptSponsor: () => {
     const { game } = get();
     if (game.sponsor) return; // один долг за раз
@@ -722,7 +782,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         },
       },
     }));
-    get().notify("info", "sponsor");
   },
 
   declineSponsor: () => {
@@ -869,6 +928,10 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   clearContractResult: () => set((s) => ({ game: { ...s.game, lastContractResult: null } })),
   clearDailyCompleted: () => set((s) => ({ game: { ...s.game, lastDailyCompleted: [] } })),
 
+  clearStreakBonus: () => set({ streakBonus: null }),
+
+  clearAchievements: () => set((s) => ({ game: { ...s.game, lastAchievements: [] } })),
+
   // Разметка графика. Живёт в сохранении игры: инструменты и время здесь
   // игровые, и в общей таблице рисунков проекта им не место.
   addDrawing: (assetId, drawing) => {
@@ -981,6 +1044,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (result.data.defaulted > 0) {
       get().notify("bad", `Просрочено займов: ${result.data.defaulted}. Репутация упала.`);
     }
+
+    // Трек-рекорд опубликованных стратегий. Отправляем вместе с синхронизацией
+    // мира: сервер игровых сделок не видит — счёт живёт в браузере, — поэтому
+    // историю бота может прислать только его хозяин.
+    if (game.publishedStrategies.length > 0) {
+      const records = game.publishedStrategies
+        .map(({ strategyId, botId }) => ({ strategyId, record: botRecord(game.account.positions, botId) }))
+        .filter(({ record }) => record.trades > 0)
+        .map(({ strategyId, record }) => ({
+          strategyId,
+          trades: record.trades,
+          winRate: record.winRate,
+          avgPnl: record.avgPnl,
+        }));
+      if (records.length > 0) void strategiesApi.report(records);
+    }
+
     return { claimed: result.data.claimed, defaulted: result.data.defaulted };
   },
 

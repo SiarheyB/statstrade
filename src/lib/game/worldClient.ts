@@ -271,6 +271,11 @@ export interface StrategyOffer {
   config: { strategy: string; assetId: string; riskPct: number; stopPct: number; takePct: number };
   author: { id: string; nickname: string; rankKey: string; contractsPassed: number };
   owned: boolean;
+  /**
+   * Итоги бота автора по этой стратегии. null — сделок пока мало, и
+   * показывать «доходность» не по чему: пять сделок это не история.
+   */
+  record: { trades: number; winRate: number; avgPnl: number; reportedAt: number | null } | null;
 }
 
 export async function fetchStrategies(): Promise<StrategyOffer[]> {
@@ -285,8 +290,11 @@ export async function fetchStrategies(): Promise<StrategyOffer[]> {
 }
 
 export const strategies = {
-  publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"] }) =>
+  publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"]; botId?: string }) =>
     post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),
+  /** Отчёт о своих ботах — трек-рекорд опубликованных стратегий. */
+  report: (records: Array<{ strategyId: string; trades: number; winRate: number; avgPnl: number }>) =>
+    post<{ updated: number }>("/api/game/strategies", { action: "report", records }),
   buy: (strategyId: string) =>
     post<{ price: number; name: string; config: StrategyOffer["config"] }>("/api/game/strategies", {
       action: "buy",

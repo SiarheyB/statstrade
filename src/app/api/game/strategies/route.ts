@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
-import { buyStrategy, listStrategies, publishStrategy, MAX_STRATEGIES_PER_AUTHOR } from "@/lib/game/social";
+import { buyStrategy, listStrategies, publishStrategy, reportStrategyRecords, MAX_STRATEGIES_PER_AUTHOR } from "@/lib/game/social";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +42,24 @@ const schema = z.discriminatedUnion("action", [
       stopPct: z.number(),
       takePct: z.number(),
     }),
+    botId: z.string().max(60).optional(),
   }),
   z.object({ action: z.literal("buy"), strategyId: z.string().max(60) }),
+  z.object({
+    // Итоги своих ботов. Присылает клиент автора: сервер игровых сделок не
+    // видит, счёт живёт в браузере.
+    action: z.literal("report"),
+    records: z
+      .array(
+        z.object({
+          strategyId: z.string().max(60),
+          trades: z.number(),
+          winRate: z.number(),
+          avgPnl: z.number(),
+        }),
+      )
+      .max(20),
+  }),
 ]);
 
 export async function POST(req: Request) {
@@ -58,9 +74,14 @@ export async function POST(req: Request) {
     const player = await ensurePlayer(user.userId, user.email);
     const body = parsed.data;
 
+    if (body.action === "report") {
+      const updated = await reportStrategyRecords(player.id, body.records);
+      return NextResponse.json({ ok: true, updated });
+    }
+
     const result =
       body.action === "publish"
-        ? await publishStrategy(player.id, player.nickname, body.name, body.description ?? "", body.price, body.config)
+        ? await publishStrategy(player.id, player.nickname, body.name, body.description ?? "", body.price, body.config, body.botId)
         : await buyStrategy(player.id, player.nickname, body.strategyId);
 
     if (!result.ok) return badRequest(MESSAGES[result.error] ?? "Не получилось");

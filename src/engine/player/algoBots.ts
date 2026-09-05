@@ -103,3 +103,32 @@ export function botSlots(unlockedPerks: string[]): number {
   if (unlockedPerks.includes("PK_ALGO_FARM")) slots += 1;
   return slots;
 }
+
+/** Результаты одного бота — то, что честно показать покупателю стратегии. */
+export interface BotRecord {
+  trades: number;
+  wins: number;
+  totalPnl: number;
+  avgPnl: number;
+  winRate: number;
+}
+
+/**
+ * Итоги закрытых сделок бота.
+ *
+ * Считается по позициям с меткой botId, а не по журналу: журнал не знает,
+ * кто открыл сделку, и статистика бота смешалась бы с ручной торговлей —
+ * ровно то, чего покупатель стратегии не должен видеть.
+ */
+export function botRecord(positions: Position[], botId: string): BotRecord {
+  const closed = positions.filter((p) => p.botId === botId && p.closedAt != null && p.realizedPnl != null);
+  const wins = closed.filter((p) => (p.realizedPnl ?? 0) > 0).length;
+  const totalPnl = closed.reduce((sum, p) => sum + (p.realizedPnl ?? 0), 0);
+  return {
+    trades: closed.length,
+    wins,
+    totalPnl,
+    avgPnl: closed.length > 0 ? totalPnl / closed.length : 0,
+    winRate: closed.length > 0 ? wins / closed.length : 0,
+  };
+}

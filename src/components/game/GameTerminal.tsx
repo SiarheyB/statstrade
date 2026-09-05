@@ -39,6 +39,7 @@ import Screener from "./Screener";
 import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
+import Achievements from "./Achievements";
 import WorldPanel from "./WorldPanel";
 import GameToasts from "./GameToasts";
 import PlayerNameGate from "./PlayerNameGate";
@@ -110,6 +111,9 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   const notify = useGameStore((s) => s.notify);
   const clearContractResult = useGameStore((s) => s.clearContractResult);
   const clearDailyCompleted = useGameStore((s) => s.clearDailyCompleted);
+  const streakBonus = useGameStore((s) => s.streakBonus);
+  const clearStreakBonus = useGameStore((s) => s.clearStreakBonus);
+  const clearAchievements = useGameStore((s) => s.clearAchievements);
   const addDrawing = useGameStore((s) => s.addDrawing);
   const removeDrawing = useGameStore((s) => s.removeDrawing);
   // Длина журнала на прошлом кадре — по её приросту понимаем, что сделка
@@ -198,6 +202,22 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
     notify("good", t("game.daily.done", { count: game.lastDailyCompleted.length, amount: fmtUsd(total) }));
     clearDailyCompleted();
   }, [game.lastDailyCompleted, notify, clearDailyCompleted, t]);
+
+  // Награда за серию заходов и новые достижения. Уведомления рисуются здесь,
+  // а не в сторе: перевод живёт в компоненте.
+  useEffect(() => {
+    if (!streakBonus) return;
+    notify("good", t("game.streak.toast", { days: streakBonus.days, amount: fmtUsd(streakBonus.amount) }));
+    clearStreakBonus();
+  }, [streakBonus, notify, clearStreakBonus, t]);
+
+  useEffect(() => {
+    if (game.lastAchievements.length === 0) return;
+    for (const id of game.lastAchievements) {
+      notify("good", t("game.achievement.toast", { name: t(`game.achievement.${id}`) }));
+    }
+    clearAchievements();
+  }, [game.lastAchievements, notify, clearAchievements, t]);
 
   useEffect(() => {
     if (status !== "ready") return;
@@ -458,6 +478,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             lifestyle={game.lifestyle}
             startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
           />
+          <Achievements unlocked={game.achievements} streak={game.streak} />
         </div>
       )}
     </div>

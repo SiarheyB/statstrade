@@ -73,6 +73,14 @@ export interface Position {
    * stopLoss, потому что стоп двигается только в сторону прибыли.
    */
   trailingPct?: number;
+  /**
+   * Кем открыта позиция: id алго-бота или ничего, если рукой.
+   *
+   * Нужна для честного трек-рекорда на рынке стратегий: без метки сделки
+   * бота неотличимы от ручных, и «доходность стратегии» пришлось бы либо
+   * брать со слов продавца, либо не показывать вовсе.
+   */
+  botId?: string;
   openedAt: number;
   closedAt?: number;
   closePrice?: number;
@@ -349,6 +357,15 @@ export interface GameDrawing {
   points: GameDrawingPoint[];
 }
 
+export interface StreakState {
+  /** Сколько дней подряд игрок заходил. */
+  days: number;
+  /** Календарный день последнего захода (UTC-сутки от эпохи). */
+  lastDay: number;
+  /** Лучшая серия за всё время — её не отнимает даже пропуск. */
+  best: number;
+}
+
 export interface SponsorDeal {
   /** Сколько денег дали. */
   stake: number;
@@ -416,6 +433,11 @@ export interface SaveGame {
   // не знают про долг.
   sponsor?: SponsorDeal | null;
   wipedOut?: boolean;
+  // Полученные достижения и серия заходов. Тоже необязательные — старые
+  // сохранения про них не знают, у них просто пустая коллекция.
+  achievements?: string[];
+  streak?: StreakState;
+  publishedStrategies?: Array<{ strategyId: string; botId: string }>;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

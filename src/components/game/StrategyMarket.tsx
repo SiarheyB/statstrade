@@ -24,6 +24,7 @@ export default function StrategyMarket() {
   const perks = useGameStore((s) => s.game.perks);
   const balance = useGameStore((s) => s.game.account.balance);
   const applyWorldCash = useGameStore((s) => s.applyWorldCash);
+  const rememberStrategy = useGameStore((s) => s.rememberStrategy);
   const addBotFromStrategy = useGameStore((s) => s.addBotFromStrategy);
 
   const [offers, setOffers] = useState<StrategyOffer[]>([]);
@@ -64,10 +65,16 @@ export default function StrategyMarket() {
         stopPct: myBot.stopPct,
         takePct: myBot.takePct,
       },
+      // Привязываем к боту: по нему клиент потом присылает результат, и
+      // покупатель видит не обещание, а историю сделок автора.
+      botId: myBot.id,
     });
     setBusy(false);
     setMessage(result.ok ? t("game.strategies.published") : result.error);
     if (result.ok) {
+      // Запоминаем связку «стратегия — бот»: по ней при синхронизации мира
+      // уходит трек-рекорд.
+      rememberStrategy(result.data.id, myBot.id);
       setName("");
       setDescription("");
       await load();
@@ -181,6 +188,22 @@ export default function StrategyMarket() {
                   )}
                 </div>
                 {offer.description && <div className="text-xs text-faint">{offer.description}</div>}
+                {/* Трек-рекорд: не обещание автора, а итоги его собственного
+                    бота. Пока сделок мало — так и говорим: пять сделок это
+                    не история стратегии, а совпадение. */}
+                <div className="text-[11px] mt-0.5">
+                  {offer.record ? (
+                    <span className={offer.record.avgPnl >= 0 ? "text-profit" : "text-loss"}>
+                      {t("game.strategies.record", {
+                        trades: offer.record.trades,
+                        winRate: Math.round(offer.record.winRate * 100),
+                        avg: fmtUsd(offer.record.avgPnl, { sign: true }),
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-faint">{t("game.strategies.unproven")}</span>
+                  )}
+                </div>
                 <div className="text-[11px] text-faint">
                   {t("game.strategies.stats", {
                     risk: offer.config.riskPct,

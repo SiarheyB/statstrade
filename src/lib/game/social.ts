@@ -134,6 +134,7 @@ export async function publishStrategy(
   description: string,
   price: number,
   config: StrategyConfig,
+  botId?: string,
 ): Promise<StrategyResult<{ id: string }>> {
   const cleanName = name.trim().replace(/\s+/g, " ");
   if (cleanName.length < 3 || cleanName.length > 40) return { ok: false, error: "invalid_name" };
@@ -148,6 +149,9 @@ export async function publishStrategy(
       description: description.trim().slice(0, 200) || null,
       price,
       config: JSON.stringify(config),
+      // Запоминаем бота, из которого стратегию опубликовали: по нему автор
+      // потом присылает результат, не подбирая стратегию по настройкам.
+      botId: botId ?? null,
     },
   });
   await recordEvent(authorId, "strategy_published", { nickname, strategy: cleanName, price });
@@ -190,6 +194,10 @@ export async function listStrategies(playerId: string) {
         purchases: true,
         createdAt: true,
         config: true,
+        trades: true,
+        winRate: true,
+        avgPnl: true,
+        reportedAt: true,
         author: { select: { id: true, nickname: true, rankKey: true, contractsPassed: true } },
       },
     }),
@@ -204,7 +212,45 @@ export async function listStrategies(playerId: string) {
     purchases: row.purchases,
     createdAt: row.createdAt.getTime(),
     config: safeParse(row.config) as StrategyConfig,
+    // Трек-рекорд отдаём, только если сделок хватает для вывода. Пять
+    // сделок — это не история стратегии, а совпадение, и подписать их
+    // «доходность 80%» значило бы помогать продавать кота в мешке.
+    record:
+      row.trades != null && row.trades >= MIN_PROVEN_TRADES
+        ? { trades: row.trades, winRate: row.winRate ?? 0, avgPnl: row.avgPnl ?? 0, reportedAt: row.reportedAt?.getTime() ?? null }
+        : null,
     author: row.author,
     owned: bought.has(row.id) || row.author.id === playerId,
   }));
+}
+
+/** Сколько сделок должно быть у бота, чтобы его результат считался историей. */
+export const MIN_PROVEN_TRADES = 20;
+
+/**
+ * Обновить трек-рекорд своих стратегий.
+ *
+ * Присылает КЛИЕНТ АВТОРА при синхронизации мира — сервер игровых сделок не
+ * видит вовсе (счёт живёт в браузере). Обновляем только строки, где автор
+ * совпадает: иначе результат чужой стратегии можно было бы переписать.
+ */
+export async function reportStrategyRecords(
+  authorId: string,
+  records: Array<{ strategyId: string; trades: number; winRate: number; avgPnl: number }>,
+): Promise<number> {
+  let updated = 0;
+  for (const record of records.slice(0, MAX_STRATEGIES_PER_AUTHOR)) {
+    if (!Number.isFinite(record.trades) || record.trades < 0) continue;
+    const res = await prisma.gameStrategy.updateMany({
+      where: { id: record.strategyId, authorId },
+      data: {
+        trades: Math.round(record.trades),
+        winRate: Math.max(0, Math.min(1, record.winRate)),
+        avgPnl: record.avgPnl,
+        reportedAt: new Date(),
+      },
+    });
+    updated += res.count;
+  }
+  return updated;
 }

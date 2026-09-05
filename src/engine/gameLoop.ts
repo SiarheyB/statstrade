@@ -28,6 +28,7 @@ import type {
 import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
 import { applySponsorCut, isWipedOut, sponsorCut, type SponsorDeal } from "@/engine/player/bailout";
+import { newlyEarned, type StreakState } from "@/engine/player/achievements";
 import { orderTriggers, trailStop, triggerLevel } from "@/engine/player/pendingOrders";
 import { isMarketOpen } from "@/lib/game/schedule";
 import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
@@ -131,6 +132,15 @@ export interface GameState {
   // Счёт разорён и спонсор ещё не предложен: UI показывает по этому флагу
   // предложение и гасит его, когда игрок ответил.
   wipedOut: boolean;
+  // Полученные достижения и последняя порция — UI показывает по ней
+  // уведомление и очищает поле, как с контрактами и заданиями.
+  achievements: string[];
+  lastAchievements: string[];
+  // Серия заходов: считается по календарным суткам реального времени.
+  streak: StreakState;
+  // Опубликованные на рынке стратегии и боты, из которых они выросли.
+  // Нужны, чтобы прислать трек-рекорд: сервер игровых сделок не видит.
+  publishedStrategies: Array<{ strategyId: string; botId: string }>;
 }
 
 /**
@@ -170,6 +180,7 @@ export function applyPositionOpen(
     stopLoss?: number;
     takeProfit?: number;
     trailingPct?: number;
+    botId?: string;
     style: Position["style"];
   },
 ): Position {
@@ -184,6 +195,7 @@ export function applyPositionOpen(
     stopLoss: input.stopLoss,
     takeProfit: input.takeProfit,
     trailingPct: input.trailingPct,
+    botId: input.botId,
     openedAt: Date.now(),
     fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
     style: input.style,
@@ -496,6 +508,7 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
         entryPrice: price,
         stopLoss: botStopLoss(price, side, bot),
         takeProfit: botTakeProfit(price, side, bot),
+        botId: bot.id,
         style: state.activeStyle.style,
       });
     }
@@ -541,6 +554,24 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   const wipedOut =
     state.wipedOut || (sponsor == null && isWipedOut(account.equity, account.positions, tuning.startingBalance));
 
+  // Достижения. Проверяются по состоянию, а не по событиям: правило «пять
+  // прибыльных подряд» обязано срабатывать одинаково и на живой сделке, и
+  // на догоняющем офлайн-прогрессе.
+  const earned = newlyEarned(state.achievements, {
+    positions: account.positions,
+    journal: account.journal,
+    skills: account.skills,
+    contractsPassed: evaluation.state.history.filter((r) => r.outcome === "passed").length,
+    unlockedMarkets,
+    equity: account.equity,
+    startingBalance: tuning.startingBalance,
+    streakDays: state.streak.days,
+    // Долг закрыт: договор был и его больше нет.
+    sponsorRepaid: state.sponsor != null && sponsor == null,
+    strategySold: state.achievements.includes("strategySold"),
+    inFund: state.achievements.includes("inFund"),
+  });
+
   // 10. Смена игрового дня — фиксируем эквити для дневного результата.
   const dayStartEquity =
     gameCalendarDay !== state.gameCalendarDay || state.dayStartEquity == null
@@ -566,5 +597,7 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     lastUpkeepMonth,
     sponsor,
     wipedOut,
+    achievements: earned.length > 0 ? [...state.achievements, ...earned] : state.achievements,
+    lastAchievements: earned.length > 0 ? earned : state.lastAchievements,
   };
 }

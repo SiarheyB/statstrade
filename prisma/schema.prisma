@@ -1482,6 +1482,14 @@ model GameStrategy {
   config      String
   price       Float
   purchases   Int      @default(0)
+  // Трек-рекорд: итоги бота АВТОРА по этой стратегии. Присылает клиент
+  // автора вместе с синхронизацией мира. Пусто, пока бот не наторговал —
+  // это честнее нуля, который читался бы как «стратегия убыточна».
+  botId       String?
+  trades      Int?
+  winRate     Float?
+  avgPnl      Float?
+  reportedAt  DateTime?
   createdAt   DateTime @default(now())
   buyers      GameStrategyPurchase[]
 
