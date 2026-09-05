@@ -40,8 +40,16 @@ export const BOT_PERSONAS = personasData as BotPersona[];
 
 /** Как часто бот шевелится. */
 export const BOT_TICK_MS = 5 * 60 * 1000;
-/** С какой вероятностью на такте бот пишет в чат. */
+/** С какой вероятностью на такте бот пишет в чат просто так. */
 export const BOT_CHAT_CHANCE = 0.25;
+/**
+ * Через сколько бот отвечает на ПРЯМОЙ вопрос.
+ *
+ * Отдельно от обычного такта: вопрос, оставшийся без ответа пять минут, — это
+ * не «живой чат», а пустая комната. Отвечает всегда, а не по вероятности:
+ * молчание в ответ на прямой вопрос выдаёт бота вернее любой реплики.
+ */
+export const ANSWER_DELAY_MS = 30_000;
 /** Стартовый капитал бота. */
 export const BOT_START_EQUITY = 10_000;
 /** Сколько сообщений из чата даём модели как контекст. */
@@ -75,6 +83,34 @@ export async function ensureBots(): Promise<number> {
   return created;
 }
 
+/**
+ * Вопрос игрока, оставшийся без ответа.
+ *
+ * Ищем последнее сообщение канала: если его написал ЧЕЛОВЕК и в нём есть
+ * вопросительный знак — на него ещё никто не ответил, потому что после него
+ * сообщений нет.
+ */
+async function pendingQuestion(channel: string) {
+  const [last] = await prisma.gameChatMessage.findMany({
+    where: { channel, removedAt: null },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: {
+      id: true,
+      text: true,
+      createdAt: true,
+      playerId: true,
+      player: { select: { isBot: true, nickname: true } },
+    },
+  });
+  if (!last || last.player.isBot) return null;
+  if (!last.text.includes("?")) return null;
+  // Даём паузу: ответ через полсекунды после вопроса выглядит роботом не
+  // меньше, чем молчание.
+  if (Date.now() - last.createdAt.getTime() < ANSWER_DELAY_MS) return null;
+  return last;
+}
+
 function personaOf(id: string | null): BotPersona | undefined {
   return BOT_PERSONAS.find((p) => p.id === id);
 }
@@ -106,18 +142,30 @@ export function equityStep(dayChangePct: number, persona: BotPersona, luck: numb
   return dayChangePct * persona.risk * direction * share;
 }
 
-/** Один такт всех ботов: торговля и, изредка, реплика в чат. */
+/** Один такт всех ботов: торговля, ответ на вопрос и, изредка, реплика в чат. */
 export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke: number }> {
+  // ОТВЕТ НА ВОПРОС идёт отдельно от общего такта и не ждёт его.
+  //
+  // Вопрос, оставшийся без ответа на пять минут, — это не живой чат, а пустая
+  // комната. Поэтому отвечающий бот выбирается независимо от того, подошло ли
+  // его время шевелиться, и отвечает ВСЕГДА, а не по вероятности: молчание в
+  // ответ на прямой вопрос выдаёт бота вернее любой реплики.
+  let spoke = 0;
+  for (const channel of ["general", "market"]) {
+    const question = await pendingQuestion(channel);
+    if (!question) continue;
+    const answered = await answerQuestion(channel, question.text, now);
+    if (answered) spoke++;
+  }
+
   const bots = await prisma.gamePlayer.findMany({
     where: { isBot: true, OR: [{ lastBotActAt: null }, { lastBotActAt: { lt: new Date(now - BOT_TICK_MS) } }] },
   });
-  if (bots.length === 0) return { moved: 0, spoke: 0 };
+  if (bots.length === 0) return { moved: 0, spoke };
 
   const assetIds = Array.from(new Set(bots.flatMap((bot) => watchList(bot.activeStyle))));
   const quotes = await readQuotes(assetIds, now);
 
-  let moved = 0;
-  let spoke = 0;
   // Кто написал последним: подряд две свои реплики в живом чате — редкость,
   // и именно она выдаёт бота быстрее содержания.
   const [last] = await prisma.gameChatMessage.findMany({
@@ -127,6 +175,7 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
     select: { playerId: true },
   });
 
+  let moved = 0;
   for (const bot of bots) {
     const persona = personaOf(bot.persona);
     if (!persona) continue;
@@ -156,17 +205,51 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
       openRouterConfigured() &&
       Math.random() < BOT_CHAT_CHANCE
     ) {
-      const said = await speak(bot.id, persona, { equity, dayChange: avg, watched, quotes });
+      const said = await speak(bot.id, persona, "general", null, { equity, dayChange: avg, watched, quotes });
       if (said) spoke++;
     }
   }
   return { moved, spoke };
 }
 
-/** Реплика бота в общий чат. */
+/** Ответ одного бота на прямой вопрос в канале. */
+async function answerQuestion(channel: string, question: string, now: number): Promise<boolean> {
+  if (!openRouterConfigured()) return false;
+  const bots = await prisma.gamePlayer.findMany({ where: { isBot: true } });
+  if (bots.length === 0) return false;
+
+  // Если в вопросе назвали имя — отвечает названный. В живом чате обращение
+  // по имени работает именно так, и ответ от постороннего вместо адресата
+  // выдаёт бота мгновенно.
+  const lower = question.toLowerCase();
+  const addressed = bots.find((candidate) => lower.includes(candidate.nickname.toLowerCase()));
+  // Иначе откликается случайный — как тот, кто первым увидел. Один: хор из
+  // шести ответов на один вопрос выдал бы всех сразу.
+  const bot = addressed ?? bots[Math.floor(Math.random() * bots.length)];
+  const persona = personaOf(bot.persona);
+  if (!persona) return false;
+
+  const watched = watchList(bot.activeStyle);
+  const quotes = await readQuotes(watched, now);
+  const said = await speak(bot.id, persona, channel, question, {
+    equity: bot.equity,
+    dayChange: 0,
+    watched,
+    quotes,
+  });
+  if (said) {
+    await prisma.gamePlayer.update({ where: { id: bot.id }, data: { lastBotActAt: new Date(now) } });
+  }
+  return said;
+}
+
+/** Реплика бота: свободная или ответ на заданный вопрос. */
 async function speak(
   botId: string,
   persona: BotPersona,
+  channel: string,
+  /** Вопрос, на который надо ответить. null — бот говорит по своей воле. */
+  question: string | null,
   context: {
     equity: number;
     dayChange: number;
@@ -174,7 +257,13 @@ async function speak(
     quotes: Record<string, { price: number; dayChangePct: number }>;
   },
 ): Promise<boolean> {
-  const recent = await readMessages("general", CHAT_CONTEXT);
+  const recent = await readMessages(channel, CHAT_CONTEXT);
+  // Бот должен знать, ЧЕМ он торгует: без этого на вопрос «какие активы?» он
+  // отвечал общими словами про стопы — что и выдавало его сразу.
+  const instruments = context.watched
+    .map((id) => ALL_ASSETS.find((asset) => asset.id === id)?.symbol)
+    .filter(Boolean)
+    .join(", ");
   const market = context.watched
     .map((id) => {
       const asset = ALL_ASSETS.find((a) => a.id === id);
@@ -196,20 +285,23 @@ async function speak(
       content: [
         `Ты — участник чата трейдеров в браузерной игре. Тебя зовут ${persona.nickname}.`,
         `Характер и манера речи: ${persona.voice}`,
+        `Ты торгуешь в стиле «${persona.style}» и следишь за инструментами: ${instruments || "разными"}.`,
         "Пиши ОДНО короткое сообщение на русском: от трёх слов до двух предложений.",
         "Это живой чат, а не пост: без приветствий, без подписи, без обращения ко всем сразу.",
         "Не упоминай, что ты модель или программа. Не повторяй чужие реплики.",
         "Не давай инвестиционных советов и никого не уговаривай что-то купить.",
-        "Иногда просто реагируй на сказанное другими, не начиная новую тему.",
+        question
+          ? "Тебе задали вопрос — ответь ИМЕННО на него, конкретно и по делу, своими словами. Общими рассуждениями не отделывайся."
+          : "Иногда просто реагируй на сказанное другими, не начиная новую тему.",
       ].join(" "),
     },
     {
       role: "user",
       content: [
-        `Твой счёт: ${Math.round(context.equity)} $, рынок сегодня ${context.dayChange >= 0 ? "растёт" : "падает"}.`,
-        market ? `Котировки: ${market}.` : "",
+        `Твой счёт: ${Math.round(context.equity)} $.`,
+        market ? `Котировки твоих инструментов: ${market}.` : "",
         history ? `Последние сообщения:\n${history}` : "В чате пока тихо.",
-        "Напиши свою реплику.",
+        question ? `Вопрос, на который надо ответить: «${question}»` : "Напиши свою реплику.",
       ]
         .filter(Boolean)
         .join("\n"),
@@ -222,6 +314,6 @@ async function speak(
   const clean = text.replace(/^["'«]|["'»]$/g, "").split("\n")[0].slice(0, 220).trim();
   if (clean.length < 2) return false;
 
-  await prisma.gameChatMessage.create({ data: { channel: "general", playerId: botId, text: clean } });
+  await prisma.gameChatMessage.create({ data: { channel, playerId: botId, text: clean } });
   return true;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { BOT_PERSONAS, BOT_CHAT_CHANCE, BOT_TICK_MS, equityStep } from "@/lib/game/bots";
+import { ANSWER_DELAY_MS, BOT_PERSONAS, BOT_CHAT_CHANCE, BOT_TICK_MS, equityStep } from "@/lib/game/bots";
 
 describe("характеры ботов", () => {
   it("у всех уникальные идентификаторы и имена", () => {
@@ -71,5 +71,14 @@ describe("правила речи", () => {
   it("шанс заговорить оставляет большинство тактов молчаливыми", () => {
     // Бот, пишущий на каждом такте, — это лента спама, а не участник чата.
     expect(BOT_CHAT_CHANCE).toBeLessThanOrEqual(0.3);
+  });
+});
+
+describe("ответ на вопрос", () => {
+  it("пауза перед ответом задана: мгновенный отклик тоже выдаёт бота", () => {
+    expect(ANSWER_DELAY_MS).toBeGreaterThanOrEqual(10_000);
+    // Но и не пять минут: вопрос, оставшийся без ответа, — это пустая
+    // комната, а не живой чат.
+    expect(ANSWER_DELAY_MS).toBeLessThan(BOT_TICK_MS);
   });
 });

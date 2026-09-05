@@ -1,3 +1,4 @@
+import { tickBots } from "@/lib/game/bots";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
@@ -20,6 +21,10 @@ export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   try {
+    // Такт ботов дёргаем и отсюда: человек ждёт ответа именно в чате, а не на
+    // вкладке мира. Не ждём результата — запрос к модели может занять
+    // секунду, а лента должна обновиться сразу.
+    void tickBots().catch(() => {});
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
