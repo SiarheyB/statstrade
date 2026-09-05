@@ -53,7 +53,11 @@ export async function GET() {
   try {
     const bots = await prisma.gamePlayer.findMany({
       where: { isBot: true },
-      orderBy: { equity: "desc" },
+      // Порядок УСТОЙЧИВЫЙ, а не по счёту. Это экран настройки: если строки
+      // стоят по эквити, они переезжают сами собой между запросами — бот,
+      // которому только что двигали ползунок, уходит вниз прямо из-под руки.
+      // Кто впереди по деньгам, видно на самой карточке.
+      orderBy: [{ createdAt: "asc" }, { nickname: "asc" }],
       select: {
         id: true,
         nickname: true,

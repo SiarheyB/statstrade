@@ -174,7 +174,12 @@ export default function GameBots() {
     };
   }, []);
 
+  // Правка одной настройки меняет ОДНУ строку в списке, а не перезагружает
+  // его целиком: перезагрузка приносила свежие счета, список пересобирался, и
+  // карточка уезжала прямо из-под руки. Свежие цифры приносит кнопка
+  // «Обновить» — тогда, когда их просят.
   async function patch(id: string, body: Record<string, unknown>) {
+    setBots((prev) => prev?.map((bot) => (bot.id === id ? { ...bot, ...body } : bot)) ?? prev);
     setBusy(true);
     const res = await fetch("/api/admin/game/bots", {
       method: "PATCH",
@@ -183,10 +188,10 @@ export default function GameBots() {
     });
     setBusy(false);
     if (!res.ok) {
+      // Не сохранилось — возвращаем на экран то, что на самом деле в базе.
       setError("Не удалось сохранить");
-      return;
+      await load();
     }
-    await load();
   }
 
   async function create() {
