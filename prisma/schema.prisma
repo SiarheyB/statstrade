@@ -1309,6 +1309,7 @@ model GamePlayer {
   // вечная блокировка требует ручного снятия, про которое забывают.
   mutedUntil        DateTime?
   seasonResults     GameSeasonResult[]
+  tournamentEntries GameTournamentEntry[]
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
 
@@ -1515,6 +1516,42 @@ model GameSeasonResult {
   createdAt DateTime @default(now())
 
   @@unique([seasonId, playerId])
+  @@index([playerId])
+}
+
+// Турниры: короткая дистанция с понятным концом. Сезон длится месяц, общий
+// рейтинг не кончается вовсе — а игроку нужно и «зашёл, три дня поторговал,
+// увидел итог». Взнос обязателен: без него турнир превращается в бесплатную
+// лотерею, где выгодно записаться и не играть.
+model GameTournament {
+  id        String    @id @default(cuid())
+  index     Int       @unique
+  startsAt  DateTime
+  endsAt    DateTime
+  entryFee  Float
+  // Призовой фонд копится из взносов участников.
+  prizePool Float     @default(0)
+  closedAt  DateTime?
+  entries   GameTournamentEntry[]
+
+  @@index([endsAt])
+}
+
+model GameTournamentEntry {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   GameTournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  playerId     String
+  player       GamePlayer     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // Эквити на входе: зачёт — рост от неё, а не абсолютные деньги, иначе
+  // турнир выигрывал бы самый богатый.
+  startEquity  Float
+  equity       Float
+  rank         Int?
+  reward       Float    @default(0)
+  joinedAt     DateTime @default(now())
+
+  @@unique([tournamentId, playerId])
   @@index([playerId])
 }
 

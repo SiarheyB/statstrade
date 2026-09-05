@@ -311,6 +311,42 @@ export async function fetchSeason(): Promise<SeasonStandings | null> {
   }
 }
 
+export interface TournamentStandings {
+  tournament: {
+    index: number;
+    startsAt: number;
+    endsAt: number;
+    entryFee: number;
+    prizePool: number;
+    players: number;
+    minPlayers: number;
+    prizeShares: number[];
+  };
+  joined: boolean;
+  rows: Array<{
+    playerId: string;
+    nickname: string;
+    rankKey: string;
+    activeStyle: string;
+    resultPct: number;
+  }>;
+}
+
+export async function fetchTournament(): Promise<TournamentStandings | null> {
+  try {
+    const res = await fetch("/api/game/tournament");
+    if (!res.ok) return null;
+    return (await res.json()) as TournamentStandings;
+  } catch {
+    return null;
+  }
+}
+
+/** Записаться в турнир. Взнос списывает клиент — сервер лишь копит фонд. */
+export function joinTournament(equity: number) {
+  return post<{ entryFee: number; endsAt: number }>("/api/game/tournament", { equity });
+}
+
 export const strategies = {
   publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"]; botId?: string }) =>
     post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),

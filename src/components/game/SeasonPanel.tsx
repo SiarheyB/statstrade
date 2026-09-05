@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fetchSeason, type SeasonStandings } from "@/lib/game/worldClient";
 import { seasonPrize, SEASON_PRIZE_PLACES } from "@/lib/game/seasons";
 import { fmtUsd } from "@/lib/format";
+import TournamentPanel from "./TournamentPanel";
 
 function daysLeft(endsAt: number): number {
   return Math.max(0, Math.ceil((endsAt - Date.now()) / (24 * 60 * 60 * 1000)));
@@ -44,6 +45,8 @@ export default function SeasonPanel({ nickname }: { nickname: string | null }) {
   const short = season.players < season.minPlayers;
 
   return (
+    <div className="space-y-4">
+    <TournamentPanel nickname={nickname} />
     <div className="card p-4 space-y-3">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
@@ -101,6 +104,7 @@ export default function SeasonPanel({ nickname }: { nickname: string | null }) {
           </table>
         </div>
       )}
+    </div>
     </div>
   );
 }

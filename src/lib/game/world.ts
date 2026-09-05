@@ -17,6 +17,7 @@
 //      получишь — можно лишь надуть свой рейтинг.
 import { prisma } from "@/lib/db";
 import { joinSeason } from "@/lib/game/seasons";
+import { updateTournamentEquity } from "@/lib/game/tournaments";
 
 export const LEADERBOARD_SIZE = 25;
 export const FEED_SIZE = 30;
@@ -160,6 +161,9 @@ export async function syncPlayer(userId: string, email: string, snapshot: Player
   // Записываем игрока в текущий сезон при первой же синхронизации: входная
   // эквити фиксируется тогда, с неё и считается сезонный рост.
   await joinSeason(player.id, clean.equity);
+  // Турнирная эквити обновляется здесь же — но только если игрок в турнире:
+  // записывает его туда отдельное действие со взносом.
+  await updateTournamentEquity(player.id, clean.equity);
 
   const claimed = player.pendingPayout;
   return {
