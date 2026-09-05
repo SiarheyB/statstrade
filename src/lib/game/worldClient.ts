@@ -248,14 +248,29 @@ export interface ChatMessage {
   author: { id: string; nickname: string; rankKey: string };
 }
 
-export async function fetchChat(channel: string): Promise<ChatMessage[]> {
+/** Лента канала вместе со сроком его жизни: чат стирается целиком. */
+export interface ChatFeed {
+  messages: ChatMessage[];
+  /** Когда канал очистится, мс. null — чат пуст, стирать нечего. */
+  clearsAt: number | null;
+  /** Сколько канал живёт от первой реплики, мс. */
+  lifetimeMs: number;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export async function fetchChat(channel: string): Promise<ChatFeed> {
   try {
     const res = await fetch(`/api/game/chat?channel=${encodeURIComponent(channel)}`);
-    if (!res.ok) return [];
-    const data = (await res.json()) as { messages?: ChatMessage[] };
-    return data.messages ?? [];
+    if (!res.ok) return { messages: [], clearsAt: null, lifetimeMs: 3 * DAY_MS };
+    const data = (await res.json()) as Partial<ChatFeed>;
+    return {
+      messages: data.messages ?? [],
+      clearsAt: data.clearsAt ?? null,
+      lifetimeMs: data.lifetimeMs ?? 3 * DAY_MS,
+    };
   } catch {
-    return [];
+    return { messages: [], clearsAt: null, lifetimeMs: 3 * DAY_MS };
   }
 }
 

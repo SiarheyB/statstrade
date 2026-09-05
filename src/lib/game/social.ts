@@ -22,6 +22,68 @@ export const CHAT_PAGE_SIZE = 60;
 // в защите от флуда сложнее этой.
 export const MESSAGE_COOLDOWN_MS = 3000;
 
+// ── Очистка чата ──────────────────────────────────────────────────────────
+//
+// Канал живёт ограниченный срок и потом стирается ЦЕЛИКОМ, а не по одному
+// сообщению. Разговор годовой давности не разговор, а свалка: искать в нём
+// нечего, а новичок, открывший чат, первым делом упирается в чужие реплики
+// из позапрошлого месяца. Общий зал и разговоры про инструменты живут три
+// дня, канал фонда — неделю: там договариваются о деньгах, и решение
+// недельной давности ещё может понадобиться.
+//
+// Срок отсчитывается от САМОГО СТАРОГО сообщения канала, а не от «каждую
+// среду в полночь». Так канал не нужно ни за чем помнить: очистили — окно
+// началось заново с первой новой реплики. И человеку это объяснимо одной
+// фразой: «чат живёт три дня».
+export const CHAT_LIFETIME_MS: Record<string, number> = {
+  general: 3 * 24 * 60 * 60 * 1000,
+  market: 3 * 24 * 60 * 60 * 1000,
+  fund: 7 * 24 * 60 * 60 * 1000,
+};
+
+/** Срок жизни канала. Каналы фонда приходят как `fund:<id>`. */
+export function lifetimeOf(channel: string): number {
+  if (channel.startsWith("fund")) return CHAT_LIFETIME_MS.fund;
+  return CHAT_LIFETIME_MS[channel] ?? CHAT_LIFETIME_MS.general;
+}
+
+/**
+ * Когда канал очистится: самое старое сообщение плюс срок жизни.
+ * `null` — чат пуст, стирать нечего и обещать нечего.
+ */
+export async function clearsAt(channel: string, now = Date.now()): Promise<number | null> {
+  const oldest = await prisma.gameChatMessage.findFirst({
+    where: { channel },
+    orderBy: { createdAt: "asc" },
+    select: { createdAt: true },
+  });
+  if (!oldest) return null;
+  return Math.max(now, oldest.createdAt.getTime() + lifetimeOf(channel));
+}
+
+/**
+ * Стереть каналы, у которых вышел срок.
+ *
+ * Удаляем НАСОВСЕМ, а не помечаем: смысл очистки в том, чтобы старого не
+ * осталось. Снятые модератором сообщения уходят вместе со всеми — они и так
+ * жили только ради разбирательства, а через три дня разбирать уже нечего.
+ */
+export async function purgeExpiredChats(now = Date.now()): Promise<{ channel: string; removed: number }[]> {
+  const channels = await prisma.gameChatMessage.groupBy({
+    by: ["channel"],
+    _min: { createdAt: true },
+  });
+  const cleared: { channel: string; removed: number }[] = [];
+  for (const row of channels) {
+    const oldest = row._min.createdAt;
+    if (!oldest) continue;
+    if (now - oldest.getTime() < lifetimeOf(row.channel)) continue;
+    const res = await prisma.gameChatMessage.deleteMany({ where: { channel: row.channel } });
+    if (res.count > 0) cleared.push({ channel: row.channel, removed: res.count });
+  }
+  return cleared;
+}
+
 export const MIN_STRATEGY_PRICE = 0;
 export const MAX_STRATEGY_PRICE = 500_000;
 export const MAX_STRATEGIES_PER_AUTHOR = 5;

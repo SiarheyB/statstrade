@@ -24,6 +24,20 @@ function channelKey(channel: string): string {
   return channel.startsWith(FUND_PREFIX) ? "fund" : channel;
 }
 
+/**
+ * Сроки мута.
+ *
+ * Час на всё подряд — плохая мера: за грубость в запале хватает десяти минут,
+ * а за третий заход с оскорблениями и суток мало. Даём выбрать, но не
+ * произвольное число: поле ввода на такой мелочи только замедляет.
+ */
+const MUTE_OPTIONS = [
+  { minutes: 10, label: "10м", title: "десять минут" },
+  { minutes: 60, label: "1ч", title: "час" },
+  { minutes: 120, label: "2ч", title: "два часа" },
+  { minutes: 24 * 60, label: "1д", title: "сутки" },
+];
+
 export default function GameChatModeration({ stats, loadedAt }: { stats: GameStats; loadedAt: number }) {
   const [filter, setFilter] = useState<string>("all");
   const [busy, setBusy] = useState(false);
@@ -60,9 +74,14 @@ export default function GameChatModeration({ stats, loadedAt }: { stats: GameSta
         <h2 className="text-lg font-medium">Чат мира</h2>
         <p className="mt-1 text-sm text-muted max-w-prose">
           Снятое сообщение исчезает из ленты игроков, но остаётся в базе: пропавшая реплика
-          выглядит как сбой, и разобраться потом, за что наказали, было бы нечем. Мут — на час и
-          со сроком, а не вечный бан: почти всё лечится паузой, а вечная блокировка требует
-          ручного снятия, про которое забывают.
+          выглядит как сбой, и разобраться потом, за что наказали, было бы нечем. Мут всегда со
+          сроком — десять минут, час, два или сутки, — а не вечный бан: почти всё лечится паузой, а
+          вечная блокировка требует ручного снятия, про которое забывают.
+        </p>
+        <p className="mt-1 text-sm text-muted max-w-prose">
+          Каналы очищаются сами: общий зал и разговоры про рынок — раз в три дня, канал фонда — раз
+          в неделю. Стирается всё, вместе со снятыми сообщениями: разбирать через три дня уже
+          нечего. Игроки об этом предупреждены прямо над полем ввода.
         </p>
       </div>
 
@@ -118,25 +137,45 @@ export default function GameChatModeration({ stats, loadedAt }: { stats: GameSta
                         снять
                       </button>
                     )}
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        void moderate(
-                          { action: "mutePlayer", playerId: message.author.id, minutes: isMuted ? 0 : 60 },
-                          () =>
+                    {isMuted ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          void moderate({ action: "mutePlayer", playerId: message.author.id, minutes: 0 }, () =>
                             setMuted((prev) => {
                               const next = new Set(prev);
-                              if (isMuted) next.delete(message.author.id);
-                              else next.add(message.author.id);
+                              next.delete(message.author.id);
                               return next;
                             }),
-                        )
-                      }
-                      className="input-base px-1.5 py-0.5 hover:border-border-strong disabled:opacity-50"
-                    >
-                      {isMuted ? "снять мут" : "мут"}
-                    </button>
+                          )
+                        }
+                        className="input-base px-1.5 py-0.5 hover:border-border-strong disabled:opacity-50"
+                      >
+                        снять мут
+                      </button>
+                    ) : (
+                      // Срок выбирается сразу, а не «мут на час всегда»:
+                      // за грубость в запале и за третий заход с оскорблениями
+                      // наказание не может быть одинаковым.
+                      MUTE_OPTIONS.map((option) => (
+                        <button
+                          key={option.minutes}
+                          type="button"
+                          disabled={busy}
+                          title={`Закрыть чат этому игроку на ${option.title}`}
+                          onClick={() =>
+                            void moderate(
+                              { action: "mutePlayer", playerId: message.author.id, minutes: option.minutes },
+                              () => setMuted((prev) => new Set(prev).add(message.author.id)),
+                            )
+                          }
+                          className="input-base px-1.5 py-0.5 hover:border-border-strong disabled:opacity-50"
+                        >
+                          {option.label}
+                        </button>
+                      ))
+                    )}
                   </span>
                 </div>
               );

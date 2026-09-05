@@ -29,11 +29,13 @@ export function botLoopDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
 
 /** Один оборот: завести недостающих ботов и дать всем походить. */
 export async function botLoopTick(): Promise<void> {
-  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }] = await Promise.all([
-    import("@/lib/featureConfig"),
-    import("@/lib/game/bots"),
-    import("@/lib/cronHeartbeat"),
-  ]);
+  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }, { purgeExpiredChats }] =
+    await Promise.all([
+      import("@/lib/featureConfig"),
+      import("@/lib/game/bots"),
+      import("@/lib/cronHeartbeat"),
+      import("@/lib/game/social"),
+    ]);
 
   // Раздел выключен админом — мир стоит целиком, и боты вместе с ним. Иначе
   // выключенная игра продолжала бы тратить деньги на токены.
@@ -41,6 +43,13 @@ export async function botLoopTick(): Promise<void> {
   if (!game.enabled) return;
 
   await ensureBots();
+  // Заодно стираем каналы, у которых вышел срок. Это единственное место,
+  // которое работает и без игроков: чат, доживший до очистки в ночь, когда
+  // никто не заходил, должен очиститься сам.
+  const cleared = await purgeExpiredChats();
+  for (const row of cleared) {
+    console.log(`[game-bots] чат «${row.channel}» очищен: ${row.removed} сообщений`);
+  }
   const result = await tickBots();
   if (result.moved > 0 || result.spoke > 0) {
     await recordCronRun("game.bots", "scheduler");

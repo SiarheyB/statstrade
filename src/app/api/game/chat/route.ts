@@ -4,7 +4,15 @@ import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
-import { normalizeChannel, postMessage, readMessages, MAX_MESSAGE_LENGTH } from "@/lib/game/social";
+import {
+  clearsAt,
+  lifetimeOf,
+  normalizeChannel,
+  postMessage,
+  purgeExpiredChats,
+  readMessages,
+  MAX_MESSAGE_LENGTH,
+} from "@/lib/game/social";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +37,10 @@ export async function GET(req: Request) {
     // (отметка времени уже сдвинута, решение не принято). after() выполняет
     // её ПОСЛЕ ответа и не отменяет вместе с ним.
     after(() => tickBots().catch(() => {}));
+    // Очистка просроченных каналов — тем же ленивым способом, что и всё
+    // остальное в этой игре: отдельный воркер ради шести таблиц держать
+    // незачем, а открытый чат — самый частый момент, когда это уместно.
+    after(() => purgeExpiredChats().catch(() => {}));
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
@@ -37,7 +49,15 @@ export async function GET(req: Request) {
     const channel = normalizeChannel(raw, player.fundId);
     if (!channel) return badRequest(raw === "fund" ? MESSAGES.not_in_fund : MESSAGES.unknown_channel);
 
-    return NextResponse.json({ channel: raw, messages: await readMessages(channel) });
+    // Срок жизни отдаём вместе с лентой: человек должен знать, что его
+    // сообщения не навсегда, ДО того как напишет что-то важное.
+    const [messages, clears] = await Promise.all([readMessages(channel), clearsAt(channel)]);
+    return NextResponse.json({
+      channel: raw,
+      messages,
+      clearsAt: clears,
+      lifetimeMs: lifetimeOf(channel),
+    });
   } catch (err) {
     return serverError((err as Error).message);
   }
