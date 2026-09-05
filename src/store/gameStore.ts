@@ -49,6 +49,7 @@ import {
   funds as fundsApi,
   loans as loansApi,
   signals as signalsApi,
+  fetchListings,
   strategies as strategiesApi,
   syncSnapshot,
 } from "@/lib/game/worldClient";
@@ -422,6 +423,14 @@ interface GameStoreState {
   cancelOrder: (orderId: string) => void;
   /** Запомнить опубликованную стратегию, чтобы слать по ней трек-рекорд. */
   rememberStrategy: (strategyId: string, botId: string) => void;
+  /**
+   * Подтянуть листинги фондов.
+   *
+   * Слоты под фонды лежат в справочнике безымянными; листинг вешает на слот
+   * имя и тикер фонда. Клиент подменяет их у себя и добавляет бумагу в набор
+   * — иначе купить её было бы негде.
+   */
+  refreshListings: () => Promise<void>;
   /** Принять деньги спонсора после разорения. */
   acceptSponsor: () => void;
   /** Отказаться: счёт остаётся как есть, предложение больше не всплывает. */
@@ -710,9 +719,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       // Первая синхронизация — сразу: игрок должен увидеть себя в мире, не
       // дожидаясь минуты, и забрать причитающиеся деньги.
       void get().syncWorld();
+      // Листинги тянем тем же тактом: новый фонд на бирже должен появиться в
+      // списке инструментов сам, без перезагрузки страницы.
+      void get().refreshListings();
       worldSyncHandle = setInterval(() => {
         if (typeof document !== "undefined" && document.hidden) return;
         void get().syncWorld();
+        void get().refreshListings();
       }, WORLD_SYNC_INTERVAL_MS);
     }
   },
@@ -833,6 +846,37 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       game: { ...s.game, account: { ...s.game.account, pendingOrders: [...(s.game.account.pendingOrders ?? []), order] } },
     }));
     return { ok: true };
+  },
+
+  refreshListings: async () => {
+    const data = await fetchListings();
+    if (!data) return;
+    set((s) => {
+      const byAsset = new Map(data.listings.map((row) => [row.assetId, row]));
+      const existing = new Set(s.game.activeAssets.map((a) => a.id));
+      // Переименовываем уже добавленные и добавляем новые: слот без листинга
+      // в наборе делать нечего — торговать безымянной бумагой нельзя.
+      const renamed = s.game.activeAssets.map((asset) => {
+        const row = byAsset.get(asset.id);
+        return row ? { ...asset, symbol: row.ticker, name: row.name } : asset;
+      });
+      const added = data.listings
+        .filter((row) => !existing.has(row.assetId))
+        .map((row) => {
+          const base = ALL_ASSETS.find((a) => a.id === row.assetId);
+          return base ? { ...base, symbol: row.ticker, name: row.name } : null;
+        })
+        .filter((a): a is Asset => a != null);
+      if (added.length === 0 && renamed.every((a, i) => a === s.game.activeAssets[i])) return { game: s.game };
+
+      const prices = { ...s.game.prices };
+      const candles = { ...s.game.candles };
+      for (const asset of added) {
+        if (prices[asset.id] == null) prices[asset.id] = seedPrice(asset);
+        candles[asset.id] ??= [];
+      }
+      return { game: { ...s.game, activeAssets: [...renamed, ...added], prices, candles } };
+    });
   },
 
   rememberStrategy: (strategyId, botId) => {

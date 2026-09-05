@@ -220,6 +220,24 @@ function toMarketCandles(rows: { ts: Date; open: number; high: number; low: numb
  * каждого часа, 5m/15m — склейкой этих минуток. Выше часа — склейкой часов
  * (для 1d берём готовую дневную свёртку: она уже посчитана).
  */
+/**
+ * С какого момента у инструмента есть публичная история.
+ *
+ * У слотов, отданных под листинг фондов, свечи генератор считает с начала
+ * мира — но показывать их до выхода фонда на биржу нельзя: у бумаги, которая
+ * разместилась вчера, не может быть годового графика. Отрезаем всё до даты
+ * листинга.
+ */
+async function historyStart(assetId: string, stepMs: number): Promise<number> {
+  if (!assetId.startsWith("FND_SLOT_")) return 0;
+  const listing = await prisma.gameListing.findUnique({ where: { assetId }, select: { listedAt: true } });
+  if (!listing) return Number.POSITIVE_INFINITY;
+  // Округляем к началу бара, а не режем по секунде размещения: иначе у
+  // фонда, вышедшего на биржу пять минут назад, график был бы пустым до
+  // конца часа — бумага как будто не торгуется вовсе.
+  return Math.floor(listing.listedAt.getTime() / stepMs) * stepMs;
+}
+
 export async function readCandles(assetId: string, tf: string, limit: number, now = Date.now()): Promise<MarketCandle[]> {
   const asset = getAsset(assetId);
   const stepMs = TIMEFRAMES[tf];
@@ -227,6 +245,8 @@ export async function readCandles(assetId: string, tf: string, limit: number, no
   await ensureHistory(assetId, now);
   const market = await getMarket();
   const bars = Math.max(1, Math.min(MAX_BARS, limit));
+  // У бумаги, разместившейся вчера, не может быть годового графика.
+  const since = await historyStart(assetId, stepMs);
 
   if (stepMs >= MS_DAY) {
     const source = await prisma.gameCandle.findMany({
@@ -234,7 +254,7 @@ export async function readCandles(assetId: string, tf: string, limit: number, no
       orderBy: { ts: "desc" },
       take: Math.min(2000, bars * Math.ceil(stepMs / MS_DAY) + 10),
     });
-    const daily = toMarketCandles(source.reverse());
+    const daily = toMarketCandles(source.reverse()).filter((candle) => candle.t >= since);
     if (stepMs === MS_DAY) return daily.slice(-bars);
     return aggregateMarket(daily, stepMs).slice(-bars);
   }
@@ -245,7 +265,7 @@ export async function readCandles(assetId: string, tf: string, limit: number, no
       orderBy: { ts: "desc" },
       take: Math.min(4000, bars * Math.ceil(stepMs / MS_HOUR) + 10),
     });
-    const hourly = toMarketCandles(source.reverse());
+    const hourly = toMarketCandles(source.reverse()).filter((candle) => candle.t >= since);
     if (stepMs === MS_HOUR) return hourly.slice(-bars);
     return aggregateMarket(hourly, stepMs).slice(-bars);
   }
@@ -273,7 +293,7 @@ export async function readCandles(assetId: string, tf: string, limit: number, no
     }
   }
   const result = stepMs === MS_MINUTE ? minutes : aggregateMarket(minutes, stepMs);
-  return result.slice(-bars);
+  return result.filter((candle) => candle.t >= since).slice(-bars);
 }
 
 function aggregateMarket(candles: MarketCandle[], bucketMs: number): MarketCandle[] {

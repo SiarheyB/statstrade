@@ -14,6 +14,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import SeasonPanel from "./SeasonPanel";
 import CopyTrading from "./CopyTrading";
 import BankPanel from "./BankPanel";
+import FundListingPanel from "./FundListing";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { fetchWorld, updateProfile, type WorldState } from "@/lib/game/worldClient";
@@ -409,6 +410,7 @@ export default function WorldPanel({
 
       {section === "funds" && (
         <div className="space-y-4">
+          <FundListingPanel />
           {world.myFund ? (
             <div className="card p-4 space-y-3">
               <div className="flex flex-wrap items-start justify-between gap-3">

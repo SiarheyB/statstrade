@@ -1355,8 +1355,28 @@ model GameFund {
   createdAt   DateTime @default(now())
   members     GamePlayer[] @relation("fundMembers")
   entries     GameFundEntry[]
+  listing     GameListing?
 
   @@index([capital])
+}
+
+// Листинг фонда на бирже.
+//
+// Генератор рынка статичен: инструменты лежат в assets.json и не меняются,
+// иначе история перестала бы воспроизводиться. Фонды же создаются на ходу.
+// Отсюда зарезервированные СЛОТЫ: восемь инструментов заранее лежат в
+// справочнике, а при листинге слот закрепляется за фондом и получает его имя
+// и тикер. Генератор про фонды не знает вовсе.
+model GameListing {
+  id          String   @id @default(cuid())
+  fundId      String   @unique
+  fund        GameFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  assetId     String   @unique
+  ticker      String   @unique
+  name        String
+  totalShares Float
+  sharesSold  Float    @default(0)
+  listedAt    DateTime @default(now())
 }
 
 model GameFundEntry {

@@ -407,6 +407,47 @@ export const signals = {
     post<{ fee: number }>("/api/game/signals", { action: "fee", leaderId, profit, feePct }),
 };
 
+export interface FundListing {
+  assetId: string;
+  ticker: string;
+  name: string;
+  totalShares: number;
+  sharesSold: number;
+  listedAt: number;
+  fundId: string;
+  capital: number;
+  owner: string;
+  bookValuePerShare: number;
+}
+
+export interface ListingRequirements {
+  ageDays: number;
+  capital: number;
+  members: number;
+  ownerContracts: number;
+  meets: { age: boolean; capital: boolean; members: boolean; owner: boolean };
+  ready: boolean;
+}
+
+export async function fetchListings(): Promise<{
+  listings: FundListing[];
+  myFundId: string | null;
+  requirements: ListingRequirements | null;
+} | null> {
+  try {
+    const res = await fetch("/api/game/listing");
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
+export const listing = {
+  list: (ticker: string) => post<{ assetId: string; ticker: string }>("/api/game/listing", { action: "list", ticker }),
+  place: (quantity: number) => post<{ sold: number; total: number }>("/api/game/listing", { action: "place", quantity }),
+};
+
 export const strategies = {
   publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"]; botId?: string }) =>
     post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),
