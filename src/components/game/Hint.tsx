@@ -30,7 +30,11 @@ export default function Hint({
       {children}
       <span
         role="tooltip"
-        className={`pointer-events-none absolute left-1/2 z-50 hidden w-max max-w-[240px] -translate-x-1/2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-fg shadow-lg group-hover:block group-focus-within:block ${
+        // Показываем на наведении и на КЛАВИАТУРНОМ фокусе, но не на обычном
+        // focus-within: после клика кнопка остаётся в фокусе, и подсказка
+        // висела на экране, пока фокус не уйдёт куда-то ещё — по две-три
+        // штуки одновременно поверх графика.
+        className={`pointer-events-none absolute left-1/2 z-50 hidden w-max max-w-[240px] -translate-x-1/2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-fg shadow-lg group-hover:block group-has-[:focus-visible]:block ${
           side === "bottom" ? "top-full mt-1.5" : "bottom-full mb-1.5"
         }`}
       >

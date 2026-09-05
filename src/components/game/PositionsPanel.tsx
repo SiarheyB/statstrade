@@ -67,8 +67,11 @@ export default function PositionsPanel({
   const history = positions.filter((p) => p.closedAt).sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0));
 
   return (
-    <div className="card p-4">
-      <div className="flex items-center gap-1 mb-3 border-b border-border">
+    // Карточка тянется на всю выделенную ей высоту, а прокручивается только
+    // содержимое: иначе под короткой таблицей оставалась пустота, а длинная
+    // растягивала страницу и уводила график за верхний край.
+    <div className="card p-4 flex flex-col h-full">
+      <div className="flex items-center gap-1 mb-3 border-b border-border shrink-0">
         {(["open", "orders", "history"] as const).map((k) => (
           <button
             key={k}
@@ -86,6 +89,7 @@ export default function PositionsPanel({
         ))}
       </div>
 
+      <div className="flex-1 min-h-0 overflow-y-auto">
       {tab === "open" ? (
         open.length === 0 ? (
           <div className="text-sm text-faint py-6 text-center">{t("game.positions.empty")}</div>
@@ -261,6 +265,7 @@ export default function PositionsPanel({
           </table>
         </div>
       )}
+      </div>
     </div>
   );
 }

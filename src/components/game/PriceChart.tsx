@@ -134,13 +134,30 @@ export const DEFAULT_TF_BY_STYLE: Record<string, string> = {
  * приходят с сервера с настоящими метками — поэтому и подписи настоящие:
  * внутри дня часы и минуты, на дневном и выше — дата.
  */
+/**
+ * Подпись на оси времени.
+ *
+ * Дата стоит ВСЕГДА, даже на минутках. Раньше внутри дня рисовались одни
+ * часы — «22:11», «23:02», — и по графику было не понять, какой это день, а
+ * тем более какой день недели. С расписанием торгов это стало важно вдвойне:
+ * между двумя соседними подписями может лежать ночь или целые выходные, и
+ * без даты этот разрыв не виден вовсе.
+ *
+ * День недели короткой строкой — потому что вопрос «а это пятница или
+ * понедельник?» на графике с сессиями возникает постоянно.
+ */
 export function fmtChartTime(ms: number, stepMs: number): string {
   const date = new Date(ms);
   const pad = (n: number) => String(n).padStart(2, "0");
-  if (stepMs >= 7 * 24 * 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${String(date.getFullYear()).slice(2)}`;
-  if (stepMs >= 24 * 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}`;
-  if (stepMs >= 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:00`;
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  const day = `${pad(date.getDate())}.${pad(date.getMonth() + 1)}`;
+  // Месяц и старше: год важнее дня недели.
+  if (stepMs >= 28 * 24 * 60 * 60_000) {
+    return `${date.toLocaleDateString(undefined, { month: "short" })} ${String(date.getFullYear()).slice(2)}`;
+  }
+  if (stepMs >= 7 * 24 * 60 * 60_000) return `${day}.${String(date.getFullYear()).slice(2)}`;
+  const weekday = date.toLocaleDateString(undefined, { weekday: "short" });
+  if (stepMs >= 24 * 60 * 60_000) return `${weekday} ${day}`;
+  return `${weekday} ${day} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 export const TF_MS: Record<string, number> = {
@@ -543,7 +560,9 @@ export default function PriceChart({
       ctx.fillStyle = CHART_COLORS.axisTextWeak;
       ctx.font = "10px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
-      const ticks = Math.max(3, Math.min(8, Math.floor(layout.plotW / 130)));
+      // Подписи стали длиннее (день недели + дата + время), поэтому и места
+      // под каждую нужно больше — иначе соседние наезжают друг на друга.
+      const ticks = Math.max(3, Math.min(8, Math.floor(layout.plotW / 165)));
       for (let i = 0; i <= ticks; i++) {
         const slot = view.i0 + (xspan * i) / ticks;
         const ms = timeOfSlot(allCandles, stepMs, slot);

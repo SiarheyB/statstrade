@@ -345,17 +345,25 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       </div>
 
       {tab === "terminal" && (
-        <div className="space-y-4">
-        {/* Верхний ряд — рабочая область: график, стакан и колонка действий.
-            Позиции идут ПОД ним во всю ширину: у таблицы девять колонок, и
-            зажатая в треть экрана она переносила строки, а место справа от
-            неё всё равно пустовало.
-            Колонка действий липкая: тикет должен оставаться под рукой, когда
-            список позиций внизу вырос и страница прокручена.
-            Стакан — узкой колонкой вплотную к графику и во всю его высоту,
-            как DOM в биржевом терминале. */}
+        // Сетка на две строки.
+        // ВЕРХ: график, стакан и колонка действий.
+        // НИЗ: позиции во всю ширину под графиком и стаканом.
+        //
+        // Колонка действий занимает обе строки и остаётся справа целиком —
+        // иначе позиции уезжали ПОД неё, и под графиком зияла пустота
+        // высотой в тикет.
+        //
+        // У таблицы позиций девять колонок: зажатая в треть экрана она
+        // переносила строки, а место справа всё равно пустовало.
+        //
+        // Стакан — узкой колонкой вплотную к графику и во всю его высоту,
+        // как DOM в биржевом терминале.
         <div
-          className={`grid grid-cols-1 gap-4 items-start ${
+          // Строки заданы явно: первая по высоте графика, вторая забирает
+          // ВСЁ оставшееся место. Иначе сетка делила высоту сама, и под
+          // таблицей позиций оставалась полоса пустоты в сотню пикселей,
+          // ровно там, где её быть не должно.
+          className={`grid grid-cols-1 gap-4 xl:grid-rows-[auto_minmax(0,1fr)] ${
             showOrderBook
               ? "xl:grid-cols-[minmax(0,1fr)_190px_minmax(320px,340px)]"
               : "xl:grid-cols-[minmax(0,1fr)_minmax(320px,340px)]"
@@ -385,7 +393,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             </div>
           )}
 
-          <div className="space-y-4 min-w-0 xl:sticky xl:top-4">
+          <div className="space-y-4 min-w-0 xl:row-span-2 xl:self-start xl:sticky xl:top-4">
             {assetId && (
               <OrderTicket
                 assets={game.activeAssets}
@@ -425,14 +433,14 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
             )}
           </div>
-        </div>
-
-        <PositionsPanel
-          positions={game.account.positions}
-          prices={game.prices}
-          assets={game.activeAssets}
-          orders={game.account.pendingOrders}
-        />
+          <div className={`min-w-0 xl:h-full ${showOrderBook ? "xl:col-span-2" : ""}`}>
+            <PositionsPanel
+              positions={game.account.positions}
+              prices={game.prices}
+              assets={game.activeAssets}
+              orders={game.account.pendingOrders}
+            />
+          </div>
         </div>
       )}
 
