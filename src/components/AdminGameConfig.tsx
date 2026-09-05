@@ -54,7 +54,7 @@ const GROUPS: { title: string; hint: string; fields: { key: string; label: strin
   },
 ];
 
-export default function AdminGameConfig() {
+export default function AdminGameConfig({ section = "all" }: { section?: "all" | "access" | "balance" }) {
   const [rows, setRows] = useState<FeatureRow[]>([]);
   const [draft, setDraft] = useState<Record<string, number>>({});
   const [busy, setBusy] = useState<string | null>(null);
@@ -131,6 +131,7 @@ export default function AdminGameConfig() {
 
   return (
     <div className="space-y-8">
+      {section !== "balance" && (
       <section>
         <h2 className="text-lg font-medium">Доступ к разделу</h2>
         <p className="mt-1 text-sm text-muted">
@@ -160,7 +161,9 @@ export default function AdminGameConfig() {
           )}
         </div>
       </section>
+      )}
 
+      {section !== "access" && (
       <section>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -224,6 +227,7 @@ export default function AdminGameConfig() {
           Вернуть сохранённые значения
         </button>
       </section>
+      )}
     </div>
   );
 }

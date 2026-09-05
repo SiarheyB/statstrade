@@ -159,8 +159,33 @@ export function newsVolScale(baseVolatility: number): number {
  * который новость обязана попасть целиком: внутри минутного ряда шок
  * применяется к минуте выхода.
  */
-export function newsForHour(seed: string, hourIndex: number, assets: Asset[], drift: number): GeneratedNews[] {
-  const lambda = NEWS_PER_DAY / 24;
+// Во сколько раз реже новости выходят в нерабочее время — ночью и в
+// выходные. Не ноль: мир не замирает, когда биржи закрыты, и именно эти
+// редкие сообщения объясняют разрыв на открытии в понедельник. Но и не
+// поровну: в субботу не публикуют отчётности и не выходит статистика, а
+// лента, которая идёт в том же темпе, что в среду, выглядит выдуманной.
+export const OFF_HOURS_NEWS_FACTOR = 0.25;
+
+/** Тихое время: суббота, воскресенье и ночь с 22:00 до 07:00 UTC. */
+export function isQuietHour(ts: number): boolean {
+  const date = new Date(ts);
+  const day = date.getUTCDay();
+  if (day === 0 || day === 6) return true;
+  const hour = date.getUTCHours();
+  return hour >= 22 || hour < 7;
+}
+
+export function newsForHour(
+  seed: string,
+  hourIndex: number,
+  assets: Asset[],
+  drift: number,
+  // Абсолютное время часа — по нему решается, тихое оно или рабочее.
+  // Необязательное: расчёты, которым лента не важна, передают только индекс.
+  ts?: number,
+): GeneratedNews[] {
+  const quiet = ts != null && isQuietHour(ts);
+  const lambda = (NEWS_PER_DAY / 24) * (quiet ? OFF_HOURS_NEWS_FACTOR : 1);
   const roll = rand(`${seed}|news|${hourIndex}`);
   if (roll >= 1 - Math.exp(-lambda)) return [];
 

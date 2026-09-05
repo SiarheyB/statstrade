@@ -118,7 +118,7 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
     const hourIndex = Math.round((ts - worldStart) / MS_HOUR);
     const dayIndex = Math.max(0, Math.floor((ts - worldStart) / MS_DAY));
     const regime = regimes[Math.min(regimes.length - 1, dayIndex)];
-    const news = newsForHour(seed, hourIndex, ALL_ASSETS, regime.preset.driftModifier);
+    const news = newsForHour(seed, hourIndex, ALL_ASSETS, regime.preset.driftModifier, ts);
     if (!isMarketOpen(asset.assetClass, ts)) {
       // Новости закрытого часа сохраняем: лента мира общая, и игрок должен
       // прочитать в воскресенье то, что откроет цену в понедельник.

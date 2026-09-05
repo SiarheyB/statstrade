@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isMarketOpen, nextOpen, sessionOf } from "@/lib/game/schedule";
-import { gapOpen, MAX_GAP } from "@/lib/game/marketGen";
+import { gapOpen, isQuietHour, MAX_GAP, newsForHour } from "@/lib/game/marketGen";
 import type { Asset } from "@/engine/entities/types";
 
 const utc = (iso: string) => new Date(`${iso}Z`).getTime();
@@ -101,5 +101,43 @@ describe("гэп на открытии", () => {
       const open = gapOpen(100, { seed: "s", asset: asset(1.2), index: i, closedMs: year, volModifier: 3 });
       expect(Math.abs(Math.log(open / 100))).toBeLessThanOrEqual(MAX_GAP + 1e-9);
     }
+  });
+});
+
+describe("новости в нерабочее время", () => {
+  const asset = {
+    id: "T",
+    symbol: "T",
+    name: "T",
+    assetClass: "stock",
+    sector: "tech",
+    correlationGroup: "tech",
+    baseVolatility: 0.3,
+    baseDrift: 0.05,
+    tickSize: 0.01,
+    startPrice: 100,
+  } as unknown as Parameters<typeof newsForHour>[2][number];
+
+  it("суббота, воскресенье и ночь считаются тихим временем", () => {
+    expect(isQuietHour(utc("2026-09-05T12:00"))).toBe(true); // суббота
+    expect(isQuietHour(utc("2026-09-06T12:00"))).toBe(true); // воскресенье
+    expect(isQuietHour(utc("2026-09-07T02:00"))).toBe(true); // ночь понедельника
+    expect(isQuietHour(utc("2026-09-07T23:00"))).toBe(true); // поздний вечер
+    expect(isQuietHour(utc("2026-09-07T12:00"))).toBe(false); // рабочий день
+  });
+
+  it("в выходные новости выходят, но заметно реже", () => {
+    // Считаем по одному и тому же ряду часов: разница только в том, что
+    // одному сообщается «тихое время», а другому нет.
+    let workday = 0;
+    let weekend = 0;
+    const monday = utc("2026-09-07T09:00");
+    const saturday = utc("2026-09-05T09:00");
+    for (let i = 0; i < 2000; i++) {
+      workday += newsForHour("s", i, [asset], 1, monday + i * 3_600_000 * 0).length;
+      weekend += newsForHour("s", i, [asset], 1, saturday).length;
+    }
+    expect(weekend).toBeGreaterThan(0); // мир не замирает
+    expect(weekend).toBeLessThan(workday * 0.6); // но лента заметно тише
   });
 });

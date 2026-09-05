@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db";
 import { isAdminEmail } from "@/lib/admin";
 import { getServerT } from "@/lib/i18n/server";
 import { ArrowLeft, ShieldCheck, KeyRound, Plug } from "lucide-react";
+import UserDetailTabs from "@/components/admin/UserDetailTabs";
+import PlayerGameCard from "@/components/admin/game/PlayerGameCard";
 import UserDetailActions from "@/components/admin/UserDetailActions";
 
 export const dynamic = "force-dynamic";
@@ -68,6 +70,44 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
 
   const isAdmin = isAdminEmail(user.email);
 
+  // Игровой профиль: он есть не у всех — только у тех, кто хотя бы раз зашёл
+  // в игру. Сезонный результат считаем здесь же, чтобы карточка отвечала на
+  // вопрос «как у него дела прямо сейчас», а не только «сколько всего».
+  const gamePlayer = await prisma.gamePlayer.findUnique({
+    where: { userId: id },
+    select: {
+      nickname: true,
+      rankKey: true,
+      prestige: true,
+      level: true,
+      equity: true,
+      peakEquity: true,
+      contractsPassed: true,
+      bestContractPct: true,
+      reliability: true,
+      activeStyle: true,
+      gameDay: true,
+      pendingPayout: true,
+      isPublic: true,
+      mutedUntil: true,
+      fundName: true,
+      lastSyncAt: true,
+      seasonStartEquity: true,
+    },
+  });
+
+  const gameCard = gamePlayer
+    ? {
+        ...gamePlayer,
+        mutedUntil: gamePlayer.mutedUntil?.getTime() ?? null,
+        lastSyncAt: gamePlayer.lastSyncAt?.toISOString() ?? null,
+        seasonReturnPct:
+          gamePlayer.seasonStartEquity && gamePlayer.seasonStartEquity > 0
+            ? ((gamePlayer.equity - gamePlayer.seasonStartEquity) / gamePlayer.seasonStartEquity) * 100
+            : null,
+      }
+    : null;
+
   return (
     <div className="p-6 md:p-8 max-w-5xl">
       <Link href="/admin/users" className="inline-flex items-center gap-1.5 text-sm text-muted hover:text-fg transition">
@@ -88,6 +128,14 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         <UserDetailActions id={user.id} email={user.email} isAdmin={isAdmin} has2fa={user.twoFactorEnabled} />
       </div>
 
+      <div className="mt-6" />
+      <UserDetailTabs
+        tabs={[
+          {
+            id: "profile",
+            label: t("admin.userDetail.tab.profile"),
+            content: (
+              <>
       {/* Профиль */}
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label={t("admin.userDetail.stat.accounts")} value={user._count.accounts} />
@@ -130,6 +178,19 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         </Row>
       </div>
 
+              </>
+            ),
+          },
+          {
+            id: "game",
+            label: t("admin.userDetail.tab.game"),
+            content: <PlayerGameCard userId={user.id} player={gameCard} />,
+          },
+          {
+            id: "accounts",
+            label: t("admin.userDetail.tab.accounts"),
+            content: (
+              <>
       {/* Аккаунты */}
       <h2 className="mt-8 text-sm font-medium flex items-center gap-2">
         <Plug size={15} /> {t("admin.userDetail.accounts")}
@@ -185,6 +246,14 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
         </div>
       </div>
 
+              </>
+            ),
+          },
+          {
+            id: "history",
+            label: t("admin.userDetail.tab.history"),
+            content: (
+              <>
       {/* Действия админов над этим пользователем */}
       <h2 className="mt-8 text-sm font-medium">{t("admin.userDetail.history")}</h2>
       <div className="mt-3 card p-5 text-sm">
@@ -204,6 +273,11 @@ export default async function AdminUserDetailPage({ params }: { params: Promise<
           </ul>
         )}
       </div>
+              </>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }

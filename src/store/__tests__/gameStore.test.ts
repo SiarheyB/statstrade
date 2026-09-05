@@ -331,8 +331,11 @@ describe("setActiveStyle", () => {
   // OrderTicket показывал только 6 тикеров Фазы 1, хотя investing по спеке
   // (раздел 8) требует широкий выбор для диверсификации.
   it("при переключении на investing ДОБАВЛЯЕТ его активы, не убирая старые", () => {
+    // Стартовый набор — шесть акций фазы 1 плюс крипта: она открыта с
+    // начала как единственный рынок, работающий в выходные.
     const before = useGameStore.getState().game.activeAssets.map((a) => a.id);
-    expect(before).toEqual(PHASE1_ASSET_IDS);
+    for (const id of PHASE1_ASSET_IDS) expect(before).toContain(id);
+    expect(before.some((id) => id.startsWith("CRY_"))).toBe(true);
     useGameStore.getState().setActiveStyle("investing");
     const ids = new Set(useGameStore.getState().game.activeAssets.map((a) => a.id));
     for (const id of PHASE1_ASSET_IDS) expect(ids.has(id)).toBe(true);

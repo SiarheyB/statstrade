@@ -47,8 +47,12 @@ export async function GET() {
       }),
       prisma.gamePlayer.findMany({
         orderBy: [{ contractsPassed: "desc" }, { prestige: "desc" }],
-        take: 10,
+        take: 25,
         select: {
+          // userId нужен, чтобы из таблицы можно было провалиться в карточку
+          // пользователя: игрок в мире и пользователь проекта — одно лицо,
+          // и админ смотрит на них вместе.
+          userId: true,
           nickname: true,
           rankKey: true,
           prestige: true,

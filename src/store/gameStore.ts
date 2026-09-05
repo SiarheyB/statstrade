@@ -161,7 +161,14 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     contractPoints: 0,
     // Только акции. Облигации приходят вместе со стилем Investing (см.
     // INVESTING_ASSET_IDS), остальные классы — наградой за контракты.
-    unlockedMarkets: ["stock"],
+    // Акции и крипта — с самого начала.
+    //
+    // Крипта здесь не за красивые глаза: это ЕДИНСТВЕННЫЙ рынок, который
+    // работает в выходные. Пока она открывалась наградой за первое
+    // испытание, новичок, зашедший в субботу, не мог сделать ровно ничего —
+    // и это два дня из семи. Награду за первое испытание перенесли на
+    // индексы.
+    unlockedMarkets: ["stock", "crypto"],
     lastContractResult: null,
     daily: freshDailyState(),
     lastDailyCompleted: [],
@@ -242,7 +249,11 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
   // investing и обратно), и активов открытых позиций, а не жёстко
   // PHASE1_ASSET_IDS, как раньше (баг: смена стиля на investing не
   // переживала перезагрузку — activeAssets откатывался к 6 тикерам).
-  const unlockedMarkets = (save.unlockedMarkets ?? ["stock"]) as AssetClass[];
+  // Старые сохранения знают только про акции — крипту им добавляем: она
+  // открыта с начала (см. freshState), и отнимать её у тех, кто начал
+  // раньше, было бы наказанием за раннее начало.
+  const savedMarkets = (save.unlockedMarkets ?? ["stock"]) as AssetClass[];
+  const unlockedMarkets = savedMarkets.includes("crypto") ? savedMarkets : ([...savedMarkets, "crypto"] as AssetClass[]);
   const requiredIds = new Set<string>([
     ...PHASE1_ASSET_IDS,
     ...save.activeAssetIds,

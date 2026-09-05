@@ -1317,6 +1317,10 @@ const en: Dict = {
   "admin.users.confirmReset2fa": "Reset 2FA for {email}?",
   "admin.users.error": "Error",
 
+  "admin.userDetail.tab.profile": "Profile",
+  "admin.userDetail.tab.game": "Game",
+  "admin.userDetail.tab.accounts": "Exchanges",
+  "admin.userDetail.tab.history": "Admin actions",
   "admin.userDetail.back": "Back to users",
   "admin.userDetail.noName": "no name",
   "admin.userDetail.registered": "registered {date}",
@@ -1529,7 +1533,7 @@ const en: Dict = {
   "nav.game": "Entry Point",
   "admin.nav.game": "Entry Point",
   "admin.game.title": "Entry Point — trading simulator",
-  "admin.game.subtitle": "Access to the trading simulator and its balance settings. The engine runs entirely in the player's browser — nobody's saved progress is touched; balance values reach the player on the next page load.",
+  "admin.game.subtitle": "Players, the shared market, moderation and balance. The market lives in the database and is one for everyone; each player's own progress stays in their browser, so balance changes never touch anybody's save — they reach the player on the next page load.",
 
   "game.loading": "Loading…",
   "game.chart.loading": "Collecting price data…",
@@ -3499,6 +3503,10 @@ const ru: Dict = {
   "admin.users.confirmReset2fa": "Сбросить 2FA для {email}?",
   "admin.users.error": "Ошибка",
 
+  "admin.userDetail.tab.profile": "Профиль",
+  "admin.userDetail.tab.game": "Игра",
+  "admin.userDetail.tab.accounts": "Биржи",
+  "admin.userDetail.tab.history": "Действия админов",
   "admin.userDetail.back": "К пользователям",
   "admin.userDetail.noName": "без имени",
   "admin.userDetail.registered": "регистрация {date}",
@@ -3711,7 +3719,7 @@ const ru: Dict = {
   "nav.game": "Точка входа",
   "admin.nav.game": "Точка входа",
   "admin.game.title": "«Точка входа» — симулятор трейдера",
-  "admin.game.subtitle": "Доступ к симулятору трейдинга и настройки его баланса. Движок игры полностью клиентский — ничьи сохранения не трогаются, а числа баланса приезжают к игроку при следующей загрузке страницы игры.",
+  "admin.game.subtitle": "Игроки, общий рынок, модерация и баланс. Рынок лежит в базе и один на всех, а прогресс каждого игрока — в его браузере: правка баланса ничьих сохранений не трогает и приезжает к игроку при следующей загрузке страницы.",
 
   "game.loading": "Загрузка…",
   "game.chart.loading": "Копим данные по цене…",
