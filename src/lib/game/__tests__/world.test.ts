@@ -2,6 +2,14 @@ import { describe, it, expect } from "vitest";
 import { clampSnapshot, defaultNickname, normalizeNickname, MAX_EQUITY_GROWTH_PER_SYNC } from "@/lib/game/world";
 import { creditLimit, repayAmount, MIN_LOAN, MAX_INTEREST_PCT } from "@/lib/game/loans";
 import { normalizeFundName, FUND_MIN_PRESTIGE, FUND_CREATION_COST } from "@/lib/game/funds";
+import {
+  MAX_MESSAGE_LENGTH,
+  MAX_STRATEGIES_PER_AUTHOR,
+  MAX_STRATEGY_PRICE,
+  MESSAGE_COOLDOWN_MS,
+  MIN_STRATEGY_PRICE,
+  normalizeChannel,
+} from "@/lib/game/social";
 
 const base = {
   fundName: "Фонд",
@@ -141,5 +149,29 @@ describe("имя из профиля в мире", () => {
     // случае берёт defaultNickname.
     expect(normalizeNickname("!!")).toBeNull();
     expect(defaultNickname("someone@example.com", "abcd1234")).toContain("someone");
+  });
+});
+
+describe("чат и рынок стратегий", () => {
+  it("канал фонда доступен только участнику фонда", () => {
+    expect(normalizeChannel("fund", "f1")).toBe("fund:f1");
+    expect(normalizeChannel("fund", null)).toBeNull();
+  });
+
+  it("общий зал и разговоры про рынок открыты всем", () => {
+    expect(normalizeChannel("general", null)).toBe("general");
+    expect(normalizeChannel("market", null)).toBe("market");
+  });
+
+  it("выдуманный канал не проходит — иначе им можно было бы шариться мимо фонда", () => {
+    expect(normalizeChannel("fund:someone-else", "f1")).toBeNull();
+    expect(normalizeChannel("../admin", null)).toBeNull();
+  });
+
+  it("границы сообщения и цены стратегии заданы и осмысленны", () => {
+    expect(MAX_MESSAGE_LENGTH).toBeGreaterThan(100);
+    expect(MESSAGE_COOLDOWN_MS).toBeGreaterThan(0);
+    expect(MAX_STRATEGY_PRICE).toBeGreaterThan(MIN_STRATEGY_PRICE);
+    expect(MAX_STRATEGIES_PER_AUTHOR).toBeGreaterThan(0);
   });
 });

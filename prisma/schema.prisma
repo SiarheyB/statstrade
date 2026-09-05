@@ -1309,6 +1309,9 @@ model GamePlayer {
   loansTaken      GameLoan[] @relation("loanBorrower")
   fundEntries     GameFundEntry[]
   worldEvents     GameWorldEvent[]
+  chatMessages    GameChatMessage[]
+  strategies      GameStrategy[]
+  strategyBuys    GameStrategyPurchase[]
 
   @@index([prestige])
   @@index([lastSyncAt])
@@ -1439,4 +1442,64 @@ model GameMarketNews {
 
   @@index([ts])
   @@index([assetId, ts])
+}
+
+// ─── Игра: разговоры и обмен стратегиями ───────────────────────────────────
+//
+// Мир, в котором игроки видят друг друга только в таблице рейтинга, — это
+// ещё не мир. Здесь живут три вещи: общий чат, идея с графиком, приложенная
+// к сообщению, и рынок стратегий.
+//
+// Идея с графиком возможна ровно потому, что рынок теперь ОБЩИЙ: приложив к
+// сообщению инструмент, таймфрейм и свою разметку, игрок показывает
+// собеседнику ровно то же, что видит сам. Раньше, когда цены считал каждый
+// браузер, это не имело бы смысла.
+
+model GameChatMessage {
+  id        String   @id @default(cuid())
+  // "general" — общий зал, "market" — разговоры про инструменты,
+  // "fund:<id>" — закрытый канал фонда.
+  channel   String
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  text      String
+  // Прикреплённая идея: инструмент, таймфрейм и разметка (JSON точек).
+  assetId   String?
+  tf        String?
+  drawings  String?
+  createdAt DateTime @default(now())
+
+  @@index([channel, createdAt])
+}
+
+model GameStrategy {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  // Настройки алго-бота одной строкой JSON: правило входа, риск, стоп, тейк.
+  config      String
+  price       Float
+  purchases   Int      @default(0)
+  createdAt   DateTime @default(now())
+  buyers      GameStrategyPurchase[]
+
+  @@index([purchases])
+  @@index([authorId])
+}
+
+model GameStrategyPurchase {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   GameStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  buyerId    String
+  buyer      GamePlayer   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  price      Float
+  createdAt  DateTime @default(now())
+
+  // Купить одну и ту же стратегию дважды нельзя — это копия правил, а не
+  // расходник.
+  @@unique([strategyId, buyerId])
+  @@index([buyerId])
 }

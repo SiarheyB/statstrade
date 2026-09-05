@@ -227,3 +227,69 @@ export const funds = {
   withdraw: (amount: number) => post<{ amount: number }>("/api/game/funds", { action: "withdraw", amount }),
   payout: (amount: number) => post<{ distributed: number }>("/api/game/funds", { action: "payout", amount }),
 };
+
+// ── Чат и рынок стратегий ─────────────────────────────────────────────────
+
+export interface ChatMessage {
+  id: string;
+  text: string;
+  assetId: string | null;
+  tf: string | null;
+  drawings: unknown;
+  createdAt: number;
+  author: { id: string; nickname: string; rankKey: string };
+}
+
+export async function fetchChat(channel: string): Promise<ChatMessage[]> {
+  try {
+    const res = await fetch(`/api/game/chat?channel=${encodeURIComponent(channel)}`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { messages?: ChatMessage[] };
+    return data.messages ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function sendChat(body: {
+  channel: string;
+  text: string;
+  assetId?: string | null;
+  tf?: string | null;
+  drawings?: unknown;
+}) {
+  return post<{ id: string }>("/api/game/chat", body);
+}
+
+export interface StrategyOffer {
+  id: string;
+  name: string;
+  description: string | null;
+  price: number;
+  purchases: number;
+  createdAt: number;
+  config: { strategy: string; assetId: string; riskPct: number; stopPct: number; takePct: number };
+  author: { id: string; nickname: string; rankKey: string; contractsPassed: number };
+  owned: boolean;
+}
+
+export async function fetchStrategies(): Promise<StrategyOffer[]> {
+  try {
+    const res = await fetch("/api/game/strategies");
+    if (!res.ok) return [];
+    const data = (await res.json()) as { strategies?: StrategyOffer[] };
+    return data.strategies ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export const strategies = {
+  publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"] }) =>
+    post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),
+  buy: (strategyId: string) =>
+    post<{ price: number; name: string; config: StrategyOffer["config"] }>("/api/game/strategies", {
+      action: "buy",
+      strategyId,
+    }),
+};

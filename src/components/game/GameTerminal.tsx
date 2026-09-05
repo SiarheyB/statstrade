@@ -405,7 +405,19 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
 
       {tab === "shop" && <Shop />}
 
-      {tab === "world" && <WorldPanel />}
+      {tab === "world" && (
+        <WorldPanel
+          currentAssetId={assetId}
+          currentSymbol={asset?.symbol ?? ""}
+          drawings={assetId ? (game.drawings[assetId] ?? []) : []}
+          onOpenIdea={(id) => {
+            // Чужая идея открывается в терминале: тот же инструмент, тот же
+            // общий рынок.
+            setSelectedAssetId(id);
+            setTab("terminal");
+          }}
+        />
+      )}
 
       {tab === "career" && (
         <div className="space-y-4">

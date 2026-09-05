@@ -9,17 +9,22 @@
 // (gameStore.applyWorldCash). Если сервер отказал — в игре ничего не
 // изменилось.
 import { useCallback, useEffect, useState } from "react";
-import { Coins, Crown, Landmark, RefreshCw, ScrollText, ShieldCheck } from "lucide-react";
+import { Coins, Crown, Landmark, MessagesSquare, RefreshCw, ScrollText, ShieldCheck, Store } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { fetchWorld, updateProfile, type WorldState } from "@/lib/game/worldClient";
+import type { GameDrawing } from "@/engine/entities/types";
+import ChatPanel from "./ChatPanel";
+import StrategyMarket from "./StrategyMarket";
 
-const SECTIONS = ["ranking", "loans", "funds", "feed"] as const;
+const SECTIONS = ["ranking", "chat", "strategies", "loans", "funds", "feed"] as const;
 type Section = (typeof SECTIONS)[number];
 
 const SECTION_ICON: Record<Section, typeof Crown> = {
   ranking: Crown,
+  chat: MessagesSquare,
+  strategies: Store,
   loans: Coins,
   funds: Landmark,
   feed: ScrollText,
@@ -29,7 +34,17 @@ function repayDue(amount: number, interestPct: number): number {
   return Math.round(amount * (1 + interestPct / 100) * 100) / 100;
 }
 
-export default function WorldPanel() {
+export default function WorldPanel({
+  currentAssetId,
+  currentSymbol,
+  drawings,
+  onOpenIdea,
+}: {
+  currentAssetId: string | undefined;
+  currentSymbol: string;
+  drawings: GameDrawing[];
+  onOpenIdea: (assetId: string) => void;
+}) {
   const { t } = useI18n();
   const balance = useGameStore((s) => s.game.account.balance);
   const gameDay = useGameStore((s) => s.game.gameCalendarDay);
@@ -246,6 +261,18 @@ export default function WorldPanel() {
           </div>
         </div>
       )}
+
+      {section === "chat" && (
+        <ChatPanel
+          inFund={!!me.fundId}
+          currentAssetId={currentAssetId}
+          currentSymbol={currentSymbol}
+          drawings={drawings}
+          onOpenIdea={onOpenIdea}
+        />
+      )}
+
+      {section === "strategies" && <StrategyMarket />}
 
       {section === "loans" && (
         <div className="space-y-4">

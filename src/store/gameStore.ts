@@ -337,6 +337,8 @@ interface GameStoreState {
   clearContractResult: () => void;
   clearDailyCompleted: () => void;
   addBot: (assetId: string) => void;
+  /** Поставить купленную на рынке стратегию в свободный слот бота. */
+  addBotFromStrategy: (config: { strategy: string; assetId: string; riskPct: number; stopPct: number; takePct: number }) => void;
   addDrawing: (assetId: string, drawing: GameDrawing) => void;
   removeDrawing: (assetId: string, id: string) => void;
   clearDrawings: (assetId: string) => void;
@@ -771,6 +773,27 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (game.bots.length >= botSlots(game.perks.unlocked)) return;
     const bot: AlgoBot = { id: crypto.randomUUID(), ...defaultBot(assetId) };
     set((s) => ({ game: { ...s.game, bots: [...s.game.bots, bot] } }));
+    void get().persistNow();
+  },
+
+  addBotFromStrategy: (config) => {
+    const { game } = get();
+    const slots = botSlots(game.perks.unlocked);
+    const bot: AlgoBot = {
+      id: crypto.randomUUID(),
+      assetId: config.assetId,
+      strategy: config.strategy as AlgoBot["strategy"],
+      riskPct: config.riskPct,
+      stopPct: config.stopPct,
+      takePct: config.takePct,
+      enabled: true,
+    };
+    set((s) => {
+      // Свободных слотов нет — заменяем последнего бота: купленная стратегия
+      // должна где-то заработать, иначе покупка бессмысленна.
+      const bots = s.game.bots.length < slots ? [...s.game.bots, bot] : [...s.game.bots.slice(0, Math.max(0, slots - 1)), bot];
+      return { game: { ...s.game, bots } };
+    });
     void get().persistNow();
   },
 
