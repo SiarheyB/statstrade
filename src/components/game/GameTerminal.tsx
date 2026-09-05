@@ -51,6 +51,7 @@ import TraderOffice from "./TraderOffice";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
+import TradeReview from "./TradeReview";
 import GameDisclaimer from "./GameDisclaimer";
 import GameOnboarding from "./GameOnboarding";
 import SponsorModal from "./SponsorModal";
@@ -387,6 +388,9 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
 
       {tab === "portfolio" && (
         <div className="space-y-4">
+          {/* Разбор — первым: он единственный говорит, что делать дальше,
+              а таблицы под ним только показывают, что уже случилось. */}
+          <TradeReview positions={game.account.positions} journal={game.account.journal} />
           <DiversificationPanel
             positions={game.account.positions}
             assets={game.activeAssets}
