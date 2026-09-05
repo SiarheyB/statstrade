@@ -42,6 +42,7 @@ import {
   type AlgoBot,
 } from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
+import { freshTaxState, taxForPeriod, toolSubscriptionCost, type TaxState } from "@/engine/economy/taxes";
 import { totalSwapFee } from "@/engine/economy/swap";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
@@ -142,6 +143,8 @@ export interface GameState {
   // Опубликованные на рынке стратегии и боты, из которых они выросли.
   // Нужны, чтобы прислать трек-рекорд: сервер игровых сделок не видит.
   publishedStrategies: Array<{ strategyId: string; botId: string }>;
+  // Налог: что уже обложено и какой убыток перенесён вперёд.
+  tax: TaxState;
 }
 
 /**
@@ -449,10 +452,20 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   const currentMonth = Math.floor(gameElapsedMs / MONTH_MS);
   let lastUpkeepMonth = state.lastUpkeepMonth;
   let lifestyle = state.lifestyle;
-  const upkeep = monthlyUpkeep(lifestyle) * tuning.upkeepMultiplier * perks.upkeepMultiplier;
+  // Абонплата за терминальные инструменты идёт вместе с содержанием: это
+  // такой же ежемесячный расход, и списывать его отдельным событием значило
+  // бы дважды дёргать игрока в один и тот же день.
+  const upkeep =
+    (monthlyUpkeep(lifestyle) + toolSubscriptionCost(perks.tools)) * tuning.upkeepMultiplier * perks.upkeepMultiplier;
+  let tax = state.tax;
   while (lastUpkeepMonth < currentMonth) {
     lastUpkeepMonth++;
     if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
+    // Налог — раз в месяц, с зафиксированной за месяц прибыли. Незакрытая
+    // прибыль не облагается: игрок платил бы за то, чего ещё не получил.
+    const period = taxForPeriod(account.journal, tax, tuning.taxRatePct);
+    tax = period.state;
+    if (period.amount > 0) account.balance -= period.amount;
   }
 
   // 6c. Плата за перенос плеча. Берётся непрерывно, а не «раз в полночь»:
@@ -605,6 +618,7 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     lastUpkeepMonth,
     sponsor,
     wipedOut,
+    tax,
     achievements: earned.length > 0 ? [...state.achievements, ...earned] : state.achievements,
     lastAchievements: earned.length > 0 ? earned : state.lastAchievements,
   };

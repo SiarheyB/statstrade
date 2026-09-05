@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { getMarket } from "@/lib/game/marketStore";
-import { scheduleBetween } from "@/lib/game/marketGen";
+import { ALL_ASSETS, getMarket } from "@/lib/game/marketStore";
+import { earningsBetween, scheduleBetween } from "@/lib/game/marketGen";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +38,22 @@ export async function GET(req: Request) {
       ts: event.ts,
       impact: event.impact,
       title: event.title,
+      symbol: null as string | null,
     }));
 
-    return NextResponse.json({ now, events });
+    // Отчётности идут в тот же список: для игрока это события одного рода —
+    // «известно, когда; неизвестно, чем кончится». Разделять их по разным
+    // спискам значило бы заставить смотреть в два места.
+    const earnings = earningsBetween(market.seed, ALL_ASSETS, safeFrom, safeTo).map((event) => ({
+      ts: event.ts,
+      impact: "high" as const,
+      title: `${event.name}: квартальный отчёт`,
+      symbol: event.symbol,
+    }));
+
+    const all = [...events, ...earnings].sort((a, b) => a.ts - b.ts);
+
+    return NextResponse.json({ now, events: all });
   } catch (err) {
     return serverError((err as Error).message);
   }

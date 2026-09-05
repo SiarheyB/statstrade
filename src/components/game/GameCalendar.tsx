@@ -32,6 +32,8 @@ interface CalendarEvent {
   ts: number;
   impact: NewsImpact;
   title: string;
+  /** Тикер, если событие про конкретную бумагу (отчётность). */
+  symbol: string | null;
 }
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -147,6 +149,9 @@ export default function GameCalendar({
                       minute: "2-digit",
                     })}
                   </span>
+                  {event.symbol && (
+                    <span className="shrink-0 font-medium text-accent w-[58px]">{event.symbol}</span>
+                  )}
                   <span className="flex-1 min-w-0">{event.title}</span>
                   {!past && <span className="shrink-0 text-accent">{t("game.calendar.ahead")}</span>}
                 </div>

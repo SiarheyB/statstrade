@@ -38,7 +38,7 @@ export default function TradeReview({ positions, journal }: { positions: Positio
           {insights.map((insight) => {
             const Icon = ICON[insight.tone];
             const values =
-              insight.id === "bestStyle"
+              insight.id === "bestStyle" || insight.id === "worstStyle"
                 ? { ...insight.values, style: t(`game.style.${insight.values.style}`) }
                 : insight.values;
             return (

@@ -357,6 +357,15 @@ export interface GameDrawing {
   points: GameDrawingPoint[];
 }
 
+export interface TaxState {
+  /** Сколько записей журнала уже обложено налогом. */
+  settledTrades: number;
+  /** Непокрытый убыток, уменьшающий базу следующих периодов. */
+  carriedLoss: number;
+  /** Сколько всего уплачено — для карточки карьеры. */
+  paidTotal: number;
+}
+
 export interface StreakState {
   /** Сколько дней подряд игрок заходил. */
   days: number;
@@ -438,6 +447,7 @@ export interface SaveGame {
   achievements?: string[];
   streak?: StreakState;
   publishedStrategies?: Array<{ strategyId: string; botId: string }>;
+  tax?: TaxState;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

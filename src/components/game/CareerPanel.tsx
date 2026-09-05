@@ -14,6 +14,9 @@ import { fmtUsd } from "@/lib/format";
 import { xpToNextLevel, MAX_SKILL_LEVEL } from "@/engine/player/progression";
 import { calculatePortfolioMetrics } from "@/engine/player/portfolioMetrics";
 import { getShopItem, monthlyUpkeep, nextRank, restFactor, traderRankKey } from "@/engine/economy/shop";
+import { toolSubscriptionCost } from "@/engine/economy/taxes";
+import { HintLabel } from "./Hint";
+import type { TaxState } from "@/engine/entities/types";
 import { stressLevel } from "@/engine/player/psychology";
 import { SELECTABLE_STYLES } from "@/store/gameStore";
 import { useGameStore } from "@/store/gameStore";
@@ -30,10 +33,14 @@ export default function CareerPanel({
   account,
   lifestyle,
   startingBalance,
+  tax,
+  tools,
 }: {
   account: Account;
   lifestyle: LifestyleState;
   startingBalance: number;
+  tax: TaxState;
+  tools: { orderBookAnywhere: boolean; screener: boolean; newsRadar: boolean };
 }) {
   const { t } = useI18n();
   const resetProgress = useGameStore((s) => s.resetProgress);
@@ -44,7 +51,9 @@ export default function CareerPanel({
   const next = nextRank(account.reputation);
   const metrics = calculatePortfolioMetrics(account.journal, startingBalance);
   const closed = account.positions.filter((p) => p.closedAt != null);
-  const upkeep = monthlyUpkeep(lifestyle);
+  // Содержание вещей и абонплата за инструменты списываются одним платежом
+  // раз в игровой месяц — показываем их так же, одной цифрой.
+  const monthly = monthlyUpkeep(lifestyle) + toolSubscriptionCost(tools);
   const owned = lifestyle.ownedItemIds.map((id) => getShopItem(id)).filter((i) => i != null);
 
   return (
@@ -111,10 +120,25 @@ export default function CareerPanel({
             <div className="tabular-nums font-medium">{fmtUsd(lifestyle.totalSpent + lifestyle.totalUpkeepPaid)}</div>
           </div>
           <div>
-            <div className="text-[11px] text-muted">{t("game.shop.upkeepTotal")}</div>
-            <div className={`tabular-nums font-medium ${upkeep > 0 ? "text-loss" : ""}`}>
-              {upkeep > 0 ? `−${fmtUsd(upkeep)}` : fmtUsd(0)}
+            <div className="text-[11px] text-muted">
+              <HintLabel text={t("game.tip.upkeep")}>{t("game.shop.upkeepTotal")}</HintLabel>
             </div>
+            <div className={`tabular-nums font-medium ${monthly > 0 ? "text-loss" : ""}`}>
+              {monthly > 0 ? `−${fmtUsd(monthly)}` : fmtUsd(0)}
+            </div>
+          </div>
+          {/* Налог показываем всегда, даже нулевой: списание, о котором игрок
+              не знал, выглядит как пропажа денег, а не как правило игры. */}
+          <div>
+            <div className="text-[11px] text-muted">
+              <HintLabel text={t("game.tip.tax")}>{t("game.career.taxPaid")}</HintLabel>
+            </div>
+            <div className={`tabular-nums font-medium ${tax.paidTotal > 0 ? "text-loss" : ""}`}>
+              {tax.paidTotal > 0 ? `−${fmtUsd(tax.paidTotal)}` : fmtUsd(0)}
+            </div>
+            {tax.carriedLoss > 0 && (
+              <div className="text-[11px] text-faint">{t("game.career.carriedLoss", { amount: fmtUsd(tax.carriedLoss) })}</div>
+            )}
           </div>
         </div>
 

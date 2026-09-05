@@ -255,6 +255,80 @@ export function scheduleBetween(seed: string, fromTs: number, toTs: number): Sch
   return out;
 }
 
+// ── Отчётности компаний ───────────────────────────────────────────────────
+//
+// Отчёт — главное событие в жизни акции: дата известна за квартал вперёд,
+// результат неизвестен до последней секунды, на открытии гэп. Именно вокруг
+// отчётов строится половина работы с акциями, и без них новость про компанию
+// приходила случайно — подготовиться к ней было нельзя.
+//
+// Устроено как макрокалендарь: заранее известны инструмент, дата и час,
+// НЕ известен результат. Он считается в тот же час, что и публикация.
+
+/** Сколько раз в год отчитывается компания. */
+export const EARNINGS_PER_YEAR = 4;
+/** Насколько отчёт двигает бумагу. Сильнее обычной новости — на то и отчёт. */
+export const EARNINGS_SHOCK_RANGE: [number, number] = [0.02, 0.08];
+const QUARTER_MS = Math.round((365 * MS_DAY) / EARNINGS_PER_YEAR);
+
+export interface EarningsEvent {
+  ts: number;
+  assetId: string;
+  symbol: string;
+  name: string;
+}
+
+/**
+ * Когда инструмент отчитывается в этом квартале.
+ *
+ * Компании отчитываются не в первый день квартала, а через несколько недель
+ * после его конца — и каждая в свой день. Разброс по кварталу как раз это и
+ * даёт: сезон отчётностей растягивается, а не сваливается в одну дату.
+ */
+export function earningsTs(seed: string, assetId: string, quarterIndex: number): number {
+  const base = quarterIndex * QUARTER_MS;
+  const dayInQuarter = Math.floor(rand(`${seed}|earn-d|${assetId}|${quarterIndex}`) * 70) + 10;
+  const hour = 13 + Math.floor(rand(`${seed}|earn-h|${assetId}|${quarterIndex}`) * 7);
+  return Math.floor((base + dayInQuarter * MS_DAY) / MS_DAY) * MS_DAY + hour * MS_HOUR;
+}
+
+/** Кто отчитывается ровно в этот час. */
+export function earningsAt(seed: string, assets: Asset[], ts: number): Asset[] {
+  const hourStart = Math.floor(ts / MS_HOUR) * MS_HOUR;
+  const quarter = Math.floor(ts / QUARTER_MS);
+  const out: Asset[] = [];
+  for (const asset of assets) {
+    // Отчитываются только компании. У валютной пары и у золота отчётности
+    // нет и быть не может.
+    if (asset.assetClass !== "stock") continue;
+    // Соседние кварталы проверяем тоже: дата может попасть на стык.
+    for (const q of [quarter - 1, quarter, quarter + 1]) {
+      if (earningsTs(seed, asset.id, q) === hourStart) {
+        out.push(asset);
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+/** Отчётности за промежуток — то, что показывает календарь. */
+export function earningsBetween(seed: string, assets: Asset[], fromTs: number, toTs: number): EarningsEvent[] {
+  const out: EarningsEvent[] = [];
+  const firstQuarter = Math.floor(fromTs / QUARTER_MS) - 1;
+  const lastQuarter = Math.floor(toTs / QUARTER_MS) + 1;
+  for (const asset of assets) {
+    if (asset.assetClass !== "stock") continue;
+    for (let q = firstQuarter; q <= lastQuarter; q++) {
+      const ts = earningsTs(seed, asset.id, q);
+      if (ts >= fromTs && ts <= toTs) {
+        out.push({ ts, assetId: asset.id, symbol: asset.symbol, name: asset.name });
+      }
+    }
+  }
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
 export function newsForHour(
   seed: string,
   hourIndex: number,
@@ -266,13 +340,33 @@ export function newsForHour(
 ): GeneratedNews[] {
   // Запланированная публикация выходит ВСЕГДА: если календарь обещал
   // событие на этот час, а его не случилось, календарь врёт — и готовиться
-  // по нему больше никто не станет.
+  // по нему больше никто не станет. То же и с отчётностями.
   const scheduled = ts != null ? scheduledAt(seed, ts) : null;
+  const reporting = ts != null ? earningsAt(seed, assets, ts) : [];
+
+  // Отчёты идут отдельным списком: в один час может отчитаться несколько
+  // компаний, и слить их в одну новость значит потерять половину.
+  const earnings: GeneratedNews[] = reporting.map((company, i) => {
+    const [lo, hi] = EARNINGS_SHOCK_RANGE;
+    const magnitude = lo + rand(`${seed}|earn-mag|${company.id}|${hourIndex}`) * (hi - lo);
+    // Результат отчёта не предопределён — в этом весь смысл ожидания.
+    const beat = rand(`${seed}|earn-sign|${company.id}|${hourIndex}`) < 0.5;
+    return {
+      ts: hourIndex * MS_HOUR + i,
+      assetId: company.id,
+      sector: null,
+      impact: "high" as NewsImpact,
+      headline: beat
+        ? `${company.name}: квартальный отчёт лучше ожиданий`
+        : `${company.name}: квартальный отчёт хуже ожиданий`,
+      shockPct: magnitude * (beat ? 1 : -1),
+    };
+  });
 
   const quiet = ts != null && isQuietHour(ts);
   const lambda = (NEWS_PER_DAY / 24) * (quiet ? OFF_HOURS_NEWS_FACTOR : 1);
   const roll = rand(`${seed}|news|${hourIndex}`);
-  if (!scheduled && roll >= 1 - Math.exp(-lambda)) return [];
+  if (!scheduled && roll >= 1 - Math.exp(-lambda)) return earnings;
 
   const macro = scheduled ? MACRO_EVENTS.find((item) => item.id === scheduled.eventId) : undefined;
   const impact = scheduled ? scheduled.impact : pickImpact(rand(`${seed}|news-impact|${hourIndex}`));
@@ -280,7 +374,7 @@ export function newsForHour(
   const wanted = direction === 1 ? "positive" : "negative";
   const pool = NEWS_TEMPLATES.filter((t) => t.impact === impact && (t.polarity === wanted || t.polarity === "mixed"));
   const candidates = pool.length > 0 ? pool : NEWS_TEMPLATES.filter((t) => t.impact === impact);
-  if (candidates.length === 0 || assets.length === 0) return [];
+  if (candidates.length === 0 || assets.length === 0) return earnings;
 
   const template = candidates[Math.floor(rand(`${seed}|news-tpl|${hourIndex}`) * candidates.length) % candidates.length];
   const asset = assets[Math.floor(rand(`${seed}|news-asset|${hourIndex}`) * assets.length) % assets.length];
@@ -299,6 +393,7 @@ export function newsForHour(
 
   if (macro) {
     return [
+      ...earnings,
       {
         ts: hourIndex * MS_HOUR,
         assetId: null,
@@ -311,6 +406,7 @@ export function newsForHour(
   }
 
   return [
+    ...earnings,
     {
       ts: hourIndex * MS_HOUR,
       assetId: template.targetType === "asset" && !sector ? asset.id : null,

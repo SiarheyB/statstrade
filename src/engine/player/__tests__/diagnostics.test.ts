@@ -82,6 +82,27 @@ describe("разбор сделок", () => {
     expect(diagnose(positions, noJournal, 8).map((i) => i.id)).toContain("leverageHarm");
   });
 
+  it("называет и слабый стиль: перестать делать убыточное — самое простое улучшение", () => {
+    seq = 0;
+    const positions = [
+      ...Array.from({ length: 6 }, () => trade({ pnl: 200, holdMin: 30, style: "swing" })),
+      ...Array.from({ length: 6 }, () => trade({ pnl: -120, holdMin: 30, style: "scalping" })),
+    ];
+    const insight = diagnose(positions, noJournal, 8).find((i) => i.id === "worstStyle");
+    expect(insight).toBeDefined();
+    expect(insight!.values.style).toBe("scalping");
+    expect(insight!.tone).toBe("warn");
+  });
+
+  it("если все стили в плюсе, ругать нечего", () => {
+    seq = 0;
+    const positions = [
+      ...Array.from({ length: 6 }, () => trade({ pnl: 200, holdMin: 30, style: "swing" })),
+      ...Array.from({ length: 6 }, () => trade({ pnl: 50, holdMin: 30, style: "scalping" })),
+    ];
+    expect(diagnose(positions, noJournal, 8).map((i) => i.id)).not.toContain("worstStyle");
+  });
+
   it("хвалит сильный стиль, а не только ругает", () => {
     seq = 0;
     const positions = [

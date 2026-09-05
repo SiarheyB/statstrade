@@ -458,6 +458,9 @@ describe("разорение и спонсор", () => {
       ...s,
       game: {
         ...s.game,
+        // Налог здесь выключен намеренно: тест про долю спонсора, и списание
+        // налога в том же тике смешало бы два расхода в одной цифре.
+        tuning: { ...s.game.tuning, taxRatePct: 0 },
         sponsor: null,
         wipedOut: false,
         account: { ...s.game.account, balance: 50, equity: 50, positions: [], pendingOrders: [], journal: [] },

@@ -514,6 +514,8 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             account={game.account}
             lifestyle={game.lifestyle}
             startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
+            tax={game.tax}
+            tools={perks.tools}
           />
           <Achievements unlocked={game.achievements} streak={game.streak} />
         </div>

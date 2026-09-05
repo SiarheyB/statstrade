@@ -17,6 +17,7 @@ export interface GameTuning {
   upkeepMultiplier: number; // множитель к расходам на образ жизни
   xpMultiplier: number; // множитель к начисляемому опыту
   maxLeverageCap: number; // 0 = не ограничивать
+  taxRatePct: number; // налог на зафиксированную прибыль, % (0 = выключить)
 }
 
 export const DEFAULT_TUNING: GameTuning = {
@@ -28,6 +29,7 @@ export const DEFAULT_TUNING: GameTuning = {
   upkeepMultiplier: 1,
   xpMultiplier: 1,
   maxLeverageCap: 0,
+  taxRatePct: 13,
 };
 
 /** Сырые числа из админки (проценты/промилле) → нормализованный GameTuning. */
@@ -45,5 +47,6 @@ export function tuningFromConfig(raw: Partial<Record<string, number>> | undefine
     upkeepMultiplier: pct(raw.upkeepPct, DEFAULT_TUNING.upkeepMultiplier),
     xpMultiplier: pct(raw.xpPct, DEFAULT_TUNING.xpMultiplier),
     maxLeverageCap: Math.max(0, num(raw.maxLeverageCap, DEFAULT_TUNING.maxLeverageCap)),
+    taxRatePct: Math.max(0, Math.min(60, num(raw.taxRatePct, DEFAULT_TUNING.taxRatePct))),
   };
 }

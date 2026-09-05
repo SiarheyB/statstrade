@@ -22,6 +22,7 @@ import type {
 import { validateOrder } from "@/engine/player/pendingOrders";
 import { sponsorOffer, WIPEOUT_PRESTIGE_PENALTY } from "@/engine/player/bailout";
 import { freshStreak, streakReward, touchStreak } from "@/engine/player/achievements";
+import { freshTaxState } from "@/engine/economy/taxes";
 import { botRecord } from "@/engine/player/algoBots";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -181,6 +182,7 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     lastAchievements: [],
     streak: freshStreak(),
     publishedStrategies: [],
+    tax: freshTaxState(),
   };
 }
 
@@ -215,6 +217,7 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     achievements: state.achievements,
     streak: state.streak,
     publishedStrategies: state.publishedStrategies,
+    tax: state.tax,
     onboardingDone,
     disclaimerSeen,
   };
@@ -316,6 +319,9 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     lastAchievements: [],
     streak: save.streak ?? freshStreak(),
     publishedStrategies: save.publishedStrategies ?? [],
+    // Старые сохранения налога не знают: начинаем считать с текущего места
+    // журнала, а не облагаем задним числом всю прошлую историю.
+    tax: save.tax ?? { ...freshTaxState(), settledTrades: save.account.journal.length },
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.

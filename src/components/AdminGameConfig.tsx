@@ -49,6 +49,7 @@ const GROUPS: { title: string; hint: string; fields: { key: string; label: strin
       { key: "dividendPct", label: "Дивиденды", unit: "%", step: 10 },
       { key: "upkeepPct", label: "Содержание покупок", unit: "%", step: 10 },
       { key: "xpPct", label: "Скорость прокачки", unit: "%", step: 10 },
+      { key: "taxRatePct", label: "Налог на прибыль", unit: "%", step: 1 },
       { key: "maxLeverageCap", label: "Потолок плеча (0 — без ограничения)", unit: "x", step: 1 },
     ],
   },

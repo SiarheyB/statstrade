@@ -186,6 +186,17 @@ export function diagnose(positions: Position[], journal: JournalEntry[], limit =
         values: { style: ranked[0].style, avg: Math.round(ranked[0].avg) },
       });
     }
+    // И слабый стиль тоже. Знать, что лучше всего идёт свинг, полезно; знать,
+    // что скальпинг стабильно съедает заработанное, — полезнее: это
+    // конкретное действие, которое можно перестать делать завтра.
+    const worst = ranked[ranked.length - 1];
+    if (worst.avg < 0 && worst.style !== ranked[0].style) {
+      insights.push({
+        id: "worstStyle",
+        tone: "warn",
+        values: { style: worst.style, avg: Math.round(worst.avg) },
+      });
+    }
   }
 
   // 8. Дисциплина по журналу: доля сделок, закрытых лучше своего риска.
