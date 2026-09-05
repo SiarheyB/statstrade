@@ -20,12 +20,15 @@ import type {
   LifestyleState,
   MarketRegime,
   NewsEvent,
+  Order,
   PerkState,
   Position,
   TradingStyleConfig,
 } from "@/engine/entities/types";
 import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
+import { orderTriggers, trailStop, triggerLevel } from "@/engine/player/pendingOrders";
+import { isMarketOpen } from "@/lib/game/schedule";
 import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
 import {
   botHasPosition,
@@ -159,6 +162,7 @@ export function applyPositionOpen(
     entryPrice: number;
     stopLoss?: number;
     takeProfit?: number;
+    trailingPct?: number;
     style: Position["style"];
   },
 ): Position {
@@ -172,6 +176,7 @@ export function applyPositionOpen(
     leverage: input.leverage,
     stopLoss: input.stopLoss,
     takeProfit: input.takeProfit,
+    trailingPct: input.trailingPct,
     openedAt: Date.now(),
     fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
     style: input.style,
@@ -202,12 +207,21 @@ export function applyPositionClose(
   extraFee = 0,
   xpMultiplier = 1,
   gameDay = 0,
+  closeSize?: number,
 ): number {
-  const requiredMargin = calculateRequiredMargin(position.entryPrice, position.size, position.leverage);
+  // Частичное закрытие: считаем всё по «ломтю» позиции, а остаток оставляем
+  // открытым с той же ценой входа. Зафиксировать половину и перевести остаток
+  // в безубыток — базовое движение сопровождения сделки, и без него не
+  // работает ни одна нормальная стратегия выхода.
+  const size = closeSize != null ? Math.min(Math.max(0, closeSize), position.size) : position.size;
+  if (!(size > 0)) return 0;
+  const partial = size < position.size;
+  const slice: Position = partial ? { ...position, size } : position;
+  const requiredMargin = calculateRequiredMargin(slice.entryPrice, slice.size, slice.leverage);
   // Стресс портит исполнение — нервный трейдер жмёт кнопку хуже. Эффект
   // всегда НЕ в пользу игрока и предсказуем по величине (см. psychology.ts).
   const filled = applySlippage(exitPrice, position.side, false, account.psychology.stress);
-  const { realizedPnl } = settleClose(position, filled, commissionRate, extraFee);
+  const { realizedPnl } = settleClose(slice, filled, commissionRate, extraFee);
   // requiredMargin — тот же резерв, что openPosition() в gameStore.ts снял с
   // баланса при открытии (раздел 4.2; при leverage=1 совпадает с полным
   // номиналом — старое поведение Фазы 1 не меняется).
@@ -215,7 +229,7 @@ export function applyPositionClose(
 
   const rMultiple =
     position.stopLoss != null
-      ? realizedPnl / (Math.abs(position.entryPrice - position.stopLoss) * position.size * position.leverage)
+      ? realizedPnl / (Math.abs(slice.entryPrice - slice.stopLoss!) * slice.size * slice.leverage)
       : 0;
 
   account.journal.push({
@@ -232,7 +246,7 @@ export function applyPositionClose(
 
   // Прогрессия (раздел 4.5) — начисляется на КАЖДОЙ закрытой сделке,
   // независимо от результата (даже убыточная по плану чему-то учит).
-  const style = position.style;
+  const style = slice.style;
   const current = account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
   account.skills[style] = applyXpGain(current, calculateXpGain(BASE_XP, rMultiple, style) * xpMultiplier);
 
@@ -244,8 +258,21 @@ export function applyPositionClose(
     liquidated: extraFee > 0, // штраф сверх комиссии бывает только при ликвидации
   });
 
-  const closed: Position = { ...position, closedAt: Date.now(), closePrice: exitPrice, realizedPnl };
-  if (idx >= 0) account.positions[idx] = closed;
+  const closed: Position = {
+    ...slice,
+    // У частичного закрытия свой id: иначе две записи об одной позиции —
+    // открытый остаток и закрытый ломоть — столкнулись бы ключами в списке.
+    id: partial ? crypto.randomUUID() : slice.id,
+    closedAt: Date.now(),
+    closePrice: exitPrice,
+    realizedPnl,
+  };
+  if (partial) {
+    if (idx >= 0) account.positions[idx] = { ...position, size: position.size - size };
+    account.positions.push(closed);
+  } else if (idx >= 0) {
+    account.positions[idx] = closed;
+  }
   return realizedPnl;
 }
 
@@ -288,15 +315,76 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   const prices = state.prices;
   const candles = state.candles;
 
-  // 4. Проверить ликвидацию и SL/TP открытых позиций (авто-закрытие).
   // Ликвидация — ПЕРВОЙ и вместо SL/TP на этом тике: реальная биржа закрыла
   // бы позицию принудительно раньше, чем добралась бы очередь до "мягкого"
   // стопа (edge case раздела 26 про приоритет форс-закрытия).
-  const account: Account = { ...state.account, positions: [...state.account.positions], journal: [...state.account.journal] };
+  const account: Account = {
+    ...state.account,
+    positions: [...state.account.positions],
+    journal: [...state.account.journal],
+    pendingOrders: [...(state.account.pendingOrders ?? [])],
+  };
+
+  // 3. Отложенные ордера — ДО проверки стопов: заявка, сработавшая на этом
+  // тике, должна тем же тиком получить право быть закрытой по своему стопу.
+  // Иначе гэп выходного дня, который и открывает позицию, и пробивает её
+  // стоп, оставил бы игрока в убытке, от которого он как раз защищался.
+  const stillPending: Order[] = [];
+  for (const order of account.pendingOrders) {
+    if (order.status !== "pending") continue;
+    const price = prices[order.assetId];
+    if (price == null) {
+      stillPending.push(order);
+      continue;
+    }
+    if (order.expiresAt != null && Date.now() >= order.expiresAt) continue; // протух — молча снимаем
+    const orderAsset = state.activeAssets.find((a) => a.id === order.assetId);
+    if (orderAsset && !isMarketOpen(orderAsset.assetClass, Date.now())) {
+      // Закрытый рынок заявку не исполняет, но и не отменяет: она для того и
+      // ставилась, чтобы дождаться открытия.
+      stillPending.push(order);
+      continue;
+    }
+    if (!orderTriggers(order, price)) {
+      stillPending.push(order);
+      continue;
+    }
+    const leverage = order.leverage ?? 1;
+    // Цена исполнения — уровень ордера, а не текущая цена: заявка стоит на
+    // уровне и берётся с него.
+    const fillPrice = triggerLevel(order) ?? price;
+    const cost = calculateRequiredMargin(fillPrice, order.size, leverage);
+    if (cost > account.balance) continue; // денег к моменту срабатывания не осталось — заявка сгорает
+    applyPositionOpen(account, {
+      assetId: order.assetId,
+      side: order.side,
+      size: order.size,
+      leverage,
+      entryPrice: fillPrice,
+      stopLoss: order.stopLoss,
+      takeProfit: order.takeProfit,
+      trailingPct: order.trailingPct,
+      style: order.style ?? state.activeStyle.style,
+    });
+  }
+  account.pendingOrders = stillPending;
+
+  // 4. Проверить ликвидацию и SL/TP.
   for (const position of [...account.positions]) {
     if (position.closedAt) continue;
     const price = prices[position.assetId];
     if (price == null) continue;
+
+    // Скользящий стоп подтягивается перед проверкой: на резком движении
+    // внутри одного тика он обязан успеть зафиксировать прибыль.
+    if (position.trailingPct != null) {
+      const moved = trailStop(position.side, price, position.trailingPct, position.stopLoss);
+      if (moved != null) {
+        position.stopLoss = moved;
+        const at = account.positions.findIndex((p) => p.id === position.id);
+        if (at >= 0) account.positions[at] = { ...position, stopLoss: moved };
+      }
+    }
     // Комиссия — по стилю, под которым позиция была ОТКРЫТА, а не по
     // текущему активному стилю: игрок мог переключиться (Фаза 2 добавила
     // смену стиля на лету), и позиция от scalping не должна вдруг закрыться

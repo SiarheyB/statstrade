@@ -10,10 +10,12 @@
 // тот инструмент, который реально открыли.
 import { prisma } from "@/lib/db";
 import assetsData from "@/data/assets.json";
+import { isMarketOpen } from "@/lib/game/schedule";
 import type { Asset } from "@/engine/entities/types";
 import {
   aggregate,
   bridgeMinutes,
+  gapOpen,
   historyMonths,
   MS_DAY,
   MS_HOUR,
@@ -107,11 +109,33 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
   const newsRows: GeneratedNews[] = [];
   const worldStart = market.startedAt.getTime();
 
+  // Часы, когда рынок этого инструмента закрыт, пропускаются: свечи за них не
+  // существует. Новости при этом продолжают выходить (мир не замирает на
+  // выходных) — они копятся и разряжаются гэпом на открытии.
+  let closedMs = 0;
+
   for (let ts = cursor; ts <= lastHourStart; ts += MS_HOUR) {
     const hourIndex = Math.round((ts - worldStart) / MS_HOUR);
     const dayIndex = Math.max(0, Math.floor((ts - worldStart) / MS_DAY));
     const regime = regimes[Math.min(regimes.length - 1, dayIndex)];
     const news = newsForHour(seed, hourIndex, ALL_ASSETS, regime.preset.driftModifier);
+    if (!isMarketOpen(asset.assetClass, ts)) {
+      // Новости закрытого часа сохраняем: лента мира общая, и игрок должен
+      // прочитать в воскресенье то, что откроет цену в понедельник.
+      for (const item of news) newsRows.push({ ...item, ts });
+      closedMs += MS_HOUR;
+      continue;
+    }
+    if (closedMs > 0) {
+      price = gapOpen(price, {
+        seed,
+        asset,
+        index: hourIndex,
+        closedMs,
+        volModifier: regime.preset.volModifier,
+      });
+      closedMs = 0;
+    }
     const candle = nextCandle(price, {
       seed,
       asset,
@@ -251,6 +275,8 @@ export interface Quote {
   price: number;
   /** Изменение за сегодня, % — из него скринер строит список «что движется». */
   dayChangePct: number;
+  /** Торгуется ли инструмент прямо сейчас (см. lib/game/schedule). */
+  open: boolean;
 }
 
 /**
@@ -272,10 +298,39 @@ export async function readQuotes(assetIds: string[], now = Date.now()): Promise<
   const byAsset = new Map(rows.map((r) => [r.assetId, r]));
   const byDay = new Map(dayRows.map((r) => [r.assetId, r]));
 
+  // Свечи текущего часа нет — значит рынок этого инструмента закрыт. Цена
+  // всё равно нужна: по ней считаются открытые позиции и рисуется портфель,
+  // просто она стоит на последнем закрытии. Берём последний бар одним
+  // запросом (DISTINCT ON), а не по инструменту: на выходных «отсутствуют»
+  // сразу все акции, и тридцать запросов каждые четыре секунды — это то, чем
+  // выходные и кладут сервер.
+  const missing = unique.filter((id) => !byAsset.has(id));
+  if (missing.length > 0) {
+    const last = await prisma.$queryRaw<
+      Array<{ assetId: string; open: number; high: number; low: number; close: number; volume: number }>
+    >`
+      SELECT DISTINCT ON ("assetId") "assetId", "open", "high", "low", "close", "volume"
+      FROM "GameCandle"
+      WHERE "tf" = ${TF_1H} AND "assetId" = ANY(${missing})
+      ORDER BY "assetId", "ts" DESC
+    `;
+    for (const row of last) byAsset.set(row.assetId, { ...row, tf: TF_1H, ts: new Date(currentHour) });
+  }
+
   for (const id of unique) {
     const asset = getAsset(id);
     const row = byAsset.get(id);
     if (!asset || !row) continue;
+    const tradable = isMarketOpen(asset.assetClass, now);
+    if (!tradable) {
+      const dayOpenClosed = byDay.get(id)?.open ?? row.close;
+      quotes[id] = {
+        price: row.close,
+        dayChangePct: dayOpenClosed > 0 ? ((row.close - dayOpenClosed) / dayOpenClosed) * 100 : 0,
+        open: false,
+      };
+      continue;
+    }
     const hourIndex = Math.round((currentHour - market.startedAt.getTime()) / MS_HOUR);
     const minuteInHour = Math.max(1, Math.floor((now - currentHour) / MS_MINUTE) + 1);
     const minutes = bridgeMinutes(
@@ -290,6 +345,7 @@ export async function readQuotes(assetIds: string[], now = Date.now()): Promise<
     quotes[id] = {
       price,
       dayChangePct: dayOpen > 0 ? ((price - dayOpen) / dayOpen) * 100 : 0,
+      open: true,
     };
   }
   return quotes;

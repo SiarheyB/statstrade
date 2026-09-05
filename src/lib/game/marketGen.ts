@@ -399,3 +399,37 @@ export function bridgeMinutes(
   }
   return out;
 }
+
+// ── Гэп после перерыва ────────────────────────────────────────────────────
+
+// Какая доля движения, которое рынок прошёл бы за время простоя, выплёскивается
+// в разрыв на открытии. Не единица: за выходные новостей меньше, чем за двое
+// рабочих суток, а часть информации уже была в цене до закрытия. 0.35 даёт
+// на выходных по паре EUR/USD (σ≈0.08) разрыв порядка десятых долей процента,
+// по акции (σ≈0.35) — процент-полтора: примерно то, что видно на реальных
+// графиках понедельника.
+export const GAP_INFO_SHARE = 0.35;
+// Потолок разрыва: без него редкий хвост нормального распределения на длинных
+// новогодних перерывах рисует обвал на ровном месте.
+export const MAX_GAP = 0.12;
+
+/**
+ * Цена открытия первого бара после перерыва.
+ *
+ * Считается ровно как обычный шаг генератора, только за «сжатое» время
+ * простоя: рынок стоял, а мир жил. Отдельная функция, а не флаг внутри
+ * nextCandle, потому что разрыв — это про ОТКРЫТИЕ следующего бара, тогда
+ * как nextCandle всегда открывается там, где закрылся предыдущий.
+ */
+export function gapOpen(
+  prevClose: number,
+  params: { seed: string; asset: Asset; index: number; closedMs: number; volModifier: number },
+): number {
+  const { seed, asset, index, closedMs, volModifier } = params;
+  if (closedMs <= 0) return prevClose;
+  const dtYears = (closedMs * GAP_INFO_SHARE) / MS_PER_YEAR;
+  const sigma = asset.baseVolatility * volModifier;
+  const z = normal(`${seed}|gap|${asset.id}|${index}`);
+  const move = Math.max(-MAX_GAP, Math.min(MAX_GAP, sigma * Math.sqrt(dtYears) * z));
+  return Math.max(asset.tickSize, prevClose * Math.exp(move));
+}

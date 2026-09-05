@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import OrderTicket from "@/components/game/OrderTicket";
 import { useGameStore } from "@/store/gameStore";
@@ -25,14 +25,27 @@ function resetStore(balance = 10_000) {
     ...s,
     game: {
       ...s.game,
-      account: { ...s.game.account, balance, positions: [] },
+      account: { ...s.game.account, balance, positions: [], pendingOrders: [] },
       prices: { [asset.id]: 100 },
       activeAssets: [asset],
     },
   }));
 }
 
-beforeEach(() => resetStore());
+// Акция торгуется только в дневную сессию будней, а тесты запускаются в
+// любой день недели. Без фиксации часов кнопки «купить/продать» были бы
+// заблокированы через раз — поэтому прибиваем время к будничной сессии.
+const TRADING_HOURS = new Date("2026-09-08T15:00:00Z").getTime();
+const CLOSED_HOURS = new Date("2026-09-05T12:00:00Z").getTime(); // суббота
+
+beforeEach(() => {
+  vi.spyOn(Date, "now").mockReturnValue(TRADING_HOURS);
+  resetStore();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 function renderTicket(overrides: Partial<Parameters<typeof OrderTicket>[0]> = {}) {
   return render(
@@ -128,5 +141,53 @@ describe("OrderTicket", () => {
     const [, slInput] = screen.getAllByRole("spinbutton");
     fireEvent.change(slInput, { target: { value: "95" } });
     expect(screen.getByText("game.order.suggestedSize")).toBeInTheDocument();
+  });
+});
+
+describe("OrderTicket на закрытом рынке", () => {
+  it("по рынку войти нельзя, но заявку поставить можно", () => {
+    vi.spyOn(Date, "now").mockReturnValue(CLOSED_HOURS);
+    renderTicket();
+    // Рыночный вход заблокирован вместе с самой кнопкой типа входа.
+    expect(screen.getByTestId("buy-button")).toBeDisabled();
+
+    fireEvent.click(screen.getByText("game.order.entry.limit"));
+    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
+    fireEvent.change(inputs[0], { target: { value: "95" } }); // уровень лимитки
+    fireEvent.change(inputs[1], { target: { value: "10" } }); // размер
+    fireEvent.click(screen.getByTestId("buy-button"));
+
+    const orders = useGameStore.getState().game.account.pendingOrders;
+    expect(orders).toHaveLength(1);
+    expect(orders[0].limitPrice).toBe(95);
+    // Позиция при этом не открылась: рынок закрыт, заявка ждёт открытия.
+    expect(useGameStore.getState().game.account.positions).toHaveLength(0);
+  });
+});
+
+describe("OrderTicket — отложенные заявки", () => {
+  it("лимитка выше рынка отклоняется как опечатка, а не ставится", () => {
+    renderTicket();
+    fireEvent.click(screen.getByText("game.order.entry.limit"));
+    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
+    fireEvent.change(inputs[0], { target: { value: "105" } });
+    fireEvent.change(inputs[1], { target: { value: "10" } });
+    fireEvent.click(screen.getByTestId("buy-button"));
+    expect(useGameStore.getState().game.account.pendingOrders).toHaveLength(0);
+    expect(screen.getByText("game.order.errorLevelSide")).toBeInTheDocument();
+  });
+
+  it("стоп на пробой ставится и несёт с собой плечо и стиль", () => {
+    renderTicket();
+    fireEvent.click(screen.getByText("game.order.entry.stop"));
+    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
+    fireEvent.change(inputs[0], { target: { value: "110" } });
+    fireEvent.change(inputs[1], { target: { value: "5" } });
+    fireEvent.click(screen.getByTestId("buy-button"));
+    const orders = useGameStore.getState().game.account.pendingOrders;
+    expect(orders).toHaveLength(1);
+    expect(orders[0].type).toBe("stop");
+    expect(orders[0].stopPrice).toBe(110);
+    expect(orders[0].style).toBeTruthy();
   });
 });

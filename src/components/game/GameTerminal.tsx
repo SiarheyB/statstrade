@@ -311,6 +311,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
                 assetId={assetId}
                 currentPrice={assetId ? game.prices[assetId] : undefined}
                 symbol={asset?.symbol ?? ""}
+                assetClass={asset?.assetClass}
                 style={currentStyle}
                 candleColors={candleColors}
                 drawings={assetId ? (game.drawings[assetId] ?? []) : []}
@@ -371,7 +372,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
           {/* Открытые позиции — под графиком: они нужны ровно там, где по
               ним принимают решение (закрыть, подвинуть стоп). Полная
               история и метрики живут во вкладке «Портфель». */}
-          <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
+          <PositionsPanel
+            positions={game.account.positions}
+            prices={game.prices}
+            assets={game.activeAssets}
+            orders={game.account.pendingOrders}
+          />
         </div>
       )}
 
@@ -383,7 +389,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             prices={game.prices}
             cash={game.account.balance}
           />
-          <PositionsPanel positions={game.account.positions} prices={game.prices} assets={game.activeAssets} />
+          <PositionsPanel
+            positions={game.account.positions}
+            prices={game.prices}
+            assets={game.activeAssets}
+            orders={game.account.pendingOrders}
+          />
           <Journal
             journal={game.account.journal}
             positions={game.account.positions}

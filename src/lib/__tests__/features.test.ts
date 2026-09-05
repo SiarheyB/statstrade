@@ -43,7 +43,9 @@ describe('features - FEATURE_DEFAULTS', () => {
     'forex',
     'forexPublicAccess',
     'tradeRecommendationsPublicAccess',
-    'game',
+    // 'game' сюда больше не входит: у него появились настройки баланса
+    // (стартовый капитал, частота новостей, волатильность и прочее), которые
+    // админ правит без передеплоя.
     'gamePublicAccess',
   ]);
 
@@ -82,9 +84,11 @@ describe('features - FEATURE_DEFAULTS', () => {
     expect(FEATURE_DEFAULTS.tradeRecommendationsPublicAccess.description).toBeTruthy();
   });
 
-  it('game and gamePublicAccess are pure on/off toggles with no tunable params', () => {
+  it('game несёт настройки баланса, а gamePublicAccess остаётся чистым выключателем', () => {
     expect(FEATURE_DEFAULTS.game.label).toBeTruthy();
     expect(FEATURE_DEFAULTS.game.description).toBeTruthy();
+    expect(FEATURE_DEFAULTS.game.startingBalance).toBeGreaterThan(0);
+    expect(FEATURE_DEFAULTS.game.volatilityPct).toBeGreaterThan(0);
     expect(FEATURE_DEFAULTS.gamePublicAccess.label).toBeTruthy();
     expect(FEATURE_DEFAULTS.gamePublicAccess.description).toBeTruthy();
   });

@@ -57,7 +57,9 @@ import {
   type PlotLayout,
 } from "@/lib/candlestickChart";
 import { ema, rsi, sma } from "@/engine/market/indicators";
-import type { GameDrawing, GameDrawingKind } from "@/engine/entities/types";
+import type { AssetClass, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
+import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
+import { useMarketClock } from "@/lib/game/useMarketClock";
 import { fetchCandles } from "@/lib/game/worldClient";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -151,6 +153,7 @@ export default function PriceChart({
   assetId,
   currentPrice,
   symbol,
+  assetClass,
   style,
   candleColors,
   drawings,
@@ -160,6 +163,7 @@ export default function PriceChart({
   assetId: string | undefined;
   currentPrice: number | undefined;
   symbol: string;
+  assetClass: AssetClass | undefined;
   // Стиль торговли определяет набор таймфреймов: скальперу дневной график не
   // нужен, инвестору минутный бесполезен.
   style: string;
@@ -171,6 +175,11 @@ export default function PriceChart({
   const { t } = useI18n();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  // Расписание торгов: пока рынок закрыт, свечи не строятся, и об этом надо
+  // сказать прямо — иначе замерший график читается как поломка.
+  const now = useMarketClock();
+  const marketOpen = assetClass && now > 0 ? isMarketOpen(assetClass, now) : true;
+  const opensAt = assetClass && now > 0 && !marketOpen ? nextOpen(assetClass, now) : null;
 
   const timeframes = TF_BY_STYLE[style] ?? TF_BY_STYLE.day;
   const [tfState, setTf] = useState(() => DEFAULT_TF_BY_STYLE[style] ?? "5m");
@@ -841,6 +850,16 @@ export default function PriceChart({
   return (
     <div className="flex h-full w-full flex-col">
       <div className="flex flex-wrap items-center gap-2 px-1 pb-2">
+        {opensAt != null && (
+          <span
+            className="rounded-md bg-surface-2 px-2 py-1 text-[11px] font-medium text-muted"
+            title={t("game.chart.marketClosedHint")}
+          >
+            {t("game.chart.marketClosed", {
+              when: new Date(opensAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }),
+            })}
+          </span>
+        )}
         <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
           {timeframes.map((code) => (
             <button

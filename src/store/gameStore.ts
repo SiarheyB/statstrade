@@ -14,10 +14,12 @@ import type {
   GameDrawing,
   MarketRegime,
   NewsEvent,
+  Order,
   PositionSide,
   SaveGame,
   TradingStyle,
 } from "@/engine/entities/types";
+import { validateOrder } from "@/engine/player/pendingOrders";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, applyPositionOpen, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
@@ -299,7 +301,7 @@ export interface GameNotice {
 
 export type OpenPositionResult =
   | { ok: true }
-  | { ok: false; error: "insufficient_funds" | "invalid_size" | "unknown_asset" | "invalid_leverage" };
+  | { ok: false; error: "insufficient_funds" | "invalid_size" | "unknown_asset" | "invalid_leverage" | "wrong_side" };
 
 interface GameStoreState {
   status: "loading" | "ready";
@@ -327,7 +329,21 @@ interface GameStoreState {
     stopLoss?: number;
     takeProfit?: number;
   }) => OpenPositionResult;
-  closePosition: (positionId: string) => void;
+  closePosition: (positionId: string, fraction?: number) => void;
+  /** Отложенный ордер: лимит или стоп. Исполняет его движок в тике. */
+  placeOrder: (input: {
+    assetId: string;
+    side: PositionSide;
+    type: "limit" | "stop";
+    size: number;
+    level: number;
+    leverage?: number;
+    stopLoss?: number;
+    takeProfit?: number;
+    trailingPct?: number;
+  }) => OpenPositionResult;
+  cancelOrder: (orderId: string) => void;
+  setTrailing: (positionId: string, trailingPct: number | undefined) => void;
   setStopLoss: (positionId: string, price: number | undefined) => void;
   setTakeProfit: (positionId: string, price: number | undefined) => void;
   setActiveStyle: (style: TradingStyle) => void;
@@ -629,12 +645,83 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     return { ok: true };
   },
 
-  closePosition: (positionId) => {
+  placeOrder: ({ assetId, side, type, size, level, leverage = 1, stopLoss, takeProfit, trailingPct }) => {
+    const { game } = get();
+    if (!(size > 0)) return { ok: false, error: "invalid_size" };
+    const cap = game.tuning.maxLeverageCap > 0
+      ? Math.min(game.activeStyle.maxLeverage, game.tuning.maxLeverageCap)
+      : game.activeStyle.maxLeverage;
+    if (!(leverage >= 1) || leverage > cap) return { ok: false, error: "invalid_leverage" };
+    const asset = game.activeAssets.find((a) => a.id === assetId);
+    const price = game.prices[assetId];
+    if (!asset || price == null) return { ok: false, error: "unknown_asset" };
+    // Сторону уровня проверяем сразу: лимитка на покупку выше рынка
+    // исполнилась бы тем же тиком и хуже рыночного ордера — это опечатка,
+    // а не намерение.
+    if (validateOrder(type, side, level, price) !== "ok") return { ok: false, error: "wrong_side" };
+    // Деньги под заявку НЕ резервируем: пока она не сработала, они у игрока
+    // на руках и работают. Не хватит в момент исполнения — заявка сгорит,
+    // и это честнее замороженного капитала под ордером, который может
+    // простоять неделю.
+    if (calculateRequiredMargin(level, size, leverage) > game.account.balance) {
+      return { ok: false, error: "insufficient_funds" };
+    }
+    const order: Order = {
+      id: crypto.randomUUID(),
+      assetId,
+      type,
+      side,
+      size,
+      limitPrice: type === "limit" ? level : undefined,
+      stopPrice: type === "stop" ? level : undefined,
+      createdAt: Date.now(),
+      status: "pending",
+      leverage,
+      stopLoss,
+      takeProfit,
+      trailingPct,
+      style: game.activeStyle.style,
+    };
+    set((s) => ({
+      game: { ...s.game, account: { ...s.game.account, pendingOrders: [...(s.game.account.pendingOrders ?? []), order] } },
+    }));
+    return { ok: true };
+  },
+
+  cancelOrder: (orderId) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: { ...s.game.account, pendingOrders: (s.game.account.pendingOrders ?? []).filter((o) => o.id !== orderId) },
+      },
+    }));
+  },
+
+  setTrailing: (positionId, trailingPct) => {
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: {
+          ...s.game.account,
+          positions: s.game.account.positions.map((p) => (p.id === positionId ? { ...p, trailingPct } : p)),
+        },
+      },
+    }));
+  },
+
+  closePosition: (positionId, fraction) => {
     const { game } = get();
     const position = game.account.positions.find((p) => p.id === positionId && !p.closedAt);
     if (!position) return;
     const price = game.prices[position.assetId];
     if (price == null) return;
+    // Доля закрытия: 1 (или не задано) — вся позиция. Ниже одной сотой не
+    // опускаемся, иначе «частичное» закрытие превращается в способ
+    // бесплатно перебирать комиссии.
+    const closeSize =
+      fraction != null && fraction > 0 && fraction < 1
+        ? Math.max(position.size * 0.01, position.size * fraction)
+        : undefined;
     const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
     // Комиссия по стилю, под которым позиция была открыта — см. комментарий
     // у аналогичного места в gameLoop.ts (авто-закрытие по SL/TP/ликвидации).
@@ -649,6 +736,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       TRADING_STYLE_CONFIGS[position.style].commissionRate * effects.commissionMultiplier,
       0,
       game.tuning.xpMultiplier * effects.xpMultiplier,
+      game.gameCalendarDay,
+      closeSize,
     );
     set((s) => ({ game: { ...s.game, account } }));
   },

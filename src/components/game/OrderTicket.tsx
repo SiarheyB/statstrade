@@ -9,6 +9,8 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { calculateRequiredMargin, calculateLiquidationPrice } from "@/engine/economy/marginEngine";
+import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
+import { useMarketClock } from "@/lib/game/useMarketClock";
 import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
 import type { Asset, AssetClass, PositionSide } from "@/engine/entities/types";
 
@@ -29,12 +31,20 @@ export default function OrderTicket({
 }) {
   const { t } = useI18n();
   const openPosition = useGameStore((s) => s.openPosition);
+  const placeOrder = useGameStore((s) => s.placeOrder);
+  // Тип входа. Рыночный — как было; лимит ждёт отката к уровню, стоп —
+  // пробоя. На закрытом рынке рыночного входа нет вовсе, и заявка остаётся
+  // единственным способом подготовиться к открытию.
+  const [entry, setEntry] = useState<"market" | "limit" | "stop">("market");
+  const [level, setLevel] = useState("");
+  const [trailing, setTrailing] = useState("");
   const [size, setSize] = useState("10");
   const [leverage, setLeverage] = useState(1);
   const [stopLoss, setStopLoss] = useState("");
   const [takeProfit, setTakeProfit] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<PositionSide | null>(null);
+  const now = useMarketClock();
 
   // Плечо активного стиля могло уменьшиться при переключении стиля —
   // не даём висеть значению выше нового потолка.
@@ -48,6 +58,19 @@ export default function OrderTicket({
 
   const slNum = stopLoss.trim() === "" ? undefined : Number(stopLoss);
   const tpNum = takeProfit.trim() === "" ? undefined : Number(takeProfit);
+  const trailNum = trailing.trim() === "" ? undefined : Number(trailing);
+  const levelNum = level.trim() === "" ? undefined : Number(level);
+
+  const asset = assets.find((a) => a.id === selectedAssetId);
+  // Расписание считаем на клиенте, а не тянем с сервера: модуль чистый, а
+  // открытие рынка игрок должен увидеть тогда же, когда часы на стене.
+  // now === 0 до первого эффекта (SSR) — до этого момента считаем рынок
+  // открытым, иначе на сервере отрисовалась бы плашка «закрыто».
+  const marketOpen = asset && now > 0 ? isMarketOpen(asset.assetClass, now) : true;
+  const opensAt = asset && now > 0 && !marketOpen ? nextOpen(asset.assetClass, now) : null;
+  const needsLevel = entry !== "market";
+  const levelReady = !needsLevel || (levelNum != null && Number.isFinite(levelNum) && levelNum > 0);
+  const canSubmit = (marketOpen || needsLevel) && levelReady && !insufficient && sizeNum > 0 && price != null;
 
   // Подсказка по размеру позиции (раздел 4.3) — только рекомендация, не
   // ограничение: показывается, когда стоп-лосс заполнен, риск 1% от баланса.
@@ -62,14 +85,23 @@ export default function OrderTicket({
       setError(t("game.order.errorSize"));
       return;
     }
-    const res = openPosition({
-      assetId: selectedAssetId,
-      side,
-      size: sizeNum,
-      leverage: effectiveLeverage,
+    const plan = {
       stopLoss: slNum != null && Number.isFinite(slNum) ? slNum : undefined,
       takeProfit: tpNum != null && Number.isFinite(tpNum) ? tpNum : undefined,
-    });
+      trailingPct: trailNum != null && Number.isFinite(trailNum) && trailNum > 0 ? trailNum : undefined,
+    };
+    const res =
+      entry === "market"
+        ? openPosition({ assetId: selectedAssetId, side, size: sizeNum, leverage: effectiveLeverage, ...plan })
+        : placeOrder({
+            assetId: selectedAssetId,
+            side,
+            type: entry,
+            size: sizeNum,
+            level: levelNum!,
+            leverage: effectiveLeverage,
+            ...plan,
+          });
     if (!res.ok) {
       setError(
         res.error === "insufficient_funds"
@@ -78,7 +110,9 @@ export default function OrderTicket({
             ? t("game.order.errorSize")
             : res.error === "invalid_leverage"
               ? t("game.order.errorLeverage")
-              : t("game.order.errorAsset"),
+              : res.error === "wrong_side"
+                ? t("game.order.errorLevelSide")
+                : t("game.order.errorAsset"),
       );
       return;
     }
@@ -132,6 +166,45 @@ export default function OrderTicket({
       {price != null && (
         <div className="text-xs text-faint">
           {t("game.order.currentPrice")}: <span className="text-fg tabular-nums font-medium">{fmtUsd(price)}</span>
+        </div>
+      )}
+
+      {!marketOpen && opensAt != null && (
+        <div className="rounded-lg bg-surface-2 px-2.5 py-2 text-[11px] leading-relaxed text-muted">
+          {t("game.order.marketClosed", {
+            when: new Date(opensAt).toLocaleString(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" }),
+          })}
+        </div>
+      )}
+
+      <div className="grid grid-cols-3 gap-1 rounded-lg bg-surface-2 p-1">
+        {(["market", "limit", "stop"] as const).map((kind) => (
+          <button
+            key={kind}
+            type="button"
+            onClick={() => setEntry(kind)}
+            disabled={kind === "market" && !marketOpen}
+            className={`px-2 py-1.5 rounded-md text-xs font-medium transition disabled:opacity-30 disabled:cursor-not-allowed ${
+              entry === kind ? "bg-surface text-fg shadow-sm" : "text-muted hover:text-fg"
+            }`}
+          >
+            {t(`game.order.entry.${kind}`)}
+          </button>
+        ))}
+      </div>
+
+      {needsLevel && (
+        <div>
+          <label className="text-xs text-faint block mb-1">{t(`game.order.level.${entry}`)}</label>
+          <input
+            type="number"
+            step="0.00001"
+            placeholder={price != null ? String(price) : ""}
+            value={level}
+            onChange={(e) => setLevel(e.target.value)}
+            className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
+          />
+          <div className="text-[11px] text-faint mt-1">{t(`game.order.levelHint.${entry}`)}</div>
         </div>
       )}
 
@@ -195,6 +268,20 @@ export default function OrderTicket({
         </div>
       </div>
 
+      <div>
+        <label className="text-xs text-faint block mb-1">{t("game.order.trailing")}</label>
+        <input
+          type="number"
+          min="0"
+          step="0.1"
+          placeholder={t("game.order.optional")}
+          value={trailing}
+          onChange={(e) => setTrailing(e.target.value)}
+          className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
+        />
+        <div className="text-[11px] text-faint mt-1">{t("game.order.trailingHint")}</div>
+      </div>
+
       {effectiveLeverage > 1 && longLiqPrice != null && shortLiqPrice != null && (
         <div className="text-[11px] text-faint space-y-0.5">
           <div>{t("game.order.liqLong", { price: fmtUsd(longLiqPrice) })}</div>
@@ -214,7 +301,7 @@ export default function OrderTicket({
           type="button"
           data-testid="buy-button"
           onClick={() => submit("long")}
-          disabled={insufficient || !(sizeNum > 0) || price == null}
+          disabled={!canSubmit}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${
             flash === "long" ? "bg-profit text-white" : "bg-profit/15 text-profit hover:bg-profit/25"
           }`}
@@ -225,7 +312,7 @@ export default function OrderTicket({
           type="button"
           data-testid="sell-button"
           onClick={() => submit("short")}
-          disabled={insufficient || !(sizeNum > 0) || price == null}
+          disabled={!canSubmit}
           className={`px-3 py-2 rounded-lg text-sm font-medium transition disabled:opacity-40 disabled:cursor-not-allowed ${
             flash === "short" ? "bg-loss text-white" : "bg-loss/15 text-loss hover:bg-loss/25"
           }`}

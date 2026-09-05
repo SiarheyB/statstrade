@@ -128,3 +128,39 @@ export async function GET() {
     return serverError((err as Error).message);
   }
 }
+
+/**
+ * Пересборка рынка: стирает сгенерированные свечи и новости, чтобы они
+ * построились заново при первом же запросе.
+ *
+ * Это не «сброс игры»: прогресс игроков, займы, фонды и сообщения не
+ * трогаются. Рынок детерминирован (цены считаются из сида и номера бара),
+ * поэтому стереть его безопасно — он восстановится точно таким же, если сид
+ * не менять. Кнопка нужна там, где старая история перестала соответствовать
+ * правилам: поменяли волатильность в настройках баланса, добавили
+ * расписание торгов, завели новый инструмент.
+ *
+ * `newSeed` меняет сид — тогда рынок восстановится ДРУГИМ. Это уже заметное
+ * для игроков событие («мир начался заново»), поэтому отдельным флагом, а не
+ * побочным эффектом.
+ */
+export async function POST(req: Request) {
+  const session = await getAdminSession();
+  if (!session) return notFound();
+  try {
+    const body = (await req.json().catch(() => ({}))) as { action?: string; newSeed?: boolean };
+    if (body.action !== "rebuildMarket") {
+      return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
+    }
+    const [candles, news] = await Promise.all([
+      prisma.gameCandle.deleteMany({}),
+      prisma.gameMarketNews.deleteMany({}),
+    ]);
+    if (body.newSeed) {
+      await prisma.gameMarket.updateMany({ data: { seed: crypto.randomUUID() } });
+    }
+    return NextResponse.json({ ok: true, removedCandles: candles.count, removedNews: news.count });
+  } catch (err) {
+    return serverError((err as Error).message);
+  }
+}

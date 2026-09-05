@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { describe, it, expect, vi } from "vitest";
+import { applyPositionClose, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { freshLifestyle } from "@/engine/economy/shop";
 import { DEFAULT_TUNING } from "@/engine/entities/tuning";
 import { freshContractState } from "@/engine/player/contracts";
@@ -443,5 +443,186 @@ describe("настройки баланса из админки (tuning)", () =>
       return next.account.skills.day?.xp ?? 0;
     }
     expect(xpAfterClose(2)).toBeGreaterThan(xpAfterClose(1));
+  });
+});
+
+// Крипта торгуется круглосуточно — на ней проверяем исполнение заявок, не
+// завися от того, в какой день недели запустили тесты.
+const cryptoAsset: Asset = {
+  ...asset,
+  id: "CRY_TEST",
+  symbol: "TESTUSD",
+  assetClass: "crypto",
+  correlationGroup: "crypto_majors",
+  tradingHours: "24/7",
+};
+
+function pendingState(order: Partial<import("@/engine/entities/types").Order>, price: number) {
+  return makeState({
+    activeAssets: [cryptoAsset],
+    prices: { [cryptoAsset.id]: price },
+    account: makeAccount({
+      pendingOrders: [
+        {
+          id: "o1",
+          assetId: cryptoAsset.id,
+          type: "limit",
+          side: "long",
+          size: 10,
+          createdAt: 0,
+          status: "pending",
+          leverage: 1,
+          ...order,
+        },
+      ],
+    }),
+  });
+}
+
+describe("исполнение отложенных ордеров в тике", () => {
+  it("лимитка ждёт своей цены и не открывает позицию раньше времени", () => {
+    const next = gameTick(1000, pendingState({ limitPrice: 95 }, 100));
+    expect(next.account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+    expect(next.account.pendingOrders).toHaveLength(1);
+  });
+
+  it("дойдя до уровня, лимитка превращается в позицию и снимается", () => {
+    const next = gameTick(1000, pendingState({ limitPrice: 95 }, 94));
+    const open = next.account.positions.filter((p) => !p.closedAt);
+    expect(open).toHaveLength(1);
+    expect(next.account.pendingOrders).toHaveLength(0);
+    // Вошли по уровню заявки, а не по текущей цене: в этом весь смысл лимитки.
+    // Проскальзывание от стресса допускается, но не больше процента.
+    expect(open[0].entryPrice).toBeGreaterThanOrEqual(95);
+    expect(open[0].entryPrice).toBeLessThan(95 * 1.01);
+  });
+
+  it("заявка несёт стоп и тейк с собой — иначе от неё нет защиты", () => {
+    const next = gameTick(1000, pendingState({ limitPrice: 95, stopLoss: 90, takeProfit: 110 }, 94));
+    const open = next.account.positions.find((p) => !p.closedAt)!;
+    expect(open.stopLoss).toBe(90);
+    expect(open.takeProfit).toBe(110);
+  });
+
+  it("не хватило денег к моменту срабатывания — заявка сгорает, а не висит вечно", () => {
+    const state = pendingState({ limitPrice: 95, size: 10_000 }, 94);
+    const next = gameTick(1000, state);
+    expect(next.account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+    expect(next.account.pendingOrders).toHaveLength(0);
+  });
+
+  it("просроченная заявка снимается", () => {
+    const next = gameTick(1000, pendingState({ limitPrice: 95, expiresAt: Date.now() - 1000 }, 94));
+    expect(next.account.pendingOrders).toHaveLength(0);
+    expect(next.account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+  });
+
+  it("на закрытом рынке заявка ждёт открытия, а не отменяется", () => {
+    // Акция в субботу: рынок закрыт, цена на уровне — но исполнять некому.
+    const saturday = new Date("2026-09-05T12:00:00Z").getTime();
+    const spy = vi.spyOn(Date, "now").mockReturnValue(saturday);
+    try {
+      const state = makeState({
+        prices: { [asset.id]: 94 },
+        account: makeAccount({
+          pendingOrders: [
+            { id: "o1", assetId: asset.id, type: "limit", side: "long", size: 10, createdAt: 0, status: "pending", limitPrice: 95, leverage: 1 },
+          ],
+        }),
+      });
+      const next = gameTick(1000, state);
+      expect(next.account.pendingOrders).toHaveLength(1);
+      expect(next.account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe("частичное закрытие", () => {
+  const openPosition: Position = {
+    id: "p1",
+    assetId: cryptoAsset.id,
+    side: "long",
+    entryPrice: 100,
+    size: 10,
+    leverage: 1,
+    openedAt: 0,
+    fees: 0,
+    style: "day",
+  };
+
+  it("закрывает ломоть и оставляет остаток открытым с той же ценой входа", () => {
+    const account = makeAccount({ positions: [openPosition] });
+    applyPositionClose(account, openPosition, 110, 0, 0, 1, 0, 4);
+    const open = account.positions.filter((p) => !p.closedAt);
+    const closed = account.positions.filter((p) => p.closedAt);
+    expect(open).toHaveLength(1);
+    expect(open[0].size).toBe(6);
+    expect(open[0].entryPrice).toBe(100);
+    expect(closed).toHaveLength(1);
+    expect(closed[0].size).toBe(4);
+  });
+
+  it("у закрытого ломтя свой id — иначе он столкнулся бы с остатком в списке", () => {
+    const account = makeAccount({ positions: [openPosition] });
+    applyPositionClose(account, openPosition, 110, 0, 0, 1, 0, 4);
+    const ids = account.positions.map((p) => p.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("прибыль начисляется только на закрытую часть", () => {
+    const account = makeAccount({ balance: 0, positions: [openPosition] });
+    const pnl = applyPositionClose(account, openPosition, 110, 0, 0, 1, 0, 4);
+    // 4 единицы по +10 = 40, плюс возвращённая маржа 4×100.
+    expect(pnl).toBeCloseTo(40, 0);
+    expect(account.balance).toBeCloseTo(440, 0);
+  });
+
+  it("размер больше позиции закрывает её целиком, а не уходит в минус", () => {
+    const account = makeAccount({ positions: [openPosition] });
+    applyPositionClose(account, openPosition, 110, 0, 0, 1, 0, 999);
+    expect(account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+  });
+
+  it("без указания размера поведение прежнее — закрывается вся позиция", () => {
+    const account = makeAccount({ positions: [openPosition] });
+    applyPositionClose(account, openPosition, 110, 0);
+    expect(account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+    expect(account.positions[0].id).toBe("p1");
+  });
+});
+
+describe("скользящий стоп в тике", () => {
+  it("подтягивается за ценой и закрывает позицию на откате", () => {
+    const position: Position = {
+      id: "p1",
+      assetId: cryptoAsset.id,
+      side: "long",
+      entryPrice: 100,
+      size: 1,
+      leverage: 1,
+      trailingPct: 5,
+      openedAt: 0,
+      fees: 0,
+      style: "day",
+    };
+    let state = makeState({
+      activeAssets: [cryptoAsset],
+      prices: { [cryptoAsset.id]: 100 },
+      account: makeAccount({ positions: [position] }),
+    });
+    state = gameTick(1000, state);
+    expect(state.account.positions[0].stopLoss).toBeCloseTo(95, 6);
+
+    // Цена ушла в прибыль — стоп поднялся следом.
+    state = gameTick(1000, { ...state, prices: { [cryptoAsset.id]: 120 } });
+    expect(state.account.positions[0].stopLoss).toBeCloseTo(114, 6);
+
+    // Откат ниже подтянутого стопа — позиция закрыта в прибыли, а не в убытке.
+    state = gameTick(1000, { ...state, prices: { [cryptoAsset.id]: 113 } });
+    const closed = state.account.positions.find((p) => p.closedAt);
+    expect(closed).toBeDefined();
+    expect(closed!.realizedPnl!).toBeGreaterThan(0);
   });
 });

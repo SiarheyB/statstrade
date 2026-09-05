@@ -46,6 +46,16 @@ export interface Order {
   stopPrice?: number;
   createdAt: number;
   status: "pending" | "filled" | "cancelled";
+  // Ордер несёт весь план сделки, а не только вход: смысл отложенного ордера
+  // в том, чтобы поставить его и уйти, а стоп, выставленный руками через
+  // час после срабатывания, от этого ничего не защищает.
+  leverage?: number;
+  stopLoss?: number;
+  takeProfit?: number;
+  trailingPct?: number;
+  /** Срок жизни; не задан — до отмены. */
+  expiresAt?: number;
+  style?: TradingStyle;
 }
 
 export interface Position {
@@ -57,6 +67,12 @@ export interface Position {
   leverage: number; // 1 = без плеча
   stopLoss?: number;
   takeProfit?: number;
+  /**
+   * Скользящий стоп: доля в процентах, на которую стоп тянется за ценой.
+   * Отдельного «лучшего курса» не храним — он восстанавливается из самого
+   * stopLoss, потому что стоп двигается только в сторону прибыли.
+   */
+  trailingPct?: number;
   openedAt: number;
   closedAt?: number;
   closePrice?: number;

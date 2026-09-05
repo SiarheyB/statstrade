@@ -62,6 +62,8 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
 export default function AdminGameStats() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [error, setError] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
+  const [rebuildResult, setRebuildResult] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -78,6 +80,28 @@ export default function AdminGameStats() {
       alive = false;
     };
   }, []);
+
+  async function rebuild() {
+    setRebuilding(true);
+    setRebuildResult(null);
+    try {
+      const res = await fetch("/api/admin/game", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "rebuildMarket" }),
+      });
+      const data = await res.json();
+      setRebuildResult(
+        res.ok
+          ? `Удалено свечей: ${data.removedCandles}, новостей: ${data.removedNews}. История построится заново.`
+          : (data.error ?? "Не удалось пересобрать"),
+      );
+    } catch {
+      setRebuildResult("Не удалось пересобрать");
+    } finally {
+      setRebuilding(false);
+    }
+  }
 
   if (error) return <div className="text-sm text-loss">Не удалось загрузить статистику</div>;
   if (!stats) return <div className="text-xs text-faint">Загрузка…</div>;
@@ -157,6 +181,26 @@ export default function AdminGameStats() {
         <div className="mt-2 text-[11px] text-faint">
           Мир создан {market.startedAt ? new Date(market.startedAt).toLocaleDateString("ru-RU") : "—"}, сид {market.seed ?? "—"}.
           История генерируется лениво: инструмент получает её, когда его впервые открывают.
+        </div>
+
+        <div className="mt-3 border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={rebuild}
+            disabled={rebuilding}
+            className="input-base px-3 py-1.5 text-xs hover:border-border-strong disabled:opacity-50"
+          >
+            {rebuilding ? "Пересобираю…" : "Пересобрать рынок"}
+          </button>
+          <p className="mt-2 text-[11px] text-faint max-w-prose">
+            Стирает сгенерированные свечи и новости — они построятся заново при первом же открытии
+            инструмента. Прогресс игроков, займы, фонды и сообщения не трогаются. Рынок
+            детерминирован (цены считаются из сида и номера бара), поэтому при том же сиде он
+            восстановится ТОЧНО ТАКИМ ЖЕ. Нужно, когда старая история перестала соответствовать
+            правилам: поменяли волатильность в настройках баланса, добавили расписание торгов,
+            завели новый инструмент.
+          </p>
+          {rebuildResult && <div className="mt-2 text-[11px] text-profit">{rebuildResult}</div>}
         </div>
       </div>
 
