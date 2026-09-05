@@ -578,3 +578,68 @@ describe("копитрейдинг", () => {
     expect(position.copiedFrom).toBeUndefined();
   });
 });
+
+describe("банкротство и работа", () => {
+  it("банкротство закрывает позиции, обнуляет деньги и репутацию", () => {
+    useGameStore.setState((s) => ({
+      ...s,
+      game: {
+        ...s.game,
+        wallet: 500,
+        account: { ...s.game.account, balance: 5_000, reputation: 80, positions: [] },
+      },
+    }));
+    const assetId = useGameStore.getState().game.activeAssets[0].id;
+    useGameStore.getState().openPosition({ assetId, side: "long", size: 1 });
+    expect(useGameStore.getState().game.account.positions.filter((p) => !p.closedAt)).toHaveLength(1);
+
+    useGameStore.getState().declareBankruptcy();
+    const g = useGameStore.getState().game;
+    expect(g.account.positions.filter((p) => !p.closedAt)).toHaveLength(0);
+    expect(g.account.balance).toBe(0);
+    expect(g.wallet).toBe(0);
+    expect(g.account.reputation).toBe(0);
+    expect(g.career.bankruptcies).toBe(1);
+  });
+
+  it("кнопки «начать заново» у игрока нет — есть работа", () => {
+    useGameStore.getState().takeJob("JOB_COURIER");
+    expect(useGameStore.getState().game.career.job?.jobId).toBe("JOB_COURIER");
+  });
+
+  it("на работу с требованиями без репутации не берут", () => {
+    useGameStore.getState().quitJob();
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, account: { ...s.game.account, reputation: 0 } } }));
+    useGameStore.getState().takeJob("JOB_JUNIOR_TRADER");
+    expect(useGameStore.getState().game.career.job).toBeNull();
+  });
+
+  it("аванс попадает в наличные и создаёт долг", () => {
+    useGameStore.getState().takeJob("JOB_COURIER");
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, wallet: 0 } }));
+    useGameStore.getState().takeAdvance(200);
+    const g = useGameStore.getState().game;
+    expect(g.wallet).toBeGreaterThan(0);
+    expect(g.career.job!.advanceDebt).toBeGreaterThan(0);
+  });
+
+  it("деньги переходят между наличными и брокерским счётом, но не появляются из воздуха", () => {
+    useGameStore.setState((s) => ({
+      ...s,
+      game: { ...s.game, wallet: 1_000, account: { ...s.game.account, balance: 2_000 } },
+    }));
+    const before = useGameStore.getState().game;
+    const total = before.wallet + before.account.balance;
+
+    useGameStore.getState().moveToBroker(400);
+    let g = useGameStore.getState().game;
+    expect(g.wallet + g.account.balance).toBeCloseTo(total, 6);
+    expect(g.wallet).toBeCloseTo(600, 6);
+
+    useGameStore.getState().moveToWallet(1_000_000);
+    g = useGameStore.getState().game;
+    // Больше, чем есть на счёте, перевести нельзя.
+    expect(g.account.balance).toBe(0);
+    expect(g.wallet + g.account.balance).toBeCloseTo(total, 6);
+  });
+});

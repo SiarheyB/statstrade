@@ -23,6 +23,7 @@ import { validateOrder } from "@/engine/player/pendingOrders";
 import { sponsorOffer, WIPEOUT_PRESTIGE_PENALTY } from "@/engine/player/bailout";
 import { freshStreak, streakReward, touchStreak } from "@/engine/player/achievements";
 import { freshTaxState } from "@/engine/economy/taxes";
+import { advanceAvailable, freshCareer, getJob, jobAvailable, JOBS } from "@/engine/player/jobs";
 import { botRecord } from "@/engine/player/algoBots";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -184,6 +185,8 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     streak: freshStreak(),
     publishedStrategies: [],
     tax: freshTaxState(),
+    wallet: 0,
+    career: freshCareer(),
   };
 }
 
@@ -219,6 +222,8 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     streak: state.streak,
     publishedStrategies: state.publishedStrategies,
     tax: state.tax,
+    wallet: state.wallet,
+    career: state.career,
     onboardingDone,
     disclaimerSeen,
   };
@@ -323,6 +328,10 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     // Старые сохранения налога не знают: начинаем считать с текущего места
     // журнала, а не облагаем задним числом всю прошлую историю.
     tax: save.tax ?? { ...freshTaxState(), settledTrades: save.account.journal.length },
+    // Старые сохранения кошелька и работы не знают: денег на руках нет,
+    // работы тоже — ровно как у того, кто никогда не банкротился.
+    wallet: save.wallet ?? 0,
+    career: save.career ?? freshCareer(),
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -447,8 +456,24 @@ interface GameStoreState {
   completeOnboarding: () => void;
   acceptDisclaimer: () => void;
   persistNow: () => Promise<void>;
-  /** Начать заново: стирает сохранение и создаёт новую партию. */
-  resetProgress: () => Promise<void>;
+  /**
+   * Объявить себя банкротом.
+   *
+   * Единственный выход из ямы — кнопки «начать заново» в игре нет намеренно.
+   * Обнуление стирает не только деньги, но и цену ошибки: если из любой ямы
+   * можно выйти нажатием кнопки, падать не страшно, и риск-менеджмент
+   * превращается в формальность.
+   */
+  declareBankruptcy: () => void;
+  /** Устроиться на работу. */
+  takeJob: (jobId: string) => void;
+  /** Уволиться. */
+  quitJob: () => void;
+  /** Взять аванс за несколько дней вперёд. */
+  takeAdvance: (amount: number) => void;
+  /** Перевести наличные на брокерский счёт и обратно. */
+  moveToBroker: (amount: number) => void;
+  moveToWallet: (amount: number) => void;
 }
 
 let tickHandle: ReturnType<typeof setInterval> | null = null;
@@ -799,6 +824,115 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
           { strategyId, botId },
         ],
       },
+    }));
+  },
+
+  declareBankruptcy: () => {
+    const { game } = get();
+    const prices = game.prices;
+    // Позиции закрываются по рынку: банкротство — это не пауза, а точка, в
+    // которой всё нажитое перестаёт быть вашим.
+    const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
+    const effects = perkEffects(game.perks);
+    for (const position of [...account.positions]) {
+      if (position.closedAt) continue;
+      const price = prices[position.assetId];
+      if (price == null) continue;
+      applyPositionClose(
+        account,
+        position,
+        price,
+        TRADING_STYLE_CONFIGS[position.style].commissionRate * effects.commissionMultiplier,
+        0,
+        game.tuning.xpMultiplier * effects.xpMultiplier,
+        game.gameCalendarDay,
+      );
+    }
+
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: {
+          ...account,
+          // Долги списываются вместе с деньгами — в этом и смысл процедуры.
+          balance: 0,
+          equity: 0,
+          pendingOrders: [],
+          // Репутация обнуляется: банкротство видно всем, и следующий заём
+          // придётся заслуживать заново.
+          reputation: 0,
+        },
+        wallet: 0,
+        sponsor: null,
+        wipedOut: false,
+        career: {
+          ...s.game.career,
+          bankruptcies: s.game.career.bankruptcies + 1,
+          lastBankruptcyAt: Date.now(),
+        },
+      },
+    }));
+  },
+
+  takeJob: (jobId) => {
+    const { game } = get();
+    const job = getJob(jobId);
+    if (!job) return;
+    const levels = Object.values(game.account.skills).map((skill) => skill.level);
+    const stats = {
+      prestige: game.account.reputation,
+      level: levels.length > 0 ? Math.max(...levels) : 0,
+      contractsPassed: game.contracts.completedIds.length,
+    };
+    if (!jobAvailable(job, stats)) return;
+    set((s) => ({
+      game: {
+        ...s.game,
+        career: {
+          ...s.game.career,
+          // Зарплата начинает капать с этой секунды, а не с полуночи.
+          job: { jobId, startedAt: Date.now(), paidUntil: Date.now(), advanceDebt: 0, earned: 0 },
+        },
+      },
+    }));
+  },
+
+  quitJob: () => {
+    set((s) => ({ game: { ...s.game, career: { ...s.game.career, job: null } } }));
+  },
+
+  takeAdvance: (amount) => {
+    const { game } = get();
+    const state = game.career.job;
+    const job = state ? getJob(state.jobId) : undefined;
+    if (!state || !job) return;
+    const available = advanceAvailable(state, job);
+    const sum = Math.min(Math.max(0, amount), available);
+    if (!(sum > 0)) return;
+    set((s) => ({
+      game: {
+        ...s.game,
+        wallet: s.game.wallet + sum,
+        career: { ...s.game.career, job: { ...state, advanceDebt: state.advanceDebt + sum } },
+      },
+    }));
+  },
+
+  moveToBroker: (amount) => {
+    const { game } = get();
+    const sum = Math.min(Math.max(0, amount), game.wallet);
+    if (!(sum > 0)) return;
+    set((s) => ({
+      game: { ...s.game, wallet: s.game.wallet - sum, account: { ...s.game.account, balance: s.game.account.balance + sum } },
+    }));
+  },
+
+  moveToWallet: (amount) => {
+    const { game } = get();
+    const sum = Math.min(Math.max(0, amount), game.account.balance);
+    if (!(sum > 0)) return;
+    set((s) => ({
+      game: { ...s.game, wallet: s.game.wallet + sum, account: { ...s.game.account, balance: s.game.account.balance - sum } },
     }));
   },
 
@@ -1248,6 +1382,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     void get().persistNow();
   },
 
+  /**
+   * Сброс прогресса. ИГРОКУ НЕДОСТУПЕН — остался только для админа и тестов.
+   *
+   * Кнопки «начать заново» в игре нет намеренно: обнуление стирает не только
+   * деньги, но и цену ошибки. Если из любой ямы можно выйти нажатием кнопки,
+   * падать не страшно, и весь риск-менеджмент превращается в формальность.
+   * Игрок вместо этого объявляет себя банкротом и идёт работать.
+   */
   resetProgress: async () => {
     // Сначала стираем слот, потом ставим свежее состояние: если сделать
     // наоборот, автосейв успеет записать новую партию поверх — и удаление
@@ -1255,7 +1397,6 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     await deleteSave();
     set({ game: freshState(get().game.tuning), onboardingDone: true, disclaimerSeen: true });
     await get().persistNow();
-    get().notify("info", "Прогресс сброшен, новая партия началась");
   },
 
   persistNow: async () => {

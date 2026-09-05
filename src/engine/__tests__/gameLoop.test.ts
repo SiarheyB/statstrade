@@ -6,6 +6,7 @@ import { freshContractState } from "@/engine/player/contracts";
 import { freshPerkState } from "@/engine/player/perks";
 import { freshStreak } from "@/engine/player/achievements";
 import { freshTaxState } from "@/engine/economy/taxes";
+import { freshCareer } from "@/engine/player/jobs";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -74,6 +75,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     streak: freshStreak(),
     publishedStrategies: [],
     tax: freshTaxState(),
+    wallet: 0,
+    career: freshCareer(),
     ...overrides,
   };
 }

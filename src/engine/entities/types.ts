@@ -364,6 +364,26 @@ export interface GameDrawing {
   points: GameDrawingPoint[];
 }
 
+export interface JobState {
+  jobId: string;
+  /** Когда устроился, мс реального времени. */
+  startedAt: number;
+  /** До какого момента зарплата уже выплачена. */
+  paidUntil: number;
+  /** Невыплаченный аванс: вычитается из будущих зарплат. */
+  advanceDebt: number;
+  /** Всего заработано на этой работе — для карточки карьеры. */
+  earned: number;
+}
+
+export interface CareerState {
+  job: JobState | null;
+  /** Сколько раз игрок объявлял себя банкротом. */
+  bankruptcies: number;
+  /** Когда объявил в последний раз. */
+  lastBankruptcyAt: number | null;
+}
+
 export interface TaxState {
   /** Сколько записей журнала уже обложено налогом. */
   settledTrades: number;
@@ -455,6 +475,8 @@ export interface SaveGame {
   streak?: StreakState;
   publishedStrategies?: Array<{ strategyId: string; botId: string }>;
   tax?: TaxState;
+  wallet?: number;
+  career?: CareerState;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

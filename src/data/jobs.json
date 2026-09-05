@@ -1,0 +1,32 @@
+[
+  {
+    "id": "JOB_COURIER",
+    "dailySalary": 120,
+    "requires": {},
+    "advanceDays": 3
+  },
+  {
+    "id": "JOB_CALLCENTER",
+    "dailySalary": 190,
+    "requires": { "prestige": 5 },
+    "advanceDays": 3
+  },
+  {
+    "id": "JOB_BACKOFFICE",
+    "dailySalary": 320,
+    "requires": { "prestige": 15, "level": 1 },
+    "advanceDays": 5
+  },
+  {
+    "id": "JOB_ANALYST",
+    "dailySalary": 520,
+    "requires": { "prestige": 40, "level": 3 },
+    "advanceDays": 5
+  },
+  {
+    "id": "JOB_JUNIOR_TRADER",
+    "dailySalary": 850,
+    "requires": { "prestige": 80, "level": 5, "contractsPassed": 1 },
+    "advanceDays": 7
+  }
+]

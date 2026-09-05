@@ -41,6 +41,7 @@ import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
 import Achievements from "./Achievements";
+import WorkPanel from "./WorkPanel";
 import NotifyToggle from "./NotifyToggle";
 import { notifyIfHidden } from "@/lib/game/desktopNotify";
 import WorldPanel from "./WorldPanel";
@@ -518,6 +519,9 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             tools={perks.tools}
           />
           <Achievements unlocked={game.achievements} streak={game.streak} />
+          {/* Работа и банкротство — в карьере: это про путь игрока, а не про
+              рынок. */}
+          <WorkPanel />
         </div>
       )}
     </div>

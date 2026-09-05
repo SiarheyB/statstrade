@@ -43,6 +43,7 @@ import {
 } from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
 import { freshTaxState, taxForPeriod, toolSubscriptionCost, type TaxState } from "@/engine/economy/taxes";
+import { accrueSalary, freshCareer, getJob, type CareerState } from "@/engine/player/jobs";
 import { totalSwapFee } from "@/engine/economy/swap";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
@@ -145,6 +146,16 @@ export interface GameState {
   publishedStrategies: Array<{ strategyId: string; botId: string }>;
   // Налог: что уже обложено и какой убыток перенесён вперёд.
   tax: TaxState;
+  /**
+   * Наличные вне брокерского счёта.
+   *
+   * Разделение не бюрократия: зарплата и заём приходят «на руки», и игрок сам
+   * решает, СКОЛЬКО из них поставить на кон. Пока всё лежало одной кучей,
+   * этого решения не существовало — деньги автоматически оказывались в игре.
+   */
+  wallet: number;
+  /** Работа и история банкротств. */
+  career: CareerState;
 }
 
 /**
@@ -574,6 +585,22 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     }
   }
 
+  // Зарплата капает непрерывно и падает В КОШЕЛЁК, а не на брокерский счёт:
+  // положить её в рынок — отдельное решение игрока, и в этом весь смысл
+  // разделения.
+  let career = state.career;
+  let wallet = state.wallet;
+  if (career.job) {
+    const job = getJob(career.job.jobId);
+    if (job) {
+      const salary = accrueSalary(career.job, job, Date.now());
+      if (salary.paid > 0 || salary.state !== career.job) {
+        wallet += salary.paid;
+        career = { ...career, job: salary.state };
+      }
+    }
+  }
+
   // Разорение: денег почти нет и закрывать больше нечего. Флаг поднимается
   // один раз — гасит его UI, когда игрок ответит на предложение спонсора.
   const wipedOut =
@@ -623,6 +650,8 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     sponsor,
     wipedOut,
     tax,
+    wallet,
+    career,
     achievements: earned.length > 0 ? [...state.achievements, ...earned] : state.achievements,
     lastAchievements: earned.length > 0 ? earned : state.lastAchievements,
   };
