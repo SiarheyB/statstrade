@@ -24,15 +24,19 @@ export default function OrderBook({ midPrice, tickSize }: { midPrice: number | u
   const maxSize = Math.max(...book.bids.map((b) => b.size), ...book.asks.map((a) => a.size), 1);
 
   return (
-    <div className="card p-3 w-full">
-      <div className="text-[11px] uppercase tracking-wide text-faint mb-2">{t("game.orderBook.title")}</div>
-      <div className="space-y-0.5">
+    <div className="card p-3 w-full h-full flex flex-col overflow-hidden">
+      <div className="text-[11px] uppercase tracking-wide text-faint mb-2 shrink-0">{t("game.orderBook.title")}</div>
+      {/* Продавцы сверху, покупатели снизу, спред посередине — как в любом
+          настоящем стакане. Обе половины делят высоту поровну и тянутся до
+          низа колонки: стакан стоит вровень с графиком, а не обрывается на
+          трети его высоты. */}
+      <div className="flex flex-1 flex-col justify-end gap-0.5 overflow-hidden">
         {[...book.asks].reverse().map((level, i) => (
           <Row key={`ask-${i}`} price={level.price} size={level.size} maxSize={maxSize} tone="loss" />
         ))}
       </div>
-      <div className="h-px bg-border my-1.5" />
-      <div className="space-y-0.5">
+      <div className="h-px bg-border my-1.5 shrink-0" />
+      <div className="flex flex-1 flex-col gap-0.5 overflow-hidden">
         {book.bids.map((level, i) => (
           <Row key={`bid-${i}`} price={level.price} size={level.size} maxSize={maxSize} tone="profit" />
         ))}

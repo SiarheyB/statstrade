@@ -134,7 +134,7 @@ export function syncSnapshot(snapshot: SyncSnapshot) {
   return post<{ claimed: number; defaulted: number; reliability: number; nickname: string }>("/api/game/sync", snapshot);
 }
 
-export function updateProfile(patch: { nickname?: string; isPublic?: boolean }) {
+export function updateProfile(patch: { isPublic?: boolean }) {
   return (async () => {
     try {
       const res = await fetch("/api/game/profile", {

@@ -43,12 +43,17 @@ export default function NotifyToggle() {
         }
         void enableNotifications().then(setOn);
       }}
-      className={`inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs transition ${
+      // Только значок, без подписи. Подпись меняла длину при включении
+      // («Уведомлять» → «Уведомления включены»), строка с вкладками не
+      // помещалась и переносилась — весь терминал уезжал вниз и оставался
+      // там, потому что настройка запоминается.
+      className={`inline-flex items-center justify-center rounded-lg p-1.5 transition ${
         on ? "text-accent" : "text-muted hover:text-fg"
       }`}
+      aria-label={t(on ? "game.notify.on" : "game.notify.off")}
+      aria-pressed={on}
     >
-      <Icon size={14} />
-      <span className="hidden sm:inline">{t(on ? "game.notify.on" : "game.notify.off")}</span>
+      <Icon size={15} />
     </button>
   );
 }

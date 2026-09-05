@@ -136,7 +136,13 @@ describe("init", () => {
       disclaimerSeen: true,
     });
     await useGameStore.getState().init();
-    expect(useGameStore.getState().game.gameElapsedMs).toBe(987_654);
+    // Не строгое равенство: загрузка догоняет время, прошедшее с момента
+    // сохранения, и между savedAt и init успевает пройти миллисекунда-другая
+    // реальных часов. Проверяем то, ради чего тест и написан, — что значение
+    // ВОССТАНОВЛЕНО, а не обнулено.
+    const restored = useGameStore.getState().game.gameElapsedMs;
+    expect(restored).toBeGreaterThanOrEqual(987_654);
+    expect(restored).toBeLessThan(987_654 + 60_000);
   });
 
   it("persistNow сохраняет текущий gameElapsedMs (обходит save→load без потери непрерывности)", async () => {

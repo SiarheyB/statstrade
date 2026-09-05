@@ -344,7 +344,11 @@ export function drawCandlesticks(
   // терминал (src/components/game/PriceChart.tsx) красит их по купленной в
   // магазине теме. Без них — те же CHART_COLORS, что и на всех остальных
   // графиках проекта, поэтому вызывающий код форекса/ордерфлоу не меняется.
-  opts: { clusters?: boolean; colW?: number; bodyRatio?: number; up?: string; down?: string } = {},
+  // bodyWidth — явная ширина тела свечи в пикселях. Нужна графикам, у
+  // которых ось X идёт НЕ по календарному времени, а по номерам свечей
+  // (игровой терминал: там ночи и выходные на оси места не занимают, и
+  // вывести ширину из stepMs/xspan нельзя).
+  opts: { clusters?: boolean; colW?: number; bodyRatio?: number; up?: string; down?: string; bodyWidth?: number } = {},
 ) {
   if (candles.length < 2) return;
   const stepMs = candles[1].t - candles[0].t;
@@ -356,7 +360,7 @@ export function drawCandlesticks(
     : 1;
   const cw = clusters
     ? wickW * 3
-    : Math.max(1, (stepMs / xspan) * plotW * bodyRatio);
+    : Math.max(1, opts.bodyWidth ?? (stepMs / xspan) * plotW * bodyRatio);
   ctx.lineWidth = wickW;
   for (const k of candles) {
     const x = sx(k.t + stepMs / 2);

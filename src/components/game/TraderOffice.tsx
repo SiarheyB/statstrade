@@ -12,6 +12,7 @@
 // терминала и одинаково выглядеть на любом экране.
 import { useI18n } from "@/lib/i18n/provider";
 import type { LifestyleState } from "@/engine/entities/types";
+import type { PerkEffects } from "@/engine/player/perks";
 
 // Вид из окна — по «лучшему» купленному жилью. Порядок важен: проверяем от
 // самого статусного к простому.
@@ -28,7 +29,16 @@ function monitorCount(owned: string[]): number {
   return 1;
 }
 
-export default function TraderOffice({ lifestyle }: { lifestyle: LifestyleState }) {
+export default function TraderOffice({
+  lifestyle,
+  tools,
+}: {
+  lifestyle: LifestyleState;
+  // Открытые инструменты — это тоже рабочее место. Игрок, купивший стакан за
+  // очки навыка, справедливо ждёт увидеть его на столе: иначе прокачка
+  // остаётся строкой в дереве перков и никак не ощущается.
+  tools: PerkEffects["tools"];
+}) {
   const { t } = useI18n();
   const owned = lifestyle.ownedItemIds;
   const view = windowView(owned);
@@ -149,6 +159,43 @@ export default function TraderOffice({ lifestyle }: { lifestyle: LifestyleState 
             );
           })}
 
+          {/* Открытые инструменты. Стакан — вертикальная лесенка уровней
+              сбоку, как настоящий DOM; скринер — планшет со строками
+              списка; новостной радар — бегущая строка над мониторами. */}
+          {tools.orderBookAnywhere && (
+            <g>
+              <rect x="132" y="120" width="52" height="76" rx="4" fill="#0b1017" stroke="var(--color-border)" />
+              {Array.from({ length: 7 }).map((_, i) => (
+                <rect
+                  key={i}
+                  x="136"
+                  y={124 + i * 10}
+                  width={i < 3 ? 30 - i * 4 : 18 + (i - 3) * 6}
+                  height="7"
+                  rx="1.5"
+                  fill={i < 3 ? "var(--color-loss, #e05260)" : "var(--color-profit, #3fa96a)"}
+                  opacity="0.55"
+                />
+              ))}
+            </g>
+          )}
+          {tools.screener && (
+            <g>
+              <rect x="452" y="150" width="58" height="46" rx="4" fill="#0b1017" stroke="var(--color-border)" />
+              {Array.from({ length: 5 }).map((_, i) => (
+                <rect key={i} x="457" y={155 + i * 8} width={i % 2 === 0 ? 44 : 32} height="4" rx="1" fill="var(--color-accent)" opacity="0.4" />
+              ))}
+            </g>
+          )}
+          {tools.newsRadar && (
+            <g>
+              <rect x="150" y="28" width="340" height="16" rx="3" fill="#0b1017" stroke="var(--color-border)" />
+              {Array.from({ length: 6 }).map((_, i) => (
+                <rect key={i} x={158 + i * 56} y="33" width={i % 3 === 0 ? 44 : 30} height="6" rx="1.5" fill="var(--color-accent)" opacity="0.45" />
+              ))}
+            </g>
+          )}
+
           {/* Мелочи на столе — только купленные */}
           {owned.includes("gear_coffee") && (
             <g>
@@ -170,9 +217,32 @@ export default function TraderOffice({ lifestyle }: { lifestyle: LifestyleState 
             </g>
           )}
 
-          {/* Кресло */}
-          <rect x="286" y="230" width="68" height="12" rx="6" fill={owned.includes("gear_chair") ? "#38445a" : "#232a36"} />
-          <rect x="298" y="242" width="44" height="26" rx="4" fill={owned.includes("gear_chair") ? "#2b3546" : "#1c2330"} />
+          {/* Кресло. Раньше покупка меняла только оттенок сиденья — человек
+              платил полторы тысячи и не видел разницы. Теперь это два разных
+              предмета: табурет и кресло со спинкой, подлокотниками и
+              крестовиной. */}
+          {owned.includes("gear_chair") ? (
+            <g>
+              {/* спинка */}
+              <rect x="292" y="196" width="56" height="46" rx="10" fill="#2f3a4d" />
+              <rect x="300" y="204" width="40" height="30" rx="7" fill="#3b4860" />
+              {/* подлокотники */}
+              <rect x="282" y="234" width="10" height="18" rx="4" fill="#28313f" />
+              <rect x="348" y="234" width="10" height="18" rx="4" fill="#28313f" />
+              {/* сиденье */}
+              <rect x="286" y="238" width="68" height="14" rx="7" fill="#38445a" />
+              {/* газлифт и крестовина */}
+              <rect x="316" y="252" width="8" height="12" fill="#1f2634" />
+              <path d="M300 270 L320 262 L340 270" fill="none" stroke="#1f2634" strokeWidth="4" strokeLinecap="round" />
+              <path d="M320 262 L320 272" stroke="#1f2634" strokeWidth="4" strokeLinecap="round" />
+            </g>
+          ) : (
+            <g>
+              <rect x="294" y="238" width="52" height="10" rx="3" fill="#232a36" />
+              <line x1="302" y1="248" x2="298" y2="272" stroke="#1c2330" strokeWidth="4" strokeLinecap="round" />
+              <line x1="338" y1="248" x2="342" y2="272" stroke="#1c2330" strokeWidth="4" strokeLinecap="round" />
+            </g>
+          )}
         </svg>
       </div>
 

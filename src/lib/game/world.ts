@@ -72,9 +72,30 @@ async function freeNickname(preferred: string, userId: string): Promise<string> 
   return `${base.slice(0, 20 - suffix.length - 1)}-${suffix}`;
 }
 
+/**
+ * Профиль игрока в мире. Имя ВСЕГДА следует за именем в профиле проекта.
+ *
+ * Меняемый псевдоним обесценивал бы и рейтинг, и репутацию заёмчика: под
+ * новым именем человек начинает с чистой историей, а те, кто дал ему в долг,
+ * не могут его найти. Поэтому имя ставится один раз — перед входом в игру
+ * (PlayerNameGate записывает его в `User.name`), — и дальше синхронизируется
+ * сюда, а не правится отдельно.
+ */
 export async function ensurePlayer(userId: string, email: string, displayName?: string | null) {
   const existing = await prisma.gamePlayer.findUnique({ where: { userId } });
-  if (existing) return existing;
+  if (existing) {
+    const wanted = displayName?.trim();
+    if (!wanted || wanted === existing.nickname) return existing;
+    // Имя в профиле изменилось — подтягиваем. Занято другим игроком —
+    // оставляем как было: чужое имя важнее совпадения.
+    const nickname = await freeNickname(wanted, userId);
+    if (nickname === existing.nickname) return existing;
+    try {
+      return await prisma.gamePlayer.update({ where: { userId }, data: { nickname } });
+    } catch {
+      return existing;
+    }
+  }
   const nickname = await freeNickname(displayName?.trim() || email, userId);
   // Гонка двух вкладок на первом заходе: обе видят пустоту и обе создают
   // профиль. Уникальный индекс по userId ловит второго — отдаём ему то, что

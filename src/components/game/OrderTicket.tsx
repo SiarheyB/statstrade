@@ -4,21 +4,23 @@
 // требуемой маржи (раздел 4.2) и проверка "хватает ли баланса" — edge case
 // раздела 26 (заявка больше доступного баланса отклоняется, ордер не
 // создаётся). Плечо ограничено maxLeverage активного стиля (раздел 5).
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { calculateRequiredMargin, calculateLiquidationPrice } from "@/engine/economy/marginEngine";
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
+import AssetPicker from "./AssetPicker";
 import { useMarketClock } from "@/lib/game/useMarketClock";
 import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
-import type { Asset, AssetClass, PositionSide } from "@/engine/entities/types";
+import type { Asset, PositionSide } from "@/engine/entities/types";
 
 export default function OrderTicket({
   assets,
   selectedAssetId,
   onSelectAsset,
   prices,
+  dayChange,
   balance,
   maxLeverage,
 }: {
@@ -26,6 +28,7 @@ export default function OrderTicket({
   selectedAssetId: string;
   onSelectAsset: (id: string) => void;
   prices: Record<string, number>;
+  dayChange: Record<string, number>;
   balance: number;
   maxLeverage: number;
 }) {
@@ -120,23 +123,6 @@ export default function OrderTicket({
     setTimeout(() => setFlash(null), 700);
   }
 
-  // Инструменты сгруппированы по рынкам: в плоском списке из трёх десятков
-  // строк было не понять, что вообще торгуешь — акция, валютная пара или
-  // металл. Порядок групп фиксированный, от простого рынка к сложному.
-  const MARKET_ORDER: AssetClass[] = ["stock", "bond", "index", "crypto", "forex", "commodity"];
-  const groups = useMemo(() => {
-    const byClass = new Map<AssetClass, { id: string; label: string }[]>();
-    for (const asset of assets) {
-      const list = byClass.get(asset.assetClass) ?? [];
-      list.push({ id: asset.id, label: `${asset.symbol} — ${asset.name}` });
-      byClass.set(asset.assetClass, list);
-    }
-    return MARKET_ORDER.filter((cls) => byClass.has(cls)).map((cls) => ({ cls, items: byClass.get(cls)! }));
-    // MARKET_ORDER — константа модуля по смыслу, но объявлена внутри
-    // компонента ради читаемости; список активов меняется редко.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [assets]);
-
   const longLiqPrice =
     price != null && effectiveLeverage > 1 ? calculateLiquidationPrice(price, effectiveLeverage, "long") : null;
   const shortLiqPrice =
@@ -145,22 +131,14 @@ export default function OrderTicket({
   return (
     <div className="card p-4 space-y-3" data-testid="order-ticket">
       <div>
-        <label className="text-xs text-faint block mb-1">{t("game.order.asset")}</label>
-        <select
-          value={selectedAssetId}
-          onChange={(e) => onSelectAsset(e.target.value)}
-          className="input-base w-full px-2 py-1.5 text-sm"
-        >
-          {groups.map((group) => (
-            <optgroup key={group.cls} label={t(`game.market.${group.cls}`)}>
-              {group.items.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.label}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
+        <label className="text-xs text-faint block mb-1.5">{t("game.order.asset")}</label>
+        <AssetPicker
+          assets={assets}
+          selectedAssetId={selectedAssetId}
+          onSelect={onSelectAsset}
+          prices={prices}
+          dayChange={dayChange}
+        />
       </div>
 
       {price != null && (

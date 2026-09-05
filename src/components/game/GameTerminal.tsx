@@ -341,17 +341,29 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       </div>
 
       {tab === "terminal" && (
-        <div className="space-y-4">
-          {/* График — главный элемент экрана. Стакан (только скальпинг)
-              стоит ВПЛОТНУЮ к графику справа, как DOM в биржевом терминале:
-              в скальпинге по нему принимают решение вместе со свечами, а не
-              «где-то ниже по странице». */}
-          <div
-            className={`grid grid-cols-1 gap-4 ${
-              showOrderBook ? "xl:grid-cols-[minmax(0,1fr)_200px_320px]" : "xl:grid-cols-[minmax(0,1fr)_330px]"
-            }`}
-          >
-            <div className="card p-3 h-[clamp(420px,64vh,820px)]">
+        // Две колонки, а не три разрозненных блока с пустотой под графиком.
+        //
+        // СЛЕВА — то, на что смотрят: график и прямо под ним открытые
+        // позиции с заявками. Раньше под графиком было пусто, а позиции
+        // уезжали на всю ширину экрана отдельной полосой — глазу приходилось
+        // ходить через весь монитор от свечи к своей сделке.
+        //
+        // СПРАВА — то, чем действуют: выбор инструмента, тикет, задания и
+        // скринер. Колонка липкая: тикет должен оставаться под рукой, когда
+        // список позиций внизу вырос и страница прокручена.
+        //
+        // Стакан — узкой колонкой ВПЛОТНУЮ к графику и во всю его высоту,
+        // как DOM в биржевом терминале: в скальпинге по нему принимают
+        // решение вместе со свечами.
+        <div
+          className={`grid grid-cols-1 gap-4 items-start ${
+            showOrderBook
+              ? "xl:grid-cols-[minmax(0,1fr)_190px_minmax(320px,340px)]"
+              : "xl:grid-cols-[minmax(0,1fr)_minmax(320px,340px)]"
+          }`}
+        >
+          <div className="space-y-4 min-w-0">
+            <div className="card p-3 h-[clamp(420px,62vh,820px)]">
               <PriceChart
                 assetId={assetId}
                 currentPrice={assetId ? game.prices[assetId] : undefined}
@@ -369,60 +381,60 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               />
             </div>
 
-            {showOrderBook && asset && (
-              <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
-            )}
-
-            <div className="space-y-4">
-              <DailyTasksPanel
-                daily={game.daily}
-                ctx={{
-                  day: game.gameCalendarDay,
-                  journal: game.account.journal,
-                  positions: game.account.positions,
-                  assets: game.activeAssets,
-                  dayStartEquity: game.dayStartEquity,
-                  equity: game.account.equity,
-                }}
-              />
-              {perks.tools.screener && (
-                <Screener
-                  assets={game.activeAssets}
-                  prices={game.prices}
-                  dayChange={game.dayChange}
-                  selectedAssetId={assetId}
-                  onSelect={setSelectedAssetId}
-                />
-              )}
-              {assetId && (
-                <OrderTicket
-                  assets={game.activeAssets}
-                  selectedAssetId={assetId}
-                  onSelectAsset={setSelectedAssetId}
-                  prices={game.prices}
-                  balance={game.account.balance}
-                  maxLeverage={
-                    game.tuning.maxLeverageCap > 0
-                      ? Math.min(game.activeStyle.maxLeverage, game.tuning.maxLeverageCap)
-                      : game.activeStyle.maxLeverage
-                  }
-                />
-              )}
-              {currentStyle === "investing" && (
-                <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
-              )}
-            </div>
+            <PositionsPanel
+              positions={game.account.positions}
+              prices={game.prices}
+              assets={game.activeAssets}
+              orders={game.account.pendingOrders}
+            />
           </div>
 
-          {/* Открытые позиции — под графиком: они нужны ровно там, где по
-              ним принимают решение (закрыть, подвинуть стоп). Полная
-              история и метрики живут во вкладке «Портфель». */}
-          <PositionsPanel
-            positions={game.account.positions}
-            prices={game.prices}
-            assets={game.activeAssets}
-            orders={game.account.pendingOrders}
-          />
+          {showOrderBook && asset && (
+            <div className="xl:h-[clamp(420px,62vh,820px)]">
+              <OrderBook midPrice={assetId ? game.prices[assetId] : undefined} tickSize={asset.tickSize} />
+            </div>
+          )}
+
+          <div className="space-y-4 min-w-0 xl:sticky xl:top-4">
+            {assetId && (
+              <OrderTicket
+                assets={game.activeAssets}
+                selectedAssetId={assetId}
+                onSelectAsset={setSelectedAssetId}
+                prices={game.prices}
+                dayChange={game.dayChange}
+                balance={game.account.balance}
+                maxLeverage={
+                  game.tuning.maxLeverageCap > 0
+                    ? Math.min(game.activeStyle.maxLeverage, game.tuning.maxLeverageCap)
+                    : game.activeStyle.maxLeverage
+                }
+              />
+            )}
+            <DailyTasksPanel
+              daily={game.daily}
+              ctx={{
+                day: game.gameCalendarDay,
+                journal: game.account.journal,
+                positions: game.account.positions,
+                assets: game.activeAssets,
+                dayStartEquity: game.dayStartEquity,
+                equity: game.account.equity,
+              }}
+            />
+            {perks.tools.screener && (
+              <Screener
+                assets={game.activeAssets}
+                prices={game.prices}
+                dayChange={game.dayChange}
+                selectedAssetId={assetId}
+                onSelect={setSelectedAssetId}
+              />
+            )}
+            {currentStyle === "investing" && (
+              <InvestingForecast principal={game.account.equity} assetCount={game.activeAssets.length} />
+            )}
+          </div>
         </div>
       )}
 
@@ -480,7 +492,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
 
       {tab === "career" && (
         <div className="space-y-4">
-          <TraderOffice lifestyle={game.lifestyle} />
+          <TraderOffice lifestyle={game.lifestyle} tools={perks.tools} />
           <ContractsPanel
             contracts={game.contracts}
             equity={game.account.equity}

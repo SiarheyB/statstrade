@@ -54,6 +54,7 @@ function renderTicket(overrides: Partial<Parameters<typeof OrderTicket>[0]> = {}
       selectedAssetId={asset.id}
       onSelectAsset={() => {}}
       prices={{ [asset.id]: 100 }}
+      dayChange={{ [asset.id]: 0 }}
       balance={10_000}
       maxLeverage={1}
       {...overrides}
@@ -64,7 +65,11 @@ function renderTicket(overrides: Partial<Parameters<typeof OrderTicket>[0]> = {}
 describe("OrderTicket", () => {
   it("показывает текущую цену выбранного актива", () => {
     renderTicket();
-    expect(screen.getByText(/100/)).toBeInTheDocument();
+    // Цена встречается дважды: в списке инструментов и в строке «текущая
+    // цена». Проверяем именно строку тикета.
+    const ticket = screen.getByTestId("order-ticket");
+    expect(ticket.textContent).toMatch(/game\.order\.currentPrice/);
+    expect(ticket.textContent).toMatch(/100/);
   });
 
   it("открывает long-позицию по кнопке Buy и обновляет баланс в сторе", () => {

@@ -67,7 +67,6 @@ export default function WorldPanel({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [nickDraft, setNickDraft] = useState("");
   const [loanAmount, setLoanAmount] = useState("1000");
   const [loanInterest, setLoanInterest] = useState("10");
   const [loanTerm, setLoanTerm] = useState("30");
@@ -79,7 +78,6 @@ export default function WorldPanel({
     const data = await fetchWorld();
     if (data) {
       setWorld(data);
-      setNickDraft((prev) => (prev === "" ? data.me.nickname : prev));
     }
   }, []);
 
@@ -92,7 +90,6 @@ export default function WorldPanel({
       const data = await fetchWorld();
       if (alive && data) {
         setWorld(data);
-        setNickDraft(data.me.nickname);
       }
     })();
     // Мир обновляется, пока вкладка открыта: чужие сделки и займы должны
@@ -133,30 +130,16 @@ export default function WorldPanel({
       {/* Профиль в мире */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-end gap-4">
-          <div className="min-w-[220px]">
-            <label className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.nickname")}</label>
-            <div className="mt-1 flex items-center gap-2">
-              <input
-                value={nickDraft}
-                maxLength={20}
-                onChange={(e) => setNickDraft(e.target.value)}
-                className="input-base px-2 py-1 text-sm w-44"
-              />
-              <button
-                type="button"
-                disabled={busy || nickDraft.trim() === me.nickname}
-                onClick={async () => {
-                  setBusy(true);
-                  const result = await updateProfile({ nickname: nickDraft });
-                  setMessage(result.ok ? t("game.world.nicknameSaved") : result.error);
-                  setBusy(false);
-                  await reload();
-                }}
-                className="px-3 py-1.5 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40"
-              >
-                {t("common.save")}
-              </button>
-            </div>
+          {/* Имя в мире не редактируется: оно берётся из профиля проекта и
+              должно совпадать с тем, под которым человек известен везде
+              остальное. Псевдоним, который можно менять в любой момент,
+              обесценивает и рейтинг, и репутацию заёмщика — под новым именем
+              начинаешь с чистой историей. Имя ставится один раз, перед
+              входом в игру (PlayerNameGate). */}
+          <div className="min-w-[200px]">
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.nickname")}</div>
+            <div className="mt-1 text-lg font-semibold">{me.nickname}</div>
+            <div className="text-[11px] text-faint">{t("game.world.nicknameFixed")}</div>
           </div>
 
           <div>

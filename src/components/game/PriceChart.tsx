@@ -61,6 +61,7 @@ import type { AssetClass, GameDrawing, GameDrawingKind } from "@/engine/entities
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
 import { fetchCandles } from "@/lib/game/worldClient";
+import Hint from "./Hint";
 import { useI18n } from "@/lib/i18n/provider";
 
 type Bar = ChartCandle & { v: number };
@@ -71,7 +72,42 @@ function sortBars(bars: Bar[]): Bar[] {
   return [...bars].sort((a, b) => a.t - b.t);
 }
 
-type View = { t0: number; t1: number; y0: number; y1: number };
+// Окно просмотра задаётся НОМЕРАМИ СВЕЧЕЙ, а не временем.
+//
+// Ось по календарному времени выглядела сломанной: с расписанием торгов
+// ночи и выходные — это часы без свечей, и в окно «260 баров по часу»
+// попадало 63 бара, а остальные две трети экрана были пустотой. Настоящие
+// терминалы поэтому и рисуют по свечам: закрытое время на оси места не
+// занимает, а свечи стоят ровно, с одинаковым шагом.
+type View = { i0: number; i1: number; y0: number; y1: number };
+
+/** Дробный номер свечи для момента времени. */
+function slotOf(bars: ChartCandle[], stepMs: number, ms: number): number {
+  const n = bars.length;
+  if (n === 0) return 0;
+  if (ms <= bars[0].t) return (ms - bars[0].t) / stepMs;
+  if (ms >= bars[n - 1].t) return n - 1 + (ms - bars[n - 1].t) / stepMs;
+  let lo = 0;
+  let hi = n - 1;
+  while (hi - lo > 1) {
+    const mid = (lo + hi) >> 1;
+    if (bars[mid].t <= ms) lo = mid;
+    else hi = mid;
+  }
+  // Внутри свечи — доля; в разрыве между свечами (ночь, выходные) доля
+  // упирается в единицу: перерыв сжимается в стык двух соседних баров.
+  return lo + Math.min(1, (ms - bars[lo].t) / stepMs);
+}
+
+/** Обратное преобразование: момент времени по дробному номеру свечи. */
+function timeOfSlot(bars: ChartCandle[], stepMs: number, slot: number): number {
+  const n = bars.length;
+  if (n === 0) return slot * stepMs;
+  if (slot <= 0) return bars[0].t + slot * stepMs;
+  if (slot >= n - 1) return bars[n - 1].t + (slot - (n - 1)) * stepMs;
+  const i = Math.floor(slot);
+  return bars[i].t + (slot - i) * stepMs;
+}
 type Tool = "cursor" | "trend" | "level" | "ray" | "rect" | "vline" | "erase";
 type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
 
@@ -188,6 +224,9 @@ export default function PriceChart({
   // здесь дал бы лишний кадр с пустым графиком.
   const tf = timeframes.includes(tfState) ? tfState : (DEFAULT_TF_BY_STYLE[style] ?? timeframes[0]);
   const [bars, setBars] = useState<Bar[]>([]);
+  // Пока ряд не пришёл, поле остаётся пустым с подписью — это честнее, чем
+  // показывать чужой таймфрейм и «догонять» его рывками.
+  const [loading, setLoading] = useState(true);
   const [following, setFollowing] = useState(true);
   const [tool, setTool] = useState<Tool>("cursor");
   const [showMa, setShowMa] = useState(true);
@@ -228,8 +267,10 @@ export default function PriceChart({
 
   const visibleCandles = useCallback(() => candlesRef.current, []);
 
-  const priceRange = useCallback((all: ChartCandle[], t0: number, t1: number, stepMs: number) => {
-    const visible = all.filter((k) => k.t + stepMs >= t0 && k.t <= t1);
+  const priceRange = useCallback((all: ChartCandle[], i0: number, i1: number) => {
+    const from = Math.max(0, Math.floor(i0));
+    const to = Math.min(all.length, Math.ceil(i1) + 1);
+    const visible = all.slice(from, to);
     const forRange = visible.length > 0 ? visible : all;
     if (forRange.length === 0) return { y0: 0, y1: 1 };
     let lo = Infinity;
@@ -243,11 +284,10 @@ export default function PriceChart({
   }, []);
 
   const followView = useCallback(
-    (all: ChartCandle[], stepMs: number): View => {
-      const lastT = all.length > 0 ? all[all.length - 1].t : 0;
-      const t1 = lastT + stepMs;
-      const t0 = t1 - stepMs * DEFAULT_VISIBLE_CANDLES;
-      return { t0, t1, ...priceRange(all, t0, t1, stepMs) };
+    (all: ChartCandle[]): View => {
+      const i1 = all.length;
+      const i0 = i1 - DEFAULT_VISIBLE_CANDLES;
+      return { i0, i1, ...priceRange(all, i0, i1) };
     },
     [priceRange],
   );
@@ -255,52 +295,51 @@ export default function PriceChart({
   const clampView = useCallback(
     (v: View): View => {
       const all = visibleCandles();
-      const stepMs = stepRef.current || 1;
-      const span = Math.min(stepMs * MAX_VISIBLE_CANDLES, Math.max(stepMs * MIN_VISIBLE_CANDLES, v.t1 - v.t0));
-      let t0 = v.t0;
-      let t1 = t0 + span;
+      const span = Math.min(MAX_VISIBLE_CANDLES, Math.max(MIN_VISIBLE_CANDLES, v.i1 - v.i0));
+      let i0 = v.i0;
+      let i1 = i0 + span;
       if (all.length > 0) {
-        const fullT0 = all[0].t;
-        const fullT1 = all[all.length - 1].t + stepMs;
-        if (t0 < fullT0 - span / 2) {
-          t0 = fullT0 - span / 2;
-          t1 = t0 + span;
+        // За край ряда пускаем на половину окна: пустое поле справа нужно,
+        // чтобы было куда рисовать разметку впереди цены.
+        if (i0 < -span / 2) {
+          i0 = -span / 2;
+          i1 = i0 + span;
         }
-        if (t1 > fullT1 + span / 2) {
-          t1 = fullT1 + span / 2;
-          t0 = t1 - span;
+        if (i1 > all.length + span / 2) {
+          i1 = all.length + span / 2;
+          i0 = i1 - span;
         }
       }
-      const natural = priceRange(all, t0, t1, stepMs);
+      const natural = priceRange(all, i0, i1);
       const naturalSpan = natural.y1 - natural.y0 || 1;
       const center = (v.y0 + v.y1) / 2;
       const pSpan = Math.min(
         naturalSpan * PRICE_ZOOM_LIMIT,
         Math.max(naturalSpan / PRICE_ZOOM_LIMIT, v.y1 - v.y0 || naturalSpan),
       );
-      return { t0, t1, y0: center - pSpan / 2, y1: center + pSpan / 2 };
+      return { i0, i1, y0: center - pSpan / 2, y1: center + pSpan / 2 };
     },
     [priceRange, visibleCandles],
   );
 
   const materializeView = useCallback((): View => {
     if (viewRef.current) return viewRef.current;
-    const view = followView(visibleCandles(), stepRef.current || TF_MS[tf] || 60_000);
+    const view = followView(visibleCandles());
     viewRef.current = view;
     setFollowing(false);
     return view;
-  }, [followView, visibleCandles, tf]);
+  }, [followView, visibleCandles]);
 
   const zoomBy = useCallback(
     (factor: number) => {
       const v = materializeView();
-      const tCenter = (v.t0 + v.t1) / 2;
-      const tSpan = (v.t1 - v.t0) * factor;
+      const iCenter = (v.i0 + v.i1) / 2;
+      const iSpan = (v.i1 - v.i0) * factor;
       const pCenter = (v.y0 + v.y1) / 2;
       const pSpan = (v.y1 - v.y0) * factor;
       viewRef.current = clampView({
-        t0: tCenter - tSpan / 2,
-        t1: tCenter + tSpan / 2,
+        i0: iCenter - iSpan / 2,
+        i1: iCenter + iSpan / 2,
         y0: pCenter - pSpan / 2,
         y1: pCenter + pSpan / 2,
       });
@@ -323,10 +362,22 @@ export default function PriceChart({
   useEffect(() => {
     if (!assetId) return;
     let alive = true;
+    // Старый ряд убираем СРАЗУ. Иначе между кликом по таймфрейму и ответом
+    // сервера график секунду рисует минутные свечи в дневном окне, потом
+    // прыгает на новые данные, потом ещё раз — на пересчитанный масштаб.
+    // Со стороны это читается как «страница несколько раз перезагрузилась».
+    setBars([]);
+    setLoading(true);
+    // Окно просмотра тоже сбрасываем: границы, посчитанные для минуток, на
+    // дневном ряду бессмысленны.
+    viewRef.current = null;
+    setFollowing(true);
+
     const load = async () => {
       const data = await fetchCandles(assetId, tf, 400);
       if (!alive) return;
       setBars(data.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })));
+      setLoading(false);
     };
     void load();
     // Внутридневные ряды обновляем чаще: там бар живёт минуты. На дневном и
@@ -395,14 +446,19 @@ export default function PriceChart({
       const stepMs = allCandles[1].t - allCandles[0].t || TF_MS[tf] || 60_000;
       stepRef.current = stepMs;
 
-      const view = viewRef.current ?? followView(allCandles, stepMs);
-      const xspan = view.t1 - view.t0 || 1;
-      const sx = (ms: number) => layout.plotX + ((ms - view.t0) / xspan) * layout.plotW;
+      const view = viewRef.current ?? followView(allCandles);
+      // Всё по горизонтали считается в номерах свечей: перерыв в торгах —
+      // это отсутствующие бары, а не пустое место на оси.
+      const xspan = view.i1 - view.i0 || 1;
+      const sxSlot = (slot: number) => layout.plotX + ((slot - view.i0) / xspan) * layout.plotW;
+      const sx = (ms: number) => sxSlot(slotOf(allCandles, stepMs, ms));
+      const barW = layout.plotW / xspan;
       const yMin = view.y0;
       const yMax = view.y1;
       const yspan = yMax - yMin || 1;
       const sy = (p: number) => layout.plotH - ((p - yMin) / yspan) * layout.plotH;
-      const invX = (x: number) => view.t0 + ((x - layout.plotX) / layout.plotW) * xspan;
+      const invX = (x: number) =>
+        timeOfSlot(allCandles, stepMs, view.i0 + ((x - layout.plotX) / layout.plotW) * xspan);
       const invY = (y: number) => yMin + (1 - y / layout.plotH) * yspan;
 
       drawPriceGrid(ctx, layout, yMin, yMax, sy);
@@ -414,8 +470,9 @@ export default function PriceChart({
       ctx.textAlign = "center";
       const ticks = Math.max(3, Math.min(8, Math.floor(layout.plotW / 130)));
       for (let i = 0; i <= ticks; i++) {
-        const ms = view.t0 + (xspan * i) / ticks;
-        const x = sx(ms);
+        const slot = view.i0 + (xspan * i) / ticks;
+        const ms = timeOfSlot(allCandles, stepMs, slot);
+        const x = sxSlot(slot);
         if (x < layout.plotX - 1 || x > layout.plotX + layout.plotW + 1) continue;
         ctx.beginPath();
         ctx.moveTo(x, 0);
@@ -432,11 +489,11 @@ export default function PriceChart({
 
       // Объём — под свечами, полупрозрачной гистограммой в нижней части поля.
       if (optionsRef.current.showVolume) {
-        const visible = allCandles.filter((k) => k.t + stepMs >= view.t0 && k.t <= view.t1);
+        const visible = allCandles.slice(Math.max(0, Math.floor(view.i0)), Math.ceil(view.i1) + 1);
         const maxVolume = visible.reduce((max, k) => Math.max(max, k.v), 0);
         if (maxVolume > 0) {
           const zone = layout.plotH * VOLUME_SHARE;
-          const width = Math.max(1, (stepMs / xspan) * layout.plotW * BODY_RATIO);
+          const width = Math.max(1, barW * BODY_RATIO);
           for (const k of visible) {
             const height = (k.v / maxVolume) * zone;
             const up = k.c >= k.o;
@@ -450,6 +507,9 @@ export default function PriceChart({
 
       drawCandlesticks(ctx, allCandles, sx, sy, layout.plotX, layout.plotW, xspan, {
         bodyRatio: BODY_RATIO,
+        // Ширина задаётся явно: вывести её из stepMs/xspan нельзя — ось
+        // идёт по номерам свечей, а не по миллисекундам.
+        bodyWidth: barW * BODY_RATIO,
         up: colorsRef.current?.up,
         down: colorsRef.current?.down,
       });
@@ -634,10 +694,12 @@ export default function PriceChart({
       const lay = layoutRef.current;
       const view = viewRef.current;
       if (!lay || !view) return null;
-      const xspan = view.t1 - view.t0 || 1;
+      const xspan = view.i1 - view.i0 || 1;
       const yspan = view.y1 - view.y0 || 1;
+      const bars = candlesRef.current;
+      const stepMs = stepRef.current || 60_000;
       return {
-        t: view.t0 + ((mx - lay.plotX) / lay.plotW) * xspan,
+        t: timeOfSlot(bars, stepMs, view.i0 + ((mx - lay.plotX) / lay.plotW) * xspan),
         price: view.y0 + (1 - my / lay.plotH) * yspan,
       };
     };
@@ -647,9 +709,11 @@ export default function PriceChart({
       const lay = layoutRef.current;
       const view = viewRef.current;
       if (!lay || !view) return null;
-      const xspan = view.t1 - view.t0 || 1;
+      const xspan = view.i1 - view.i0 || 1;
       const yspan = view.y1 - view.y0 || 1;
-      const sx = (ms: number) => lay.plotX + ((ms - view.t0) / xspan) * lay.plotW;
+      const bars = candlesRef.current;
+      const stepMs = stepRef.current || 60_000;
+      const sx = (ms: number) => lay.plotX + ((slotOf(bars, stepMs, ms) - view.i0) / xspan) * lay.plotW;
       const sy = (p: number) => lay.plotH - ((p - view.y0) / yspan) * lay.plotH;
       for (const item of [...drawingsRef.current].reverse()) {
         if (item.kind === "level" && item.points[0]) {
@@ -699,13 +763,13 @@ export default function PriceChart({
 
       if (drag && lay) {
         if (drag.mode === "pan") {
-          const span = drag.startView.t1 - drag.startView.t0;
-          const dt = ((mx - drag.mx) / lay.plotW) * span;
+          const span = drag.startView.i1 - drag.startView.i0;
+          const di = ((mx - drag.mx) / lay.plotW) * span;
           const pspan = drag.startView.y1 - drag.startView.y0;
           const dp = ((my - drag.my) / lay.plotH) * pspan;
           viewRef.current = clampView({
-            t0: drag.startView.t0 - dt,
-            t1: drag.startView.t1 - dt,
+            i0: drag.startView.i0 - di,
+            i1: drag.startView.i1 - di,
             y0: drag.startView.y0 + dp,
             y1: drag.startView.y1 + dp,
           });
@@ -721,10 +785,10 @@ export default function PriceChart({
           // По оси времени: вправо — растягиваем (свечей меньше, они шире),
           // влево — сжимаем и видим больше истории.
           const factor = Math.exp((drag.mx - mx) / 220);
-          const span = (drag.startView.t1 - drag.startView.t0) * factor;
+          const span = (drag.startView.i1 - drag.startView.i0) * factor;
           // Правый край (текущая цена) остаётся на месте — так ведут себя
           // биржевые терминалы.
-          viewRef.current = clampView({ ...drag.startView, t0: drag.startView.t1 - span });
+          viewRef.current = clampView({ ...drag.startView, i0: drag.startView.i1 - span });
         } else if (drag.mode === "draw" && draftRef.current) {
           const point = dataAt(mx, my);
           if (point) {
@@ -814,9 +878,9 @@ export default function PriceChart({
       const factor = e.deltaY > 0 ? 1.1 : 0.9;
       const fx = Math.min(1, Math.max(0, (mx - lay.plotX) / lay.plotW));
       const fy = Math.min(1, Math.max(0, my / lay.plotH));
-      const tCursor = v.t0 + fx * (v.t1 - v.t0);
-      const tSpan = (v.t1 - v.t0) * factor;
-      let next: View = { ...v, t0: tCursor - fx * tSpan, t1: tCursor + (1 - fx) * tSpan };
+      const iCursor = v.i0 + fx * (v.i1 - v.i0);
+      const iSpan = (v.i1 - v.i0) * factor;
+      let next: View = { ...v, i0: iCursor - fx * iSpan, i1: iCursor + (1 - fx) * iSpan };
       if (!e.shiftKey) {
         const pCursor = v.y1 - fy * (v.y1 - v.y0);
         const pSpan = (v.y1 - v.y0) * factor;
@@ -862,31 +926,33 @@ export default function PriceChart({
         )}
         <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
           {timeframes.map((code) => (
-            <button
-              key={code}
-              type="button"
-              onClick={() => setTf(code)}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
-                tf === code ? "bg-accent text-white" : "text-muted hover:text-fg"
-              }`}
-            >
-              {TF_LABEL[code] ?? code}
-            </button>
+            <Hint key={code} text={t(`game.chart.tf.${code}.hint`)}>
+              <button
+                type="button"
+                onClick={() => setTf(code)}
+                className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
+                  tf === code ? "bg-accent text-white" : "text-muted hover:text-fg"
+                }`}
+              >
+                {TF_LABEL[code] ?? code}
+              </button>
+            </Hint>
           ))}
         </div>
 
         {/* Инструменты разметки — те же, что на форексе и карте ордеров. */}
         <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
           {TOOLS.map(({ id, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTool(id)}
-              title={t(`game.chart.tool.${id}`)}
-              className={`${toolButton} ${tool === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
-            >
-              <Icon size={13} />
-            </button>
+            <Hint key={id} text={t(`game.chart.tool.${id}.hint`)}>
+              <button
+                type="button"
+                onClick={() => setTool(id)}
+                aria-label={t(`game.chart.tool.${id}`)}
+                className={`${toolButton} ${tool === id ? "bg-accent text-white" : "text-muted hover:text-fg"}`}
+              >
+                <Icon size={13} />
+              </button>
+            </Hint>
           ))}
         </div>
 
@@ -898,14 +964,15 @@ export default function PriceChart({
               ["rsi", showRsi, setShowRsi],
             ] as const
           ).map(([key, value, set]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => set(!value)}
-              className={`${toolButton} ${value ? "bg-accent/20 text-accent" : "text-muted hover:text-fg"}`}
-            >
-              {t(`game.chart.indicator.${key}`)}
-            </button>
+            <Hint key={key} text={t(`game.chart.indicator.${key}.hint`)}>
+              <button
+                type="button"
+                onClick={() => set(!value)}
+                className={`${toolButton} ${value ? "bg-accent/20 text-accent" : "text-muted hover:text-fg"}`}
+              >
+                {t(`game.chart.indicator.${key}`)}
+              </button>
+            </Hint>
           ))}
         </div>
 
@@ -930,6 +997,11 @@ export default function PriceChart({
 
       <div ref={containerRef} className="relative min-h-[240px] flex-1">
         <canvas ref={canvasRef} className="absolute inset-0" />
+        {loading && (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-faint">
+            {t("game.chart.loading")}
+          </div>
+        )}
       </div>
 
       <div className="px-1 pt-1 text-[11px] text-faint">{t("game.chart.hint")}</div>

@@ -21,11 +21,28 @@ import { stressLevel } from "@/engine/player/psychology";
 import type { GameState } from "@/engine/gameLoop";
 import type { TradingStyle } from "@/engine/entities/types";
 import MarketRegimeBadge from "./MarketRegimeBadge";
+import { HintLabel } from "./Hint";
+import { useMarketClock } from "@/lib/game/useMarketClock";
 
-function Metric({ label, value, tone, hint }: { label: string; value: string; tone?: "profit" | "loss"; hint?: string }) {
+function Metric({
+  label,
+  value,
+  tone,
+  hint,
+  tip,
+}: {
+  label: string;
+  value: string;
+  tone?: "profit" | "loss";
+  hint?: string;
+  /** Что эта цифра означает. Без пояснения половина шапки — набор терминов. */
+  tip?: string;
+}) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] uppercase tracking-[0.12em] text-muted">{label}</div>
+      <div className="text-[10px] uppercase tracking-[0.12em] text-muted">
+        {tip ? <HintLabel text={tip}>{label}</HintLabel> : label}
+      </div>
       <div
         className={`text-lg font-semibold tabular-nums truncate ${
           tone === "profit" ? "text-profit" : tone === "loss" ? "text-loss" : ""
@@ -53,6 +70,11 @@ export default function GameHeader({
   const style: TradingStyle = game.activeStyle.style;
   const skill = game.account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
   const xpPct = Math.min(100, (skill.xp / (skill.xpToNextLevel || 1)) * 100);
+
+  const now = useMarketClock(30_000);
+  // Часы берём из состояния, а не из Date.now() в рендере: читать часы во
+  // время рендера React справедливо считает нечистотой.
+  const clock = now > 0 ? new Date(now).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
 
   const rankKey = traderRankKey(game.account.reputation);
   const next = nextRank(game.account.reputation);
@@ -94,13 +116,24 @@ export default function GameHeader({
             amount: `${dayPnl >= 0 ? "+" : ""}${fmtUsd(dayPnl)}`,
             pct: `${dayPnl >= 0 ? "+" : ""}${dayPnlPct.toFixed(2)}%`,
           })}
+          tip={t("game.tip.equity")}
         />
         <Metric
           label={t("game.stat.balance")}
           value={fmtUsd(game.account.balance)}
           hint={marginUsed > 0 ? t("game.header.marginUsed", { amount: fmtUsd(marginUsed) }) : undefined}
+          tip={t("game.tip.balance")}
         />
-        <Metric label={t("game.stat.day")} value={String(game.gameCalendarDay + 1)} hint={styleLabel} />
+        {/* День карьеры и часы. Номер дня сам по себе ничего не объяснял:
+            «день 281» человек читает как ошибку, пока ему не скажут, что это
+            281-е сутки С НАЧАЛА ЕГО ПАРТИИ. Время рядом — потому что от него
+            зависит, какие рынки сейчас открыты. */}
+        <Metric
+          label={t("game.stat.day")}
+          value={String(game.gameCalendarDay + 1)}
+          hint={now > 0 ? `${clock} · ${styleLabel}` : styleLabel}
+          tip={t("game.tip.day", { days: game.gameCalendarDay + 1 })}
+        />
 
         <div className="min-w-[150px]">
           <div className="flex items-baseline justify-between gap-2">
@@ -127,6 +160,7 @@ export default function GameHeader({
             value={fmtUsd(game.sponsor.owed)}
             tone="loss"
             hint={t("game.sponsor.share") + `: ${game.sponsor.sharePct}%`}
+            tip={t("game.tip.sponsorDebt")}
           />
         )}
 
@@ -135,7 +169,9 @@ export default function GameHeader({
         {stress !== "calm" && (
           <div className="min-w-[110px]">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-[10px] uppercase tracking-[0.12em] text-muted">{t("game.psy.stress")}</span>
+              <span className="text-[10px] uppercase tracking-[0.12em] text-muted">
+                <HintLabel text={t("game.tip.stress")}>{t("game.psy.stress")}</HintLabel>
+              </span>
               <span className={`text-[11px] tabular-nums ${stress === "high" ? "text-loss" : "text-muted"}`}>
                 {Math.round(game.account.psychology.stress)}
               </span>
