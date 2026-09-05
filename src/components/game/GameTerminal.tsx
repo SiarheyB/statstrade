@@ -40,6 +40,8 @@ import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
 import CareerPanel from "./CareerPanel";
 import Achievements from "./Achievements";
+import NotifyToggle from "./NotifyToggle";
+import { notifyIfHidden } from "@/lib/game/desktopNotify";
 import WorldPanel from "./WorldPanel";
 import GameToasts from "./GameToasts";
 import PlayerNameGate from "./PlayerNameGate";
@@ -176,10 +178,14 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
     // может закрыться несколько, и стопка тостов ничего не сообщает.
     const entry = journal[journal.length - 1];
     lastJournalLength.current = journal.length;
-    notify(
-      entry.pnl >= 0 ? "good" : "bad",
-      t(entry.pnl >= 0 ? "game.notice.tradeWin" : "game.notice.tradeLoss", { amount: fmtUsd(Math.abs(entry.pnl)) }),
-    );
+    const text = t(entry.pnl >= 0 ? "game.notice.tradeWin" : "game.notice.tradeLoss", {
+      amount: fmtUsd(Math.abs(entry.pnl)),
+    });
+    notify(entry.pnl >= 0 ? "good" : "bad", text);
+    // На невидимой вкладке тост показывать некому — дублируем системным
+    // уведомлением. Один тег на все сделки: десять окон подряд на скальпинге
+    // это не информирование, а атака.
+    notifyIfHidden(t("game.notify.tradeTitle"), text, "game-trade");
   }, [game.account.journal, notify, t]);
 
   useEffect(() => {
@@ -192,6 +198,14 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
         name: t(`game.contract.${result.contractId}.name`),
         reason: t(`game.contract.outcome.${result.outcome}`),
       }),
+    );
+    notifyIfHidden(
+      t("game.notify.contractTitle"),
+      t(passed ? "game.notice.contractPassed" : "game.notice.contractFailed", {
+        name: t(`game.contract.${result.contractId}.name`),
+        reason: t(`game.contract.outcome.${result.outcome}`),
+      }),
+      "game-contract",
     );
     clearContractResult();
   }, [game.lastContractResult, notify, clearContractResult, t]);
@@ -317,6 +331,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               </button>
             );
           })}
+        </div>
+
+        {/* Уведомления — справа от вкладок: игрок вспоминает о них ровно
+            тогда, когда собирается уйти со страницы. */}
+        <div className="ml-auto">
+          <NotifyToggle />
         </div>
       </div>
 
