@@ -316,7 +316,11 @@ import type { AlgoBot } from "@/engine/player/algoBots";
 // Точки хранятся в координатах ДАННЫХ (игровое время + цена), а не в
 // пикселях: иначе разметка разъезжалась бы при любом зуме и смене размера
 // окна.
-export type GameDrawingKind = "trend" | "level" | "rect";
+// Набор тот же, что на форексе и карте ордеров (DrawingToolbar.tsx):
+// трендовая, горизонтальная линия, горизонтальный луч, прямоугольник. Плюс
+// вертикальная отметка — на игровом графике ей есть применение, которого нет
+// на реальном: отметить момент выхода новости.
+export type GameDrawingKind = "trend" | "level" | "ray" | "rect" | "vline";
 
 export interface GameDrawingPoint {
   t: number;

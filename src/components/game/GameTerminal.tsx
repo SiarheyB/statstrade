@@ -20,6 +20,7 @@
 // тик → автосейв → сохранение при уходе со страницы (раздел 12).
 import { useEffect, useMemo, useRef, useState } from "react";
 import { BarChart3, Briefcase, Globe2, Newspaper, ShoppingBag, Trophy } from "lucide-react";
+import assetsData from "@/data/assets.json";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
@@ -43,6 +44,7 @@ import GameToasts from "./GameToasts";
 import PlayerNameGate from "./PlayerNameGate";
 import OfflineReportModal from "./OfflineReportModal";
 import ContractsPanel from "./ContractsPanel";
+import MarketsPanel from "./MarketsPanel";
 import PerkTree from "./PerkTree";
 import BotsPanel from "./BotsPanel";
 import TraderOffice from "./TraderOffice";
@@ -80,6 +82,16 @@ const TAB_ICON: Record<Tab, typeof BarChart3> = {
 // ордеров (lib/chartPrefs.ts): вернувшись в игру, человек ждёт ту же
 // вкладку и тот же инструмент, что оставил.
 const PREFS_KEY = "game.settings";
+
+// Сколько инструментов на каждом рынке — считаем один раз на модуль:
+// список активов статичен.
+const ALL_MARKET_COUNTS: Record<string, number> = (assetsData as { assetClass: string }[]).reduce(
+  (acc, asset) => {
+    acc[asset.assetClass] = (acc[asset.assetClass] ?? 0) + 1;
+    return acc;
+  },
+  {} as Record<string, number>,
+);
 
 export default function GameTerminal({ tuning, playerName }: { tuning: GameTuning; playerName: string | null }) {
   const { t } = useI18n();
@@ -403,6 +415,10 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             equity={game.account.equity}
             balance={game.account.balance}
             currentDay={game.gameCalendarDay}
+          />
+          <MarketsPanel
+            unlocked={game.unlockedMarkets}
+            assetCounts={ALL_MARKET_COUNTS}
           />
           <PerkTree perks={game.perks} skills={game.account.skills} contractPoints={game.contractPoints} />
           <BotsPanel bots={game.bots} perks={game.perks} assets={game.activeAssets} />

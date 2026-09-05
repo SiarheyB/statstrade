@@ -29,7 +29,19 @@
 // перевешиваются на каждый тик игры — иначе драг рвался бы посреди
 // перетаскивания. Функция отрисовки живёт в redrawRef.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eraser, Maximize2, Minus, Minus as LevelIcon, MousePointer2, Plus, Radio, Square, TrendingUp } from "lucide-react";
+import {
+  ArrowRight,
+  Eraser,
+  Maximize2,
+  Minus,
+  Minus as LevelIcon,
+  MousePointer2,
+  MoveVertical,
+  Plus,
+  Radio,
+  Square,
+  TrendingUp,
+} from "lucide-react";
 import {
   CHART_COLORS,
   drawCandlesticks,
@@ -58,7 +70,7 @@ function sortBars(bars: Bar[]): Bar[] {
 }
 
 type View = { t0: number; t1: number; y0: number; y1: number };
-type Tool = "cursor" | "trend" | "level" | "rect" | "erase";
+type Tool = "cursor" | "trend" | "level" | "ray" | "rect" | "vline" | "erase";
 type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
 
 // Набор таймфреймов зависит от стиля: скальперу дневной график не нужен, а
@@ -129,7 +141,9 @@ const TOOLS: { id: Tool; Icon: typeof MousePointer2 }[] = [
   { id: "cursor", Icon: MousePointer2 },
   { id: "trend", Icon: TrendingUp },
   { id: "level", Icon: LevelIcon },
+  { id: "ray", Icon: ArrowRight },
   { id: "rect", Icon: Square },
+  { id: "vline", Icon: MoveVertical },
   { id: "erase", Icon: Eraser },
 ];
 
@@ -465,6 +479,20 @@ export default function PriceChart({
           ctx.moveTo(layout.plotX, y);
           ctx.lineTo(layout.plotX + layout.plotW, y);
           ctx.stroke();
+        } else if (item.kind === "ray" && item.points[0]) {
+          // Луч: от точки вправо до края — уровень, который начал
+          // действовать с определённого момента, а не «всегда был».
+          const y = sy(item.points[0].price);
+          ctx.beginPath();
+          ctx.moveTo(sx(item.points[0].t), y);
+          ctx.lineTo(layout.plotX + layout.plotW, y);
+          ctx.stroke();
+        } else if (item.kind === "vline" && item.points[0]) {
+          const x = sx(item.points[0].t);
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, layout.plotH);
+          ctx.stroke();
         } else if (item.kind === "trend" && item.points.length === 2) {
           ctx.beginPath();
           ctx.moveTo(sx(item.points[0].t), sy(item.points[0].price));
@@ -617,6 +645,12 @@ export default function PriceChart({
       for (const item of [...drawingsRef.current].reverse()) {
         if (item.kind === "level" && item.points[0]) {
           if (Math.abs(sy(item.points[0].price) - my) <= HIT_TOLERANCE) return item;
+        } else if (item.kind === "ray" && item.points[0]) {
+          // Луч тянется от своей точки вправо: попадание считаем только
+          // правее начала.
+          if (Math.abs(sy(item.points[0].price) - my) <= HIT_TOLERANCE && mx >= sx(item.points[0].t) - HIT_TOLERANCE) return item;
+        } else if (item.kind === "vline" && item.points[0]) {
+          if (Math.abs(sx(item.points[0].t) - mx) <= HIT_TOLERANCE) return item;
         } else if (item.kind === "trend" && item.points.length === 2) {
           const x1 = sx(item.points[0].t);
           const y1 = sy(item.points[0].price);
@@ -686,7 +720,10 @@ export default function PriceChart({
           const point = dataAt(mx, my);
           if (point) {
             const draft = draftRef.current;
-            draft.points = draft.kind === "level" ? [point] : [draft.points[0], point];
+            draft.points =
+              draft.kind === "level" || draft.kind === "ray" || draft.kind === "vline"
+                ? [point]
+                : [draft.points[0], point];
           }
         }
       }
@@ -710,10 +747,11 @@ export default function PriceChart({
       if (active !== "cursor") {
         const point = dataAt(mx, my);
         if (point) {
+          const singlePoint = active === "level" || active === "ray" || active === "vline";
           draftRef.current = {
             id: crypto.randomUUID(),
             kind: active as GameDrawingKind,
-            points: active === "level" ? [point] : [point, point],
+            points: singlePoint ? [point] : [point, point],
           };
           dragRef.current = { mode: "draw", mx, my, startView: { ...view } };
         }
@@ -729,11 +767,16 @@ export default function PriceChart({
       if (draft) {
         // Случайный клик тем же инструментом не должен оставлять точку
         // нулевой длины: у линии и прямоугольника концы обязаны различаться.
+        const singlePoint = draft.kind === "level" || draft.kind === "ray" || draft.kind === "vline";
         const meaningful =
-          draft.kind === "level" ||
+          singlePoint ||
           (draft.points.length === 2 && (draft.points[0].t !== draft.points[1].t || draft.points[0].price !== draft.points[1].price));
         if (meaningful) addRef.current(draft);
         draftRef.current = null;
+        // Инструмент отжимается сам: нарисовал уровень — вернулся курсор.
+        // Иначе следующий клик по графику ставит ещё одну линию, хотя
+        // человек просто хотел посмотреть цену под курсором.
+        setTool("cursor");
       }
       dragRef.current = null;
       canvas.style.cursor = "crosshair";

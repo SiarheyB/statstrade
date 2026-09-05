@@ -10,7 +10,7 @@ import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import { calculateRequiredMargin, calculateLiquidationPrice } from "@/engine/economy/marginEngine";
 import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
-import type { Asset, PositionSide } from "@/engine/entities/types";
+import type { Asset, AssetClass, PositionSide } from "@/engine/entities/types";
 
 export default function OrderTicket({
   assets,
@@ -86,7 +86,22 @@ export default function OrderTicket({
     setTimeout(() => setFlash(null), 700);
   }
 
-  const options = useMemo(() => assets.map((a) => ({ id: a.id, label: `${a.symbol} — ${a.name}` })), [assets]);
+  // Инструменты сгруппированы по рынкам: в плоском списке из трёх десятков
+  // строк было не понять, что вообще торгуешь — акция, валютная пара или
+  // металл. Порядок групп фиксированный, от простого рынка к сложному.
+  const MARKET_ORDER: AssetClass[] = ["stock", "bond", "index", "crypto", "forex", "commodity"];
+  const groups = useMemo(() => {
+    const byClass = new Map<AssetClass, { id: string; label: string }[]>();
+    for (const asset of assets) {
+      const list = byClass.get(asset.assetClass) ?? [];
+      list.push({ id: asset.id, label: `${asset.symbol} — ${asset.name}` });
+      byClass.set(asset.assetClass, list);
+    }
+    return MARKET_ORDER.filter((cls) => byClass.has(cls)).map((cls) => ({ cls, items: byClass.get(cls)! }));
+    // MARKET_ORDER — константа модуля по смыслу, но объявлена внутри
+    // компонента ради читаемости; список активов меняется редко.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [assets]);
 
   const longLiqPrice =
     price != null && effectiveLeverage > 1 ? calculateLiquidationPrice(price, effectiveLeverage, "long") : null;
@@ -102,10 +117,14 @@ export default function OrderTicket({
           onChange={(e) => onSelectAsset(e.target.value)}
           className="input-base w-full px-2 py-1.5 text-sm"
         >
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
+          {groups.map((group) => (
+            <optgroup key={group.cls} label={t(`game.market.${group.cls}`)}>
+              {group.items.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.label}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
       </div>
