@@ -32,6 +32,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Eraser,
+  Magnet,
   Maximize2,
   Minus,
   Minus as LevelIcon,
@@ -111,6 +112,45 @@ export function timeOfSlot(bars: ChartCandle[], stepMs: number, slot: number): n
   const i = Math.floor(slot);
   return bars[i].t + (slot - i) * stepMs;
 }
+/**
+ * Магнит: притянуть точку к хаю или лою ближайшей свечи.
+ *
+ * Уровень, поставленный «на глаз», почти всегда оказывается на пиксель ниже
+ * хая — и потом непонятно, почему цена его «не достала». Тот же магнит стоит
+ * на форексе и карте ордеров (lib/useChartInteractions.ts), но там ось
+ * календарная, а здесь — номера свечей, поэтому ближайший бар ищется по
+ * слоту, а не поиском по времени.
+ *
+ * Порог по цене — доля высоты свечи: у спокойного бара притягивает только
+ * вплотную, у длинного — с приличного расстояния, и это правильно: важна не
+ * абсолютная разница в долларах, а «целился ли человек в этот край».
+ *
+ * Порог МЕНЬШЕ, чем на форексе (там 0.6): при 0.6 середина свечи ближе к
+ * краю, чем порог, и магнит утягивал бы к экстремуму даже уровень, честно
+ * поставленный по телу. Треть высоты оставляет середину свободной.
+ */
+export const MAGNET_PRICE_THRESHOLD = 0.35;
+
+export function snapToBar(
+  bars: ChartCandle[],
+  slot: number,
+  price: number,
+  magnet: boolean,
+): { slot: number; price: number } {
+  if (!magnet || bars.length === 0) return { slot, price };
+  const index = Math.max(0, Math.min(bars.length - 1, Math.round(slot)));
+  // Дальше половины свечи от центра бара не притягиваем: иначе точка,
+  // поставленная между свечами, прыгала бы к соседней без спроса.
+  if (Math.abs(slot - index) > 0.5) return { slot, price };
+  const bar = bars[index];
+  const range = bar.h - bar.l || Math.abs(bar.c) * 0.001 || 1;
+  const threshold = range * MAGNET_PRICE_THRESHOLD;
+  const toHigh = Math.abs(price - bar.h);
+  const toLow = Math.abs(price - bar.l);
+  if (toHigh > threshold && toLow > threshold) return { slot: index, price };
+  return { slot: index, price: toHigh <= toLow ? bar.h : bar.l };
+}
+
 type Tool = "cursor" | "trend" | "level" | "ray" | "rect" | "vline" | "erase";
 type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
 
@@ -254,6 +294,10 @@ export default function PriceChart({
   const [showMa, setShowMa] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [showRsi, setShowRsi] = useState(false);
+  // Магнит: точка разметки прилипает к хаю или лою ближайшей свечи. Ровно то
+  // же, что на форексе и карте ордеров — уровень, поставленный «на глаз», на
+  // пиксель ниже хая, и потом непонятно, почему цена его «не достала».
+  const [magnet, setMagnet] = useState(true);
   // Пока настройки не прочитаны, данные не грузим: эффекты первого рендера
   // видят дефолты, и без этого гейта в сеть уходит лишний запрос за чужим
   // таймфреймом, а игрок успевает увидеть не тот график (тот же приём, что
@@ -267,6 +311,7 @@ export default function PriceChart({
     if (savedTf && (TF_BY_STYLE[style] ?? TF_BY_STYLE.day).includes(savedTf)) setTf(savedTf);
     if (typeof prefs.showMa === "boolean") setShowMa(prefs.showMa);
     if (typeof prefs.showVolume === "boolean") setShowVolume(prefs.showVolume);
+    if (typeof prefs.magnet === "boolean") setMagnet(prefs.magnet);
     if (typeof prefs.showRsi === "boolean") setShowRsi(prefs.showRsi);
     setHydrated(true);
     // Стиль в зависимостях не нужен: набор таймфреймов у нового стиля свой,
@@ -278,8 +323,8 @@ export default function PriceChart({
   // рождается — запись идёт в эффекте.
   useEffect(() => {
     if (!hydrated) return;
-    writeTerminalPrefs({ showMa, showVolume, showRsi });
-  }, [hydrated, showMa, showVolume, showRsi]);
+    writeTerminalPrefs({ showMa, showVolume, showRsi, magnet });
+  }, [hydrated, showMa, showVolume, showRsi, magnet]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -330,6 +375,7 @@ export default function PriceChart({
   const addRef = useRef(onAddDrawing);
   const removeRef = useRef(onRemoveDrawing);
   const optionsRef = useRef({ showMa, showVolume, showRsi });
+  const magnetRef = useRef(magnet);
 
   const viewRef = useRef<View | null>(null);
   const layoutRef = useRef<PlotLayout | null>(null);
@@ -514,6 +560,7 @@ export default function PriceChart({
     addRef.current = onAddDrawing;
     removeRef.current = onRemoveDrawing;
     optionsRef.current = { showMa, showVolume, showRsi };
+    magnetRef.current = magnet;
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -811,7 +858,12 @@ export default function PriceChart({
       return "pan";
     };
 
-    const dataAt = (mx: number, my: number) => {
+    /**
+     * Точка данных под курсором. `snap` — притягивать ли её к краям свечи:
+     * разметку притягиваем, а крестик и подпись цены нет, иначе значение под
+     * курсором перестало бы соответствовать тому, где курсор.
+     */
+    const dataAt = (mx: number, my: number, snap = false) => {
       const lay = layoutRef.current;
       const view = viewRef.current;
       if (!lay || !view) return null;
@@ -819,10 +871,10 @@ export default function PriceChart({
       const yspan = view.y1 - view.y0 || 1;
       const bars = candlesRef.current;
       const stepMs = stepRef.current || 60_000;
-      return {
-        t: timeOfSlot(bars, stepMs, view.i0 + ((mx - lay.plotX) / lay.plotW) * xspan),
-        price: view.y0 + (1 - my / lay.plotH) * yspan,
-      };
+      const rawSlot = view.i0 + ((mx - lay.plotX) / lay.plotW) * xspan;
+      const rawPrice = view.y0 + (1 - my / lay.plotH) * yspan;
+      const point = snap ? snapToBar(bars, rawSlot, rawPrice, magnetRef.current) : { slot: rawSlot, price: rawPrice };
+      return { t: timeOfSlot(bars, stepMs, point.slot), price: point.price };
     };
 
     /** Ближайшая разметка к точке — для ластика. */
@@ -911,7 +963,7 @@ export default function PriceChart({
           // биржевые терминалы.
           viewRef.current = clampView({ ...drag.startView, i0: drag.startView.i1 - span });
         } else if (drag.mode === "draw" && draftRef.current) {
-          const point = dataAt(mx, my);
+          const point = dataAt(mx, my, true);
           if (point) {
             const draft = draftRef.current;
             draft.points =
@@ -939,7 +991,7 @@ export default function PriceChart({
       }
 
       if (active !== "cursor") {
-        const point = dataAt(mx, my);
+        const point = dataAt(mx, my, true);
         if (point) {
           const singlePoint = active === "level" || active === "ray" || active === "vline";
           draftRef.current = {
@@ -1067,6 +1119,19 @@ export default function PriceChart({
 
         {/* Инструменты разметки — те же, что на форексе и карте ордеров. */}
         <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
+          {/* Магнит стоит рядом с инструментами, а не среди индикаторов: он
+              меняет поведение рисования, а не то, что видно на графике. */}
+          <Hint text={t(magnet ? "game.chart.magnet.on" : "game.chart.magnet.off")}>
+            <button
+              type="button"
+              onClick={() => setMagnet((v) => !v)}
+              aria-label={t("game.chart.magnet")}
+              aria-pressed={magnet}
+              className={`${toolButton} ${magnet ? "bg-accent/20 text-accent" : "text-muted hover:text-fg"}`}
+            >
+              <Magnet size={13} />
+            </button>
+          </Hint>
           {TOOLS.map(({ id, Icon }) => (
             <Hint key={id} text={t(`game.chart.tool.${id}.hint`)}>
               <button

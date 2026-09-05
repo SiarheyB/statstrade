@@ -31,6 +31,8 @@ export interface TerminalPrefs {
   showMa?: boolean;
   showVolume?: boolean;
   showRsi?: boolean;
+  /** Притягивать разметку к хаям и лоям свечей. */
+  magnet?: boolean;
   /** Масштаб и положение окна — по ключу «инструмент|таймфрейм». */
   views?: Record<string, StoredView>;
 }

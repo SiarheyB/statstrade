@@ -14,6 +14,7 @@ import AssetPicker from "./AssetPicker";
 import { HintLabel } from "./Hint";
 import { useMarketClock } from "@/lib/game/useMarketClock";
 import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
+import { levelAmount, percentAmount } from "@/engine/economy/pnlCalculator";
 import type { Asset, PositionSide } from "@/engine/entities/types";
 
 export default function OrderTicket({
@@ -78,6 +79,26 @@ export default function OrderTicket({
 
   // Подсказка по размеру позиции (раздел 4.3) — только рекомендация, не
   // ограничение: показывается, когда стоп-лосс заполнен, риск 1% от баланса.
+  // Уровни в деньгах. «Стоп на 41 200» само по себе не говорит ничего:
+  // человек ставит стоп по графику, а рискует счётом — и переводить одно в
+  // другое в уме он не должен.
+  const riskAmount =
+    price != null && slNum != null && Number.isFinite(slNum) && sizeNum > 0
+      ? levelAmount(price, slNum, sizeNum, effectiveLeverage)
+      : null;
+  const rewardAmount =
+    price != null && tpNum != null && Number.isFinite(tpNum) && sizeNum > 0
+      ? levelAmount(price, tpNum, sizeNum, effectiveLeverage)
+      : null;
+  const trailAmount =
+    price != null && trailNum != null && Number.isFinite(trailNum) && trailNum > 0 && sizeNum > 0
+      ? percentAmount(price, trailNum, sizeNum, effectiveLeverage)
+      : null;
+  // R-мультипликатор: во сколько раз цель больше риска. Единственное число,
+  // по которому видно, стоит ли сделка того, — и считать его в уме перед
+  // каждым входом никто не станет.
+  const rr = riskAmount != null && riskAmount > 0 && rewardAmount != null ? rewardAmount / riskAmount : null;
+
   const suggestedSize =
     price != null && slNum != null && Number.isFinite(slNum)
       ? suggestPositionSize(balance, DEFAULT_RISK_PER_TRADE_PCT, price, slNum)
@@ -237,6 +258,9 @@ export default function OrderTicket({
             onChange={(e) => setStopLoss(e.target.value)}
             className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
           />
+          <div className="mt-1 h-4 text-[11px] tabular-nums text-loss">
+            {riskAmount != null && `−${fmtUsd(riskAmount)}`}
+          </div>
         </div>
         <div>
           <label className="text-xs text-faint block mb-1">
@@ -250,6 +274,9 @@ export default function OrderTicket({
             onChange={(e) => setTakeProfit(e.target.value)}
             className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
           />
+          <div className="mt-1 h-4 text-[11px] tabular-nums text-profit">
+            {rewardAmount != null && `+${fmtUsd(rewardAmount)}`}
+          </div>
         </div>
       </div>
 
@@ -266,13 +293,26 @@ export default function OrderTicket({
           onChange={(e) => setTrailing(e.target.value)}
           className="input-base w-full px-2 py-1.5 text-sm tabular-nums"
         />
-        <div className="text-[11px] text-faint mt-1">{t("game.order.trailingHint")}</div>
+        <div className="text-[11px] text-faint mt-1">
+          {trailAmount != null
+            ? t("game.order.trailingAmount", { amount: fmtUsd(trailAmount) })
+            : t("game.order.trailingHint")}
+        </div>
       </div>
 
       {effectiveLeverage > 1 && longLiqPrice != null && shortLiqPrice != null && (
         <div className="text-[11px] text-faint space-y-0.5">
           <div>{t("game.order.liqLong", { price: fmtUsd(longLiqPrice) })}</div>
           <div>{t("game.order.liqShort", { price: fmtUsd(shortLiqPrice) })}</div>
+        </div>
+      )}
+
+      {rr != null && (
+        <div className="text-xs text-faint flex items-center justify-between">
+          <HintLabel text={t("game.tip.rr")}>{t("game.order.rr")}</HintLabel>
+          <span className={`tabular-nums font-medium ${rr >= 1 ? "text-profit" : "text-loss"}`}>
+            {rr.toFixed(2)}
+          </span>
         </div>
       )}
 

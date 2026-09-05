@@ -5,6 +5,28 @@
 // fees  = (entryPrice*size + closePrice*size) * commissionRate + spreadCost
 import type { Position } from "@/engine/entities/types";
 
+/**
+ * Сколько денег стоит уровень: расстояние до цены, умноженное на объём и плечо.
+ *
+ * Нужно для тикета: «стоп на 41 200» само по себе не говорит ничего — важно,
+ * сколько это в деньгах. Игрок ставит стоп, глядя на график, а рискует
+ * счётом, и переводить одно в другое в уме он не должен.
+ *
+ * Комиссию сюда НЕ включаем: она зависит от цены закрытия, которую в момент
+ * планирования никто не знает, а обещать точную цифру и потом её не сдержать
+ * хуже, чем честная оценка «примерно столько».
+ */
+export function levelAmount(price: number, level: number, size: number, leverage: number): number {
+  if (!(price > 0) || !(level > 0) || !(size > 0) || !(leverage > 0)) return 0;
+  return Math.abs(price - level) * size * leverage;
+}
+
+/** То же самое, но расстояние задано процентом — как у скользящего стопа. */
+export function percentAmount(price: number, pct: number, size: number, leverage: number): number {
+  if (!(pct > 0)) return 0;
+  return levelAmount(price, price * (1 + pct / 100), size, leverage);
+}
+
 export function calculateFees(
   entryPrice: number,
   closePrice: number,
