@@ -25,7 +25,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
-import { activeTheme } from "@/engine/economy/shop";
+import { activeTheme, getShopItem, sellValue } from "@/engine/economy/shop";
 import { perkEffects } from "@/engine/player/perks";
 import type { GameTuning } from "@/engine/entities/tuning";
 import type { TradingStyle } from "@/engine/entities/types";
@@ -119,6 +119,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   const streakBonus = useGameStore((s) => s.streakBonus);
   const clearStreakBonus = useGameStore((s) => s.clearStreakBonus);
   const clearAchievements = useGameStore((s) => s.clearAchievements);
+  const clearSeizedItems = useGameStore((s) => s.clearSeizedItems);
   const addDrawing = useGameStore((s) => s.addDrawing);
   const removeDrawing = useGameStore((s) => s.removeDrawing);
   // Длина журнала на прошлом кадре — по её приросту понимаем, что сделка
@@ -228,6 +229,21 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
     clearStreakBonus();
   }, [streakBonus, notify, clearStreakBonus, t]);
 
+  // Изъятие за долг по содержанию: о нём нельзя узнать по молча пропавшей
+  // вещи — это единственное в игре, что забирают без нажатия кнопки.
+  useEffect(() => {
+    if (game.lastSeizedItems.length === 0) return;
+    for (const id of game.lastSeizedItems) {
+      const item = getShopItem(id);
+      if (!item) continue;
+      notify("bad", t("game.shop.seized", {
+        name: t(`game.shop.item.${id}.name`),
+        amount: fmtUsd(sellValue(item, true)),
+      }));
+    }
+    clearSeizedItems();
+  }, [game.lastSeizedItems, notify, clearSeizedItems, t]);
+
   useEffect(() => {
     if (game.lastAchievements.length === 0) return;
     for (const id of game.lastAchievements) {
@@ -323,6 +339,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               >
                 <Icon size={14} />
                 {t(`game.tab.${name}`)}
+                {/* Долг по содержанию — единственное, из-за чего вещи
+                    забирают. Значок на вкладке нужен тому, кто в магазин
+                    после покупок больше не заходит. */}
+                {name === "shop" && game.lifestyle.unpaidUpkeep > 0 && (
+                  <span className="rounded-full bg-loss/20 px-1.5 text-[10px] text-loss">!</span>
+                )}
                 {name === "news" && unreadNews > 0 && (
                   <span
                     className={`rounded-full px-1.5 text-[10px] tabular-nums ${

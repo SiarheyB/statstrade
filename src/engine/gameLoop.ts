@@ -25,13 +25,31 @@ import type {
   Position,
   TradingStyleConfig,
 } from "@/engine/entities/types";
-import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
+import {
+  applyContractReward,
+  evaluateContract,
+  getContract,
+} from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
-import { applySponsorCut, isWipedOut, sponsorCut, type SponsorDeal } from "@/engine/player/bailout";
+import {
+  applySponsorCut,
+  isWipedOut,
+  sponsorCut,
+  type SponsorDeal,
+} from "@/engine/player/bailout";
 import { newlyEarned, type StreakState } from "@/engine/player/achievements";
-import { orderTriggers, trailStop, triggerLevel } from "@/engine/player/pendingOrders";
+import {
+  orderTriggers,
+  trailStop,
+  triggerLevel,
+} from "@/engine/player/pendingOrders";
 import { isMarketOpen } from "@/lib/game/schedule";
-import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
+import {
+  evaluateDaily,
+  freshDailyState,
+  type DailyState,
+  type DailyTask,
+} from "@/engine/player/dailyTasks";
 import {
   botHasPosition,
   botPositionSize,
@@ -42,11 +60,24 @@ import {
   type AlgoBot,
 } from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
-import { freshTaxState, taxForPeriod, toolSubscriptionCost, type TaxState } from "@/engine/economy/taxes";
-import { accrueSalary, freshCareer, getJob, type CareerState } from "@/engine/player/jobs";
+import {
+  freshTaxState,
+  taxForPeriod,
+  toolSubscriptionCost,
+  type TaxState,
+} from "@/engine/economy/taxes";
+import {
+  accrueSalary,
+  freshCareer,
+  getJob,
+  type CareerState,
+} from "@/engine/player/jobs";
 import { totalSwapFee } from "@/engine/economy/swap";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
-import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
+import {
+  calculateUnrealizedPnl,
+  settleClose,
+} from "@/engine/economy/pnlCalculator";
 import {
   calculateLiquidationPenalty,
   calculateLiquidationPrice,
@@ -54,10 +85,26 @@ import {
   calculateRequiredMargin,
   checkLiquidation,
 } from "@/engine/economy/marginEngine";
-import { applyXpGain, calculateXpGain, xpToNextLevel, BASE_XP } from "@/engine/player/progression";
+import {
+  applyXpGain,
+  calculateXpGain,
+  xpToNextLevel,
+  BASE_XP,
+} from "@/engine/player/progression";
 import { processQuarterlyDividends } from "@/engine/economy/dividends";
-import { chargeUpkeep, monthlyUpkeep, restFactor } from "@/engine/economy/shop";
-import { applySlippage, applyTradeOutcome, recoverOverTime } from "@/engine/player/psychology";
+import {
+  chargeUpkeep,
+  graceExpired,
+  monthlyUpkeep,
+  pickForcedSale,
+  releaseItem,
+  restFactor,
+} from "@/engine/economy/shop";
+import {
+  applySlippage,
+  applyTradeOutcome,
+  recoverOverTime,
+} from "@/engine/player/psychology";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 // Длина одной свечи. Игровое время теперь идёт вровень с реальным, поэтому
@@ -156,6 +203,13 @@ export interface GameState {
   wallet: number;
   /** Работа и история банкротств. */
   career: CareerState;
+  /**
+   * Вещи, изъятые за долг по содержанию на последнем шаге.
+   *
+   * UI показывает по ним уведомление и очищает поле — тем же способом, что
+   * завершённые испытания и полученные достижения.
+   */
+  lastSeizedItems: string[];
 }
 
 /**
@@ -163,7 +217,10 @@ export interface GameState {
  * первым: если оба условия истинны в один тик (гэп больше расстояния между
  * ними), консервативнее закрыть по стопу, а не по тейку.
  */
-export function checkStopConditions(position: Position, currentPrice: number): number | null {
+export function checkStopConditions(
+  position: Position,
+  currentPrice: number,
+): number | null {
   const { side, stopLoss, takeProfit } = position;
   if (side === "long") {
     if (stopLoss != null && currentPrice <= stopLoss) return stopLoss;
@@ -201,7 +258,12 @@ export function applyPositionOpen(
     style: Position["style"];
   },
 ): Position {
-  const entryPrice = applySlippage(input.entryPrice, input.side, true, account.psychology.stress);
+  const entryPrice = applySlippage(
+    input.entryPrice,
+    input.side,
+    true,
+    account.psychology.stress,
+  );
   const position: Position = {
     id: crypto.randomUUID(),
     assetId: input.assetId,
@@ -219,7 +281,11 @@ export function applyPositionOpen(
     fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
     style: input.style,
   };
-  account.balance -= calculateRequiredMargin(entryPrice, input.size, input.leverage);
+  account.balance -= calculateRequiredMargin(
+    entryPrice,
+    input.size,
+    input.leverage,
+  );
   account.positions.push(position);
   return position;
 }
@@ -251,14 +317,26 @@ export function applyPositionClose(
   // открытым с той же ценой входа. Зафиксировать половину и перевести остаток
   // в безубыток — базовое движение сопровождения сделки, и без него не
   // работает ни одна нормальная стратегия выхода.
-  const size = closeSize != null ? Math.min(Math.max(0, closeSize), position.size) : position.size;
+  const size =
+    closeSize != null
+      ? Math.min(Math.max(0, closeSize), position.size)
+      : position.size;
   if (!(size > 0)) return 0;
   const partial = size < position.size;
   const slice: Position = partial ? { ...position, size } : position;
-  const requiredMargin = calculateRequiredMargin(slice.entryPrice, slice.size, slice.leverage);
+  const requiredMargin = calculateRequiredMargin(
+    slice.entryPrice,
+    slice.size,
+    slice.leverage,
+  );
   // Стресс портит исполнение — нервный трейдер жмёт кнопку хуже. Эффект
   // всегда НЕ в пользу игрока и предсказуем по величине (см. psychology.ts).
-  const filled = applySlippage(exitPrice, position.side, false, account.psychology.stress);
+  const filled = applySlippage(
+    exitPrice,
+    position.side,
+    false,
+    account.psychology.stress,
+  );
   const { realizedPnl } = settleClose(slice, filled, commissionRate, extraFee);
   // requiredMargin — тот же резерв, что openPosition() в gameStore.ts снял с
   // баланса при открытии (раздел 4.2; при leverage=1 совпадает с полным
@@ -267,7 +345,10 @@ export function applyPositionClose(
 
   const rMultiple =
     position.stopLoss != null
-      ? realizedPnl / (Math.abs(slice.entryPrice - slice.stopLoss!) * slice.size * slice.leverage)
+      ? realizedPnl /
+        (Math.abs(slice.entryPrice - slice.stopLoss!) *
+          slice.size *
+          slice.leverage)
       : 0;
 
   account.journal.push({
@@ -285,8 +366,15 @@ export function applyPositionClose(
   // Прогрессия (раздел 4.5) — начисляется на КАЖДОЙ закрытой сделке,
   // независимо от результата (даже убыточная по плану чему-то учит).
   const style = slice.style;
-  const current = account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
-  account.skills[style] = applyXpGain(current, calculateXpGain(BASE_XP, rMultiple, style) * xpMultiplier);
+  const current = account.skills[style] ?? {
+    level: 0,
+    xp: 0,
+    xpToNextLevel: xpToNextLevel(0),
+  };
+  account.skills[style] = applyXpGain(
+    current,
+    calculateXpGain(BASE_XP, rMultiple, style) * xpMultiplier,
+  );
 
   const idx = account.positions.findIndex((p) => p.id === position.id);
   account.psychology = applyTradeOutcome(account.psychology, {
@@ -306,7 +394,8 @@ export function applyPositionClose(
     realizedPnl,
   };
   if (partial) {
-    if (idx >= 0) account.positions[idx] = { ...position, size: position.size - size };
+    if (idx >= 0)
+      account.positions[idx] = { ...position, size: position.size - size };
     account.positions.push(closed);
   } else if (idx >= 0) {
     account.positions[idx] = closed;
@@ -314,7 +403,10 @@ export function applyPositionClose(
   return realizedPnl;
 }
 
-function recalculateAccountMetrics(account: Account, prices: Record<string, number>): void {
+function recalculateAccountMetrics(
+  account: Account,
+  prices: Record<string, number>,
+): void {
   let unrealizedTotal = 0;
   let marginUsed = 0;
   for (const p of account.positions) {
@@ -345,7 +437,9 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   // Перки складываются с настройками админки, а не заменяют их: админ задаёт
   // «мир», перк — личное преимущество игрока внутри этого мира.
   const xpMultiplier = tuning.xpMultiplier * perks.xpMultiplier;
-  const maintenanceRate = DEFAULT_MAINTENANCE_MARGIN_RATE * (perks.marginMultiplier - perks.liquidationBuffer);
+  const maintenanceRate =
+    DEFAULT_MAINTENANCE_MARGIN_RATE *
+    (perks.marginMultiplier - perks.liquidationBuffer);
   const dtGameMs = dtRealMs * state.activeStyle.timeAcceleration;
   const gameElapsedMs = state.gameElapsedMs + dtGameMs;
 
@@ -416,7 +510,12 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     // Скользящий стоп подтягивается перед проверкой: на резком движении
     // внутри одного тика он обязан успеть зафиксировать прибыль.
     if (position.trailingPct != null) {
-      const moved = trailStop(position.side, price, position.trailingPct, position.stopLoss);
+      const moved = trailStop(
+        position.side,
+        price,
+        position.trailingPct,
+        position.stopLoss,
+      );
       if (moved != null) {
         position.stopLoss = moved;
         const at = account.positions.findIndex((p) => p.id === position.id);
@@ -430,8 +529,16 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     const commissionRate = TRADING_STYLE_CONFIGS[position.style].commissionRate;
 
     if (checkLiquidation(position, price, maintenanceRate)) {
-      const penalty = calculateLiquidationPenalty(position.entryPrice, position.size);
-      const liqPriceAdjusted = calculateLiquidationPrice(position.entryPrice, position.leverage, position.side, maintenanceRate);
+      const penalty = calculateLiquidationPenalty(
+        position.entryPrice,
+        position.size,
+      );
+      const liqPriceAdjusted = calculateLiquidationPrice(
+        position.entryPrice,
+        position.leverage,
+        position.side,
+        maintenanceRate,
+      );
       applyPositionClose(
         account,
         position,
@@ -446,7 +553,15 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
 
     const exitPrice = checkStopConditions(position, price);
     if (exitPrice == null) continue;
-    applyPositionClose(account, position, exitPrice, commissionRate * perks.commissionMultiplier, 0, xpMultiplier, state.gameCalendarDay);
+    applyPositionClose(
+      account,
+      position,
+      exitPrice,
+      commissionRate * perks.commissionMultiplier,
+      0,
+      xpMultiplier,
+      state.gameCalendarDay,
+    );
   }
 
   // 6. Дивиденды/купоны раз в неделю (раздел 4.6) — платим за КАЖДЫЙ
@@ -458,7 +573,12 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   let lastDividendQuarter = state.lastDividendQuarter;
   while (lastDividendQuarter < currentQuarter) {
     lastDividendQuarter++;
-    processQuarterlyDividends(account, state.activeAssets, prices, tuning.dividendMultiplier * perks.dividendMultiplier);
+    processQuarterlyDividends(
+      account,
+      state.activeAssets,
+      prices,
+      tuning.dividendMultiplier * perks.dividendMultiplier,
+    );
   }
 
   // 6b. Расход на образ жизни раз в игровой месяц (раздел 13) — зеркально
@@ -471,11 +591,19 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   // такой же ежемесячный расход, и списывать его отдельным событием значило
   // бы дважды дёргать игрока в один и тот же день.
   const upkeep =
-    (monthlyUpkeep(lifestyle) + toolSubscriptionCost(perks.tools)) * tuning.upkeepMultiplier * perks.upkeepMultiplier;
+    (monthlyUpkeep(lifestyle) + toolSubscriptionCost(perks.tools)) *
+    tuning.upkeepMultiplier *
+    perks.upkeepMultiplier;
   let tax = state.tax;
   while (lastUpkeepMonth < currentMonth) {
     lastUpkeepMonth++;
-    if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
+    if (upkeep > 0)
+      lifestyle = chargeUpkeep(
+        account,
+        lifestyle,
+        upkeep,
+        Date.now(),
+      ).lifestyle;
     // Налог — раз в месяц, с зафиксированной за месяц прибыли. Незакрытая
     // прибыль не облагается: игрок платил бы за то, чего ещё не получил.
     const period = taxForPeriod(account.journal, tax, tuning.taxRatePct);
@@ -490,12 +618,45 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   const swap = totalSwapFee(account.positions, dtGameMs);
   if (swap > 0) account.balance -= swap;
 
+  // Взыскание за долг по содержанию.
+  //
+  // Раньше неоплаченное копилось цифрой и не значило ничего: можно было
+  // купить яхту, перестать платить и жить дальше. Теперь у долга есть цена —
+  // но не сразу: месяц даётся на то, чтобы продать что-нибудь самому и
+  // дороже. Не продал — вещь уходит принудительно и уже за полцены.
+  const seized: string[] = [];
+  // За раз забирают одну вещь: если выручки не хватило, отсчёт идёт заново, и
+  // у игрока снова есть месяц. Раздеть догола одним тиком — не ответственность,
+  // а расправа.
+  if (graceExpired(lifestyle, Date.now())) {
+    const item = pickForcedSale(lifestyle, lifestyle.unpaidUpkeep);
+    if (item) {
+      const released = releaseItem(account, lifestyle, item, true);
+      lifestyle = released.lifestyle;
+      seized.push(item.id);
+      // Выручка гасит долг, остаток остаётся у владельца — как и положено при
+      // взыскании: забирают долг, а не вещь целиком.
+      const covered = Math.min(lifestyle.unpaidUpkeep, released.received);
+      account.balance -= covered;
+      lifestyle = {
+        ...lifestyle,
+        unpaidUpkeep: lifestyle.unpaidUpkeep - covered,
+        upkeepDebtSince:
+          lifestyle.unpaidUpkeep - covered > 0 ? Date.now() : null,
+      };
+    }
+  }
+
   // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);
 
   // 8. Контракт (цель игрока) — проверяется каждый тик по свежей эквити.
   const gameCalendarDay = Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000));
-  const evaluation = evaluateContract(state.contracts, account.equity, gameCalendarDay);
+  const evaluation = evaluateContract(
+    state.contracts,
+    account.equity,
+    gameCalendarDay,
+  );
   let contractPoints = state.contractPoints;
   let unlockedMarkets = state.unlockedMarkets;
   if (evaluation.finished?.outcome === "passed") {
@@ -505,7 +666,10 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
       contractPoints += contract.reward.skillPoints;
       // Новые рынки — главная награда: 41 инструмент лежит в assets.json и
       // ждёт разблокировки, это готовый контент, а не новая разработка.
-      const merged = new Set<AssetClass>([...unlockedMarkets, ...contract.reward.unlockMarkets]);
+      const merged = new Set<AssetClass>([
+        ...unlockedMarkets,
+        ...contract.reward.unlockMarkets,
+      ]);
       unlockedMarkets = Array.from(merged);
       // Награда меняет баланс — пересчитываем метрики ещё раз, иначе эквити
       // на этом кадре покажет старое значение.
@@ -517,7 +681,11 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   // это. Считается от игрового времени, а не от реального: на investing
   // «неделя отдыха» проходит за секунды, и это правильно — там и торговый
   // день короче.
-  account.psychology = recoverOverTime(account.psychology, dtGameMs, restFactor(lifestyle));
+  account.psychology = recoverOverTime(
+    account.psychology,
+    dtGameMs,
+    restFactor(lifestyle),
+  );
 
   // 8b. Алго-боты (ветка перков «Автоматика»). Работают только в пределах
   // купленных слотов: лишние боты в сохранении молча игнорируются, а не
@@ -564,8 +732,15 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   if (dailyResult.rewardCash > 0) {
     account.balance += dailyResult.rewardCash;
     const style = state.activeStyle.style;
-    const current = account.skills[style] ?? { level: 0, xp: 0, xpToNextLevel: xpToNextLevel(0) };
-    account.skills[style] = applyXpGain(current, dailyResult.rewardXp * xpMultiplier);
+    const current = account.skills[style] ?? {
+      level: 0,
+      xp: 0,
+      xpToNextLevel: xpToNextLevel(0),
+    };
+    account.skills[style] = applyXpGain(
+      current,
+      dailyResult.rewardXp * xpMultiplier,
+    );
     recalculateAccountMetrics(account, prices);
   }
 
@@ -604,7 +779,9 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   // Разорение: денег почти нет и закрывать больше нечего. Флаг поднимается
   // один раз — гасит его UI, когда игрок ответит на предложение спонсора.
   const wipedOut =
-    state.wipedOut || (sponsor == null && isWipedOut(account.equity, account.positions, tuning.startingBalance));
+    state.wipedOut ||
+    (sponsor == null &&
+      isWipedOut(account.equity, account.positions, tuning.startingBalance));
 
   // Достижения. Проверяются по состоянию, а не по событиям: правило «пять
   // прибыльных подряд» обязано срабатывать одинаково и на живой сделке, и
@@ -613,7 +790,9 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     positions: account.positions,
     journal: account.journal,
     skills: account.skills,
-    contractsPassed: evaluation.state.history.filter((r) => r.outcome === "passed").length,
+    contractsPassed: evaluation.state.history.filter(
+      (r) => r.outcome === "passed",
+    ).length,
     unlockedMarkets,
     equity: account.equity,
     startingBalance: tuning.startingBalance,
@@ -643,7 +822,10 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     unlockedMarkets,
     lastContractResult: evaluation.finished ?? state.lastContractResult,
     daily: dailyResult.state,
-    lastDailyCompleted: dailyResult.completed.length > 0 ? dailyResult.completed : state.lastDailyCompleted,
+    lastDailyCompleted:
+      dailyResult.completed.length > 0
+        ? dailyResult.completed
+        : state.lastDailyCompleted,
     lastDividendQuarter,
     lifestyle,
     lastUpkeepMonth,
@@ -652,7 +834,11 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     tax,
     wallet,
     career,
-    achievements: earned.length > 0 ? [...state.achievements, ...earned] : state.achievements,
+    lastSeizedItems: seized.length > 0 ? seized : state.lastSeizedItems,
+    achievements:
+      earned.length > 0
+        ? [...state.achievements, ...earned]
+        : state.achievements,
     lastAchievements: earned.length > 0 ? earned : state.lastAchievements,
   };
 }

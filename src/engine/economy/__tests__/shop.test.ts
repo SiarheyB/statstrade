@@ -4,6 +4,14 @@ import {
   canPurchase,
   chargeUpkeep,
   DEFAULT_THEME_ID,
+  FORCED_SALE_RATE,
+  graceExpired,
+  pickForcedSale,
+  releaseItem,
+  SELF_SALE_RATE,
+  settleUpkeepDebt,
+  sellValue,
+  UPKEEP_GRACE_DAYS,
   equipTheme,
   freshLifestyle,
   getShopItem,
@@ -172,6 +180,106 @@ describe("содержание (upkeep)", () => {
     expect(paid).toBe(300);
     expect(shortfall).toBe(600);
     expect(lifestyle.unpaidUpkeep).toBe(600);
+  });
+
+  it("гасит старый долг раньше текущего месяца", () => {
+    // Иначе долг висел бы вечно у того, кто кое-как тянет ежемесячные.
+    const account = makeAccount({ balance: 1_000 });
+    const before = { ...freshLifestyle(), unpaidUpkeep: 600, upkeepDebtSince: 1_000 };
+    const { lifestyle, shortfall } = chargeUpkeep(account, before, 900);
+    expect(account.balance).toBe(0);
+    expect(shortfall).toBe(500);
+    expect(lifestyle.unpaidUpkeep).toBe(500);
+    // Отсчёт льготного срока не сдвинулся: долг тот же самый.
+    expect(lifestyle.upkeepDebtSince).toBe(1_000);
+  });
+
+  it("снимает отметку долга, когда его закрыли", () => {
+    const account = makeAccount({ balance: 5_000 });
+    const before = { ...freshLifestyle(), unpaidUpkeep: 600, upkeepDebtSince: 1_000 };
+    const { lifestyle } = chargeUpkeep(account, before, 900);
+    expect(lifestyle.unpaidUpkeep).toBe(0);
+    expect(lifestyle.upkeepDebtSince).toBeNull();
+  });
+});
+
+describe("долг по содержанию: продажа и взыскание", () => {
+  const owned = (ids: string[]) => ({ ...freshLifestyle(), ownedItemIds: [DEFAULT_THEME_ID, ...ids] });
+
+  it("своя продажа выгоднее принудительной", () => {
+    const item = getShopItem("life_car")!;
+    expect(sellValue(item)).toBe(Math.floor(item.price * SELF_SALE_RATE));
+    expect(sellValue(item, true)).toBe(Math.floor(item.price * FORCED_SALE_RATE));
+    expect(sellValue(item, true)).toBeLessThan(sellValue(item));
+  });
+
+  it("забирает самое дешёвое, чего хватает на долг", () => {
+    // За долг в триста долларов не должны отнимать яхту: кофемашины (600 $,
+    // при взыскании 300) хватает ровно впритык.
+    const picked = pickForcedSale(owned(["gear_coffee", "life_car", "life_yacht"]), 300);
+    expect(picked?.id).toBe("gear_coffee");
+  });
+
+  it("берёт дороже, если дешёвого не хватает", () => {
+    // Долг 1 000 — кофемашина за 300 его не закроет, машина за 45 000 да.
+    expect(pickForcedSale(owned(["gear_coffee", "life_car", "life_yacht"]), 1_000)?.id).toBe("life_car");
+  });
+
+  it("на неподъёмный долг забирает самое дорогое из имеющегося", () => {
+    const picked = pickForcedSale(owned(["gear_coffee", "life_car", "life_yacht"]), 5_000_000);
+    expect(picked?.id).toBe("life_yacht");
+  });
+
+  it("тему не забирает — она ничего не стоит в содержании", () => {
+    expect(pickForcedSale(owned([]), 1_000)).toBeNull();
+  });
+
+  it("продажа возвращает деньги, снимает престиж и убирает вещь", () => {
+    const item = getShopItem("life_car")!;
+    const account = makeAccount({ balance: 0, reputation: item.prestige + 5 });
+    const { lifestyle, received } = releaseItem(account, owned(["life_car"]), item, false);
+    expect(received).toBe(sellValue(item));
+    expect(account.balance).toBe(received);
+    expect(account.reputation).toBe(5);
+    expect(lifestyle.ownedItemIds).not.toContain("life_car");
+  });
+
+  it("продажа лицензии стирает имя фонда, продажа темы — её выбор", () => {
+    const account = makeAccount();
+    const withFund = { ...owned(["status_fund"]), fundName: "Альфа" };
+    expect(releaseItem(account, withFund, getShopItem("status_fund")!, false).lifestyle.fundName).toBe("");
+  });
+
+  it("продажа сразу гасит долг, остальное остаётся на балансе", () => {
+    const item = getShopItem("life_car")!;
+    const account = makeAccount({ balance: 0 });
+    const before = { ...owned(["life_car"]), unpaidUpkeep: 1_000, upkeepDebtSince: 1_000 };
+    const sold = releaseItem(account, before, item, false);
+    const after = settleUpkeepDebt(account, sold.lifestyle);
+    expect(after.unpaidUpkeep).toBe(0);
+    expect(after.upkeepDebtSince).toBeNull();
+    expect(account.balance).toBe(sellValue(item) - 1_000);
+  });
+
+  it("частичная выручка уменьшает долг, но срок не обнуляет", () => {
+    const item = getShopItem("gear_coffee")!;
+    const account = makeAccount({ balance: 0 });
+    const before = { ...owned(["gear_coffee"]), unpaidUpkeep: 1_000, upkeepDebtSince: 1_000 };
+    const sold = releaseItem(account, before, item, false);
+    const after = settleUpkeepDebt(account, sold.lifestyle);
+    expect(after.unpaidUpkeep).toBe(1_000 - sellValue(item));
+    expect(after.upkeepDebtSince).toBe(1_000);
+    expect(account.balance).toBe(0);
+  });
+
+  it("льготный срок идёт от появления долга", () => {
+    const debtStart = 1_000_000;
+    const lifestyle = { ...freshLifestyle(), unpaidUpkeep: 600, upkeepDebtSince: debtStart };
+    const day = 24 * 60 * 60 * 1000;
+    expect(graceExpired(lifestyle, debtStart + (UPKEEP_GRACE_DAYS - 1) * day)).toBe(false);
+    expect(graceExpired(lifestyle, debtStart + UPKEEP_GRACE_DAYS * day)).toBe(true);
+    // Без долга срок не истекает вовсе.
+    expect(graceExpired(freshLifestyle(), Date.now())).toBe(false);
   });
 });
 

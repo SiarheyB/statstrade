@@ -129,20 +129,127 @@ export function monthlyUpkeep(lifestyle: LifestyleState): number {
  *
  * Мутирует account, возвращает фактически списанное и недостачу.
  */
-export function chargeUpkeep(account: Account, lifestyle: LifestyleState, upkeep: number): { lifestyle: LifestyleState; paid: number; shortfall: number } {
+export function chargeUpkeep(
+  account: Account,
+  lifestyle: LifestyleState,
+  upkeep: number,
+  now = Date.now(),
+): { lifestyle: LifestyleState; paid: number; shortfall: number } {
   if (upkeep <= 0) return { lifestyle, paid: 0, shortfall: 0 };
-  const paid = Math.min(upkeep, Math.max(0, account.balance));
-  const shortfall = upkeep - paid;
+  // Долг гасится в первую очередь: сначала старое, потом текущий месяц —
+  // иначе долг мог бы висеть вечно, пока игрок кое-как тянет ежемесячные.
+  const owed = lifestyle.unpaidUpkeep + upkeep;
+  const paid = Math.min(owed, Math.max(0, account.balance));
+  const left = owed - paid;
   account.balance -= paid;
   return {
     lifestyle: {
       ...lifestyle,
       totalUpkeepPaid: lifestyle.totalUpkeepPaid + paid,
-      unpaidUpkeep: lifestyle.unpaidUpkeep + shortfall,
+      unpaidUpkeep: left,
+      // Отметка ставится в момент, когда долг появился, и снимается, когда
+      // его закрыли: от неё идёт льготный срок.
+      upkeepDebtSince: left > 0 ? (lifestyle.upkeepDebtSince ?? now) : null,
     },
     paid,
-    shortfall,
+    shortfall: left,
   };
+}
+
+// ── Долг по содержанию: продать самому или лишиться ───────────────────────
+//
+// Раньше неоплаченное просто копилось цифрой и ничего не значило: можно было
+// купить яхту, перестать платить и жить дальше. Владение вещами должно чего-то
+// стоить, иначе покупка — разовое решение без последствий.
+//
+// Механика простая и с выбором. Не хватило денег — появляется долг и месяц
+// на то, чтобы разобраться. Продать вещь самому можно за 70% цены. Не продал
+// за месяц — вещь уходит принудительно и уже за 50%: срочная распродажа
+// всегда хуже спокойной. Остаток после погашения возвращается владельцу, как
+// и положено при взыскании.
+
+/** Сколько игрок получает, продавая вещь сам. */
+export const SELF_SALE_RATE = 0.7;
+/** Сколько выручается при взыскании: срочная продажа всегда дешевле. */
+export const FORCED_SALE_RATE = 0.5;
+/** Сколько дней даётся на то, чтобы закрыть долг самому. */
+export const UPKEEP_GRACE_DAYS = 30;
+
+/** Что дадут за вещь. */
+export function sellValue(item: ShopItem, forced = false): number {
+  return Math.floor(item.price * (forced ? FORCED_SALE_RATE : SELF_SALE_RATE));
+}
+
+/**
+ * Что заберут за долг.
+ *
+ * Самая ДЕШЁВАЯ вещь, выручки за которую хватает на долг: взыскание не должно
+ * отнимать яхту за неуплаченную тысячу. Если такой нет — самая дорогая из
+ * имеющихся, иначе долг не закрыть ничем.
+ */
+export function pickForcedSale(lifestyle: LifestyleState, debt: number): ShopItem | null {
+  const owned = lifestyle.ownedItemIds
+    .map((id) => getShopItem(id))
+    .filter((item): item is ShopItem => !!item && item.price > 0)
+    // Тему забирать бессмысленно: она ничего не стоит в содержании и не
+    // продаётся — это оформление терминала, а не имущество.
+    .filter((item) => item.category !== "theme");
+  if (owned.length === 0) return null;
+  const enough = owned.filter((item) => sellValue(item, true) >= debt).sort((a, b) => a.price - b.price);
+  if (enough.length > 0) return enough[0];
+  return owned.sort((a, b) => b.price - a.price)[0];
+}
+
+/** Убрать вещь и зачислить выручку. Общий путь для продажи и для взыскания. */
+export function releaseItem(
+  account: Account,
+  lifestyle: LifestyleState,
+  item: ShopItem,
+  forced: boolean,
+): { lifestyle: LifestyleState; received: number } {
+  const received = sellValue(item, forced);
+  account.balance += received;
+  // Престиж, который вещь давала, уходит вместе с ней: статус держится на
+  // том, что у тебя есть, а не на том, что когда-то было.
+  account.reputation = Math.max(0, account.reputation - item.prestige);
+  return {
+    lifestyle: {
+      ...lifestyle,
+      ownedItemIds: lifestyle.ownedItemIds.filter((id) => id !== item.id),
+      // Проданная тема не может остаться надетой.
+      equippedThemeId: lifestyle.equippedThemeId === item.id ? null : lifestyle.equippedThemeId,
+      // Название фонда держится на предмете: продал — потерял.
+      fundName: item.id === "status_fund" ? "" : lifestyle.fundName,
+    },
+    received,
+  };
+}
+
+/**
+ * Погасить долг деньгами, которые есть сейчас.
+ *
+ * Вызывается сразу после продажи: человек продал вещь ИМЕННО чтобы закрыть
+ * долг, и было бы издевательством отдать ему деньги и оставить долг висеть
+ * до конца месяца — тем более что до тех пор деньги можно потратить.
+ */
+export function settleUpkeepDebt(account: Account, lifestyle: LifestyleState): LifestyleState {
+  if (!(lifestyle.unpaidUpkeep > 0)) return lifestyle;
+  const paid = Math.min(lifestyle.unpaidUpkeep, Math.max(0, account.balance));
+  if (paid <= 0) return lifestyle;
+  account.balance -= paid;
+  const left = lifestyle.unpaidUpkeep - paid;
+  return {
+    ...lifestyle,
+    totalUpkeepPaid: lifestyle.totalUpkeepPaid + paid,
+    unpaidUpkeep: left,
+    upkeepDebtSince: left > 0 ? lifestyle.upkeepDebtSince : null,
+  };
+}
+
+/** Истёк ли льготный срок по долгу. */
+export function graceExpired(lifestyle: LifestyleState, now: number): boolean {
+  if (!(lifestyle.unpaidUpkeep > 0) || !lifestyle.upkeepDebtSince) return false;
+  return now - lifestyle.upkeepDebtSince >= UPKEEP_GRACE_DAYS * 24 * 60 * 60 * 1000;
 }
 
 // Ранг трейдера по очкам престижа — видимая «лестница» вместо голого числа

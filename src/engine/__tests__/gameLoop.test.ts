@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { applyPositionClose, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
-import { freshLifestyle } from "@/engine/economy/shop";
+import { freshLifestyle, UPKEEP_GRACE_DAYS } from "@/engine/economy/shop";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 import { DEFAULT_TUNING } from "@/engine/entities/tuning";
 import { freshContractState } from "@/engine/player/contracts";
 import { freshPerkState } from "@/engine/player/perks";
@@ -55,6 +57,7 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     lastDividendQuarter: 0,
     lifestyle: freshLifestyle(),
     lastUpkeepMonth: 0,
+    lastSeizedItems: [],
     newsFeed: [],
     dayChange: {},
     dayStartEquity: 10_000,
@@ -420,6 +423,71 @@ describe("расход на образ жизни (раздел 13)", () => {
     const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(5));
     expect(next.account.balance).toBe(0);
     expect(next.lifestyle.unpaidUpkeep).toBe(24_000);
+    // Долг получил отметку времени — с неё пойдёт льготный месяц.
+    expect(next.lifestyle.upkeepDebtSince).toBeGreaterThan(0);
+  });
+
+  it("пока идёт льготный срок, ничего не забирает", () => {
+    const lifestyle = {
+      ...freshLifestyle(),
+      ownedItemIds: ["gear_coffee", "life_car"],
+      unpaidUpkeep: 1_000,
+      upkeepDebtSince: Date.now() - 5 * DAY_MS,
+    };
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 0 }) });
+    const next = gameTick(1_000, state, mulberry32(11));
+    expect(next.lifestyle.ownedItemIds).toContain("life_car");
+    expect(next.lastSeizedItems).toEqual([]);
+  });
+
+  it("после льготного срока забирает вещь и гасит ею долг, остаток отдаёт", () => {
+    // Долг 1 000: кофемашины (при взыскании 300) не хватает, уходит машина
+    // за 45 000, из них 1 000 — на долг, остальное владельцу.
+    const lifestyle = {
+      ...freshLifestyle(),
+      ownedItemIds: ["gear_coffee", "life_car"],
+      unpaidUpkeep: 1_000,
+      upkeepDebtSince: Date.now() - (UPKEEP_GRACE_DAYS + 1) * DAY_MS,
+    };
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 0, reputation: 100 }) });
+    const next = gameTick(1_000, state, mulberry32(12));
+    expect(next.lifestyle.ownedItemIds).not.toContain("life_car");
+    expect(next.lifestyle.ownedItemIds).toContain("gear_coffee");
+    expect(next.lastSeizedItems).toEqual(["life_car"]);
+    expect(next.lifestyle.unpaidUpkeep).toBe(0);
+    expect(next.lifestyle.upkeepDebtSince).toBeNull();
+    // Выручка за вычетом долга. Награды за ежедневки вычитаем: изъятие
+    // выглядит как прибыльный день и попутно закрывает задачу.
+    const daily = next.lastDailyCompleted.reduce((sum, task) => sum + task.rewardCash, 0);
+    expect(next.account.balance - daily).toBe(45_000 - 1_000);
+  });
+
+  it("за раз забирает только одну вещь, даже если долг остался", () => {
+    // Иначе один тик раздевал бы игрока догола — это расправа, а не долг.
+    const lifestyle = {
+      ...freshLifestyle(),
+      ownedItemIds: ["gear_coffee", "gear_chair"],
+      unpaidUpkeep: 100_000,
+      upkeepDebtSince: Date.now() - (UPKEEP_GRACE_DAYS + 1) * DAY_MS,
+    };
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 0 }) });
+    const next = gameTick(1_000, state, mulberry32(13));
+    expect(next.lastSeizedItems).toHaveLength(1);
+    expect(next.lifestyle.unpaidUpkeep).toBeGreaterThan(0);
+    // Отсчёт пошёл заново: следующий месяц у игрока снова есть.
+    expect(next.lifestyle.upkeepDebtSince).toBeGreaterThan(Date.now() - 1_000);
+  });
+
+  it("если забирать нечего, долг просто остаётся висеть", () => {
+    const lifestyle = {
+      ...freshLifestyle(),
+      unpaidUpkeep: 5_000,
+      upkeepDebtSince: Date.now() - (UPKEEP_GRACE_DAYS + 1) * DAY_MS,
+    };
+    const state = makeState({ lifestyle, account: makeAccount({ balance: 0 }) });
+    const next = gameTick(1_000, state, mulberry32(14));
+    expect(next.lastSeizedItems).toEqual([]);
+    expect(next.lifestyle.unpaidUpkeep).toBe(5_000);
   });
 });
 

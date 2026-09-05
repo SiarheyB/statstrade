@@ -8,29 +8,44 @@
 //
 // Вся арифметика — в движке (engine/economy/shop.ts): компонент только
 // показывает и вызывает действия стора (раздел 17).
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Lock } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
-import { fmtUsd } from "@/lib/format";
+import { fmtDate, fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
 import {
   canPurchase,
+  FORCED_SALE_RATE,
   FUND_LICENSE_ITEM_ID,
   monthlyUpkeep,
   nextRank,
+  SELF_SALE_RATE,
+  sellValue,
   SHOP_CATEGORIES,
   SHOP_ITEMS,
   traderRankKey,
+  UPKEEP_GRACE_DAYS,
 } from "@/engine/economy/shop";
 import type { ShopCategory, ShopItem } from "@/engine/entities/types";
 
 function ItemCard({ item, owned }: { item: ShopItem; owned: boolean }) {
   const { t } = useI18n();
+  // Продажа в два нажатия, а не через window.confirm: системное окно здесь
+  // единственное на весь терминал и выглядит чужим. Состояние продублировано
+  // в ref: два быстрых клика подряд попадают в один рендер, и обработчик
+  // второго увидел бы ещё старое значение из замыкания.
+  const [confirmSell, setConfirmSell] = useState(false);
+  const confirmRef = useRef(false);
+  const armSell = (value: boolean) => {
+    confirmRef.current = value;
+    setConfirmSell(value);
+  };
   const balance = useGameStore((s) => s.game.account.balance);
   const prestige = useGameStore((s) => s.game.account.reputation);
   const lifestyle = useGameStore((s) => s.game.lifestyle);
   const purchase = useGameStore((s) => s.purchaseShopItem);
   const equipTheme = useGameStore((s) => s.equipShopTheme);
+  const sell = useGameStore((s) => s.sellShopItem);
 
   const check = canPurchase(item, balance, lifestyle, prestige);
   const locked = !check.ok && check.error === "locked";
@@ -76,7 +91,28 @@ function ItemCard({ item, owned }: { item: ShopItem; owned: boolean }) {
             {equipped ? t("game.shop.equipped") : t("game.shop.equip")}
           </button>
         ) : (
-          <div className="text-xs text-accent text-center py-1.5">{t("game.shop.owned")}</div>
+          // Продать можно всегда, а не только когда есть долг: вещь, от
+          // которой нельзя избавиться, — это не покупка, а ловушка.
+          <button
+            type="button"
+            onClick={() => {
+              if (confirmRef.current) {
+                armSell(false);
+                sell(item.id);
+              } else {
+                armSell(true);
+              }
+            }}
+            onBlur={() => armSell(false)}
+            title={confirmSell ? undefined : t("game.shop.sellHint", { prestige: item.prestige })}
+            className={`w-full px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+              confirmSell ? "bg-loss/20 text-loss" : "bg-surface-2 text-muted hover:text-fg"
+            }`}
+          >
+            {confirmSell
+              ? t("game.shop.sellConfirm", { amount: fmtUsd(sellValue(item)) })
+              : t("game.shop.sell", { amount: fmtUsd(sellValue(item)) })}
+          </button>
         )
       ) : (
         <button
@@ -169,7 +205,14 @@ export default function Shop() {
           но узнать об этом он должен из интерфейса, а не по пропавшим
           деньгам (баланс при этом в минус не уходит — см. chargeUpkeep). */}
       {lifestyle.unpaidUpkeep > 0 && (
-        <div className="text-xs text-loss">{t("game.shop.unpaidWarning", { amount: fmtUsd(lifestyle.unpaidUpkeep) })}</div>
+        <div className="rounded-lg border border-loss/40 bg-loss/10 px-3 py-2 text-xs text-loss">
+          {t("game.shop.unpaidWarning", {
+            amount: fmtUsd(lifestyle.unpaidUpkeep),
+            date: fmtDate((lifestyle.upkeepDebtSince ?? Date.now()) + UPKEEP_GRACE_DAYS * 24 * 60 * 60 * 1000),
+            rate: Math.round(SELF_SALE_RATE * 100),
+            forced: Math.round(FORCED_SALE_RATE * 100),
+          })}
+        </div>
       )}
       {upkeep > 0 && upkeep > balance && lifestyle.unpaidUpkeep === 0 && (
         <div className="text-xs text-loss">{t("game.shop.upkeepRisk")}</div>

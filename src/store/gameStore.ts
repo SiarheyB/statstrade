@@ -40,7 +40,7 @@ import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkErro
 import { freshDailyState } from "@/engine/player/dailyTasks";
 import { catchUp, type OfflineReport } from "@/engine/offline";
 import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
-import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
+import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, releaseItem, settleUpkeepDebt, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
 import {
@@ -199,6 +199,7 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     tax: freshTaxState(),
     wallet: 0,
     career: freshCareer(),
+    lastSeizedItems: [],
   };
 }
 
@@ -344,6 +345,7 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     // работы тоже — ровно как у того, кто никогда не банкротился.
     wallet: save.wallet ?? 0,
     career: save.career ?? freshCareer(),
+    lastSeizedItems: [],
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -383,6 +385,7 @@ interface GameStoreState {
   clearStreakBonus: () => void;
   /** Полученные достижения показаны — очистить. */
   clearAchievements: () => void;
+  clearSeizedItems: () => void;
   dismissOfflineReport: () => void;
   notify: (tone: GameNoticeTone, text: string) => void;
   dismissNotice: (id: string) => void;
@@ -470,6 +473,8 @@ interface GameStoreState {
   withdrawFromFund: (amount: number) => Promise<WorldActionResult>;
   payoutFund: (amount: number) => Promise<WorldActionResult>;
   purchaseShopItem: (itemId: string) => PurchaseResult;
+  /** Продать купленное самому — дороже, чем при взыскании. */
+  sellShopItem: (itemId: string) => void;
   equipShopTheme: (themeId: string) => void;
   setFundName: (name: string) => void;
   updateJournalEntry: (entryId: string, patch: { tags?: string[]; note?: string }) => void;
@@ -1207,6 +1212,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   clearStreakBonus: () => set({ streakBonus: null }),
 
   clearAchievements: () => set((s) => ({ game: { ...s.game, lastAchievements: [] } })),
+  clearSeizedItems: () => set((s) => ({ game: { ...s.game, lastSeizedItems: [] } })),
 
   // Разметка графика. Живёт в сохранении игры: инструменты и время здесь
   // игровые, и в общей таблице рисунков проекта им не место.
@@ -1449,6 +1455,20 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set((s) => ({ game: { ...s.game, account, lifestyle } }));
     void get().persistNow();
     return { ok: true };
+  },
+
+  // Продажа по своей воле. Выручка идёт на баланс, и долг по содержанию
+  // гасится тут же: продают обычно ради него, а ждать конца месяца — значит
+  // дать шанс потратить эти деньги и всё равно лишиться вещи.
+  sellShopItem: (itemId) => {
+    const { game } = get();
+    const item = getShopItem(itemId);
+    if (!item || !game.lifestyle.ownedItemIds.includes(itemId)) return;
+    const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
+    const released = releaseItem(account, game.lifestyle, item, false);
+    const lifestyle = settleUpkeepDebt(account, released.lifestyle);
+    set((s) => ({ game: { ...s.game, account, lifestyle } }));
+    void get().persistNow();
   },
 
   equipShopTheme: (themeId) => {
