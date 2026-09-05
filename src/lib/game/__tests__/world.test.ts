@@ -3,12 +3,14 @@ import { clampSnapshot, defaultNickname, normalizeNickname, MAX_EQUITY_GROWTH_PE
 import { creditLimit, repayAmount, MIN_LOAN, MAX_INTEREST_PCT } from "@/lib/game/loans";
 import { normalizeFundName, FUND_MIN_PRESTIGE, FUND_CREATION_COST } from "@/lib/game/funds";
 import {
+  DEFAULT_MUTE_MINUTES,
   MAX_MESSAGE_LENGTH,
   MAX_STRATEGIES_PER_AUTHOR,
   MAX_STRATEGY_PRICE,
   MESSAGE_COOLDOWN_MS,
   MIN_STRATEGY_PRICE,
   normalizeChannel,
+  type ChatError,
 } from "@/lib/game/social";
 
 const base = {
@@ -173,5 +175,19 @@ describe("чат и рынок стратегий", () => {
     expect(MESSAGE_COOLDOWN_MS).toBeGreaterThan(0);
     expect(MAX_STRATEGY_PRICE).toBeGreaterThan(MIN_STRATEGY_PRICE);
     expect(MAX_STRATEGIES_PER_AUTHOR).toBeGreaterThan(0);
+  });
+});
+
+describe("модерация чата", () => {
+  it("мут задан сроком, а не вечным баном", () => {
+    // Вечная блокировка требует ручного снятия, про которое забывают;
+    // почти всё, что происходит в чате, лечится паузой.
+    expect(DEFAULT_MUTE_MINUTES).toBeGreaterThan(0);
+    expect(DEFAULT_MUTE_MINUTES).toBeLessThanOrEqual(60 * 24);
+  });
+
+  it("«мут» есть среди ошибок отправки — иначе игрок не узнает, почему молчит", () => {
+    const errors: ChatError[] = ["muted", "empty", "too_long", "too_fast", "unknown_channel", "not_in_fund"];
+    expect(errors).toContain("muted");
   });
 });

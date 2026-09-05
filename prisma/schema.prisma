@@ -1305,6 +1305,9 @@ model GamePlayer {
   seasonId          String?
   season            GameSeason? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
   seasonStartEquity Float?
+  // Мут в чате со сроком, а не вечный бан: почти всё лечится паузой, а
+  // вечная блокировка требует ручного снятия, про которое забывают.
+  mutedUntil        DateTime?
   seasonResults     GameSeasonResult[]
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
@@ -1474,6 +1477,9 @@ model GameChatMessage {
   assetId   String?
   tf        String?
   drawings  String?
+  // Снятое модератором сообщение не удаляется: пропавшая реплика выглядит
+  // как сбой, и разобраться потом, за что наказали, было бы нечем.
+  removedAt DateTime?
   createdAt DateTime @default(now())
 
   @@index([channel, createdAt])

@@ -3,6 +3,7 @@ import { getAdminSession, notFound } from "@/lib/admin";
 import { serverError } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { ALL_ASSETS } from "@/lib/game/marketStore";
+import { DEFAULT_MUTE_MINUTES, mutePlayer, recentMessagesForReview, removeMessage } from "@/lib/game/social";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,7 @@ export async function GET() {
       assetsWithHistory,
       byStyle,
       byRank,
+      chat,
     ] = await Promise.all([
       prisma.gamePlayer.count(),
       prisma.gamePlayer.count({ where: { lastSyncAt: { gte: new Date(now - DAY) } } }),
@@ -82,9 +84,13 @@ export async function GET() {
       // не во что мы думали, что играют.
       prisma.gamePlayer.groupBy({ by: ["activeStyle"], _count: { _all: true } }),
       prisma.gamePlayer.groupBy({ by: ["rankKey"], _count: { _all: true } }),
+      // Лента чата для модерации: без неё админка видит мир, но не может
+      // на него повлиять.
+      recentMessagesForReview(40),
     ]);
 
     return NextResponse.json({
+      chat,
       players: {
         total: players,
         activeDay,
@@ -148,7 +154,28 @@ export async function POST(req: Request) {
   const session = await getAdminSession();
   if (!session) return notFound();
   try {
-    const body = (await req.json().catch(() => ({}))) as { action?: string; newSeed?: boolean };
+    const body = (await req.json().catch(() => ({}))) as {
+      action?: string;
+      newSeed?: boolean;
+      messageId?: string;
+      playerId?: string;
+      minutes?: number;
+    };
+
+    // Модерация чата. Общий зал без неё держится ровно до первого желающего
+    // его сломать.
+    if (body.action === "removeMessage") {
+      if (!body.messageId) return NextResponse.json({ error: "Не указано сообщение" }, { status: 400 });
+      const ok = await removeMessage(body.messageId);
+      return NextResponse.json({ ok, removed: ok });
+    }
+    if (body.action === "mutePlayer") {
+      if (!body.playerId) return NextResponse.json({ error: "Не указан игрок" }, { status: 400 });
+      const minutes = Number.isFinite(body.minutes) ? Math.max(0, Math.min(60 * 24 * 30, body.minutes!)) : DEFAULT_MUTE_MINUTES;
+      const until = await mutePlayer(body.playerId, minutes);
+      return NextResponse.json({ ok: true, mutedUntil: until?.getTime() ?? null });
+    }
+
     if (body.action !== "rebuildMarket") {
       return NextResponse.json({ error: "Неизвестное действие" }, { status: 400 });
     }

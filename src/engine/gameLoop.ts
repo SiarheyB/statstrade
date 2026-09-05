@@ -42,6 +42,7 @@ import {
   type AlgoBot,
 } from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
+import { totalSwapFee } from "@/engine/economy/swap";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
 import {
@@ -453,6 +454,13 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     lastUpkeepMonth++;
     if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
   }
+
+  // 6c. Плата за перенос плеча. Берётся непрерывно, а не «раз в полночь»:
+  // игровое время идёт вровень с реальным, и полночь — момент, к которому
+  // игрок отношения не имеет; закрыв позицию через час, он платит за час.
+  // Только за ЗАЁМНУЮ часть: свои деньги процентов не стоят.
+  const swap = totalSwapFee(account.positions, dtGameMs);
+  if (swap > 0) account.balance -= swap;
 
   // 7. Пересчитать equity/marginLevel (после дивидендов — они меняют balance).
   recalculateAccountMetrics(account, prices);

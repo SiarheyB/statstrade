@@ -13,6 +13,7 @@ const MESSAGES: Record<string, string> = {
   too_fast: "Слишком часто — подождите пару секунд",
   unknown_channel: "Неизвестный канал",
   not_in_fund: "Вы не состоите в фонде",
+  muted: "Вам временно закрыт доступ к чату",
 };
 
 export async function GET(req: Request) {

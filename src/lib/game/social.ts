@@ -26,7 +26,7 @@ export const MIN_STRATEGY_PRICE = 0;
 export const MAX_STRATEGY_PRICE = 500_000;
 export const MAX_STRATEGIES_PER_AUTHOR = 5;
 
-export type ChatError = "empty" | "too_long" | "too_fast" | "unknown_channel" | "not_in_fund";
+export type ChatError = "muted" | "empty" | "too_long" | "too_fast" | "unknown_channel" | "not_in_fund";
 export type ChatResult<T> = { ok: true; value: T } | { ok: false; error: ChatError };
 
 /** Каналы: общий зал, разговоры про инструменты и закрытый канал фонда. */
@@ -52,6 +52,14 @@ export async function postMessage(
   const clean = text.trim().replace(/\s+/g, " ");
   if (clean.length === 0) return { ok: false, error: "empty" };
   if (clean.length > MAX_MESSAGE_LENGTH) return { ok: false, error: "too_long" };
+
+  // Мут проверяем здесь, а не в маршруте: писать в чат можно из трёх мест
+  // (общий зал, рынок, канал фонда), и обойти запрет, зайдя не с той двери,
+  // быть не должно.
+  const author = await prisma.gamePlayer.findUnique({ where: { id: playerId }, select: { mutedUntil: true } });
+  if (author?.mutedUntil && author.mutedUntil.getTime() > Date.now()) {
+    return { ok: false, error: "muted" };
+  }
 
   const last = await prisma.gameChatMessage.findFirst({
     where: { playerId },
@@ -82,7 +90,9 @@ export async function postMessage(
 
 export async function readMessages(channel: string, limit = CHAT_PAGE_SIZE) {
   const rows = await prisma.gameChatMessage.findMany({
-    where: { channel },
+    // Снятые модератором сообщения из ленты исчезают, но в базе остаются:
+    // разобраться потом, за что наказали, иначе будет нечем.
+    where: { channel, removedAt: null },
     orderBy: { createdAt: "desc" },
     take: Math.min(CHAT_PAGE_SIZE, limit),
     select: {
@@ -253,4 +263,58 @@ export async function reportStrategyRecords(
     updated += res.count;
   }
   return updated;
+}
+
+// ── Модерация ─────────────────────────────────────────────────────────────
+
+/** На сколько по умолчанию закрывают доступ к чату. */
+export const DEFAULT_MUTE_MINUTES = 60;
+
+/**
+ * Снять сообщение.
+ *
+ * Не удаляем, а помечаем: пропавшая реплика выглядит как сбой, а разобраться
+ * потом, за что человека наказали, было бы нечем.
+ */
+export async function removeMessage(messageId: string): Promise<boolean> {
+  const res = await prisma.gameChatMessage.updateMany({
+    where: { id: messageId, removedAt: null },
+    data: { removedAt: new Date() },
+  });
+  return res.count > 0;
+}
+
+/** Закрыть игроку чат на срок. `minutes = 0` снимает мут. */
+export async function mutePlayer(playerId: string, minutes: number): Promise<Date | null> {
+  const mutedUntil = minutes > 0 ? new Date(Date.now() + minutes * 60_000) : null;
+  await prisma.gamePlayer.update({ where: { id: playerId }, data: { mutedUntil } });
+  return mutedUntil;
+}
+
+/** Последние сообщения всех каналов — то, что смотрит модератор. */
+export async function recentMessagesForReview(limit = 50) {
+  const rows = await prisma.gameChatMessage.findMany({
+    orderBy: { createdAt: "desc" },
+    take: Math.min(200, limit),
+    select: {
+      id: true,
+      channel: true,
+      text: true,
+      createdAt: true,
+      removedAt: true,
+      player: { select: { id: true, nickname: true, mutedUntil: true } },
+    },
+  });
+  return rows.map((row) => ({
+    id: row.id,
+    channel: row.channel,
+    text: row.text,
+    createdAt: row.createdAt.getTime(),
+    removed: row.removedAt != null,
+    author: {
+      id: row.player.id,
+      nickname: row.player.nickname,
+      mutedUntil: row.player.mutedUntil?.getTime() ?? null,
+    },
+  }));
 }
