@@ -118,6 +118,15 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
 
   let moved = 0;
   let spoke = 0;
+  // Кто написал последним: подряд две свои реплики в живом чате — редкость,
+  // и именно она выдаёт бота быстрее содержания.
+  const [last] = await prisma.gameChatMessage.findMany({
+    where: { channel: "general", removedAt: null },
+    orderBy: { createdAt: "desc" },
+    take: 1,
+    select: { playerId: true },
+  });
+
   for (const bot of bots) {
     const persona = personaOf(bot.persona);
     if (!persona) continue;
@@ -139,7 +148,14 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
     });
     moved++;
 
-    if (openRouterConfigured() && Math.random() < BOT_CHAT_CHANCE) {
+    // Говорит не больше ОДНОГО бота за такт: чат, в котором трое пишут
+    // одновременно каждые пять минут, выглядит сценарием, а не разговором.
+    if (
+      spoke === 0 &&
+      last?.playerId !== bot.id &&
+      openRouterConfigured() &&
+      Math.random() < BOT_CHAT_CHANCE
+    ) {
       const said = await speak(bot.id, persona, { equity, dayChange: avg, watched, quotes });
       if (said) spoke++;
     }
