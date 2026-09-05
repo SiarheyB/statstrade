@@ -41,6 +41,7 @@ export type GameStats = {
     daysGenerated: number;
   };
   worldEventsWeek: number;
+  bots: { count: number; available: number; aiConfigured: boolean };
   chat: {
     id: string;
     channel: string;

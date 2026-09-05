@@ -4,6 +4,8 @@ import { serverError } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { ALL_ASSETS } from "@/lib/game/marketStore";
 import { getBank } from "@/lib/game/bank";
+import { ensureBots, BOT_PERSONAS } from "@/lib/game/bots";
+import { openRouterConfigured } from "@/lib/game/openrouter";
 import { DEFAULT_MUTE_MINUTES, mutePlayer, recentMessagesForReview, removeMessage } from "@/lib/game/social";
 
 export const dynamic = "force-dynamic";
@@ -94,7 +96,10 @@ export async function GET() {
       recentMessagesForReview(40),
     ]);
 
+    const bots = await prisma.gamePlayer.count({ where: { isBot: true } });
+
     return NextResponse.json({
+      bots: { count: bots, available: BOT_PERSONAS.length, aiConfigured: openRouterConfigured() },
       chat,
       players: {
         total: players,
@@ -194,6 +199,17 @@ export async function POST(req: Request) {
       ]);
       const bank = await getBank();
       return NextResponse.json({ ok: true, capital: bank.capital, totalShares: bank.totalShares });
+    }
+
+    // Боты: завести недостающих или убрать всех. Это единственный способ
+    // управлять населением мира — сами они не появляются.
+    if (body.action === "spawnBots") {
+      const created = await ensureBots();
+      return NextResponse.json({ ok: true, created });
+    }
+    if (body.action === "removeBots") {
+      const removed = await prisma.gamePlayer.deleteMany({ where: { isBot: true } });
+      return NextResponse.json({ ok: true, removed: removed.count });
     }
 
     if (body.action !== "rebuildMarket") {

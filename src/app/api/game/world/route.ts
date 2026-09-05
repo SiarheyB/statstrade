@@ -1,3 +1,4 @@
+import { tickBots } from "@/lib/game/bots";
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
@@ -11,10 +12,18 @@ export const dynamic = "force-dynamic";
 // Один запрос на весь общий мир: рейтинг, лента, фонды, займы и мой профиль.
 // Клиент дёргает его редко (вкладка «Мир» + раз в минуту, пока она открыта),
 // поэтому дешевле отдать всё сразу, чем гонять пять эндпоинтов.
+/**
+ * Такт ботов идёт здесь: боты «живут» в момент, когда кто-то смотрит на мир.
+ * Фоновый процесс пришлось бы держать живым круглосуточно, а выигрыш нулевой
+ * — если в мир никто не смотрит, шевелиться в нём незачем.
+ */
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
   try {
+    // Не ждём ботов: их такт может уйти в языковую модель на секунду-другую,
+    // а мир должен открыться сразу.
+    void tickBots().catch(() => {});
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 

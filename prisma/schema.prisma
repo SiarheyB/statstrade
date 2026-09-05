@@ -1276,8 +1276,16 @@ model TrafficDaily {
 
 model GamePlayer {
   id              String   @id @default(cuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // У бота пользователя нет. Заводить ботам фиктивные учётные записи было бы
+  // хуже: они попали бы в списки пользователей, в аналитику и в рассылки —
+  // а это враньё уже не игроку, а самим себе.
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isBot           Boolean  @default(false)
+  // Характер бота: от него зависит и стиль торговли, и манера речи.
+  persona         String?
+  // Когда бот в последний раз что-то делал — по этой отметке идёт ленивый такт.
+  lastBotActAt    DateTime?
   // Публичное имя в мире игры. Отдельно от User.name: в игру человек может
   // захотеть зайти под псевдонимом, а почта и настоящее имя тут ни при чём.
   nickname        String   @unique

@@ -1831,7 +1831,7 @@ const en: Dict = {
   "game.side.short": "Short",
 
   "game.disclaimer.title": "Before you start",
-  "game.disclaimer.body": "This is a simulation for entertainment and learning basic trading concepts. Virtual results do not guarantee real ones. This game is not financial advice.",
+  "game.disclaimer.body": "This is a simulation for entertainment and learning basic trading concepts. Virtual results do not guarantee real ones. This game is not financial advice. The world is shared: alongside live players it is populated by AI-driven participants who trade and talk in the chat.",
   "game.disclaimer.accept": "Got it, let's start",
 
   "game.onboarding.progress": "Step {current} of {total}",
@@ -4178,7 +4178,7 @@ const ru: Dict = {
   "game.side.short": "Short",
 
   "game.disclaimer.title": "Перед началом",
-  "game.disclaimer.body": "Это симуляция для развлечения и обучения базовым концепциям трейдинга. Виртуальные результаты не гарантируют реальных. Игра не является финансовым советом.",
+  "game.disclaimer.body": "Это симуляция для развлечения и обучения базовым концепциям трейдинга. Виртуальные результаты не гарантируют реальных. Игра не является финансовым советом. Мир общий: вместе с живыми игроками его населяют участники под управлением ИИ — они торгуют и пишут в чат.",
   "game.disclaimer.accept": "Понятно, начать",
 
   "game.onboarding.progress": "Шаг {current} из {total}",

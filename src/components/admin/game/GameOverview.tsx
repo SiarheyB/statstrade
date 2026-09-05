@@ -22,6 +22,30 @@ export default function GameOverview({ stats }: { stats: GameStats }) {
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
   const { players, market, loans } = stats;
 
+  async function botAction(action: "spawnBots" | "removeBots") {
+    setRebuilding(true);
+    setRebuildResult(null);
+    try {
+      const res = await fetch("/api/admin/game", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      setRebuildResult(
+        res.ok
+          ? action === "spawnBots"
+            ? `Заведено ботов: ${data.created}.`
+            : `Убрано ботов: ${data.removed}.`
+          : (data.error ?? "Не получилось"),
+      );
+    } catch {
+      setRebuildResult("Не получилось");
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
   async function resetBank() {
     setRebuilding(true);
     setRebuildResult(null);
@@ -111,6 +135,41 @@ export default function GameOverview({ stats }: { stats: GameStats }) {
             ))}
             {players.byRank.length === 0 && <div className="text-xs text-faint">—</div>}
           </div>
+        </div>
+      </div>
+
+      <div className="card p-4">
+        <div className="text-sm font-medium mb-1">Боты</div>
+        <p className="text-[11px] text-faint mb-3 max-w-prose">
+          Пустой мир не оживает сам: рейтинг из одного человека и чат, где не с кем говорить. Боты
+          торгуют по НАСТОЯЩЕМУ рынку — в день падения у них тоже красно, — попадают в рейтинг и
+          разговаривают через языковую модель. Заготовленных фраз у них нет намеренно: набор из
+          двадцати реплик выдаёт бота с третьего сообщения вернее, чем молчание. Поэтому без ключа
+          OpenRouter они торгуют, но молчат.
+        </p>
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="tabular-nums">
+            {stats.bots.count} из {stats.bots.available}
+          </span>
+          <span className={stats.bots.aiConfigured ? "text-profit text-xs" : "text-loss text-xs"}>
+            {stats.bots.aiConfigured ? "модель подключена" : "ключ OPENROUTER_API_KEY не задан — боты молчат"}
+          </span>
+          <button
+            type="button"
+            onClick={() => void botAction("spawnBots")}
+            disabled={rebuilding}
+            className="input-base px-3 py-1.5 text-xs hover:border-border-strong disabled:opacity-50"
+          >
+            Завести недостающих
+          </button>
+          <button
+            type="button"
+            onClick={() => void botAction("removeBots")}
+            disabled={rebuilding}
+            className="input-base px-3 py-1.5 text-xs hover:border-border-strong disabled:opacity-50"
+          >
+            Убрать всех
+          </button>
         </div>
       </div>
 
