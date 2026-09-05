@@ -16,6 +16,10 @@ export interface Asset {
   baseDrift: number; // годовой снос (тренд), напр. 0.05 = 5%/год
   tickSize: number;
   tradingHours: "always" | "session";
+  // Цена, с которой инструмент начинает историю. Раньше все стартовали со
+  // 100 — по графику было не понять, торгуешь ты индексом, парой EUR/USD или
+  // биткоином. Теперь у каждого своя, близкая к настоящей.
+  startPrice: number;
   dividendYield?: number;
   compositeOf?: string; // для индексов — из какой correlationGroup складывается
 }

@@ -28,12 +28,20 @@ export interface RegimePreset {
 // не биржевые (бычий рынок годами), а игровые: режим, который не меняется
 // месяцами реального времени, для игрока просто не существует. Ориентир —
 // увидеть смену обстановки за несколько заходов, а не за сезон.
+//
+// Длительности подобраны так, чтобы ВЗВЕШЕННЫЙ ПО ВРЕМЕНИ снос выходил в
+// небольшой плюс: рынок большую часть времени растёт, и игрок, который
+// просто держит бумагу, не должен гарантированно проигрывать. Первый подбор
+// давал бычий рынок лишь 11% времени и повышенную волатильность 30% —
+// средний множитель сноса выходил 0.14 при множителе волатильности 1.43, и
+// любая бумага медленно сползала вниз (замерено: биткоин −77% за год с
+// небольшим). Считать это глазами бесполезно — только прогоном.
 export const REGIME_PRESETS: Record<MarketRegimeType, RegimePreset> = {
-  bull: { driftModifier: 2.5, volModifier: 0.9, minDurationDays: 4, maxDurationDays: 14 },
-  bear: { driftModifier: -1.2, volModifier: 1.35, minDurationDays: 3, maxDurationDays: 10 },
-  sideways: { driftModifier: 0.5, volModifier: 0.75, minDurationDays: 2, maxDurationDays: 8 },
-  high_volatility: { driftModifier: 0.5, volModifier: 2.2, minDurationDays: 1, maxDurationDays: 4 },
-  crisis: { driftModifier: -3, volModifier: 2.5, minDurationDays: 1, maxDurationDays: 3 },
+  bull: { driftModifier: 2.5, volModifier: 0.9, minDurationDays: 6, maxDurationDays: 22 },
+  bear: { driftModifier: -1.2, volModifier: 1.35, minDurationDays: 5, maxDurationDays: 16 },
+  sideways: { driftModifier: 0.5, volModifier: 0.75, minDurationDays: 5, maxDurationDays: 16 },
+  high_volatility: { driftModifier: 0.5, volModifier: 2.0, minDurationDays: 2, maxDurationDays: 5 },
+  crisis: { driftModifier: -3, volModifier: 2.5, minDurationDays: 1, maxDurationDays: 4 },
 };
 
 // Куда режим может перейти и с какими весами. Матрица НЕ симметрична и это
@@ -41,11 +49,11 @@ export const REGIME_PRESETS: Record<MarketRegimeType, RegimePreset> = {
 // чаще, чем прямо из спокойного боковика, а выходит из кризиса обычно не
 // сразу в рост, а в затяжной медвежий/боковой рынок.
 export const REGIME_TRANSITIONS: Record<MarketRegimeType, [MarketRegimeType, number][]> = {
-  bull: [["sideways", 0.5], ["high_volatility", 0.25], ["bear", 0.22], ["crisis", 0.03]],
-  bear: [["sideways", 0.5], ["bull", 0.2], ["high_volatility", 0.22], ["crisis", 0.08]],
-  sideways: [["bull", 0.4], ["bear", 0.3], ["high_volatility", 0.28], ["crisis", 0.02]],
-  high_volatility: [["sideways", 0.35], ["bear", 0.3], ["bull", 0.23], ["crisis", 0.12]],
-  crisis: [["bear", 0.5], ["high_volatility", 0.3], ["sideways", 0.2]],
+  bull: [["sideways", 0.5], ["bear", 0.3], ["high_volatility", 0.15], ["crisis", 0.05]],
+  bear: [["sideways", 0.45], ["bull", 0.3], ["high_volatility", 0.17], ["crisis", 0.08]],
+  sideways: [["bull", 0.45], ["bear", 0.35], ["high_volatility", 0.17], ["crisis", 0.03]],
+  high_volatility: [["sideways", 0.35], ["bull", 0.3], ["bear", 0.28], ["crisis", 0.07]],
+  crisis: [["bear", 0.5], ["sideways", 0.35], ["high_volatility", 0.15]],
 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
