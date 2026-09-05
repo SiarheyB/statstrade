@@ -1,5 +1,5 @@
 import { tickBots } from "@/lib/game/bots";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer, leaderboard, worldFeed } from "@/lib/game/world";
@@ -23,7 +23,11 @@ export async function GET() {
   try {
     // Не ждём ботов: их такт может уйти в языковую модель на секунду-другую,
     // а мир должен открыться сразу.
-    void tickBots().catch(() => {});
+    // after() — а не «просто не ждать»: работа, брошенная через void, живёт
+    // ровно до конца запроса, и такт ботов регулярно обрывался на середине
+    // (отметка времени уже сдвинута, решение не принято). after() выполняет
+    // её ПОСЛЕ ответа и не отменяет вместе с ним.
+    after(() => tickBots().catch(() => {}));
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 

@@ -10,17 +10,19 @@
 // Данные грузятся ОДИН раз на все вкладки: разделение страницы не должно
 // превращаться в пять походов на сервер за одним и тем же набором цифр.
 import { useEffect, useState } from "react";
-import { BarChart3, MessagesSquare, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
+import { BarChart3, Bot, MessagesSquare, ShieldCheck, SlidersHorizontal, Users } from "lucide-react";
 import AdminGameConfig from "@/components/AdminGameConfig";
 import GameOverview from "./GameOverview";
 import GameChatModeration from "./GameChatModeration";
 import GamePlayers from "./GamePlayers";
+import GameBots from "./GameBots";
 import type { GameStats } from "./types";
 
 const TABS = [
   { id: "overview", label: "Обзор", Icon: BarChart3 },
   { id: "players", label: "Игроки", Icon: Users },
   { id: "chat", label: "Чат", Icon: MessagesSquare },
+  { id: "bots", label: "Боты", Icon: Bot },
   { id: "access", label: "Доступ", Icon: ShieldCheck },
   { id: "balance", label: "Баланс", Icon: SlidersHorizontal },
 ] as const;
@@ -76,6 +78,7 @@ export default function AdminGameTabs() {
       {tab === "overview" && stats && <GameOverview stats={stats} />}
       {tab === "players" && stats && <GamePlayers stats={stats} />}
       {tab === "chat" && stats && <GameChatModeration stats={stats} loadedAt={loadedAt} />}
+      {tab === "bots" && <GameBots />}
       {tab === "access" && <AdminGameConfig section="access" />}
       {tab === "balance" && <AdminGameConfig section="balance" />}
     </div>

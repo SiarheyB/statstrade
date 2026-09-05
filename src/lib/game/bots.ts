@@ -20,9 +20,22 @@
 // сообщения вернее, чем молчание. Нет ключа — боты торгуют, но молчат.
 import { prisma } from "@/lib/db";
 import personasData from "@/data/botPersonas.json";
-import { readQuotes, ALL_ASSETS } from "@/lib/game/marketStore";
+import { readNews, readQuotes, ALL_ASSETS } from "@/lib/game/marketStore";
 import { askModel, openRouterConfigured } from "@/lib/game/openrouter";
 import { readMessages } from "@/lib/game/social";
+import { symbolOf } from "@/lib/game/assetNames";
+import {
+  botEquity,
+  decideByRules,
+  marketBrief,
+  MAX_POSITIONS,
+  parseDecision,
+  positionValue,
+  type BotDecision,
+  type BotPositionView,
+  type BotSettings,
+  type QuoteView,
+} from "@/lib/game/botBrain";
 
 export interface BotPersona {
   id: string;
@@ -40,6 +53,15 @@ export const BOT_PERSONAS = personasData as BotPersona[];
 
 /** Как часто бот шевелится. */
 export const BOT_TICK_MS = 5 * 60 * 1000;
+/**
+ * Насколько глубоко бот думает моделью по умолчанию, %.
+ *
+ * Не 100: запрос к модели стоит денег, а на каждом такте каждого бота их
+ * уходит столько, что игра становится дороже удовольствия. Треть решений
+ * через ИИ достаточно, чтобы поведение перестало быть механическим, — а
+ * админка поднимает это число тем ботам, которые на виду.
+ */
+export const DEFAULT_AI_PCT = 35;
 /** С какой вероятностью на такте бот пишет в чат просто так. */
 export const BOT_CHAT_CHANCE = 0.25;
 /**
@@ -71,6 +93,12 @@ export async function ensureBots(): Promise<number> {
           activeStyle: persona.style,
           equity: BOT_START_EQUITY,
           peakEquity: BOT_START_EQUITY,
+          // Настройки характера копируются в строку бота: дальше их правит
+          // админка, и справочник больше не должен перебивать правку.
+          botSkill: persona.skill,
+          botRisk: persona.risk,
+          botAiPct: DEFAULT_AI_PCT,
+          botCash: BOT_START_EQUITY,
           lastBotActAt: new Date(),
           lastSyncAt: new Date(),
         },
@@ -115,6 +143,34 @@ function personaOf(id: string | null): BotPersona | undefined {
   return BOT_PERSONAS.find((p) => p.id === id);
 }
 
+/**
+ * Манера речи бота.
+ *
+ * У ботов из справочника характер прописан там, у заведённых в админке —
+ * в собственном поле. Без этого созданный админом бот молчал бы всегда:
+ * речь висела на наличии персонажа, а персонажа у него нет.
+ */
+function voiceOf(bot: {
+  nickname: string;
+  persona: string | null;
+  activeStyle: string;
+  botVoice: string | null;
+  botSkill: number | null;
+  botRisk: number | null;
+}): BotPersona | null {
+  const persona = personaOf(bot.persona);
+  if (persona) return bot.botVoice ? { ...persona, voice: bot.botVoice } : persona;
+  if (!bot.botVoice) return null; // характера нет — и говорить не о чем
+  return {
+    id: `custom-${bot.nickname}`,
+    nickname: bot.nickname,
+    style: bot.activeStyle,
+    risk: bot.botRisk ?? 1,
+    skill: bot.botSkill ?? 0.55,
+    voice: bot.botVoice,
+  };
+}
+
 /** Инструменты, за которыми следит бот этого стиля. */
 function watchList(style: string): string[] {
   const byStyle: Record<string, string[]> = {
@@ -128,18 +184,203 @@ function watchList(style: string): string[] {
 }
 
 /**
- * Движение счёта бота за такт.
+ * Движение счёта бота за такт — СТАРАЯ модель, оставлена для тестов.
  *
- * Считается из ДНЕВНОГО изменения его инструментов: рынок падает — падают и
- * боты. Мастерство определяет, какую долю движения он берёт в свою сторону:
- * у сильного счёт растёт даже на падении, у слабого тает и на росте.
+ * Считалась из дневного изменения инструментов: рынок падает — падают и боты.
+ * Работало, пока боты не торговали по-настоящему; теперь счёт двигают их
+ * собственные позиции, а эта формула осталась как описание того, что бот
+ * «в среднем» должен показывать.
  */
 export function equityStep(dayChangePct: number, persona: BotPersona, luck: number): number {
-  // luck 0..1 — случайность такта: даже мастер иногда встаёт не туда.
   const direction = luck < persona.skill ? 1 : -1;
-  // Шаг такта — доля дневного движения: за пять минут счёт не удваивается.
   const share = BOT_TICK_MS / (24 * 60 * 60 * 1000);
   return dayChangePct * persona.risk * direction * share;
+}
+
+/** Настройки бота: справочник характеров плюс правки из админки. */
+export function settingsOf(bot: {
+  persona: string | null;
+  activeStyle: string;
+  botSkill: number | null;
+  botRisk: number | null;
+  botAiPct: number | null;
+}): BotSettings {
+  const persona = personaOf(bot.persona);
+  return {
+    skill: bot.botSkill ?? persona?.skill ?? 0.55,
+    risk: bot.botRisk ?? persona?.risk ?? 1,
+    aiPct: bot.botAiPct ?? DEFAULT_AI_PCT,
+    style: bot.activeStyle,
+  };
+}
+
+/** Открытые позиции бота в том виде, в котором с ними работает мозг. */
+function toView(rows: { id: string; assetId: string; side: string; qty: number; entryPrice: number; openedAt: Date }[]): BotPositionView[] {
+  return rows.map((row) => ({
+    id: row.id,
+    assetId: row.assetId,
+    side: row.side === "short" ? "short" : "long",
+    qty: row.qty,
+    entryPrice: row.entryPrice,
+    openedAt: row.openedAt.getTime(),
+  }));
+}
+
+/**
+ * Решение через модель.
+ *
+ * Модель видит ровно то же, что увидел бы человек: свои позиции с их
+ * результатом, котировки своих инструментов и свежие заголовки. Отвечает
+ * строгим JSON — свободный текст здесь не нужен, объяснение уходит в поле
+ * reason и потом показывается в админке.
+ */
+async function decideByModel(
+  persona: BotPersona | undefined,
+  settings: BotSettings,
+  positions: BotPositionView[],
+  quotes: Record<string, QuoteView>,
+  watched: string[],
+  equity: number,
+  cash: number,
+  news: { headline: string; impact: string }[],
+): Promise<BotDecision | null> {
+  const brief = marketBrief(watched, quotes, symbolOf, positions, news);
+  const symbols = watched.map(symbolOf).join(", ");
+  const answer = await askModel(
+    [
+      {
+        role: "system",
+        content: [
+          `Ты — трейдер в биржевой игре${persona ? ` по имени ${persona.nickname}` : ""}.`,
+          `Твой стиль — «${settings.style}»: ${STYLE_BRIEF[settings.style] ?? "торгуешь по ситуации"}.`,
+          "Прими ОДНО решение и ответь только JSON, без пояснений вокруг:",
+          '{"action":"open|close|hold","symbol":"ТИКЕР","side":"long|short","sizePct":число,"reason":"кратко почему"}',
+          `Открывать можно только эти инструменты: ${symbols}.`,
+          `Больше ${MAX_POSITIONS} позиций одновременно не держи. sizePct — доля счёта в процентах, от 5 до 60.`,
+          "reason — одна фраза на русском, своими словами: что ты увидел на рынке.",
+        ].join(" "),
+      },
+      {
+        role: "user",
+        content: `Счёт: ${Math.round(equity)} $, свободных денег ${Math.round(cash)} $.\n${brief}`,
+      },
+    ],
+    { maxTokens: 220, temperature: 0.7 },
+  );
+  if (!answer) return null;
+  const bySymbol: Record<string, string> = {};
+  for (const id of watched) bySymbol[symbolOf(id)] = id;
+  return parseDecision(answer, positions, bySymbol);
+}
+
+/** Как объяснить модели стиль — иначе «scalping» для неё просто слово. */
+const STYLE_BRIEF: Record<string, string> = {
+  scalping: "берёшь короткие импульсы и не сидишь в позиции долго",
+  day: "входишь по движению дня и закрываешь до вечера",
+  swing: "держишь идею несколько дней и ищешь развороты",
+  investing: "покупаешь надолго и не реагируешь на каждый шорох",
+};
+
+/** Применить решение: списать деньги, открыть или закрыть позицию. */
+async function applyDecision(
+  botId: string,
+  decision: BotDecision,
+  cash: number,
+  equity: number,
+  positions: BotPositionView[],
+  quotes: Record<string, QuoteView>,
+): Promise<{ cash: number; done: boolean }> {
+  if (decision.action === "hold") return { cash, done: false };
+
+  if (decision.action === "close") {
+    const position = positions.find((p) => p.id === decision.positionId);
+    const price = position ? quotes[position.assetId]?.price : undefined;
+    if (!position || !price) return { cash, done: false };
+    await prisma.gameBotPosition.delete({ where: { id: position.id } }).catch(() => null);
+    // Лонг возвращает деньги по рынку, шорт — только результат: выручка от
+    // продажи легла в кэш ещё при открытии.
+    return { cash: cash + positionValue(position, price), done: true };
+  }
+
+  const price = quotes[decision.assetId]?.price;
+  if (!price || positions.length >= MAX_POSITIONS) return { cash, done: false };
+  // Размер считается от ЭКВИТИ, а не от свободных денег: иначе бот с тремя
+  // открытыми позициями входил бы четвёртой на копейки.
+  const notional = Math.min(cash, (equity * decision.sizePct) / 100);
+  if (!(notional > 1)) return { cash, done: false };
+  const qty = notional / price;
+  await prisma.gameBotPosition.create({
+    data: {
+      botId,
+      assetId: decision.assetId,
+      side: decision.side,
+      qty,
+      entryPrice: price,
+      reason: decision.reason.slice(0, 200),
+    },
+  });
+  // Шорт денег не занимает: выручка от продажи остаётся в кэше, а результат
+  // считается отдельно (см. positionValue).
+  return { cash: decision.side === "long" ? cash - notional : cash, done: true };
+}
+
+/** Один такт одного бота: пересчёт счёта, решение и его исполнение. */
+async function tickOneBot(
+  bot: {
+    id: string;
+    persona: string | null;
+    activeStyle: string;
+    equity: number;
+    peakEquity: number;
+    botCash: number | null;
+    botSkill: number | null;
+    botRisk: number | null;
+    botAiPct: number | null;
+  },
+  quotes: Record<string, QuoteView>,
+  news: { headline: string; impact: string }[],
+  now: number,
+): Promise<{ equity: number; plan: string | null; acted: boolean }> {
+  const settings = settingsOf(bot);
+  const persona = personaOf(bot.persona);
+  const watched = watchList(bot.activeStyle);
+  const rows = await prisma.gameBotPosition.findMany({ where: { botId: bot.id } });
+  const positions = toView(rows);
+  // Кэш появляется у ботов, заведённых до этой механики: весь их счёт —
+  // деньги, позиций ещё нет.
+  let cash = bot.botCash ?? bot.equity;
+  const equity = botEquity(cash, positions, quotes);
+
+  // Через модель думает не каждое решение: запрос стоит денег, и «глубина
+  // ИИ» в процентах — это ровно про то, сколько владелец игры готов на бота
+  // потратить.
+  const useModel = openRouterConfigured() && Math.random() * 100 < settings.aiPct;
+  const decision =
+    (useModel
+      ? await decideByModel(persona, settings, positions, quotes, watched, equity, cash, news)
+      : null) ?? decideByRules(settings, positions, quotes, watched, Math.random(), now);
+
+  const applied = await applyDecision(bot.id, decision, cash, equity, positions, quotes);
+  cash = applied.cash;
+
+  // Эквити пересчитывается ПОСЛЕ сделки: закрытая позиция уже не должна
+  // считаться дважды.
+  const fresh = applied.done ? await prisma.gameBotPosition.findMany({ where: { botId: bot.id } }) : rows;
+  const finalEquity = Math.max(1, botEquity(cash, toView(fresh), quotes));
+  const plan = decision.action === "hold" ? decision.reason : `${decision.action === "open" ? "вход" : "выход"}: ${decision.reason}`;
+
+  await prisma.gamePlayer.update({
+    where: { id: bot.id },
+    data: {
+      equity: finalEquity,
+      botCash: cash,
+      peakEquity: Math.max(bot.peakEquity, finalEquity),
+      botPlan: `${useModel ? "ИИ" : "правила"} · ${plan}`.slice(0, 300),
+      lastBotActAt: new Date(now),
+      lastSyncAt: new Date(now),
+    },
+  });
+  return { equity: finalEquity, plan, acted: applied.done };
 }
 
 /** Один такт всех ботов: торговля, ответ на вопрос и, изредка, реплика в чат. */
@@ -159,12 +400,20 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
   }
 
   const bots = await prisma.gamePlayer.findMany({
-    where: { isBot: true, OR: [{ lastBotActAt: null }, { lastBotActAt: { lt: new Date(now - BOT_TICK_MS) } }] },
+    where: {
+      isBot: true,
+      botActive: true,
+      OR: [{ lastBotActAt: null }, { lastBotActAt: { lt: new Date(now - BOT_TICK_MS) } }],
+    },
   });
   if (bots.length === 0) return { moved: 0, spoke };
 
+  // Котировки берутся ОДНИМ запросом на всех: инструментов у ботов десяток
+  // на всех, а походов в базу иначе было бы по одному на бота.
   const assetIds = Array.from(new Set(bots.flatMap((bot) => watchList(bot.activeStyle))));
   const quotes = await readQuotes(assetIds, now);
+  // Новости последних суток — то же, что видит игрок в ленте.
+  const news = await readNews(now - 24 * 60 * 60 * 1000, 12);
 
   // Кто написал последним: подряд две свои реплики в живом чате — редкость,
   // и именно она выдаёт бота быстрее содержания.
@@ -177,35 +426,41 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
 
   let moved = 0;
   for (const bot of bots) {
-    const persona = personaOf(bot.persona);
-    if (!persona) continue;
-    const watched = watchList(bot.activeStyle);
-    const changes = watched.map((id) => quotes[id]?.dayChangePct ?? 0);
-    const avg = changes.length > 0 ? changes.reduce((a, b) => a + b, 0) / changes.length : 0;
-    const luck = Math.random();
-    const pct = equityStep(avg, persona, luck);
-    const equity = Math.max(100, bot.equity * (1 + pct / 100));
-
-    await prisma.gamePlayer.update({
-      where: { id: bot.id },
-      data: {
-        equity,
-        peakEquity: Math.max(bot.peakEquity, equity),
-        lastBotActAt: new Date(now),
-        lastSyncAt: new Date(now),
-      },
+    // ЗАЯВКА НА ТАКТ. Такт дёргается из нескольких мест сразу (котировки,
+    // мир, чат) и никого не ждёт — без этой проверки два запроса читали
+    // одного бота одновременно, каждый видел «позиций меньше четырёх» и
+    // каждый открывал свою. Счёт после такой гонки вырастал втрое из ниоткуда.
+    //
+    // Отметка времени работает как версия строки: обновить её сможет только
+    // тот, кто увидел её прежнее значение.
+    const claimed = await prisma.gamePlayer.updateMany({
+      where: { id: bot.id, lastBotActAt: bot.lastBotActAt },
+      data: { lastBotActAt: new Date(now) },
     });
+    if (claimed.count === 0) continue; // такт уже забрал другой запрос
+
+    const result = await tickOneBot(bot, quotes, news, now);
     moved++;
 
     // Говорит не больше ОДНОГО бота за такт: чат, в котором трое пишут
     // одновременно каждые пять минут, выглядит сценарием, а не разговором.
+    const persona = voiceOf(bot);
     if (
       spoke === 0 &&
+      persona &&
       last?.playerId !== bot.id &&
       openRouterConfigured() &&
       Math.random() < BOT_CHAT_CHANCE
     ) {
-      const said = await speak(bot.id, persona, "general", null, { equity, dayChange: avg, watched, quotes });
+      const watched = watchList(bot.activeStyle);
+      const changes = watched.map((id) => quotes[id]?.dayChangePct ?? 0);
+      const avg = changes.length > 0 ? changes.reduce((a, b) => a + b, 0) / changes.length : 0;
+      const said = await speak(bot.id, persona, "general", null, {
+        equity: result.equity,
+        dayChange: avg,
+        watched,
+        quotes,
+      });
       if (said) spoke++;
     }
   }
@@ -215,7 +470,7 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
 /** Ответ одного бота на прямой вопрос в канале. */
 async function answerQuestion(channel: string, question: string, now: number): Promise<boolean> {
   if (!openRouterConfigured()) return false;
-  const bots = await prisma.gamePlayer.findMany({ where: { isBot: true } });
+  const bots = await prisma.gamePlayer.findMany({ where: { isBot: true, botActive: true } });
   if (bots.length === 0) return false;
 
   // Если в вопросе назвали имя — отвечает названный. В живом чате обращение
@@ -226,7 +481,7 @@ async function answerQuestion(channel: string, question: string, now: number): P
   // Иначе откликается случайный — как тот, кто первым увидел. Один: хор из
   // шести ответов на один вопрос выдал бы всех сразу.
   const bot = addressed ?? bots[Math.floor(Math.random() * bots.length)];
-  const persona = personaOf(bot.persona);
+  const persona = voiceOf(bot);
   if (!persona) return false;
 
   const watched = watchList(bot.activeStyle);

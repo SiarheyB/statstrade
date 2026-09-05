@@ -1,5 +1,5 @@
 import { tickBots } from "@/lib/game/bots";
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
@@ -24,7 +24,11 @@ export async function GET(req: Request) {
     // Такт ботов дёргаем и отсюда: человек ждёт ответа именно в чате, а не на
     // вкладке мира. Не ждём результата — запрос к модели может занять
     // секунду, а лента должна обновиться сразу.
-    void tickBots().catch(() => {});
+    // after() — а не «просто не ждать»: работа, брошенная через void, живёт
+    // ровно до конца запроса, и такт ботов регулярно обрывался на середине
+    // (отметка времени уже сдвинута, решение не принято). after() выполняет
+    // её ПОСЛЕ ответа и не отменяет вместе с ним.
+    after(() => tickBots().catch(() => {}));
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
