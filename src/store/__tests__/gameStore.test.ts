@@ -547,3 +547,34 @@ describe("разорение и спонсор", () => {
     expect(g.account.balance).toBe(50);
   });
 });
+
+describe("копитрейдинг", () => {
+  it("скопированная сделка помнит, у кого скопирована", () => {
+    useGameStore.setState((s) => ({
+      ...s,
+      game: { ...s.game, account: { ...s.game.account, balance: 100_000, positions: [] } },
+    }));
+    const assetId = useGameStore.getState().game.activeAssets[0].id;
+    useGameStore.getState().openPosition({
+      assetId,
+      side: "long",
+      size: 1,
+      copiedFrom: "leader-1",
+      copyFeePct: 20,
+    });
+    const position = useGameStore.getState().game.account.positions.find((p) => !p.closedAt)!;
+    expect(position.copiedFrom).toBe("leader-1");
+    expect(position.copyFeePct).toBe(20);
+  });
+
+  it("своя сделка метки копирования не несёт — иначе комиссия ушла бы в пустоту", () => {
+    useGameStore.setState((s) => ({
+      ...s,
+      game: { ...s.game, account: { ...s.game.account, balance: 100_000, positions: [] } },
+    }));
+    const assetId = useGameStore.getState().game.activeAssets[0].id;
+    useGameStore.getState().openPosition({ assetId, side: "long", size: 1 });
+    const position = useGameStore.getState().game.account.positions.find((p) => !p.closedAt)!;
+    expect(position.copiedFrom).toBeUndefined();
+  });
+});

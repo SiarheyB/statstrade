@@ -185,6 +185,8 @@ export function applyPositionOpen(
     takeProfit?: number;
     trailingPct?: number;
     botId?: string;
+    copiedFrom?: string;
+    copyFeePct?: number;
     style: Position["style"];
   },
 ): Position {
@@ -200,6 +202,8 @@ export function applyPositionOpen(
     takeProfit: input.takeProfit,
     trailingPct: input.trailingPct,
     botId: input.botId,
+    copiedFrom: input.copiedFrom,
+    copyFeePct: input.copyFeePct,
     openedAt: Date.now(),
     fees: 0, // считается при закрытии — см. pnlCalculator.settleClose
     style: input.style,

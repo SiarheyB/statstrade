@@ -47,6 +47,7 @@ import {
   fetchQuotes,
   funds as fundsApi,
   loans as loansApi,
+  signals as signalsApi,
   strategies as strategiesApi,
   syncSnapshot,
 } from "@/lib/game/worldClient";
@@ -380,6 +381,10 @@ interface GameStoreState {
     leverage?: number;
     stopLoss?: number;
     takeProfit?: number;
+    trailingPct?: number;
+    /** Чей сигнал копируем: при закрытии в плюс ведущему уйдёт его доля. */
+    copiedFrom?: string;
+    copyFeePct?: number;
   }) => OpenPositionResult;
   closePosition: (positionId: string, fraction?: number) => void;
   /** Отложенный ордер: лимит или стоп. Исполняет его движок в тике. */
@@ -690,7 +695,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
 
-  openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit }) => {
+  openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit, trailingPct, copiedFrom, copyFeePct }) => {
     const { game } = get();
     if (!(size > 0)) return { ok: false, error: "invalid_size" };
     // Потолок плеча — минимум из стиля и настройки админки (0 = не ограничивать).
@@ -718,9 +723,27 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       entryPrice: price,
       stopLoss,
       takeProfit,
+      trailingPct,
+      copiedFrom,
+      copyFeePct,
       style: game.activeStyle.style,
     });
     set((s) => ({ game: { ...s.game, account } }));
+
+    // Открытый для подписки игрок публикует сигнал. Сервер сам молча
+    // пропустит вызов, если подписка закрыта, — проверять это на клиенте
+    // значило бы держать здесь ещё одну копию состояния.
+    if (!copiedFrom) {
+      void signalsApi.publish({
+        assetId,
+        side,
+        price,
+        // В процентах от входа: у подписчика своя цена входа, и абсолютные
+        // уровни ведущего ему не подходят.
+        stopPct: stopLoss != null ? ((price - stopLoss) / price) * 100 * (side === "long" ? 1 : -1) : null,
+        takePct: takeProfit != null ? ((takeProfit - price) / price) * 100 * (side === "long" ? 1 : -1) : null,
+      });
+    }
     return { ok: true };
   },
 
@@ -847,7 +870,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // движке: ручное закрытие не должно стоить дороже, чем срабатывание
     // стопа по той же позиции.
     const effects = perkEffects(game.perks);
-    applyPositionClose(
+    const realized = applyPositionClose(
       account,
       position,
       price,
@@ -858,6 +881,19 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       closeSize,
     );
     set((s) => ({ game: { ...s.game, account } }));
+
+    // Скопированная сделка закрыта в плюс — доля ведущему. С убыточной не
+    // берём: наказывать подписчика за то, что чужой сигнал не сработал, —
+    // двойная потеря. Результат берём из самой функции закрытия: искать
+    // запись по id ненадёжно — у частичного закрытия он новый.
+    if (position.copiedFrom && realized > 0) {
+      const feePct = position.copyFeePct ?? 0;
+      const fee = realized * (feePct / 100);
+      if (fee > 0) {
+        get().applyWorldCash(-fee);
+        void signalsApi.fee(position.copiedFrom, realized, feePct);
+      }
+    }
   },
 
   setStopLoss: (positionId, price) => {

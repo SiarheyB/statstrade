@@ -1310,6 +1310,12 @@ model GamePlayer {
   mutedUntil        DateTime?
   seasonResults     GameSeasonResult[]
   tournamentEntries GameTournamentEntry[]
+  // Копитрейдинг: открыт ли игрок для подписки и почём.
+  signalsOpen       Boolean @default(false)
+  signalFeePct      Float   @default(20)
+  signals           GameSignal[]
+  ledSubscriptions  GameSubscription[] @relation("SignalLeader")
+  subscriptions     GameSubscription[] @relation("SignalFollower")
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
 
@@ -1553,6 +1559,46 @@ model GameTournamentEntry {
 
   @@unique([tournamentId, playerId])
   @@index([playerId])
+}
+
+// Сигнал ведущего: что и в какую сторону он открыл.
+//
+// Сделки живут в браузере игрока, сервер их не видит и «зеркалить» позиции не
+// может. Ведущий публикует сигнал, а клиент подписчика открывает то же сам,
+// своим размером и своими деньгами: размер позиции остаётся решением того,
+// кто рискует.
+model GameSignal {
+  id        String   @id @default(cuid())
+  authorId  String
+  author    GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  assetId   String
+  side      String
+  price     Float
+  // Стоп и тейк в ПРОЦЕНТАХ от входа: у подписчика своя цена входа, и
+  // копировать абсолютные уровни было бы бессмысленно.
+  stopPct   Float?
+  takePct   Float?
+  createdAt DateTime @default(now())
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
+model GameSubscription {
+  id         String   @id @default(cuid())
+  leaderId   String
+  leader     GamePlayer @relation("SignalLeader", fields: [leaderId], references: [id], onDelete: Cascade)
+  followerId String
+  follower   GamePlayer @relation("SignalFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  // Комиссия ведущего с ПРИБЫЛЬНОЙ скопированной сделки. С убытка не берётся:
+  // наказывать подписчика за то, что чужой сигнал не сработал, — двойная
+  // потеря.
+  feePct     Float
+  auto       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([leaderId, followerId])
+  @@index([followerId])
 }
 
 model GameStrategy {

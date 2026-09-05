@@ -347,6 +347,58 @@ export function joinTournament(equity: number) {
   return post<{ entryFee: number; endsAt: number }>("/api/game/tournament", { equity });
 }
 
+export interface SignalLeader {
+  id: string;
+  nickname: string;
+  rankKey: string;
+  contractsPassed: number;
+  prestige: number;
+  activeStyle: string;
+  feePct: number;
+  followers: number;
+  signals: number;
+  subscribed: boolean;
+  auto: boolean;
+}
+
+export interface TradeSignal {
+  id: string;
+  assetId: string;
+  side: string;
+  price: number;
+  stopPct: number | null;
+  takePct: number | null;
+  createdAt: number;
+  author: { id: string; nickname: string; rankKey: string };
+  auto: boolean;
+  feePct: number;
+}
+
+export async function fetchSignals(): Promise<{ leaders: SignalLeader[]; signals: TradeSignal[] } | null> {
+  try {
+    const res = await fetch("/api/game/signals");
+    if (!res.ok) return null;
+    const data = await res.json();
+    return { leaders: data.leaders ?? [], signals: data.signals ?? [] };
+  } catch {
+    return null;
+  }
+}
+
+export const signals = {
+  open: (feePct: number) => post<{ ok: true }>("/api/game/signals", { action: "open", feePct }),
+  close: () => post<{ ok: true }>("/api/game/signals", { action: "close" }),
+  subscribe: (leaderId: string, auto: boolean) =>
+    post<{ feePct: number }>("/api/game/signals", { action: "subscribe", leaderId, auto }),
+  unsubscribe: (leaderId: string) => post<{ ok: true }>("/api/game/signals", { action: "unsubscribe", leaderId }),
+  /** Публикует клиент ведущего в момент открытия позиции. */
+  publish: (body: { assetId: string; side: string; price: number; stopPct?: number | null; takePct?: number | null }) =>
+    post<{ ok: true }>("/api/game/signals", { action: "publish", ...body }),
+  /** Подписчик закрыл скопированную сделку в плюс — платим ведущему. */
+  fee: (leaderId: string, profit: number, feePct: number) =>
+    post<{ fee: number }>("/api/game/signals", { action: "fee", leaderId, profit, feePct }),
+};
+
 export const strategies = {
   publish: (body: { name: string; description?: string; price: number; config: StrategyOffer["config"]; botId?: string }) =>
     post<{ id: string }>("/api/game/strategies", { action: "publish", ...body }),
