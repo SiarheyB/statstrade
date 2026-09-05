@@ -1314,6 +1314,13 @@ model GamePlayer {
   signalsOpen       Boolean @default(false)
   signalFeePct      Float   @default(20)
   signals           GameSignal[]
+  // Банк: кредиты, облигации и доля в акциях.
+  bankLoans         GameBankLoan[]
+  bankBonds         GameBankBond[]
+  bankShares        GameBankShare?
+  // Вещи, изъятые банком за просрочку. Клиент забирает список на
+  // синхронизации и убирает предметы у себя: сервер имущество не хранит.
+  seizedItems       String?
   ledSubscriptions  GameSubscription[] @relation("SignalLeader")
   subscriptions     GameSubscription[] @relation("SignalFollower")
   createdAt       DateTime @default(now())
@@ -1599,6 +1606,81 @@ model GameSubscription {
 
   @@unique([leaderId, followerId])
   @@index([followerId])
+}
+
+// Игровой банк — один на мир.
+//
+// До него занять можно было только у другого игрока: пока в мире два
+// человека, занять не у кого вовсе. Банк работает всегда — выдаёт кредиты,
+// зарабатывает на процентах, забирает залог за просрочку и продаёт изъятое
+// остальным. И развивается сам: капитал растёт на процентах и падает на
+// невозвратах, а от него зависит цена его акции.
+model GameBank {
+  id             String   @id @default(cuid())
+  capital        Float
+  lentOut        Float    @default(0)
+  // Привлечено по облигациям — это ДОЛГ банка перед игроками.
+  bondsIssued    Float    @default(0)
+  interestEarned Float    @default(0)
+  lossesTaken    Float    @default(0)
+  totalShares    Int
+  sharesSold     Int      @default(0)
+  foundedAt      DateTime @default(now())
+}
+
+model GameBankLoan {
+  id              String   @id @default(cuid())
+  playerId        String
+  player          GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  principal       Float
+  // Годовая ставка: считается из скоринга, чем хуже история — тем дороже.
+  ratePct         Float
+  termDays        Int
+  takenAt         DateTime @default(now())
+  dueAt           DateTime
+  repaidAt        DateTime?
+  status          String   @default("active")
+  // Залог — предмет из магазина. null означает кредит без обеспечения.
+  collateralItem  String?
+  collateralValue Float?
+
+  @@index([playerId, status])
+  @@index([dueAt])
+}
+
+model GameRepossessed {
+  id        String   @id @default(cuid())
+  itemId    String
+  fromId    String?
+  price     Float
+  soldToId  String?
+  soldAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([soldAt])
+}
+
+model GameBankBond {
+  id         String   @id @default(cuid())
+  playerId   String
+  player     GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  amount     Float
+  couponPct  Float
+  termDays   Int
+  boughtAt   DateTime @default(now())
+  maturesAt  DateTime
+  redeemedAt DateTime?
+
+  @@index([playerId])
+  @@index([maturesAt])
+}
+
+model GameBankShare {
+  id       String @id @default(cuid())
+  playerId String @unique
+  player   GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  shares   Int    @default(0)
+  avgPrice Float  @default(0)
 }
 
 model GameStrategy {

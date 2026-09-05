@@ -130,8 +130,16 @@ export interface SyncSnapshot {
   gameDay: number;
 }
 
+export interface SyncResult {
+  claimed: number;
+  defaulted: number;
+  reliability: number;
+  nickname: string;
+  seizedItems?: string[];
+}
+
 export function syncSnapshot(snapshot: SyncSnapshot) {
-  return post<{ claimed: number; defaulted: number; reliability: number; nickname: string }>("/api/game/sync", snapshot);
+  return post<SyncResult>("/api/game/sync", snapshot);
 }
 
 export function updateProfile(patch: { isPublic?: boolean }) {

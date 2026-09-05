@@ -166,13 +166,19 @@ export async function syncPlayer(userId: string, email: string, snapshot: Player
   await updateTournamentEquity(player.id, clean.equity);
 
   const claimed = player.pendingPayout;
+  // Вещи, изъятые банком за просрочку. Сервер имущество игрока не хранит —
+  // только факт изъятия; клиент забирает список и убирает предметы у себя.
+  const seizedItems: string[] = player.seizedItems ? (JSON.parse(player.seizedItems) as string[]) : [];
   return {
+    seizedItems,
     player: await prisma.gamePlayer.update({
       where: { id: player.id },
       data: {
         ...clean,
         peakEquity: Math.max(player.peakEquity, clean.equity),
         pendingPayout: 0,
+        // Список изъятого отдаётся ровно один раз: клиент его применил.
+        seizedItems: seizedItems.length > 0 ? null : undefined,
         lastSyncAt: new Date(),
       },
     }),

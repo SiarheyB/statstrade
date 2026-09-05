@@ -474,6 +474,15 @@ interface GameStoreState {
   /** Перевести наличные на брокерский счёт и обратно. */
   moveToBroker: (amount: number) => void;
   moveToWallet: (amount: number) => void;
+  /**
+   * Изменить НАЛИЧНЫЕ из общего мира: кредит банка, покупка облигации,
+   * акции, изъятой вещи. Отдельно от applyWorldCash, который двигает
+   * брокерский счёт: деньги банка приходят на руки, и положить их в рынок —
+   * отдельное решение игрока.
+   */
+  creditWallet: (amount: number) => void;
+  /** Получить вещь, купленную вне магазина (витрина изъятого у банка). */
+  receiveItem: (itemId: string) => void;
 }
 
 let tickHandle: ReturnType<typeof setInterval> | null = null;
@@ -927,6 +936,30 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }));
   },
 
+  creditWallet: (amount) => {
+    set((s) => ({ game: { ...s.game, wallet: Math.max(0, s.game.wallet + amount) } }));
+  },
+
+  receiveItem: (itemId) => {
+    set((s) => {
+      if (s.game.lifestyle.ownedItemIds.includes(itemId)) return { game: s.game };
+      const item = getShopItem(itemId);
+      return {
+        game: {
+          ...s.game,
+          lifestyle: {
+            ...s.game.lifestyle,
+            ownedItemIds: [...s.game.lifestyle.ownedItemIds, itemId],
+            // Престиж вещь даёт такой же, как из магазина: она та же самая,
+            // просто досталась дешевле и с чужой историей.
+            ...(item ? {} : {}),
+          },
+          account: item ? { ...s.game.account, reputation: s.game.account.reputation + item.prestige } : s.game.account,
+        },
+      };
+    });
+  },
+
   moveToWallet: (amount) => {
     const { game } = get();
     const sum = Math.min(Math.max(0, amount), game.account.balance);
@@ -1231,6 +1264,23 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
     if (result.data.defaulted > 0) {
       get().notify("bad", `Просрочено займов: ${result.data.defaulted}. Репутация упала.`);
+    }
+
+    // Банк забрал залог за просрочку: убираем вещь у себя. Сервер имущество
+    // не хранит, он только сообщает о факте изъятия — и делает это ровно
+    // один раз.
+    const seized = result.data.seizedItems ?? [];
+    if (seized.length > 0) {
+      set((s) => ({
+        game: {
+          ...s.game,
+          lifestyle: {
+            ...s.game.lifestyle,
+            ownedItemIds: s.game.lifestyle.ownedItemIds.filter((id) => !seized.includes(id)),
+          },
+        },
+      }));
+      get().notify("bad", `Банк изъял залог: ${seized.length}`);
     }
 
     // Трек-рекорд опубликованных стратегий. Отправляем вместе с синхронизацией
