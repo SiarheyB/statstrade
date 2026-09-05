@@ -58,6 +58,7 @@ import TradeReview from "./TradeReview";
 import GameDisclaimer from "./GameDisclaimer";
 import GameOnboarding from "./GameOnboarding";
 import SponsorModal from "./SponsorModal";
+import Hint from "./Hint";
 
 const STYLE_LABEL_KEY: Record<TradingStyle, string> = {
   scalping: "game.style.scalping",
@@ -292,16 +293,17 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             плечо, поэтому он рядом со вкладками, а не спрятан внутри одной. */}
         <div className="flex items-center gap-1 card p-1 w-fit">
           {SELECTABLE_STYLES.map((style) => (
-            <button
-              key={style}
-              type="button"
-              onClick={() => setActiveStyle(style)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
-                currentStyle === style ? "bg-accent text-white" : "text-muted hover:text-fg"
-              }`}
-            >
-              {t(STYLE_LABEL_KEY[style])}
-            </button>
+            <Hint key={style} text={t(`game.tip.style.${style}`)}>
+              <button
+                type="button"
+                onClick={() => setActiveStyle(style)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                  currentStyle === style ? "bg-accent text-white" : "text-muted hover:text-fg"
+                }`}
+              >
+                {t(STYLE_LABEL_KEY[style])}
+              </button>
+            </Hint>
           ))}
         </div>
 
@@ -309,8 +311,8 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
           {TABS.map((name) => {
             const Icon = TAB_ICON[name];
             return (
+              <Hint key={name} text={t(`game.tip.tab.${name}`)}>
               <button
-                key={name}
                 type="button"
                 onClick={() => setTab(name)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition ${
@@ -329,6 +331,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
                   </span>
                 )}
               </button>
+              </Hint>
             );
           })}
         </div>

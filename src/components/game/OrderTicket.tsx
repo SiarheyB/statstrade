@@ -11,6 +11,7 @@ import { useGameStore } from "@/store/gameStore";
 import { calculateRequiredMargin, calculateLiquidationPrice } from "@/engine/economy/marginEngine";
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
 import AssetPicker from "./AssetPicker";
+import { HintLabel } from "./Hint";
 import { useMarketClock } from "@/lib/game/useMarketClock";
 import { suggestPositionSize, DEFAULT_RISK_PER_TRADE_PCT } from "@/engine/economy/positionSizing";
 import type { Asset, PositionSide } from "@/engine/entities/types";
@@ -187,7 +188,9 @@ export default function OrderTicket({
       )}
 
       <div>
-        <label className="text-xs text-faint block mb-1">{t("game.order.size")}</label>
+        <label className="text-xs text-faint block mb-1">
+          <HintLabel text={t("game.tip.size")}>{t("game.order.size")}</HintLabel>
+        </label>
         <input
           type="number"
           min="0"
@@ -206,7 +209,7 @@ export default function OrderTicket({
       {maxLeverage > 1 && (
         <div>
           <label className="text-xs text-faint flex items-center justify-between mb-1">
-            <span>{t("game.order.leverage")}</span>
+            <HintLabel text={t("game.tip.leverage")}>{t("game.order.leverage")}</HintLabel>
             <span className="text-fg font-medium tabular-nums">{effectiveLeverage}x</span>
           </label>
           <input
@@ -223,7 +226,9 @@ export default function OrderTicket({
 
       <div className="grid grid-cols-2 gap-2">
         <div>
-          <label className="text-xs text-faint block mb-1">{t("game.order.stopLoss")}</label>
+          <label className="text-xs text-faint block mb-1">
+            <HintLabel text={t("game.tip.stopLoss")}>{t("game.order.stopLoss")}</HintLabel>
+          </label>
           <input
             type="number"
             step="0.01"
@@ -234,7 +239,9 @@ export default function OrderTicket({
           />
         </div>
         <div>
-          <label className="text-xs text-faint block mb-1">{t("game.order.takeProfit")}</label>
+          <label className="text-xs text-faint block mb-1">
+            <HintLabel text={t("game.tip.takeProfit")}>{t("game.order.takeProfit")}</HintLabel>
+          </label>
           <input
             type="number"
             step="0.01"
@@ -247,7 +254,9 @@ export default function OrderTicket({
       </div>
 
       <div>
-        <label className="text-xs text-faint block mb-1">{t("game.order.trailing")}</label>
+        <label className="text-xs text-faint block mb-1">
+          <HintLabel text={t("game.order.trailingHint")}>{t("game.order.trailing")}</HintLabel>
+        </label>
         <input
           type="number"
           min="0"
@@ -268,7 +277,7 @@ export default function OrderTicket({
       )}
 
       <div className="text-xs text-faint flex items-center justify-between">
-        <span>{t("game.order.cost")}</span>
+        <HintLabel text={t("game.tip.cost")}>{t("game.order.cost")}</HintLabel>
         <span className={`tabular-nums font-medium ${insufficient ? "text-loss" : "text-fg"}`}>{fmtUsd(cost)}</span>
       </div>
 

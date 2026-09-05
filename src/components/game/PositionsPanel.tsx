@@ -9,6 +9,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { calculateUnrealizedPnl } from "@/engine/economy/pnlCalculator";
 import { useGameStore } from "@/store/gameStore";
+import { HintLabel } from "./Hint";
 import { triggerLevel } from "@/engine/player/pendingOrders";
 import type { Asset, Order, Position } from "@/engine/entities/types";
 
@@ -94,14 +95,26 @@ export default function PositionsPanel({
               <thead>
                 <tr className="text-left text-xs text-faint">
                   <th className="font-medium pb-2 pr-3">{t("game.positions.asset")}</th>
-                  <th className="font-medium pb-2 pr-3">{t("game.positions.side")}</th>
-                  <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.size")}</th>
+                  <th className="font-medium pb-2 pr-3">
+                    <HintLabel text={t("game.tip.side")}>{t("game.positions.side")}</HintLabel>
+                  </th>
+                  <th className="font-medium pb-2 pr-3 text-right">
+                    <HintLabel text={t("game.tip.size")}>{t("game.positions.size")}</HintLabel>
+                  </th>
                   <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.entry")}</th>
                   <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.current")}</th>
-                  <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.stopLoss")}</th>
-                  <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.takeProfit")}</th>
-                  <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.trailing")}</th>
-                  <th className="font-medium pb-2 pr-3 text-right">{t("game.positions.pnl")}</th>
+                  <th className="font-medium pb-2 pr-3 text-right">
+                    <HintLabel text={t("game.tip.stopLoss")}>{t("game.positions.stopLoss")}</HintLabel>
+                  </th>
+                  <th className="font-medium pb-2 pr-3 text-right">
+                    <HintLabel text={t("game.tip.takeProfit")}>{t("game.positions.takeProfit")}</HintLabel>
+                  </th>
+                  <th className="font-medium pb-2 pr-3 text-right">
+                    <HintLabel text={t("game.order.trailingHint")}>{t("game.positions.trailing")}</HintLabel>
+                  </th>
+                  <th className="font-medium pb-2 pr-3 text-right">
+                    <HintLabel text={t("game.tip.pnl")}>{t("game.positions.pnl")}</HintLabel>
+                  </th>
                   <th className="font-medium pb-2" />
                 </tr>
               </thead>
