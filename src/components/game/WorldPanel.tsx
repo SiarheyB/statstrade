@@ -20,6 +20,7 @@ import { useGameStore } from "@/store/gameStore";
 import { fetchWorld, updateProfile, type WorldState } from "@/lib/game/worldClient";
 import type { GameDrawing } from "@/engine/entities/types";
 import ChatPanel from "./ChatPanel";
+import Hint, { HintLabel } from "./Hint";
 import StrategyMarket from "./StrategyMarket";
 
 const SECTIONS = ["ranking", "season", "chat", "copy", "strategies", "bank", "loans", "funds", "feed"] as const;
@@ -142,29 +143,40 @@ export default function WorldPanel({
               начинаешь с чистой историей. Имя ставится один раз, перед
               входом в игру (PlayerNameGate). */}
           <div className="min-w-[200px]">
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.nickname")}</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">
+              <HintLabel text={t("game.tip.world.nickname")}>{t("game.world.nickname")}</HintLabel>
+            </div>
             <div className="mt-1 text-lg font-semibold">{me.nickname}</div>
             <div className="text-[11px] text-faint">{t("game.world.nicknameFixed")}</div>
           </div>
 
           <div>
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.reliability")}</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">
+              <HintLabel text={t("game.tip.world.reliability")}>{t("game.world.reliability")}</HintLabel>
+            </div>
             <div className={`text-lg font-semibold tabular-nums ${me.reliability < 50 ? "text-loss" : "text-profit"}`}>
               {me.reliability}
             </div>
           </div>
           <div>
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.creditLimit")}</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">
+              <HintLabel text={t("game.tip.world.creditLimit")}>{t("game.world.creditLimit")}</HintLabel>
+            </div>
             <div className="text-lg font-semibold tabular-nums">{fmtUsd(me.creditLimit)}</div>
           </div>
           <div>
-            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">{t("game.world.debt")}</div>
+            <div className="text-[11px] uppercase tracking-[0.12em] text-muted">
+              <HintLabel text={t("game.tip.world.debt")}>{t("game.world.debt")}</HintLabel>
+            </div>
             <div className={`text-lg font-semibold tabular-nums ${totalDebt > 0 ? "text-loss" : ""}`}>
               {fmtUsd(totalDebt)}
             </div>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer ml-auto">
+          {/* Тумблер и кнопка стоят вплотную к правому краю карточки —
+              подсказку по центру там обрезало бы. */}
+          <Hint text={t("game.tip.world.public")} align="end" className="ml-auto">
+          <label className="flex items-center gap-2 text-xs text-muted cursor-pointer">
             <input
               type="checkbox"
               checked={me.isPublic}
@@ -177,6 +189,8 @@ export default function WorldPanel({
             />
             {t("game.world.public")}
           </label>
+          </Hint>
+          <Hint text={t("game.tip.world.refresh")} align="end">
           <button
             type="button"
             onClick={() => void reload()}
@@ -185,6 +199,7 @@ export default function WorldPanel({
             <RefreshCw size={12} />
             {t("game.world.refresh")}
           </button>
+          </Hint>
         </div>
 
         {message && <div className="text-xs text-accent">{message}</div>}
