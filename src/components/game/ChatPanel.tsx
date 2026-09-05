@@ -12,6 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { LineChart, Send } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fetchChat, sendChat, type ChatMessage } from "@/lib/game/worldClient";
+import { symbolOf } from "@/lib/game/assetNames";
 import type { GameDrawing } from "@/engine/entities/types";
 
 const CHANNELS = ["general", "market", "fund"] as const;
@@ -130,7 +131,7 @@ export default function ChatPanel({
                 className="mt-1 inline-flex items-center gap-1.5 rounded-md bg-accent/10 px-2 py-1 text-[11px] text-accent hover:bg-accent/20"
               >
                 <LineChart size={12} />
-                {t("game.chat.openIdea", { asset: message.assetId })}
+                {t("game.chat.openIdea", { asset: symbolOf(message.assetId) })}
               </button>
             )}
           </div>

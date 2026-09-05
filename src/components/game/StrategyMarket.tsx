@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ShoppingCart, Upload } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { symbolOf } from "@/lib/game/assetNames";
 import { fmtUsd } from "@/lib/format";
 import { fetchStrategies, strategies as api, type StrategyOffer } from "@/lib/game/worldClient";
 import { useGameStore } from "@/store/gameStore";
@@ -161,7 +162,7 @@ export default function StrategyMarket() {
                     {offer.author.nickname} · {t("game.world.contracts")}: {offer.author.contractsPassed}
                   </span>
                   <span className="text-xs text-muted">
-                    {t(`game.bots.strategy.${offer.config.strategy}`)} · {offer.config.assetId}
+                    {t(`game.bots.strategy.${offer.config.strategy}`)} · {symbolOf(offer.config.assetId)}
                   </span>
                   <span className="ml-auto tabular-nums">{offer.price === 0 ? t("game.shop.free") : fmtUsd(offer.price)}</span>
                   {offer.owned ? (
