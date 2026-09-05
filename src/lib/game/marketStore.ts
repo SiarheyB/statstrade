@@ -247,21 +247,30 @@ function aggregateMarket(candles: MarketCandle[], bucketMs: number): MarketCandl
   return aggregate(generated, bucketMs).map((c) => ({ t: c.ts, o: c.open, h: c.high, l: c.low, c: c.close, v: c.volume }));
 }
 
+export interface Quote {
+  price: number;
+  /** Изменение за сегодня, % — из него скринер строит список «что движется». */
+  dayChangePct: number;
+}
+
 /**
  * Текущие цены инструментов. Это последняя минутка текущего часа — та же
  * цена, которую игрок видит на графике.
  */
-export async function readQuotes(assetIds: string[], now = Date.now()): Promise<Record<string, number>> {
+export async function readQuotes(assetIds: string[], now = Date.now()): Promise<Record<string, Quote>> {
   const unique = Array.from(new Set(assetIds)).filter((id) => !!getAsset(id));
   const market = await getMarket();
   const currentHour = floorTo(now, MS_HOUR);
-  const quotes: Record<string, number> = {};
+  const quotes: Record<string, Quote> = {};
 
   await Promise.all(unique.map((id) => ensureHistory(id, now)));
-  const rows = await prisma.gameCandle.findMany({
-    where: { assetId: { in: unique }, tf: TF_1H, ts: new Date(currentHour) },
-  });
+  const dayStart = new Date(floorTo(now, MS_DAY));
+  const [rows, dayRows] = await Promise.all([
+    prisma.gameCandle.findMany({ where: { assetId: { in: unique }, tf: TF_1H, ts: new Date(currentHour) } }),
+    prisma.gameCandle.findMany({ where: { assetId: { in: unique }, tf: TF_1D, ts: dayStart } }),
+  ]);
   const byAsset = new Map(rows.map((r) => [r.assetId, r]));
+  const byDay = new Map(dayRows.map((r) => [r.assetId, r]));
 
   for (const id of unique) {
     const asset = getAsset(id);
@@ -276,9 +285,29 @@ export async function readQuotes(assetIds: string[], now = Date.now()): Promise<
       hourIndex,
       minuteInHour,
     );
-    quotes[id] = minutes.length > 0 ? minutes[minutes.length - 1].close : row.close;
+    const price = minutes.length > 0 ? minutes[minutes.length - 1].close : row.close;
+    const dayOpen = byDay.get(id)?.open ?? row.open;
+    quotes[id] = {
+      price,
+      dayChangePct: dayOpen > 0 ? ((price - dayOpen) / dayOpen) * 100 : 0,
+    };
   }
   return quotes;
+}
+
+/**
+ * Текущий рыночный режим — его знает только сервер: таймлайн считается от
+ * начала мира, и у всех игроков он один.
+ */
+export async function readRegime(now = Date.now()) {
+  const market = await getMarket();
+  const dayIndex = Math.max(0, Math.floor((now - market.startedAt.getTime()) / MS_DAY));
+  const timeline = regimeTimeline(market.seed, dayIndex + 2);
+  const today = timeline[Math.min(timeline.length - 1, dayIndex)];
+  // Сколько дней рынок уже в этом режиме — для подписи «Боковик 3д».
+  let daysInRegime = 0;
+  for (let i = dayIndex; i >= 0 && timeline[i]?.type === today.type; i--) daysInRegime++;
+  return { type: today.type, daysInRegime, driftModifier: today.preset.driftModifier, volModifier: today.preset.volModifier };
 }
 
 /** Новости мира за период — общие для всех игроков. */

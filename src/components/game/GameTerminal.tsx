@@ -26,7 +26,6 @@ import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { activeTheme } from "@/engine/economy/shop";
 import { perkEffects } from "@/engine/player/perks";
-import { candleIntervalMs } from "@/engine/gameLoop";
 import type { GameTuning } from "@/engine/entities/tuning";
 import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
@@ -210,7 +209,6 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
     ? (selectedAssetId as string)
     : game.activeAssets[0]?.id;
   const asset = game.activeAssets.find((a) => a.id === assetId);
-  const candles = assetId ? (game.candles[assetId] ?? []) : [];
   const currentStyle = game.activeStyle.style;
   const unreadNews = game.newsFeed.filter((n) => n.expiresAt > game.gameElapsedMs).length;
   // Стакан — в скальпинге всегда, в остальных стилях только с перком
@@ -298,14 +296,18 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
           >
             <div className="card p-3 h-[clamp(420px,64vh,820px)]">
               <PriceChart
-                candles={candles}
+                assetId={assetId}
                 currentPrice={assetId ? game.prices[assetId] : undefined}
                 symbol={asset?.symbol ?? ""}
+                style={currentStyle}
                 candleColors={candleColors}
-                baseIntervalMs={candleIntervalMs()}
                 drawings={assetId ? (game.drawings[assetId] ?? []) : []}
-                onAddDrawing={(drawing) => assetId && addDrawing(assetId, drawing)}
-                onRemoveDrawing={(id) => assetId && removeDrawing(assetId, id)}
+                onAddDrawing={(drawing) => {
+                  if (assetId) addDrawing(assetId, drawing);
+                }}
+                onRemoveDrawing={(id) => {
+                  if (assetId) removeDrawing(assetId, id);
+                }}
               />
             </div>
 
@@ -328,8 +330,8 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               {perks.tools.screener && (
                 <Screener
                   assets={game.activeAssets}
-                  candles={game.candles}
                   prices={game.prices}
+                  dayChange={game.dayChange}
                   selectedAssetId={assetId}
                   onSelect={setSelectedAssetId}
                 />

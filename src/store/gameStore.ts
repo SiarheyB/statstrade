@@ -31,13 +31,12 @@ import {
 } from "@/engine/player/contracts";
 import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkError } from "@/engine/player/perks";
 import { freshDailyState } from "@/engine/player/dailyTasks";
-import { simulateOffline, type OfflineReport } from "@/engine/offline";
+import { catchUp, type OfflineReport } from "@/engine/offline";
 import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
-import { liveRng } from "@/engine/rng";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
-import { funds as fundsApi, loans as loansApi, syncSnapshot } from "@/lib/game/worldClient";
+import { fetchCandles, fetchQuotes, funds as fundsApi, loans as loansApi, syncSnapshot } from "@/lib/game/worldClient";
 import { traderRankKey } from "@/engine/economy/shop";
 
 const ALL_ASSETS = assetsData as Asset[];
@@ -81,15 +80,27 @@ export function assetIdsForMarkets(markets: AssetClass[]): string[] {
 // админки (tuning.startingBalance) — эта константа остаётся дефолтом движка
 // и точкой отсчёта для метрик портфеля в старых сохранениях.
 export const STARTING_BALANCE = DEFAULT_TUNING.startingBalance;
-// Стартовая цена всех Фазы-1 акций — спека не задаёт её явно (только
-// баз. волатильность/снос), 100 — обычный дефолт для симуляторов такого рода.
-const STARTING_PRICE = 100;
+// Цена до первого ответа сервера — та, с которой инструмент начинал историю.
+// Настоящая придёт с котировками через пару секунд; показывать всё это время
+// «100» у золота и биткоина было бы обманом.
+function seedPrice(asset: Asset): number {
+  return asset.startPrice ?? 100;
+}
 const TICK_INTERVAL_MS = 250; // ~4Hz — плавно на глаз, не грузит вкладку
 const AUTOSAVE_INTERVAL_MS = 60_000; // раздел 12: «каждые 60 секунд реального времени»
 // Синхронизация с общим миром — раз в минуту, тем же ритмом, что автосейв:
 // чаще незачем (в рейтинге сравниваются достижения, а не секунды), реже —
 // и другие игроки видели бы устаревший профиль.
 const WORLD_SYNC_INTERVAL_MS = 60_000;
+// Как часто спрашиваем котировки общего рынка. Четыре секунды — компромисс:
+// цена меняется каждую минуту (свеча минутная), но внутри минуты она тоже
+// живая, и раз в четыре секунды график шевелится достаточно, чтобы терминал
+// не выглядел замершим, а сервер не считает лишнего.
+const QUOTES_INTERVAL_MS = 4_000;
+// Свечи для алго-ботов: им нужна история своего инструмента, чтобы считать
+// сигнал. Раз в минуту — чаще незачем, бар всё равно минутный.
+const BOT_CANDLES_INTERVAL_MS = 60_000;
+const BOT_CANDLES_LIMIT = 80;
 const SAVE_VERSION = "1.0.0-phase1";
 
 function freshAccount(startingBalance = STARTING_BALANCE): Account {
@@ -112,7 +123,7 @@ function freshAccount(startingBalance = STARTING_BALANCE): Account {
 function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
   const activeAssets = ALL_ASSETS.filter((a) => PHASE1_ASSET_IDS.includes(a.id));
   const prices: Record<string, number> = {};
-  for (const a of activeAssets) prices[a.id] = STARTING_PRICE;
+  for (const a of activeAssets) prices[a.id] = seedPrice(a);
   return {
     account: freshAccount(tuning.startingBalance),
     // Партия начинается со спокойного боковика (раздел 3.4), а не с
@@ -129,8 +140,8 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     lastDividendQuarter: 0,
     lifestyle: freshLifestyle(),
     lastUpkeepMonth: 0,
-    activeNews: [],
     newsFeed: [],
+    dayChange: {},
     dayStartEquity: tuning.startingBalance,
     tuning,
     contracts: freshContractState(),
@@ -217,7 +228,7 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
   ]);
   const activeAssets = ALL_ASSETS.filter((a) => requiredIds.has(a.id));
   const prices = { ...save.prices };
-  for (const a of activeAssets) if (prices[a.id] == null) prices[a.id] = STARTING_PRICE;
+  for (const a of activeAssets) if (prices[a.id] == null) prices[a.id] = seedPrice(a);
   return {
     account: save.account,
     // Сохранения до Фазы 3 лежат с NEUTRAL_REGIME (maxDurationDays =
@@ -243,11 +254,10 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     // покупки первой вещи (на investing-ускорении это сотни месяцев —
     // мгновенное обнуление баланса на ровном месте).
     lastUpkeepMonth: save.lastUpkeepMonth ?? Math.floor((save.gameElapsedMs ?? 0) / MONTH_MS),
-    // Активные новости не восстанавливаем: их всплеск волатильности привязан
-    // к игровому времени и к моменту, когда игрок смотрел на график. Лента
-    // (история заголовков) переживает перезагрузку — её и читает UI.
-    activeNews: [],
-    newsFeed: (save.newsFeed ?? []) as NewsEvent[],
+    // Лента новостей общая и живёт на сервере — при загрузке она пустая и
+    // наполняется первым же ответом котировок.
+    newsFeed: [],
+    dayChange: {},
     dayStartEquity: save.dayStartEquity ?? save.account.equity,
     contracts: save.contracts ?? freshContractState(),
     perks: save.perks ?? freshPerkState(),
@@ -305,6 +315,8 @@ interface GameStoreState {
   init: () => Promise<void>;
   /** Настройки баланса из админки — вызывается страницей ДО init(). */
   setTuning: (tuning: GameTuning) => void;
+  /** Забрать свежие котировки общего рынка и разложить их по состоянию. */
+  refreshQuotes: () => Promise<void>;
   startTicking: () => void;
   stopTicking: () => void;
   openPosition: (input: {
@@ -362,6 +374,8 @@ let tickHandle: ReturnType<typeof setInterval> | null = null;
 let lastTickAt = 0;
 let autosaveHandle: ReturnType<typeof setInterval> | null = null;
 let worldSyncHandle: ReturnType<typeof setInterval> | null = null;
+let quotesHandle: ReturnType<typeof setInterval> | null = null;
+let botCandlesHandle: ReturnType<typeof setInterval> | null = null;
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
   status: "loading",
@@ -387,17 +401,92 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     set((s) => ({ game: { ...s.game, tuning } }));
   },
 
+  refreshQuotes: async () => {
+    const { game } = get();
+    const ids = game.activeAssets.map((a) => a.id);
+    const newsSince = game.newsFeed[0]?.timestamp;
+    const data = await fetchQuotes(ids, newsSince ? newsSince + 1 : undefined);
+    if (!data) return;
+
+    const prices: Record<string, number> = { ...game.prices };
+    const dayChange: Record<string, number> = { ...game.dayChange };
+    for (const [assetId, quote] of Object.entries(data.quotes)) {
+      prices[assetId] = quote.price;
+      dayChange[assetId] = quote.dayChangePct;
+    }
+
+    // Новости приходят «свежие сверху»; сливаем с уже показанными и режем
+    // ленту, чтобы она не росла бесконечно за длинную сессию.
+    const incoming: NewsEvent[] = data.news.map((n) => ({
+      id: n.id,
+      timestamp: n.ts,
+      headline: n.headline,
+      affectedAssets: n.assetId ? [n.assetId] : ["*"],
+      affectedSectors: n.sector ? [n.sector] : undefined,
+      impact: n.impact as NewsEvent["impact"],
+      priceShockPct: n.shockPct,
+      volatilityMultiplier: 1,
+      volatilityDurationCandles: 0,
+      expiresAt: n.ts + 60 * 60 * 1000,
+      templateId: n.id,
+    }));
+    const seen = new Set(game.newsFeed.map((n) => n.id));
+    const newsFeed = [...incoming.filter((n) => !seen.has(n.id)), ...game.newsFeed].slice(0, 60);
+
+    set((s) => ({
+      game: {
+        ...s.game,
+        prices,
+        dayChange,
+        newsFeed,
+        marketRegime: {
+          ...s.game.marketRegime,
+          type: data.regime.type as MarketRegime["type"],
+          driftModifier: data.regime.driftModifier,
+          volModifier: data.regime.volModifier,
+          daysInRegime: data.regime.daysInRegime,
+        },
+      },
+    }));
+  },
+
   init: async () => {
     const tuning = get().game.tuning ?? DEFAULT_TUNING;
     const save = await loadGame();
     if (save) {
-      // Мир жил и без игрока: прокручиваем симуляцию на время отсутствия
-      // (с потолком в игровых днях — см. engine/offline.ts) и показываем
-      // отчёт. Без этого возвращаться было незачем: закрыл вкладку — время
-      // остановилось.
       const loaded = saveToState(save, tuning);
+      // Догон за время отсутствия. Рынок общий и живёт на сервере, поэтому
+      // «что случилось, пока меня не было» — это не пересимуляция, а факты:
+      // берём исторические свечи своих позиций и смотрим, задело ли стоп.
       const away = Math.max(0, Date.now() - (save.savedAt ?? Date.now()));
-      const { state: advanced, report } = simulateOffline(loaded, away, liveRng());
+      const heldAssets = Array.from(
+        new Set(loaded.account.positions.filter((p) => !p.closedAt).map((p) => p.assetId)),
+      );
+      const quotes = await fetchQuotes(loaded.activeAssets.map((a) => a.id));
+      const prices = { ...loaded.prices };
+      if (quotes) for (const [id, q] of Object.entries(quotes.quotes)) prices[id] = q.price;
+
+      const history: Record<string, Candle[]> = {};
+      if (away > 60_000 && heldAssets.length > 0) {
+        // Минутки за время отсутствия — по ним и проверяем стопы. Больше
+        // суток берём часовыми: точность внутри дня уже не важна, а
+        // тянуть тысячи баров ради этого незачем.
+        const useMinutes = away <= 24 * 60 * 60 * 1000;
+        const bars = Math.min(1200, Math.ceil(away / (useMinutes ? 60_000 : 3_600_000)) + 5);
+        const series = await Promise.all(heldAssets.map((id) => fetchCandles(id, useMinutes ? "1m" : "1h", bars)));
+        heldAssets.forEach((id, i) => {
+          history[id] = series[i]
+            .filter((c) => c.t >= (save.savedAt ?? 0))
+            .map((c) => ({ timestamp: c.t, open: c.o, high: c.h, low: c.l, close: c.c, volume: c.v }));
+        });
+      }
+
+      const { state: advanced, report } = catchUp({ ...loaded, prices }, {
+        history,
+        prices,
+        elapsedMs: away,
+        now: Date.now(),
+      });
       set({
         game: advanced,
         offlineReport: report,
@@ -405,8 +494,8 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
         disclaimerSeen: save.disclaimerSeen,
         status: "ready",
       });
-      // Сразу сохраняем прокрученное состояние: иначе при быстром закрытии
-      // вкладки офлайн-прогресс посчитался бы второй раз от того же savedAt.
+      // Сразу сохраняем догнанное состояние: иначе при быстром закрытии
+      // вкладки те же события применились бы второй раз.
       void get().persistNow();
     } else {
       set({ game: freshState(tuning), onboardingDone: false, disclaimerSeen: false, status: "ready" });
@@ -425,13 +514,49 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const now = performance.now();
       const dtRealMs = now - lastTickAt;
       lastTickAt = now;
-      set((s) => ({ game: gameTick(dtRealMs, s.game, liveRng()) }));
+      set((s) => ({ game: gameTick(dtRealMs, s.game) }));
     }, TICK_INTERVAL_MS);
 
     if (!autosaveHandle) {
       autosaveHandle = setInterval(() => {
         void get().persistNow();
       }, AUTOSAVE_INTERVAL_MS);
+    }
+
+    if (!quotesHandle) {
+      void get().refreshQuotes();
+      quotesHandle = setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        void get().refreshQuotes();
+      }, QUOTES_INTERVAL_MS);
+    }
+
+    if (!botCandlesHandle) {
+      const loadBotCandles = async () => {
+        const { game } = get();
+        const ids = Array.from(new Set(game.bots.filter((b) => b.enabled).map((b) => b.assetId)));
+        if (ids.length === 0) return;
+        const series = await Promise.all(ids.map((id) => fetchCandles(id, "1m", BOT_CANDLES_LIMIT)));
+        set((s) => {
+          const candles = { ...s.game.candles };
+          ids.forEach((id, i) => {
+            candles[id] = series[i].map((c) => ({
+              timestamp: c.t,
+              open: c.o,
+              high: c.h,
+              low: c.l,
+              close: c.c,
+              volume: c.v,
+            }));
+          });
+          return { game: { ...s.game, candles } };
+        });
+      };
+      void loadBotCandles();
+      botCandlesHandle = setInterval(() => {
+        if (typeof document !== "undefined" && document.hidden) return;
+        void loadBotCandles();
+      }, BOT_CANDLES_INTERVAL_MS);
     }
 
     if (!worldSyncHandle) {
@@ -457,6 +582,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     if (worldSyncHandle) {
       clearInterval(worldSyncHandle);
       worldSyncHandle = null;
+    }
+    if (quotesHandle) {
+      clearInterval(quotesHandle);
+      quotesHandle = null;
+    }
+    if (botCandlesHandle) {
+      clearInterval(botCandlesHandle);
+      botCandlesHandle = null;
     }
   },
 
@@ -564,7 +697,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       const prices = { ...s.game.prices };
       const candles = { ...s.game.candles };
       for (const a of missing) {
-        prices[a.id] = STARTING_PRICE;
+        prices[a.id] = seedPrice(a);
         candles[a.id] = [];
       }
       return {

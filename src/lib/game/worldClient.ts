@@ -160,6 +160,64 @@ export const loans = {
   repay: (loanId: string) => post<{ paid: number }>("/api/game/loans", { action: "repay", loanId }),
 };
 
+// ── Рынок ─────────────────────────────────────────────────────────────────
+// Цены и свечи приходят с сервера: рынок общий, история лежит в базе.
+
+export interface ServerQuote {
+  price: number;
+  dayChangePct: number;
+}
+
+export interface ServerNews {
+  id: string;
+  ts: number;
+  assetId: string | null;
+  sector: string | null;
+  impact: string;
+  headline: string;
+  shockPct: number;
+}
+
+export interface QuotesResponse {
+  now: number;
+  quotes: Record<string, ServerQuote>;
+  news: ServerNews[];
+  regime: { type: string; daysInRegime: number; driftModifier: number; volModifier: number };
+}
+
+export async function fetchQuotes(assetIds: string[], newsSince?: number): Promise<QuotesResponse | null> {
+  if (assetIds.length === 0) return null;
+  try {
+    const params = new URLSearchParams({ assets: assetIds.join(",") });
+    if (newsSince) params.set("newsSince", String(newsSince));
+    const res = await fetch(`/api/game/quotes?${params.toString()}`);
+    if (!res.ok) return null;
+    return (await res.json()) as QuotesResponse;
+  } catch {
+    return null;
+  }
+}
+
+export interface ServerCandle {
+  t: number;
+  o: number;
+  h: number;
+  l: number;
+  c: number;
+  v: number;
+}
+
+export async function fetchCandles(assetId: string, tf: string, limit: number): Promise<ServerCandle[]> {
+  try {
+    const res = await fetch(`/api/game/candles?assetId=${encodeURIComponent(assetId)}&tf=${encodeURIComponent(tf)}&limit=${limit}`);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { candles?: ServerCandle[] };
+    return data.candles ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export const funds = {
   create: (name: string, motto: string, feePct: number) =>
     post<{ id: string; cost: number }>("/api/game/funds", { action: "create", name, motto, feePct }),

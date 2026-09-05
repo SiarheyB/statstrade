@@ -1,10 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { candleIntervalMs, checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { checkStopConditions, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
 import { freshLifestyle } from "@/engine/economy/shop";
 import { DEFAULT_TUNING } from "@/engine/entities/tuning";
 import { freshContractState } from "@/engine/player/contracts";
 import { freshPerkState } from "@/engine/player/perks";
-import { makeRegime } from "@/engine/market/marketRegime";
 import { NEUTRAL_REGIME } from "@/engine/entities/types";
 import type { Account, Asset, Position } from "@/engine/entities/types";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -53,8 +52,8 @@ function makeState(overrides: Partial<GameState> = {}): GameState {
     lastDividendQuarter: 0,
     lifestyle: freshLifestyle(),
     lastUpkeepMonth: 0,
-    activeNews: [],
     newsFeed: [],
+    dayChange: {},
     dayStartEquity: 10_000,
     tuning: DEFAULT_TUNING,
     contracts: freshContractState(),
@@ -114,72 +113,14 @@ describe("checkStopConditions", () => {
 });
 
 describe("gameTick", () => {
-  it("двигает игровое время вровень с реальным и обновляет цену активного актива", () => {
+  // Цены здесь больше не рождаются: рынок общий и живёт на сервере, тик
+  // только применяет пришедшие котировки к счёту. Генерация цен, свечей,
+  // новостей и режимов проверяется в src/lib/game/__tests__/marketGen.test.ts.
+  it("двигает игровое время вровень с реальным, не трогая цены", () => {
     const state = makeState();
-    const rng = mulberry32(1);
-    const next = gameTick(1000, state, rng); // 1 реальная секунда = 1 игровая
+    const next = gameTick(1000, state);
     expect(next.gameElapsedMs).toBe(1000);
-    expect(next.prices[asset.id]).not.toBe(100);
-    expect(next.prices[asset.id]).toBeGreaterThan(0);
-  });
-
-  it("копит свечи в минутные бакеты, не создавая лишних баров внутри одного", () => {
-    let state = makeState();
-    const rng = mulberry32(2);
-    // Время идёт вровень с реальным: свеча — ровно одна минута жизни.
-    const interval = candleIntervalMs();
-    expect(interval).toBe(60_000);
-    state = gameTick(200, state, rng);
-    state = gameTick(200, state, rng); // те же 0.4 секунды — тот же бакет
-    expect(state.candles[asset.id].length).toBe(1);
-    expect(state.candles[asset.id][0].timestamp).toBeLessThan(interval);
-    state = gameTick(3 * 60 * 1000, state, rng); // +3 минуты — новые бакеты
-    expect(state.candles[asset.id].length).toBeGreaterThan(1);
-    expect(state.candles[asset.id].length).toBeLessThanOrEqual(500);
-  });
-
-  // Регрессия того же места с обратной стороны: длинный шаг (офлайн-прогресс
-  // перескакивает часы за один вызов) добавляет ОДНУ свечу за шаг, а не
-  // заполняет каждый пропущенный бакет — история остаётся связной, но
-  // редеет. Это осознанный размен: заполнять минутками неделю отсутствия
-  // значит держать в памяти десять тысяч баров ради истории, которую всё
-  // равно обрежет MAX_CANDLES_PER_ASSET.
-  it("длинный шаг добавляет одну свечу, а не тысячу пустых", () => {
-    let state = makeState();
-    const rng = mulberry32(21);
-    for (let i = 0; i < 10; i++) state = gameTick(60 * 60 * 1000, state, rng); // 10 шагов по часу
-    const candles = state.candles[asset.id];
-    expect(candles.length).toBe(10);
-    // И они идут строго по возрастанию времени — график не «двоится».
-    for (let i = 1; i < candles.length; i++) {
-      expect(candles[i].timestamp).toBeGreaterThan(candles[i - 1].timestamp);
-    }
-  });
-
-  // Регрессия: два независимых тикера на одном источнике (вторая вкладка,
-  // либо в деве — осиротевший setInterval от предыдущей версии модуля после
-  // Fast Refresh) могли записать в state.candles бакет со временем МЕНЬШЕ
-  // уже сохранённого — массив переставал быть отсортированным по времени,
-  // и график рисовал "две дорожки" одна поверх другой.
-  it("не добавляет свечу с бакетом раньше уже существующего (защита от отката времени назад)", () => {
-    let state = makeState();
-    const rng = mulberry32(20);
-    state = gameTick(5000, state, rng); // копим нормальную историю вперёд
-    state = gameTick(5000, state, rng);
-    const before = state.candles[asset.id];
-    const lastTimestamp = before[before.length - 1].timestamp;
-    // Тик с отрицательным dtRealMs — единственный способ извне заставить
-    // gameElapsedMs (и, соответственно, бакет) уйти назад; в реальной игре
-    // так не бывает (dtRealMs = perfomance.now() diff, всегда ≥0), но
-    // защита должна держаться и на этом крайнем случае.
-    state = gameTick(-100_000, state, rng);
-    const after = state.candles[asset.id];
-    // Либо длина не изменилась (бакет отклонён), либо новый бакет всё равно
-    // не раньше последнего уже существующего — в любом случае убывания нет.
-    expect(after[after.length - 1].timestamp).toBeGreaterThanOrEqual(lastTimestamp);
-    for (let i = 1; i < after.length; i++) {
-      expect(after[i].timestamp).toBeGreaterThan(after[i - 1].timestamp);
-    }
+    expect(next.prices[asset.id]).toBe(state.prices[asset.id]);
   });
 
   it("закрывает позицию по SL и возвращает на баланс резерв + realizedPnl (без утечки денег)", () => {
@@ -201,8 +142,7 @@ describe("gameTick", () => {
       account: makeAccount({ balance: balanceAfterOpen, positions: [position] }),
       prices: { [asset.id]: 85 }, // уже ниже стопа — сработает немедленно
     });
-    const rng = mulberry32(3);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     const closed = next.account.positions.find((p) => p.id === "p1")!;
     expect(closed.closedAt).toBeDefined();
     // (90-100)*10 - fees, fees = (100*10 + 90*10) * commissionRate(day=0.0008) = 1.52
@@ -231,8 +171,7 @@ describe("gameTick", () => {
       account: makeAccount({ positions: [position] }),
       prices: { [asset.id]: 100 },
     });
-    const rng = mulberry32(4);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     const still = next.account.positions.find((p) => p.id === "p1")!;
     expect(still.closedAt).toBeUndefined();
   });
@@ -253,8 +192,7 @@ describe("gameTick", () => {
       account: makeAccount({ balance: 9100, positions: [position] }),
       prices: { [asset.id]: 100 },
     });
-    const rng = mulberry32(5);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     const p = next.account.positions[0];
     const price = next.prices[asset.id];
     const unrealized = p.closedAt ? 0 : (price - p.entryPrice) * p.size * p.leverage - p.fees;
@@ -285,9 +223,8 @@ describe("gameTick", () => {
       account: makeAccount({ balance: 9900, positions: [closedPosition] }),
       prices: { [asset.id]: 90 },
     });
-    const rng = mulberry32(6);
     for (let i = 0; i < 20; i++) {
-      state = gameTick(1000, state, rng);
+      state = gameTick(1000, state);
       expect(state.account.equity).toBe(state.account.balance);
     }
   });
@@ -312,8 +249,7 @@ describe("ликвидация (раздел 4.2, интеграция в gameTi
       account: makeAccount({ balance: 10000 - requiredMargin, positions: [position] }),
       prices: { [asset.id]: 85 }, // ниже ликвидационной цены
     });
-    const rng = mulberry32(7);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     const closed = next.account.positions.find((p) => p.id === "p1")!;
     expect(closed.closedAt).toBeDefined();
     expect(closed.closePrice).toBeCloseTo(90.5, 1); // ликвидационная цена, не 85 и не 50 (SL)
@@ -336,8 +272,7 @@ describe("ликвидация (раздел 4.2, интеграция в gameTi
       account: makeAccount({ balance: 9000, positions: [position] }),
       prices: { [asset.id]: 85 },
     });
-    const rng = mulberry32(8);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     const closed = next.account.positions.find((p) => p.id === "p1")!;
     expect(closed.closePrice).toBe(90); // закрылось по SL, не по (недостижимой) ликвидации
   });
@@ -358,8 +293,7 @@ describe("ликвидация (раздел 4.2, интеграция в gameTi
       account: makeAccount({ balance: 9800, positions: [position] }),
       prices: { [asset.id]: 100 },
     });
-    const rng = mulberry32(9);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     expect(next.account.marginUsed).toBeCloseTo(200, 5);
     expect(next.account.marginLevel).toBeCloseTo((next.account.equity / 200) * 100, 5);
   });
@@ -383,15 +317,13 @@ describe("прогрессия (раздел 4.5, интеграция в gameTi
       account: makeAccount({ balance: 9000, positions: [position], skills: {} }),
       prices: { [asset.id]: 110 },
     });
-    const rng = mulberry32(10);
-    const next = gameTick(1, state, rng);
+    const next = gameTick(1, state);
     expect(next.account.skills.day).toBeDefined();
     expect(next.account.skills.day.xp + next.account.skills.day.level).toBeGreaterThan(0);
   });
 
   it("опыт копится за несколько сделок подряд, а не перезаписывается", () => {
     let state = makeState({ account: makeAccount({ balance: 10000, skills: {} }) });
-    const rng = mulberry32(11);
     for (let i = 0; i < 3; i++) {
       state = {
         ...state,
@@ -415,7 +347,7 @@ describe("прогрессия (раздел 4.5, интеграция в gameTi
         },
         prices: { [asset.id]: state.prices[asset.id] + 5 },
       };
-      state = gameTick(1, state, rng);
+      state = gameTick(1, state);
     }
     // 3 закрытые прибыльные сделки — суммарный опыт больше, чем от одной.
     const afterThree = state.account.skills.day.level * 1000 + state.account.skills.day.xp;
@@ -429,12 +361,11 @@ describe("прогрессия (раздел 4.5, интеграция в gameTi
 // комиссии/спред слишком высоки относительно волатильности актива.
 describe("balance sanity (упрощённый Monte Carlo, раздел 25)", () => {
   it("случайный трейдер переживает разумное число тиков без немедленного банкротства", () => {
-    const rng = mulberry32(123);
     let state = makeState({ account: makeAccount({ balance: 10000 }) });
     let bankruptAtTick: number | null = null;
     const TICKS = 500;
     for (let i = 0; i < TICKS; i++) {
-      state = gameTick(1000, state, rng);
+      state = gameTick(1000, state);
       if (state.account.equity <= 0) {
         bankruptAtTick = i;
         break;
@@ -480,123 +411,13 @@ describe("расход на образ жизни (раздел 13)", () => {
   });
 });
 
-describe("рыночные режимы и новости (Фаза 3)", () => {
-  // Тот же сид и тот же стартовый набор — разница в итоговой цене может быть
-  // только из-за режима. Нужен актив с НЕнулевым baseDrift: сверху лежит
-  // asset с drift 0, а driftModifier режима — множитель, и на нуле любой
-  // режим дал бы одинаковый снос.
-  const trending: Asset = { ...asset, baseDrift: 0.1 };
-
-  function priceAfter(regimeType: "bull" | "crisis", seed: number): number {
-    let next = makeState({
-      marketRegime: makeRegime(regimeType, 1),
-      activeAssets: [trending],
-      prices: { [trending.id]: 100 },
-    });
-    const rng = mulberry32(seed);
-    // Шагаем часами: время теперь реальное, и на секундных шагах разница
-    // между режимами тонет в шуме округления до тика цены.
-    for (let i = 0; i < 240; i++) next = gameTick(60 * 60 * 1000, next, rng);
-    return next.prices[trending.id];
-  }
-
-  function median(values: number[]): number {
-    const sorted = [...values].sort((a, b) => a - b);
-    return sorted[Math.floor(sorted.length / 2)];
-  }
-
-  it("бычий режим уводит цену выше кризисного (медиана по 21 сиду)", () => {
-    // Сравниваем медианы, а не одну серию: у кризиса волатильность втрое
-    // выше, и отдельная траектория может улететь куда угодно — это и есть
-    // кризис, а не поломка теста.
-    const seeds = Array.from({ length: 21 }, (_, i) => i + 1);
-    const bull = median(seeds.map((s) => priceAfter("bull", s)));
-    const crisis = median(seeds.map((s) => priceAfter("crisis", s)));
-    expect(bull).toBeGreaterThan(crisis);
-    expect(crisis).toBeLessThan(100); // кризис в среднем именно роняет рынок
-  });
-
-  it("новость попадает в ленту и двигает цену затронутой бумаги", () => {
-    // Гоняем, пока генератор не выдаст новость (частота ~1.5 в игровой день).
-    let state = makeState();
-    const rng = mulberry32(2);
-    let ticks = 0;
-    while (state.newsFeed.length === 0 && ticks < 5_000) {
-      state = gameTick(1000, state, rng);
-      ticks++;
-    }
-    expect(state.newsFeed.length).toBeGreaterThan(0);
-    const news = state.newsFeed[0];
-    expect(news.headline).not.toContain("{");
-    expect(news.expiresAt).toBeGreaterThan(news.timestamp);
-  });
-
-  it("лента не растёт бесконечно", () => {
-    let state = makeState();
-    const rng = mulberry32(4);
-    // investing-ускорение: новости сыплются гораздо быстрее реального времени.
-    const investing = { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing };
-    state = investing;
-    for (let i = 0; i < 3_000; i++) state = gameTick(250, state, rng);
-    expect(state.newsFeed.length).toBeLessThanOrEqual(50);
-  });
-
-  it("активы одной группы корреляции ходят вместе чаще, чем врозь", () => {
-    const sibling: Asset = { ...asset, id: "STK_SIBLING", symbol: "SIB" };
-    const stranger: Asset = { ...asset, id: "STK_STRANGER", symbol: "STR", correlationGroup: "energy_stocks" };
-    let state = makeState({
-      activeAssets: [asset, sibling, stranger],
-      prices: { [asset.id]: 100, [sibling.id]: 100, [stranger.id]: 100 },
-      // Боковик с минимальным сносом: смотрим на шум, а не на общий тренд.
-      marketRegime: makeRegime("sideways", 1),
-    });
-    const rng = mulberry32(12);
-    let sameGroupAgree = 0;
-    let otherGroupAgree = 0;
-    let prev = state.prices;
-    for (let i = 0; i < 400; i++) {
-      state = gameTick(1000, state, rng);
-      const d1 = Math.sign(state.prices[asset.id] - prev[asset.id]);
-      const d2 = Math.sign(state.prices[sibling.id] - prev[sibling.id]);
-      const d3 = Math.sign(state.prices[stranger.id] - prev[stranger.id]);
-      if (d1 !== 0 && d1 === d2) sameGroupAgree++;
-      if (d1 !== 0 && d1 === d3) otherGroupAgree++;
-      prev = state.prices;
-    }
-    expect(sameGroupAgree).toBeGreaterThan(otherGroupAgree);
-  });
-});
-
 describe("настройки баланса из админки (tuning)", () => {
-  it("newsPerGameDay = 0 полностью выключает новости", () => {
-    let state = makeState({ tuning: { ...DEFAULT_TUNING, newsPerGameDay: 0 } });
-    const rng = mulberry32(8);
-    for (let i = 0; i < 2_000; i++) state = gameTick(250, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, rng);
-    expect(state.newsFeed).toEqual([]);
-  });
-
   it("множитель расходов масштабирует списание за образ жизни", () => {
     const lifestyle = { ...freshLifestyle(), ownedItemIds: ["life_studio"] }; // 900/мес
     const state = makeState({ lifestyle, account: makeAccount({ balance: 10_000 }), tuning: { ...DEFAULT_TUNING, upkeepMultiplier: 0.5 } });
     const dtRealMs = MONTH_MS / TRADING_STYLE_CONFIGS.investing.timeAcceleration;
     const next = gameTick(dtRealMs, { ...state, activeStyle: TRADING_STYLE_CONFIGS.investing }, mulberry32(9));
     expect(next.account.balance).toBe(10_000 - 450);
-  });
-
-  it("множитель волатильности расширяет размах цены", () => {
-    function spread(volatilityMultiplier: number): number {
-      let state = makeState({ tuning: { ...DEFAULT_TUNING, volatilityMultiplier, newsPerGameDay: 0 } });
-      const rng = mulberry32(21);
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (let i = 0; i < 500; i++) {
-        state = gameTick(1000, state, rng);
-        lo = Math.min(lo, state.prices[asset.id]);
-        hi = Math.max(hi, state.prices[asset.id]);
-      }
-      return hi - lo;
-    }
-    expect(spread(2)).toBeGreaterThan(spread(0.5));
   });
 
   it("множитель опыта ускоряет прокачку", () => {
@@ -618,7 +439,7 @@ describe("настройки баланса из админки (tuning)", () =>
         prices: { [asset.id]: 94 }, // ниже стопа — закроется на этом же тике
         tuning: { ...DEFAULT_TUNING, xpMultiplier },
       });
-      const next = gameTick(250, state, mulberry32(2));
+      const next = gameTick(250, state);
       return next.account.skills.day?.xp ?? 0;
     }
     expect(xpAfterClose(2)).toBeGreaterThan(xpAfterClose(1));

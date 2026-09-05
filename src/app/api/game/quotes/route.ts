@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
-import { readNews, readQuotes } from "@/lib/game/marketStore";
+import { readNews, readQuotes, readRegime } from "@/lib/game/marketStore";
 
 export const dynamic = "force-dynamic";
 
@@ -24,12 +24,13 @@ export async function GET(req: Request) {
     const assets = (url.searchParams.get("assets") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, MAX_ASSETS);
     const since = Number(url.searchParams.get("newsSince") ?? 0);
 
-    const [quotes, news] = await Promise.all([
+    const [quotes, news, regime] = await Promise.all([
       readQuotes(assets),
-      readNews(Number.isFinite(since) && since > 0 ? since : Date.now() - 6 * 60 * 60 * 1000, 40),
+      readNews(Number.isFinite(since) && since > 0 ? since : Date.now() - 24 * 60 * 60 * 1000, 40),
+      readRegime(),
     ]);
 
-    return NextResponse.json({ now: Date.now(), quotes, news });
+    return NextResponse.json({ now: Date.now(), quotes, news, regime });
   } catch (err) {
     return serverError((err as Error).message);
   }

@@ -4,24 +4,37 @@
 // строке переключает график на инструмент — иначе от списка мало толку.
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
-import { screenAssets } from "@/engine/market/screener";
-import type { Asset, Candle } from "@/engine/entities/types";
+import type { Asset } from "@/engine/entities/types";
 
 export default function Screener({
   assets,
-  candles,
   prices,
+  dayChange,
   selectedAssetId,
   onSelect,
 }: {
   assets: Asset[];
-  candles: Record<string, Candle[]>;
   prices: Record<string, number>;
+  // Изменение за день считает сервер: рынок общий, и «что движется» у всех
+  // одинаково. Раньше это считалось по локальным свечам, которых у каждого
+  // игрока были свои.
+  dayChange: Record<string, number>;
   selectedAssetId: string | undefined;
   onSelect: (assetId: string) => void;
 }) {
   const { t } = useI18n();
-  const rows = screenAssets(assets, candles, prices).slice(0, 12);
+  const rows = assets
+    .map((asset) => ({
+      assetId: asset.id,
+      symbol: asset.symbol,
+      price: prices[asset.id] ?? 0,
+      changePct: dayChange[asset.id] ?? 0,
+    }))
+    .filter((row) => row.price > 0)
+    // Сортировка по модулю движения: скринер показывает, где движение, а не
+    // кто в плюсе — падение на 5% интереснее роста на 0.1%.
+    .sort((a, b) => Math.abs(b.changePct) - Math.abs(a.changePct))
+    .slice(0, 12);
 
   return (
     <div className="card p-3">

@@ -28,7 +28,7 @@
 // Слушатели мыши/колеса навешаны ОДИН раз (эффект без зависимостей) и не
 // перевешиваются на каждый тик игры — иначе драг рвался бы посреди
 // перетаскивания. Функция отрисовки живёт в redrawRef.
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Eraser, Maximize2, Minus, Minus as LevelIcon, MousePointer2, Plus, Radio, Square, TrendingUp } from "lucide-react";
 import {
   CHART_COLORS,
@@ -45,51 +45,74 @@ import {
   type PlotLayout,
 } from "@/lib/candlestickChart";
 import { ema, rsi, sma } from "@/engine/market/indicators";
-import type { Candle as EngineCandle, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
-import { fmtGameClock, fmtGameDuration } from "@/lib/gameTime";
+import type { GameDrawing, GameDrawingKind } from "@/engine/entities/types";
+import { fetchCandles } from "@/lib/game/worldClient";
 import { useI18n } from "@/lib/i18n/provider";
+
+type Bar = ChartCandle & { v: number };
 
 // Сортируем защитно: проекция времени и drawCandlesticks предполагают строго
 // возрастающий порядок и молча рисуют мусор, если это не так.
-function toChartCandles(candles: EngineCandle[]): (ChartCandle & { v: number })[] {
-  return [...candles]
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .map((c) => ({ t: c.timestamp, o: c.open, h: c.high, l: c.low, c: c.close, v: c.volume }));
-}
-
-/** Склейка базовых свечей по `factor` штук в одну (таймфрейм графика). */
-export function aggregateCandles(
-  candles: (ChartCandle & { v: number })[],
-  baseIntervalMs: number,
-  factor: number,
-): (ChartCandle & { v: number })[] {
-  if (factor <= 1 || candles.length === 0) return candles;
-  const bucketMs = baseIntervalMs * factor;
-  const out: (ChartCandle & { v: number })[] = [];
-  let current: (ChartCandle & { v: number }) | null = null;
-  let currentBucket = NaN;
-  for (const k of candles) {
-    const bucket = Math.floor(k.t / bucketMs) * bucketMs;
-    if (!current || bucket !== currentBucket) {
-      if (current) out.push(current);
-      current = { t: bucket, o: k.o, h: k.h, l: k.l, c: k.c, v: k.v };
-      currentBucket = bucket;
-      continue;
-    }
-    current.h = Math.max(current.h, k.h);
-    current.l = Math.min(current.l, k.l);
-    current.c = k.c;
-    current.v += k.v;
-  }
-  if (current) out.push(current);
-  return out;
+function sortBars(bars: Bar[]): Bar[] {
+  return [...bars].sort((a, b) => a.t - b.t);
 }
 
 type View = { t0: number; t1: number; y0: number; y1: number };
 type Tool = "cursor" | "trend" | "level" | "rect" | "erase";
 type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
 
-const TF_FACTORS = [1, 5, 15, 60];
+// Набор таймфреймов зависит от стиля: скальперу дневной график не нужен, а
+// инвестору минутный бесполезен. Раньше список был один на всех, и в
+// дейтрейдинге не было ни дневного, ни недельного — «проанализировать день»
+// было нечем.
+export const TF_BY_STYLE: Record<string, string[]> = {
+  scalping: ["1m", "5m", "15m", "1h"],
+  day: ["1m", "5m", "15m", "1h", "4h", "1d"],
+  swing: ["15m", "1h", "4h", "1d", "1w"],
+  investing: ["1h", "4h", "1d", "1w", "1M"],
+};
+export const DEFAULT_TF_BY_STYLE: Record<string, string> = {
+  scalping: "1m",
+  day: "5m",
+  swing: "1h",
+  investing: "1d",
+};
+
+/**
+ * Подпись на оси времени. Игровое время идёт вровень с реальным, а свечи
+ * приходят с сервера с настоящими метками — поэтому и подписи настоящие:
+ * внутри дня часы и минуты, на дневном и выше — дата.
+ */
+export function fmtChartTime(ms: number, stepMs: number): string {
+  const date = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (stepMs >= 7 * 24 * 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${String(date.getFullYear()).slice(2)}`;
+  if (stepMs >= 24 * 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}`;
+  if (stepMs >= 60 * 60_000) return `${pad(date.getDate())}.${pad(date.getMonth() + 1)} ${pad(date.getHours())}:00`;
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+export const TF_MS: Record<string, number> = {
+  "1m": 60_000,
+  "5m": 5 * 60_000,
+  "15m": 15 * 60_000,
+  "1h": 60 * 60_000,
+  "4h": 4 * 60 * 60_000,
+  "1d": 24 * 60 * 60_000,
+  "1w": 7 * 24 * 60 * 60_000,
+  "1M": 30 * 24 * 60 * 60_000,
+};
+
+const TF_LABEL: Record<string, string> = {
+  "1m": "1м",
+  "5m": "5м",
+  "15m": "15м",
+  "1h": "1ч",
+  "4h": "4ч",
+  "1d": "1д",
+  "1w": "1н",
+  "1M": "1мес",
+};
 const DEFAULT_VISIBLE_CANDLES = 260;
 const MIN_VISIBLE_CANDLES = 8;
 const MAX_VISIBLE_CANDLES = 1200;
@@ -111,20 +134,22 @@ const TOOLS: { id: Tool; Icon: typeof MousePointer2 }[] = [
 ];
 
 export default function PriceChart({
-  candles,
+  assetId,
   currentPrice,
   symbol,
+  style,
   candleColors,
-  baseIntervalMs,
   drawings,
   onAddDrawing,
   onRemoveDrawing,
 }: {
-  candles: EngineCandle[];
+  assetId: string | undefined;
   currentPrice: number | undefined;
   symbol: string;
+  // Стиль торговли определяет набор таймфреймов: скальперу дневной график не
+  // нужен, инвестору минутный бесполезен.
+  style: string;
   candleColors?: { up: string; down: string };
-  baseIntervalMs: number;
   drawings: GameDrawing[];
   onAddDrawing: (drawing: GameDrawing) => void;
   onRemoveDrawing: (id: string) => void;
@@ -133,20 +158,37 @@ export default function PriceChart({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const [tfFactor, setTfFactor] = useState(1);
+  const timeframes = TF_BY_STYLE[style] ?? TF_BY_STYLE.day;
+  const [tfState, setTf] = useState(() => DEFAULT_TF_BY_STYLE[style] ?? "5m");
+  // Смена стиля меняет набор таймфреймов. Если текущий в новый набор не
+  // входит, подставляем разумный по умолчанию прямо при рендере — эффект
+  // здесь дал бы лишний кадр с пустым графиком.
+  const tf = timeframes.includes(tfState) ? tfState : (DEFAULT_TF_BY_STYLE[style] ?? timeframes[0]);
+  const [bars, setBars] = useState<Bar[]>([]);
   const [following, setFollowing] = useState(true);
   const [tool, setTool] = useState<Tool>("cursor");
   const [showMa, setShowMa] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [showRsi, setShowRsi] = useState(false);
 
-  const candlesRef = useRef(candles);
+  // Между запросами последний бар «дышит» вслед за котировкой: иначе график
+  // замирает на пятнадцать секунд, хотя цена в шапке меняется. Считаем это
+  // при рендере — состояние тут заводить не за чем, значение производное.
+  const liveBars = useMemo(() => {
+    if (currentPrice == null || bars.length === 0) return bars;
+    const last = bars[bars.length - 1];
+    if (last.c === currentPrice) return bars;
+    return [
+      ...bars.slice(0, -1),
+      { ...last, c: currentPrice, h: Math.max(last.h, currentPrice), l: Math.min(last.l, currentPrice) },
+    ];
+  }, [bars, currentPrice]);
+
+  const candlesRef = useRef<Bar[]>(liveBars);
   const priceRef = useRef(currentPrice);
   const symbolRef = useRef(symbol);
   const tRef = useRef(t);
   const colorsRef = useRef(candleColors);
-  const tfRef = useRef(tfFactor);
-  const baseIntervalRef = useRef(baseIntervalMs);
   const drawingsRef = useRef(drawings);
   const toolRef = useRef(tool);
   const addRef = useRef(onAddDrawing);
@@ -155,16 +197,13 @@ export default function PriceChart({
 
   const viewRef = useRef<View | null>(null);
   const layoutRef = useRef<PlotLayout | null>(null);
-  const stepRef = useRef(baseIntervalMs);
+  const stepRef = useRef(TF_MS[tf] ?? 60_000);
   const hoverRef = useRef<{ mx: number; my: number } | null>(null);
   const dragRef = useRef<{ mode: DragMode; mx: number; my: number; startView: View } | null>(null);
   const draftRef = useRef<GameDrawing | null>(null);
   const redrawRef = useRef<() => void>(() => {});
 
-  const visibleCandles = useCallback(
-    () => aggregateCandles(toChartCandles(candlesRef.current), baseIntervalRef.current, tfRef.current),
-    [],
-  );
+  const visibleCandles = useCallback(() => candlesRef.current, []);
 
   const priceRange = useCallback((all: ChartCandle[], t0: number, t1: number, stepMs: number) => {
     const visible = all.filter((k) => k.t + stepMs >= t0 && k.t <= t1);
@@ -223,11 +262,11 @@ export default function PriceChart({
 
   const materializeView = useCallback((): View => {
     if (viewRef.current) return viewRef.current;
-    const view = followView(visibleCandles(), stepRef.current || baseIntervalRef.current);
+    const view = followView(visibleCandles(), stepRef.current || TF_MS[tf] || 60_000);
     viewRef.current = view;
     setFollowing(false);
     return view;
-  }, [followView, visibleCandles]);
+  }, [followView, visibleCandles, tf]);
 
   const zoomBy = useCallback(
     (factor: number) => {
@@ -253,15 +292,40 @@ export default function PriceChart({
     redrawRef.current();
   }, []);
 
+  // ── Данные: свечи приходят с сервера ────────────────────────────────────
+  //
+  // Раньше график рисовал то, что насчитал сам браузер, — у каждого игрока
+  // был свой рынок и восемь часов истории. Теперь ряд общий, лежит в базе, и
+  // на длинных таймфреймах видно месяцы.
+  useEffect(() => {
+    if (!assetId) return;
+    let alive = true;
+    const load = async () => {
+      const data = await fetchCandles(assetId, tf, 400);
+      if (!alive) return;
+      setBars(data.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })));
+    };
+    void load();
+    // Внутридневные ряды обновляем чаще: там бар живёт минуты. На дневном и
+    // выше перезапрашивать чаще раза в минуту незачем.
+    const period = (TF_MS[tf] ?? 60_000) < 60 * 60 * 1000 ? 15_000 : 60_000;
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      void load();
+    }, period);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [assetId, tf]);
+
   // ── Отрисовка ───────────────────────────────────────────────────────────
   useEffect(() => {
-    candlesRef.current = candles;
+    candlesRef.current = liveBars;
     priceRef.current = currentPrice;
     symbolRef.current = symbol;
     tRef.current = t;
     colorsRef.current = candleColors;
-    tfRef.current = tfFactor;
-    baseIntervalRef.current = baseIntervalMs;
     drawingsRef.current = drawings;
     toolRef.current = tool;
     addRef.current = onAddDrawing;
@@ -295,7 +359,7 @@ export default function PriceChart({
       };
       layoutRef.current = layout;
 
-      const allCandles = aggregateCandles(toChartCandles(candles), baseIntervalMs, tfFactor);
+      const allCandles = sortBars(liveBars);
       if (allCandles.length < 2) {
         ctx.fillStyle = CHART_COLORS.axisTextWeak;
         ctx.font = "12px ui-sans-serif, system-ui";
@@ -305,7 +369,7 @@ export default function PriceChart({
         return;
       }
 
-      const stepMs = allCandles[1].t - allCandles[0].t || baseIntervalMs * tfFactor;
+      const stepMs = allCandles[1].t - allCandles[0].t || TF_MS[tf] || 60_000;
       stepRef.current = stepMs;
 
       const view = viewRef.current ?? followView(allCandles, stepMs);
@@ -334,7 +398,7 @@ export default function PriceChart({
         ctx.moveTo(x, 0);
         ctx.lineTo(x, layout.plotH);
         ctx.stroke();
-        ctx.fillText(fmtGameClock(ms), x, layout.plotH + 16);
+        ctx.fillText(fmtChartTime(ms, stepMs), x, layout.plotH + 16);
       }
       ctx.textAlign = "left";
 
@@ -475,7 +539,7 @@ export default function PriceChart({
         drawPriceCrosshairTag(ctx, invY(hov.my), hov.my, layout);
         const ms = invX(hov.mx);
         const candle = allCandles.find((k) => ms >= k.t && ms < k.t + stepMs);
-        drawTimeCrosshairTag(ctx, fmtGameClock(candle ? candle.t : ms), hov.mx, layout);
+        drawTimeCrosshairTag(ctx, fmtChartTime(candle ? candle.t : ms, stepMs), hov.mx, layout);
         if (candle) {
           drawTooltipBox(
             ctx,
@@ -495,13 +559,12 @@ export default function PriceChart({
     redrawRef.current = draw;
     draw();
   }, [
-    candles,
+    liveBars,
     currentPrice,
     symbol,
     t,
     candleColors,
-    tfFactor,
-    baseIntervalMs,
+    tf,
     followView,
     drawings,
     tool,
@@ -736,17 +799,16 @@ export default function PriceChart({
     <div className="flex h-full w-full flex-col">
       <div className="flex flex-wrap items-center gap-2 px-1 pb-2">
         <div className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5">
-          {TF_FACTORS.map((factor) => (
+          {timeframes.map((code) => (
             <button
-              key={factor}
+              key={code}
               type="button"
-              onClick={() => setTfFactor(factor)}
-              title={t("game.chart.tfHint", { duration: fmtGameDuration(baseIntervalMs * factor) })}
+              onClick={() => setTf(code)}
               className={`px-2.5 py-1 text-xs font-medium rounded-md transition ${
-                tfFactor === factor ? "bg-accent text-white" : "text-muted hover:text-fg"
+                tf === code ? "bg-accent text-white" : "text-muted hover:text-fg"
               }`}
             >
-              {fmtGameDuration(baseIntervalMs * factor)}
+              {TF_LABEL[code] ?? code}
             </button>
           ))}
         </div>

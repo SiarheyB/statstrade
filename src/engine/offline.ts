@@ -1,27 +1,27 @@
-// Офлайн-прогресс: что произошло, пока вкладка была закрыта.
+// Догон за время отсутствия: что случилось со счётом, пока вкладка была
+// закрыта.
 //
-// Это главный крючок браузерных экономических игр — вернуться и увидеть, что
-// без тебя что-то случилось. До этого симуляция стояла: закрыл вкладку в
-// среду, открыл в пятницу — та же свеча, тот же день, разбирать нечего.
+// Раньше здесь заново прокручивалась симуляция цен. Теперь рынок общий и
+// живёт на сервере, поэтому догон — это не «досимулировать», а ПРИМЕНИТЬ
+// то, что на рынке уже произошло: пройти по историческим свечам своих
+// позиций и посмотреть, задело ли стоп или тейк.
 //
-// Три правила, без которых механика превращается в чит или в наказание:
-//
-//   1. Потолок в ИГРОВЫХ днях, а не в реальных часах. На investing (43200x)
-//      двенадцать реальных часов — это 59 игровых ЛЕТ: рынок ушёл бы в
-//      бесконечность, а игрок вернулся бы к руинам. Считаем не больше
-//      MAX_OFFLINE_GAME_DAYS игровых дней, сколько бы человек ни отсутствовал.
-//   2. Число шагов ограничено. Прогонять 172 800 тиков за отсутствие ночью —
-//      это секунды фризов на открытии страницы; берём не больше MAX_STEPS
-//      шагов покрупнее. Для GBM это корректно: процесс непрерывный, шаг
-//      входит в формулу.
-//   3. Позиции живут своей жизнью, и стопы работают. Это не жестокость, а
-//      единственный честный вариант: удержание позиции через ночь — риск, и
-//      именно стоп от него защищает. Игра ровно этому и учит.
-import { gameTick, type GameState } from "@/engine/gameLoop";
+// Так честнее и проще: цена за время отсутствия — объективный факт, одна и
+// та же для всех игроков, а не результат отдельного прогона в одном
+// конкретном браузере.
+import { applyPositionClose, MONTH_MS, type GameState } from "@/engine/gameLoop";
+import { DIVIDEND_PERIOD_MS } from "@/engine/gameLoop";
+import { processQuarterlyDividends } from "@/engine/economy/dividends";
+import { chargeUpkeep, monthlyUpkeep, restFactor } from "@/engine/economy/shop";
+import { evaluateContract, applyContractReward, getContract } from "@/engine/player/contracts";
+import { perkEffects } from "@/engine/player/perks";
+import { recoverOverTime } from "@/engine/player/psychology";
+import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
+import type { Account, Candle } from "@/engine/entities/types";
 
-export const MAX_OFFLINE_GAME_DAYS = 30;
-export const MAX_STEPS = 400;
-const MS_PER_DAY = 24 * 60 * 60 * 1000;
+// Отчёт показываем только после заметного перерыва: «прошло четыре минуты» —
+// это не новость, а раздражение.
+export const MIN_REPORT_MS = 6 * 60 * 60 * 1000;
 
 export interface OfflineReport {
   gameDays: number;
@@ -30,67 +30,171 @@ export interface OfflineReport {
   balanceChange: number;
   tradesClosed: number;
   newsCount: number;
-  contractFinished: string | null; // id завершившегося контракта, если он закрылся без игрока
+  contractFinished: string | null;
 }
 
 export interface OfflineResult {
   state: GameState;
-  // null — либо перерыв был совсем коротким (ничего не считали), либо
-  // недостаточно длинным, чтобы показывать окно (рынок при этом досчитан).
   report: OfflineReport | null;
 }
 
-// Отчёт показываем только после заметного перерыва: «прошло 4 минуты» —
-// это не новость, а раздражение.
-export const MIN_REPORT_GAME_MS = 6 * 60 * 60 * 1000; // 6 часов
+/**
+ * Первая свеча, в которой цена задела уровень. Внутри бара порядок движения
+ * неизвестен, поэтому при попадании и стопа, и тейка в один бар считаем
+ * сработавшим СТОП — так делают все честные тестеры стратегий: считать
+ * иначе значит систематически завышать результат.
+ */
+export function firstTouch(
+  candles: Candle[],
+  side: "long" | "short",
+  stopLoss: number | undefined,
+  takeProfit: number | undefined,
+): { price: number; ts: number } | null {
+  for (const candle of candles) {
+    if (side === "long") {
+      if (stopLoss != null && candle.low <= stopLoss) return { price: stopLoss, ts: candle.timestamp };
+      if (takeProfit != null && candle.high >= takeProfit) return { price: takeProfit, ts: candle.timestamp };
+    } else {
+      if (stopLoss != null && candle.high >= stopLoss) return { price: stopLoss, ts: candle.timestamp };
+      if (takeProfit != null && candle.low <= takeProfit) return { price: takeProfit, ts: candle.timestamp };
+    }
+  }
+  return null;
+}
 
-// А вот СИМУЛИРОВАТЬ надо любой перерыв длиннее полуминуты: время в игре
-// идёт вровень с реальным, и если пропускать короткие отлучки, игровой
-// календарь начнёт отставать от настоящего — день в игре перестанет
-// означать день. Полминуты — порог, ниже которого это просто перезагрузка
-// страницы.
-export const MIN_SIMULATE_MS = 30 * 1000;
+export interface CatchUpInput {
+  /** Свечи по инструментам открытых позиций за время отсутствия. */
+  history: Record<string, Candle[]>;
+  /** Текущие цены с сервера. */
+  prices: Record<string, number>;
+  /** Сколько реального времени прошло с последнего сохранения. */
+  elapsedMs: number;
+  /** Текущий момент — игровое время идёт вровень с реальным. */
+  now: number;
+}
 
 /**
- * Прокручивает симуляцию на время отсутствия. realElapsedMs — сколько
- * реального времени прошло с последнего сохранения.
+ * Применяет к счёту всё, что накопилось за время отсутствия. Мутаций
+ * состояния снаружи нет: возвращается новое.
  */
-export function simulateOffline(state: GameState, realElapsedMs: number, rng: () => number): OfflineResult {
-  if (!(realElapsedMs > 0)) return { state, report: null };
-  const acceleration = state.activeStyle.timeAcceleration;
-  const wantedGameMs = realElapsedMs * acceleration;
-  const cappedGameMs = Math.min(wantedGameMs, MAX_OFFLINE_GAME_DAYS * MS_PER_DAY);
-  if (cappedGameMs < MIN_SIMULATE_MS) return { state, report: null };
+export function catchUp(state: GameState, input: CatchUpInput): OfflineResult {
+  const { history, prices, elapsedMs } = input;
+  if (!(elapsedMs > 0)) return { state, report: null };
 
   const equityBefore = state.account.equity;
   const balanceBefore = state.account.balance;
   const tradesBefore = state.account.journal.length;
-  const newsBefore = state.newsFeed.length;
   const contractBefore = state.contracts.active?.contractId ?? null;
 
-  const steps = Math.min(MAX_STEPS, Math.max(1, Math.round(cappedGameMs / (1000 * acceleration))));
-  const dtRealPerStep = cappedGameMs / acceleration / steps;
+  const perks = perkEffects(state.perks);
+  const account: Account = {
+    ...state.account,
+    positions: [...state.account.positions],
+    journal: [...state.account.journal],
+  };
 
-  let next = state;
-  for (let i = 0; i < steps; i++) next = gameTick(dtRealPerStep, next, rng);
+  const gameElapsedMs = state.gameElapsedMs + elapsedMs;
+  const gameCalendarDay = Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000));
 
-  const contractFinished =
-    contractBefore && next.contracts.active?.contractId !== contractBefore ? contractBefore : null;
+  // 1. Позиции: закрываем те, чей стоп или тейк задело за время отсутствия.
+  for (const position of [...account.positions]) {
+    if (position.closedAt) continue;
+    if (position.stopLoss == null && position.takeProfit == null) continue;
+    const touch = firstTouch(history[position.assetId] ?? [], position.side, position.stopLoss, position.takeProfit);
+    if (!touch) continue;
+    applyPositionClose(
+      account,
+      position,
+      touch.price,
+      TRADING_STYLE_CONFIGS[position.style].commissionRate * perks.commissionMultiplier,
+      0,
+      state.tuning.xpMultiplier * perks.xpMultiplier,
+      gameCalendarDay,
+    );
+  }
 
-  // Короткая отлучка симулируется молча: рынок сходится с реальным временем,
-  // но окном «пока тебя не было» игрока не дёргаем.
-  if (cappedGameMs < MIN_REPORT_GAME_MS) return { state: next, report: null };
+  // 2. Дивиденды и содержание — за каждый пройденный период.
+  let lastDividendQuarter = state.lastDividendQuarter;
+  const currentDividendPeriod = Math.floor(gameElapsedMs / DIVIDEND_PERIOD_MS);
+  while (lastDividendQuarter < currentDividendPeriod) {
+    lastDividendQuarter++;
+    processQuarterlyDividends(
+      account,
+      state.activeAssets,
+      prices,
+      state.tuning.dividendMultiplier * perks.dividendMultiplier,
+    );
+  }
+
+  let lifestyle = state.lifestyle;
+  let lastUpkeepMonth = state.lastUpkeepMonth;
+  const currentMonth = Math.floor(gameElapsedMs / MONTH_MS);
+  const upkeep = monthlyUpkeep(lifestyle) * state.tuning.upkeepMultiplier * perks.upkeepMultiplier;
+  while (lastUpkeepMonth < currentMonth) {
+    lastUpkeepMonth++;
+    if (upkeep > 0) lifestyle = chargeUpkeep(account, lifestyle, upkeep).lifestyle;
+  }
+
+  // 3. Психология отдыхает: за ночь без торговли стресс уходит.
+  account.psychology = recoverOverTime(account.psychology, elapsedMs, restFactor(lifestyle));
+
+  // 4. Пересчёт эквити и проверка контракта по её итогу.
+  let unrealized = 0;
+  let marginUsed = 0;
+  for (const position of account.positions) {
+    if (position.closedAt != null) continue;
+    const price = prices[position.assetId];
+    if (price != null) {
+      const direction = position.side === "long" ? 1 : -1;
+      unrealized += (price - position.entryPrice) * position.size * position.leverage * direction;
+    }
+    marginUsed += (position.entryPrice * position.size) / position.leverage;
+  }
+  account.equity = account.balance + unrealized;
+  account.marginUsed = marginUsed;
+  account.marginLevel = marginUsed > 0 ? (account.equity / marginUsed) * 100 : Infinity;
+
+  const evaluation = evaluateContract(state.contracts, account.equity, gameCalendarDay);
+  let contractPoints = state.contractPoints;
+  let unlockedMarkets = state.unlockedMarkets;
+  if (evaluation.finished?.outcome === "passed") {
+    const contract = getContract(evaluation.finished.contractId);
+    if (contract) {
+      applyContractReward(account, contract);
+      contractPoints += contract.reward.skillPoints;
+      unlockedMarkets = Array.from(new Set([...unlockedMarkets, ...contract.reward.unlockMarkets]));
+    }
+  }
+
+  const next: GameState = {
+    ...state,
+    account,
+    prices,
+    lifestyle,
+    lastUpkeepMonth,
+    lastDividendQuarter,
+    gameElapsedMs,
+    gameCalendarDay,
+    dayStartEquity: account.equity,
+    contracts: evaluation.state,
+    contractPoints,
+    unlockedMarkets,
+    lastContractResult: evaluation.finished ?? state.lastContractResult,
+  };
+
+  if (elapsedMs < MIN_REPORT_MS) return { state: next, report: null };
 
   return {
     state: next,
     report: {
-      gameDays: Math.round(cappedGameMs / MS_PER_DAY),
+      gameDays: Math.round(elapsedMs / (24 * 60 * 60 * 1000)),
       equityBefore,
-      equityAfter: next.account.equity,
-      balanceChange: next.account.balance - balanceBefore,
-      tradesClosed: next.account.journal.length - tradesBefore,
-      newsCount: next.newsFeed.length - newsBefore,
-      contractFinished,
+      equityAfter: account.equity,
+      balanceChange: account.balance - balanceBefore,
+      tradesClosed: account.journal.length - tradesBefore,
+      newsCount: 0, // ленту приносит сервер отдельно
+      contractFinished:
+        contractBefore && evaluation.state.active?.contractId !== contractBefore ? contractBefore : null,
     },
   };
 }

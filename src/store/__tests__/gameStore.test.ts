@@ -327,14 +327,13 @@ describe("setActiveStyle", () => {
     const ids = new Set(useGameStore.getState().game.activeAssets.map((a) => a.id));
     for (const id of PHASE1_ASSET_IDS) expect(ids.has(id)).toBe(true);
     for (const id of INVESTING_ASSET_IDS) expect(ids.has(id)).toBe(true);
-    // Новым активам выставлена стартовая цена и пустая история свечей —
-    // иначе gameTick пропустил бы их (currentPrice == null → continue).
-    // Только те, что ДЕЙСТВИТЕЛЬНО новые: часть INVESTING_ASSET_IDS — те же
-    // 6 акций, что уже активны в Фазе 1 (investing = все акции+облигации),
-    // их prices/candles setActiveStyle не трогает (уже были активны).
+    // Новым активам выставлена стартовая цена инструмента и пустая история
+    // свечей — до первого ответа котировок с сервера. Раньше здесь у всех
+    // стояла сотня, и по графику было не понять, торгуешь ты акцией или
+    // золотом.
     const newlyAdded = INVESTING_ASSET_IDS.filter((id) => !PHASE1_ASSET_IDS.includes(id));
     for (const id of newlyAdded) {
-      expect(useGameStore.getState().game.prices[id]).toBe(100);
+      expect(useGameStore.getState().game.prices[id]).toBeGreaterThan(0);
       expect(useGameStore.getState().game.candles[id]).toEqual([]);
     }
   });

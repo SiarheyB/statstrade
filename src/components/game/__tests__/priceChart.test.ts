@@ -1,76 +1,57 @@
 import { describe, it, expect } from "vitest";
-import { aggregateCandles } from "@/components/game/PriceChart";
-import { fmtGameClock, fmtGameDuration } from "@/lib/gameTime";
+import { DEFAULT_TF_BY_STYLE, fmtChartTime, TF_BY_STYLE, TF_MS } from "@/components/game/PriceChart";
 
-type C = { t: number; o: number; h: number; l: number; c: number; v: number };
+// Склейка свечей переехала на сервер (src/lib/game/marketGen.ts): график
+// теперь получает готовый ряд нужного таймфрейма, а не собирает его сам.
 
-const MIN = 60_000;
-
-function series(): C[] {
-  // 6 минутных свечей подряд
-  return [
-    { t: 0 * MIN, o: 10, h: 12, l: 9, c: 11, v: 100 },
-    { t: 1 * MIN, o: 11, h: 15, l: 10, c: 14, v: 200 },
-    { t: 2 * MIN, o: 14, h: 14, l: 8, c: 9, v: 300 },
-    { t: 3 * MIN, o: 9, h: 11, l: 7, c: 10, v: 50 },
-    { t: 4 * MIN, o: 10, h: 13, l: 10, c: 12, v: 60 },
-    { t: 5 * MIN, o: 12, h: 12, l: 11, c: 11, v: 70 },
-  ];
-}
-
-describe("aggregateCandles", () => {
-  it("на множителе 1 отдаёт исходный ряд", () => {
-    const input = series();
-    expect(aggregateCandles(input, MIN, 1)).toBe(input);
+describe("наборы таймфреймов по стилям", () => {
+  it("у скальпинга только внутридневные, дневного графика там нет", () => {
+    expect(TF_BY_STYLE.scalping).toContain("1m");
+    expect(TF_BY_STYLE.scalping).not.toContain("1d");
+    expect(TF_BY_STYLE.scalping.at(-1)).toBe("1h");
   });
 
-  it("склеивает свечи по OHLC-правилам: open первой, close последней, максимум и минимум по всем", () => {
-    const [first] = aggregateCandles(series(), MIN, 3);
-    // Объём при склейке СУММИРУЕТСЯ: часовая свеча наторговала столько же,
-    // сколько шестьдесят минуток внутри неё.
-    expect(first).toEqual({ t: 0, o: 10, h: 15, l: 8, c: 9, v: 600 });
+  it("у дейтрейдинга есть и минутки, и дневной — день нужно чем-то анализировать", () => {
+    expect(TF_BY_STYLE.day).toContain("1m");
+    expect(TF_BY_STYLE.day).toContain("1d");
   });
 
-  it("делит ряд на бакеты по времени, а не по счётчику: 6 минуток при x3 дают 2 свечи", () => {
-    const out = aggregateCandles(series(), MIN, 3);
-    expect(out).toHaveLength(2);
-    expect(out[1].t).toBe(3 * MIN);
-    expect(out[1].c).toBe(11);
+  it("у свинга и инвестиций есть недельный и месячный горизонт", () => {
+    expect(TF_BY_STYLE.swing).toContain("1w");
+    expect(TF_BY_STYLE.investing).toContain("1M");
+    expect(TF_BY_STYLE.investing).not.toContain("1m");
   });
 
-  it("неполный последний бакет не выбрасывается — это текущая, ещё формирующаяся свеча", () => {
-    const out = aggregateCandles(series().slice(0, 4), MIN, 3);
-    expect(out).toHaveLength(2);
-    expect(out[1]).toEqual({ t: 3 * MIN, o: 9, h: 11, l: 7, c: 10, v: 50 });
+  it("таймфрейм по умолчанию входит в набор своего стиля", () => {
+    for (const style of Object.keys(TF_BY_STYLE)) {
+      expect(TF_BY_STYLE[style]).toContain(DEFAULT_TF_BY_STYLE[style]);
+    }
   });
 
-  it("пропуск в истории не склеивает соседние бакеты в один", () => {
-    const gapped: C[] = [
-      { t: 0, o: 1, h: 1, l: 1, c: 1, v: 1 },
-      { t: 10 * MIN, o: 2, h: 2, l: 2, c: 2, v: 1 },
-    ];
-    const out = aggregateCandles(gapped, MIN, 3);
-    expect(out.map((k) => k.t)).toEqual([0, 9 * MIN]);
-  });
-
-  it("пустой ряд не ломает агрегацию", () => {
-    expect(aggregateCandles([], MIN, 5)).toEqual([]);
+  it("каждый таймфрейм из наборов имеет известную длительность и они возрастают", () => {
+    for (const list of Object.values(TF_BY_STYLE)) {
+      const durations = list.map((tf) => TF_MS[tf]);
+      expect(durations.every((d) => typeof d === "number" && d > 0)).toBe(true);
+      for (let i = 1; i < durations.length; i++) expect(durations[i]).toBeGreaterThan(durations[i - 1]);
+    }
   });
 });
 
-describe("подписи игрового времени", () => {
-  it("длительность свечи подписывается в секундах, минутах, часах или днях", () => {
-    expect(fmtGameDuration(1_000)).toBe("1с");
-    expect(fmtGameDuration(15_000)).toBe("15с");
-    expect(fmtGameDuration(MIN)).toBe("1м");
-    expect(fmtGameDuration(15 * MIN)).toBe("15м");
-    expect(fmtGameDuration(60 * MIN)).toBe("1ч");
-    expect(fmtGameDuration(12 * 60 * MIN)).toBe("12ч");
-    expect(fmtGameDuration(60 * 60 * MIN)).toBe("2.5д");
+describe("подписи на оси времени", () => {
+  const ts = new Date(2026, 8, 5, 14, 37).getTime(); // 5 сентября 2026, 14:37
+
+  it("внутри дня показываются часы и минуты", () => {
+    expect(fmtChartTime(ts, TF_MS["1m"])).toBe("14:37");
+    expect(fmtChartTime(ts, TF_MS["15m"])).toBe("14:37");
   });
 
-  it("часы игрового времени показываются как день + время", () => {
-    expect(fmtGameClock(0)).toBe("Д1 00:00");
-    expect(fmtGameClock(25 * 60 * MIN)).toBe("Д2 01:00");
+  it("на часовых — дата с часом: иначе на длинном окне не понять, какой это день", () => {
+    expect(fmtChartTime(ts, TF_MS["1h"])).toBe("05.09 14:00");
+  });
+
+  it("на дневном — дата, на недельном и выше — с годом", () => {
+    expect(fmtChartTime(ts, TF_MS["1d"])).toBe("05.09");
+    expect(fmtChartTime(ts, TF_MS["1w"])).toBe("05.09.26");
+    expect(fmtChartTime(ts, TF_MS["1M"])).toBe("05.09.26");
   });
 });

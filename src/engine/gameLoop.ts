@@ -1,9 +1,14 @@
-// Главный тик симуляции — раздел 11 спеки. Фаза 1 добавила базовый цикл
-// (цена/SL-TP/equity), Фаза 2 — плечо/маржа/ликвидацию (4.2) и прогрессию
-// (4.5, начисляется в applyPositionClose), Фаза 5 — дивиденды/купоны (4.6,
-// шаг 6), раздел 13 — расход на образ жизни (шаг 6b), Фаза 3 — рыночные
-// режимы (3.4, шаг 1), новости (3.5, шаг 2) и корреляцию активов внутри
-// группы (3.3, внутри шага 3).
+// Главный тик игры.
+//
+// ВАЖНО: цены здесь больше НЕ рождаются. Рынок общий и живёт на сервере
+// (src/lib/game/marketStore.ts) — стор кладёт свежие котировки в state.prices
+// и свечи в state.candles, а тик только применяет их к счёту игрока:
+// стоп/тейк, ликвидации, маржа, дивиденды, содержание, контракты, задания,
+// психология и алго-боты.
+//
+// Так и должно быть: пока цену считал каждый браузер сам, у всех был свой
+// рынок, история умирала вместе с вкладкой, а сравнивать результаты в общем
+// мире было не с чем.
 import type {
   Account,
   Asset,
@@ -33,15 +38,6 @@ import {
 } from "@/engine/player/algoBots";
 import { DEFAULT_MAINTENANCE_MARGIN_RATE } from "@/engine/economy/marginEngine";
 import { DEFAULT_TUNING, type GameTuning } from "@/engine/entities/tuning";
-import { updateMarketRegime } from "@/engine/market/marketRegime";
-import {
-  applyNewsShock,
-  maybeGenerateNews,
-  MAX_NEWS_FEED,
-  newsVolMultipliers,
-  pruneExpiredNews,
-} from "@/engine/market/newsEngine";
-import { randomNormal, simulateTick, tickVolume } from "@/engine/market/priceSimulation";
 import { calculateUnrealizedPnl, settleClose } from "@/engine/economy/pnlCalculator";
 import {
   calculateLiquidationPenalty,
@@ -56,7 +52,6 @@ import { chargeUpkeep, monthlyUpkeep, restFactor } from "@/engine/economy/shop";
 import { applySlippage, applyTradeOutcome, recoverOverTime } from "@/engine/player/psychology";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
-const MS_PER_YEAR = 365 * 24 * 60 * 60 * 1000;
 // Длина одной свечи. Игровое время теперь идёт вровень с реальным, поэтому
 // минутная свеча — это ровно минута жизни: как в настоящем терминале.
 // Формирующаяся свеча при этом обновляется на каждом тике (4 раза в
@@ -86,14 +81,9 @@ export const DIVIDEND_PERIOD_MS = 7 * 24 * 60 * 60 * 1000;
 // расход на образ жизни списывается втрое чаще, чем приходят дивиденды, и это
 // намеренно — содержание должно ощущаться, а не теряться на фоне купонов.
 export const MONTH_MS = 30 * 24 * 60 * 60 * 1000;
-// Корреляция активов внутри одной correlationGroup (раздел 3.3): доля общего
-// шока в шуме каждой бумаги. 0.6 — техи ходят вместе, но не одной линией;
-// при 1 весь сектор превратился бы в один инструмент, при 0 диверсификация
-// по секторам не значила бы ничего (а сводка в DiversificationPanel — врала).
-export const GROUP_CORRELATION = 0.6;
-
 export interface GameState {
   account: Account;
+  // Текущий режим рынка. Считается на сервере: таймлайн общий для всех.
   marketRegime: MarketRegime;
   prices: Record<string, number>;
   candles: Record<string, Candle[]>;
@@ -108,8 +98,10 @@ export interface GameState {
   // результат в шапке терминала. Хранить историю эквити ради одной цифры
   // было бы дороже: снимок обновляется раз в игровой день.
   dayStartEquity: number;
-  activeNews: NewsEvent[]; // новости, чей всплеск волатильности ещё не истёк (раздел 3.5)
-  newsFeed: NewsEvent[]; // лента для UI, новые в начале, до MAX_NEWS_FEED штук
+  // Лента новостей общего мира — её приносит стор вместе с котировками.
+  newsFeed: NewsEvent[];
+  // Изменение за день по инструментам (для скринера) — тоже из котировок.
+  dayChange: Record<string, number>;
   // Настройки баланса из админки. Живут в состоянии, а не в модульной
   // переменной движка: формулы обязаны оставаться чистыми и тестируемыми
   // (раздел 26 — никакого скрытого глобального состояния).
@@ -129,34 +121,6 @@ export interface GameState {
   lastDailyCompleted: DailyTask[];
   bots: AlgoBot[];
   drawings: Record<string, GameDrawing[]>;
-}
-
-function appendPriceToCandles(
-  candles: Candle[],
-  price: number,
-  gameMs: number,
-  intervalMs: number,
-  volume: number,
-): Candle[] {
-  const bucketStart = Math.floor(gameMs / intervalMs) * intervalMs;
-  const last = candles[candles.length - 1];
-  if (last && last.timestamp === bucketStart) {
-    last.high = Math.max(last.high, price);
-    last.low = Math.min(last.low, price);
-    last.close = price;
-    last.volume += volume;
-    return candles;
-  }
-  // Защита от "отката времени назад" — не должно случаться при
-  // gameElapsedMs, монотонно растущем внутри одной вкладки, но на практике
-  // случалось: gameDb.saveGame теперь тоже это блокирует (см. её комментарий),
-  // здесь — вторая линия обороны на случай, если что-то всё же пришло не по
-  // порядку (например, уже испорченное старое сохранение). Молча
-  // игнорируем более старый бакет вместо порчи массива — свечи внутри
-  // одной вкладки должны идти строго по возрастанию времени.
-  if (last && bucketStart < last.timestamp) return candles;
-  const next = [...candles, { timestamp: bucketStart, open: price, high: price, low: price, close: price, volume }];
-  return next.length > MAX_CANDLES_PER_ASSET ? next.slice(next.length - MAX_CANDLES_PER_ASSET) : next;
 }
 
 /**
@@ -304,13 +268,13 @@ function recalculateAccountMetrics(account: Account, prices: Record<string, numb
 
 /**
  * Главный тик. dtRealMs — сколько реального времени прошло с прошлого
- * вызова. rng — источник случайности (сидированный в тестах, Math.random в
- * игре) — обязателен явным параметром для каждой функции движка (раздел 26).
+ * вызова. Источник случайности больше не нужен: всё случайное (цены,
+ * новости, режимы) считает сервер.
  *
  * Шаги псевдокода раздела 11 реализованы полностью, кроме психологии
  * (раздел 4.4) — она остаётся заготовкой типов до своей фазы.
  */
-export function gameTick(dtRealMs: number, state: GameState, rng: () => number): GameState {
+export function gameTick(dtRealMs: number, state: GameState): GameState {
   const tuning = state.tuning ?? DEFAULT_TUNING;
   const perks = perkEffects(state.perks);
   // Перки складываются с настройками админки, а не заменяют их: админ задаёт
@@ -318,58 +282,11 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
   const xpMultiplier = tuning.xpMultiplier * perks.xpMultiplier;
   const maintenanceRate = DEFAULT_MAINTENANCE_MARGIN_RATE * (perks.marginMultiplier - perks.liquidationBuffer);
   const dtGameMs = dtRealMs * state.activeStyle.timeAcceleration;
-  const dtYears = dtGameMs / MS_PER_YEAR;
   const gameElapsedMs = state.gameElapsedMs + dtGameMs;
 
-  const intervalMs = candleIntervalMs(state.activeStyle.timeAcceleration);
-
-  // 1. Рыночный режим (раздел 3.4) — задаёт μ и σ всему рынку на недели
-  // игрового времени вперёд.
-  const marketRegime = updateMarketRegime(state.marketRegime, dtGameMs, rng);
-
-  // 2. Новости (раздел 3.5). Мгновенный скачок применяется к ценам ДО шага
-  // цены: иначе новость успела бы «опоздать» на одну свечу и на графике
-  // выглядела бы как реакция без причины.
-  let prices = { ...state.prices };
-  const fresh = maybeGenerateNews(dtGameMs, state.activeAssets, marketRegime.driftModifier, gameElapsedMs, intervalMs, rng, {
-    perGameDay: tuning.newsPerGameDay,
-    blackSwanWeight: tuning.blackSwanWeight,
-  });
-  const activeNews = pruneExpiredNews(fresh ? [...state.activeNews, fresh] : state.activeNews, gameElapsedMs);
-  const newsFeed = fresh ? [fresh, ...state.newsFeed].slice(0, MAX_NEWS_FEED) : state.newsFeed;
-  if (fresh) prices = applyNewsShock(prices, fresh);
-
-  // 3. Обновить цены активных активов.
-  const candles = { ...state.candles };
-  const assetIds = state.activeAssets.map((a) => a.id);
-  const volMultipliers = newsVolMultipliers(activeNews, gameElapsedMs, assetIds);
-  // Общий шок на группу корреляции (раздел 3.3): активы одного сектора
-  // ходят вместе, а не независимо. Разыгрывается ОДИН раз за тик на группу
-  // и подмешивается к индивидуальному шуму каждой бумаги.
-  const groupZ = new Map<string, number>();
-  for (const asset of state.activeAssets) {
-    if (!groupZ.has(asset.correlationGroup)) groupZ.set(asset.correlationGroup, randomNormal(0, 1, rng));
-  }
-  const idioWeight = Math.sqrt(1 - GROUP_CORRELATION ** 2);
-  for (const asset of state.activeAssets) {
-    const currentPrice = prices[asset.id];
-    if (currentPrice == null) continue;
-    // Сумма коррелированной и независимой части с весами GROUP_CORRELATION и
-    // sqrt(1-p²) сохраняет единичную дисперсию Z — иначе волатильность
-    // «поехала» бы вместе с уровнем корреляции.
-    const z = GROUP_CORRELATION * (groupZ.get(asset.correlationGroup) ?? 0) + idioWeight * randomNormal(0, 1, rng);
-    const newPrice = simulateTick({
-      asset,
-      currentPrice,
-      dtYears,
-      regime: marketRegime,
-      activeVolMultiplier: (volMultipliers[asset.id] ?? 1) * tuning.volatilityMultiplier,
-      correlatedZ: z,
-    });
-    prices[asset.id] = newPrice;
-    const volume = tickVolume((newPrice - currentPrice) / currentPrice, rng);
-    candles[asset.id] = appendPriceToCandles(candles[asset.id] ?? [], newPrice, gameElapsedMs, intervalMs, volume);
-  }
+  // Цены приходят с сервера — стор обновил их перед тиком.
+  const prices = state.prices;
+  const candles = state.candles;
 
   // 4. Проверить ликвидацию и SL/TP открытых позиций (авто-закрытие).
   // Ликвидация — ПЕРВОЙ и вместо SL/TP на этом тике: реальная биржа закрыла
@@ -519,9 +436,6 @@ export function gameTick(dtRealMs: number, state: GameState, rng: () => number):
     prices,
     candles,
     account,
-    marketRegime,
-    activeNews,
-    newsFeed,
     gameElapsedMs,
     gameCalendarDay,
     dayStartEquity,
