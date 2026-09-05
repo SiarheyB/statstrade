@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   aggregate,
   bridgeMinutes,
+  freshVolState,
   hash32,
   historyMonths,
   MAX_HISTORY_MONTHS,
@@ -37,8 +38,23 @@ const SEED = "world-seed";
 const regimes = regimeTimeline(SEED, 60);
 
 function ctx(index: number, news: GeneratedNews[] = []) {
-  return { seed: SEED, asset, kind: "h" as const, stepMs: MS_HOUR, regimes, ts: index * MS_HOUR, index, news };
+  return {
+    seed: SEED,
+    asset,
+    kind: "h" as const,
+    stepMs: MS_HOUR,
+    regimes,
+    ts: index * MS_HOUR,
+    index,
+    news,
+    // Волатильность переносится от бара к бару; для одиночных проверок
+    // начинаем с долгосрочной средней инструмента.
+    vol: freshVolState(asset.baseVolatility * Math.sqrt(MS_HOUR / (365 * 24 * MS_HOUR))),
+  };
 }
+
+/** Бар из результата шага — тесты про свечу, а не про состояние. */
+const bar = (index: number, news: GeneratedNews[] = []) => nextCandle(100, ctx(index, news)).candle;
 
 describe("детерминированность", () => {
   it("одинаковый ключ — одинаковое число, разный — разное", () => {
@@ -71,14 +87,14 @@ describe("детерминированность", () => {
   });
 
   it("соседние бары различаются — это не константа", () => {
-    expect(nextCandle(100, ctx(1)).close).not.toBe(nextCandle(100, ctx(2)).close);
+    expect(bar(1).close).not.toBe(bar(2).close);
   });
 });
 
 describe("свечи", () => {
   it("high не ниже тела, low не выше — бар корректен", () => {
     for (let i = 0; i < 200; i++) {
-      const candle = nextCandle(100, ctx(i));
+      const candle = bar(i);
       expect(candle.high).toBeGreaterThanOrEqual(Math.max(candle.open, candle.close) - 1e-9);
       expect(candle.low).toBeLessThanOrEqual(Math.min(candle.open, candle.close) + 1e-9);
       expect(candle.low).toBeGreaterThan(0);
@@ -88,16 +104,16 @@ describe("свечи", () => {
 
   it("цена округляется к шагу инструмента", () => {
     const forex: Asset = { ...asset, id: "FX", tickSize: 0.00001, baseVolatility: 0.08 };
-    const candle = nextCandle(1.085, { ...ctx(5), asset: forex });
+    const candle = nextCandle(1.085, { ...ctx(5), asset: forex }).candle;
     expect(Math.round(candle.close / 0.00001) * 0.00001).toBeCloseTo(candle.close, 9);
   });
 
   it("новость по инструменту двигает его бар, чужая — нет", () => {
     const shock: GeneratedNews = { ts: 0, assetId: asset.id, sector: null, impact: "high", headline: "x", shockPct: -0.1 };
     const alien: GeneratedNews = { ...shock, assetId: "OTHER" };
-    const plain = nextCandle(100, ctx(7)).close;
-    const hit = nextCandle(100, ctx(7, [shock])).close;
-    const miss = nextCandle(100, ctx(7, [alien])).close;
+    const plain = bar(7).close;
+    const hit = bar(7, [shock]).close;
+    const miss = bar(7, [alien]).close;
     expect(hit).toBeLessThan(plain * 0.95);
     expect(miss).toBe(plain);
   });
@@ -150,8 +166,8 @@ describe("новости", () => {
   it("макроновость двигает цену слабее, чем новость про сам инструмент", () => {
     const strong: GeneratedNews = { ts: 0, assetId: asset.id, sector: null, impact: "high", headline: "x", shockPct: -0.1 };
     const global: GeneratedNews = { ts: 0, assetId: null, sector: null, impact: "high", headline: "x", shockPct: -0.1 };
-    const own = nextCandle(100, ctx(3, [strong])).close;
-    const macro = nextCandle(100, ctx(3, [global])).close;
+    const own = bar(3, [strong]).close;
+    const macro = bar(3, [global]).close;
     expect(own).toBeLessThan(macro);
   });
 
@@ -211,7 +227,7 @@ describe("история и агрегация", () => {
 });
 
 describe("минутки внутри часа (мост Броуна)", () => {
-  const hour = nextCandle(100, ctx(12));
+  const hour = nextCandle(100, ctx(12)).candle;
 
   it("первая минутка открывается ровно там же, где час, последняя им же закрывается", () => {
     const minutes = bridgeMinutes(hour, asset, SEED, 12);

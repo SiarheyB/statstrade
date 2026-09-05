@@ -18,6 +18,18 @@
 //     минутку можно попросить за любой час прошлого.
 //   • 5m/15m/4h/1w/1M нигде не хранятся: собираются из хранимых рядов.
 import type { Asset, NewsImpact } from "@/engine/entities/types";
+import {
+  ANCHORS_PER_HOUR,
+  barVolume,
+  bridgePath,
+  freshVolState,
+  intradayFactor,
+  nextVolState,
+  shapeBar,
+  type VolState,
+} from "@/lib/game/candleShape";
+
+export { freshVolState, type VolState };
 import { NEWS_TEMPLATES, IMPACT_WEIGHTS, sectorLabel } from "@/engine/market/newsEngine";
 import macroData from "@/data/macroEvents.json";
 import { REGIME_PRESETS, REGIME_TRANSITIONS, type RegimePreset } from "@/engine/market/marketRegime";
@@ -453,7 +465,7 @@ export interface GeneratedCandle {
   volume: number;
 }
 
-const MS_PER_YEAR = 365 * MS_DAY;
+export const MS_PER_YEAR = 365 * MS_DAY;
 
 /** Сколько месяцев истории у конкретного инструмента (детерминированно). */
 export function historyMonths(seed: string, assetId: string): number {
@@ -474,6 +486,20 @@ export interface StepContext {
   index: number;
   /** Новости, попавшие в этот бар. */
   news: GeneratedNews[];
+  /**
+   * Состояние волатильности с прошлого бара.
+   *
+   * Из-за него бары перестают быть одинаковыми: после сильного движения
+   * несколько часов трясёт, после затишья затишье продолжается — это и есть
+   * «поджатия» и «выносы», которых раньше не было (см. lib/game/candleShape).
+   */
+  vol: VolState;
+}
+
+export interface StepResult {
+  candle: GeneratedCandle;
+  /** Волатильность для следующего бара. */
+  vol: VolState;
 }
 
 /**
@@ -481,8 +507,8 @@ export interface StepContext {
  * только шок берётся не из потока RNG, а из ключа «инструмент + номер бара»,
  * поэтому бар можно пересчитать в любой момент и получить то же самое.
  */
-export function nextCandle(prev: number, ctx: StepContext): GeneratedCandle {
-  const { seed, asset, kind, stepMs, regimes, ts, index, news } = ctx;
+export function nextCandle(prev: number, ctx: StepContext): StepResult {
+  const { seed, asset, kind, stepMs, regimes, ts, index, news, vol } = ctx;
   const dayIndex = Math.max(0, Math.floor(ts / MS_DAY));
   const regime = regimes[Math.min(regimes.length - 1, dayIndex)] ?? regimes[regimes.length - 1];
   const dtYears = stepMs / MS_PER_YEAR;
@@ -493,44 +519,64 @@ export function nextCandle(prev: number, ctx: StepContext): GeneratedCandle {
   const z = GROUP_CORRELATION * groupZ + Math.sqrt(1 - GROUP_CORRELATION ** 2) * ownZ;
 
   const mu = asset.baseDrift * regime.preset.driftModifier;
-  const sigma = asset.baseVolatility * regime.preset.volModifier;
+
+  // Волатильность бара складывается из трёх множителей: собственной
+  // (кластеризованной) дисперсии инструмента, часа суток и режима рынка.
+  const hourlyBase = asset.baseVolatility * Math.sqrt(dtYears);
+  const clustered = Math.sqrt(vol.variance);
+  const activity = intradayFactor(asset.assetClass, new Date(ts).getUTCHours());
+  const sigmaStep = clustered * activity * regime.preset.volModifier * (1 + vol.newsBoost);
+
   const open = prev;
   // Без члена −0.5σ²: снос задаёт МЕДИАННУЮ траекторию, а не математическое
   // ожидание. У классического GBM медиана уезжает вниз тем сильнее, чем выше
   // волатильность (у биткоина с σ=0.7 это −24% в год на ровном месте), и
   // «типичный» игрок видел бы падение там, где по замыслу рост. Для игры
   // важно именно то, что видит типичный игрок.
-  let close = open * Math.exp(mu * dtYears + sigma * Math.sqrt(dtYears) * z);
+  let close = open * Math.exp(mu * dtYears + sigmaStep * z);
 
+  let newsHit = false;
   for (const item of news) {
     if (!newsHits(item, asset)) continue;
+    newsHit = true;
     const reach = item.assetId ? 1 : item.sector ? SECTOR_SHOCK_SCALE : GLOBAL_SHOCK_SCALE;
     close *= shockFactor(item.shockPct * reach * newsVolScale(asset.baseVolatility));
   }
+  close = Math.max(asset.tickSize, close);
 
-  // Тени: доля движения, отложенная в обе стороны. Без них бар выглядит
-  // «нарисованным» — только тело, ни одного фитиля.
-  const range = Math.abs(close - open);
-  const wickUp = range * rand(`${seed}|wu|${asset.id}|${kind}|${index}`) * 0.9 + open * sigma * Math.sqrt(dtYears) * 0.35;
-  const wickDown = range * rand(`${seed}|wd|${asset.id}|${kind}|${index}`) * 0.9 + open * sigma * Math.sqrt(dtYears) * 0.35;
-  const high = Math.max(open, close) + wickUp;
-  const low = Math.max(asset.tickSize, Math.min(open, close) - wickDown);
+  // Форма бара снимается С ПУТИ, а не дорисовывается формулой: отсюда и
+  // марубозу без теней, и дожи, и длинный хвост после выноса.
+  const path = bridgePath((step) => normal(`${seed}|path|${asset.id}|${kind}|${index}|${step}`), ANCHORS_PER_HOUR);
+  const shaped = shapeBar(open, close, sigmaStep, path);
 
-  const move = Math.abs(close - open) / (open || 1);
-  const volume = 40 * (1 + move * 400) * (0.4 + rand(`${seed}|v|${asset.id}|${kind}|${index}`) * 1.2) * (stepMs / MS_MINUTE);
+  const volume = barVolume(
+    asset,
+    shaped.path,
+    vol.newsBoost,
+    activity,
+    rand(`${seed}|v|${asset.id}|${kind}|${index}`),
+  ) * (stepMs / MS_MINUTE);
 
   const round = (value: number) => {
     const tick = asset.tickSize > 0 ? asset.tickSize : 0.01;
     return Math.round(value / tick) * tick;
   };
 
+  // В GARCH идёт СТАНДАРТИЗОВАННАЯ доходность: сезонность, режим и новость
+  // уже учтены в σ этого бара, и кормить их обратно значило бы считать одно
+  // и то же дважды — дисперсия раскручивалась бы по кругу.
+  const seasonal = Math.max(1e-6, activity * regime.preset.volModifier * (1 + vol.newsBoost));
+  const logReturn = Math.log(close / open) / seasonal;
   return {
-    ts,
-    open: round(open),
-    high: round(high),
-    low: round(low),
-    close: round(Math.max(asset.tickSize, close)),
-    volume: Math.round(volume),
+    candle: {
+      ts,
+      open: round(open),
+      high: round(shaped.high),
+      low: round(Math.max(asset.tickSize, shaped.low)),
+      close: round(close),
+      volume: Math.round(volume),
+    },
+    vol: nextVolState(vol, logReturn, hourlyBase, newsHit),
   };
 }
 
@@ -582,45 +628,124 @@ export function bridgeMinutes(
   const close = hour.close;
   if (!(open > 0) || !(close > 0)) return [];
 
-  // Накопленные приращения моста. Ключ включает индекс часа, поэтому минутки
-  // одного и того же часа всегда одинаковы.
-  const steps: number[] = [0];
-  for (let m = 1; m <= MINUTES_PER_HOUR; m++) {
-    steps.push(steps[m - 1] + normal(`${seed}|bridge|${asset.id}|${hourIndex}|${m}`));
-  }
-  const total = steps[MINUTES_PER_HOUR];
+  // Минутки — УТОЧНЕНИЕ того же пути, по которому построен час.
+  //
+  // Час получил свою форму из двенадцати опорных точек (см. candleShape).
+  // Здесь мы берём ТЕ ЖЕ точки и разбиваем каждый отрезок между ними на пять
+  // минут собственным мостом. Поэтому минутный график проходит ровно через
+  // опорные точки часового и не может уйти от него в сторону — а раньше это
+  // были два независимых ряда, которые расходились тем сильнее, чем дольше
+  // на них смотреть.
+  const anchors = bridgePath((step) => normal(`${seed}|path|${asset.id}|h|${hourIndex}|${step}`), ANCHORS_PER_HOUR);
+  const perAnchor = MINUTES_PER_HOUR / ANCHORS_PER_HOUR;
   const logOpen = Math.log(open);
   const logClose = Math.log(close);
-  // Амплитуда шума внутри часа: часовая волатильность, разложенная на
-  // минуты. Слишком большая — минутки вылезут за тени часа, слишком
-  // маленькая — прямая линия вместо графика.
-  const sigma = (asset.baseVolatility / Math.sqrt(365 * 24)) * 0.55;
+  // Амплитуда шума внутри часа восстанавливается из самого бара: у спокойного
+  // часа минутки спокойные, у бурного — бурные. Брать её из «средней»
+  // волатильности инструмента, как раньше, значило рисовать одинаковые
+  // минутки и в затишье, и на новости.
+  const sigma = Math.max(1e-9, (Math.log(hour.high / Math.max(asset.tickSize, hour.low)) || 0) / 3.5);
+
+  // Значение моста в момент минуты m: между опорными точками добавляется
+  // собственный подшум, обнуляющийся на самих точках.
+  const offsetAt = (m: number): number => {
+    const segment = Math.min(ANCHORS_PER_HOUR - 1, Math.floor(m / perAnchor));
+    const within = m - segment * perAnchor;
+    const base = anchors[segment] + ((anchors[segment + 1] - anchors[segment]) * within) / perAnchor;
+    if (within === 0) return base;
+    const sub = bridgePath(
+      (step) => normal(`${seed}|sub|${asset.id}|${hourIndex}|${segment}|${step}`),
+      perAnchor,
+    );
+    // Подшум мельче основного: иначе минутки вылезали бы за тени своего часа.
+    return base + sub[within] * 0.45;
+  };
 
   const priceAt = (m: number) => {
     const ratio = m / MINUTES_PER_HOUR;
-    const bridge = steps[m] - ratio * total;
-    return Math.exp(logOpen + (logClose - logOpen) * ratio + sigma * bridge);
+    return Math.exp(logOpen + (logClose - logOpen) * ratio + sigma * offsetAt(m));
   };
 
   const tick = asset.tickSize > 0 ? asset.tickSize : 0.01;
   const round = (value: number) => Math.round(value / tick) * tick;
+  // Минутка не может выйти за границы своего часа: час — это и есть её
+  // агрегат, и расхождение здесь читалось бы как ошибка данных.
+  const clamp = (value: number) => Math.min(hour.high, Math.max(hour.low, value));
   const limit = Math.max(1, Math.min(MINUTES_PER_HOUR, count));
+
   const out: GeneratedCandle[] = [];
   for (let m = 0; m < limit; m++) {
-    const o = priceAt(m);
-    const c = priceAt(m + 1);
-    const wick = Math.abs(c - o) * rand(`${seed}|bw|${asset.id}|${hourIndex}|${m}`) * 0.6;
-    const volume = Math.max(1, hour.volume / MINUTES_PER_HOUR) * (0.4 + rand(`${seed}|bv|${asset.id}|${hourIndex}|${m}`) * 1.2);
+    const o = clamp(priceAt(m));
+    const c = clamp(priceAt(m + 1));
+    // Форма минутки — из её собственного мини-пути, теми же правилами, что у
+    // часа: часть минут выходит без теней, часть длинными хвостами.
+    const inner = bridgePath((step) => normal(`${seed}|mp|${asset.id}|${hourIndex}|${m}|${step}`), 6);
+    const logO = Math.log(o);
+    const logC = Math.log(c);
+    const innerSigma = sigma / Math.sqrt(MINUTES_PER_HOUR);
+    let hi = Math.max(o, c);
+    let lo = Math.min(o, c);
+    for (let i = 1; i < inner.length - 1; i++) {
+      const price = Math.exp(logO + (logC - logO) * (i / (inner.length - 1)) + innerSigma * inner[i]);
+      hi = Math.max(hi, price);
+      lo = Math.min(lo, price);
+    }
+    const volume =
+      Math.max(1, hour.volume / MINUTES_PER_HOUR) * (0.4 + rand(`${seed}|bv|${asset.id}|${hourIndex}|${m}`) * 1.2);
     out.push({
       ts: hour.ts + m * MS_MINUTE,
       open: round(o),
-      high: round(Math.max(o, c) + wick),
-      low: round(Math.max(tick, Math.min(o, c) - wick)),
+      high: round(clamp(hi)),
+      low: round(Math.max(tick, clamp(lo))),
       close: round(c),
       volume: Math.round(volume),
     });
   }
   return out;
+}
+
+// ── Тики ──────────────────────────────────────────────────────────────────
+//
+// Раньше «текущая» свеча ждала конца минуты и появлялась целиком: палка
+// возникала из ниоткуда, и было непонятно, откуда она взялась. Настоящий
+// терминал показывает цену непрерывно, и последний бар растёт на глазах.
+//
+// Тики строятся тем же приёмом — мостом внутри минуты, — поэтому клиент может
+// считать их сам, без единого запроса к серверу, и они гарантированно сойдутся
+// с минуткой, когда та закроется.
+
+/** Сколько тиков в минуте: раз в две секунды. */
+export const TICKS_PER_MINUTE = 30;
+
+/**
+ * Цена внутри минуты в момент `offsetMs` от её начала.
+ *
+ * Мост между открытием и закрытием минутки, прижатый к её же границам: тик не
+ * может уйти выше максимума своей минуты — иначе тиковая цена противоречила
+ * бы бару, который сама и образует.
+ */
+export function tickPrice(
+  minute: GeneratedCandle,
+  asset: Asset,
+  seed: string,
+  minuteIndex: number,
+  offsetMs: number,
+): number {
+  const open = minute.open;
+  const close = minute.close;
+  if (!(open > 0) || !(close > 0)) return close;
+  const step = Math.max(0, Math.min(TICKS_PER_MINUTE, Math.round((offsetMs / MS_MINUTE) * TICKS_PER_MINUTE)));
+  if (step === 0) return open;
+  if (step >= TICKS_PER_MINUTE) return close;
+
+  const path = bridgePath((i) => normal(`${seed}|tick|${asset.id}|${minuteIndex}|${i}`), TICKS_PER_MINUTE);
+  const logOpen = Math.log(open);
+  const logClose = Math.log(close);
+  const sigma = Math.max(1e-9, (Math.log(minute.high / Math.max(asset.tickSize, minute.low)) || 0) / 3);
+  const ratio = step / TICKS_PER_MINUTE;
+  const price = Math.exp(logOpen + (logClose - logOpen) * ratio + sigma * path[step]);
+  const tick = asset.tickSize > 0 ? asset.tickSize : 0.01;
+  return Math.round(Math.min(minute.high, Math.max(minute.low, price)) / tick) * tick;
 }
 
 // ── Гэп после перерыва ────────────────────────────────────────────────────

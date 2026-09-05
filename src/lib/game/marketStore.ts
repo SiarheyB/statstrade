@@ -15,11 +15,13 @@ import type { Asset } from "@/engine/entities/types";
 import {
   aggregate,
   bridgeMinutes,
+  freshVolState,
   gapOpen,
   historyMonths,
   MS_DAY,
   MS_HOUR,
   MS_MINUTE,
+  MS_PER_YEAR,
   newsForHour,
   nextCandle,
   rand,
@@ -106,6 +108,11 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
   const regimes = regimeTimeline(seed, totalDays);
 
   const rows: GeneratedCandle[] = [];
+  // Волатильность переносится от бара к бару — из-за этого спокойное идёт за
+  // спокойным, а буйное за буйным. При догоне истории кусками состояние
+  // начинается заново с долгосрочной средней: цена от этого не меняется,
+  // меняется только «характер» первых часов после стыка.
+  let vol = freshVolState(asset.baseVolatility * Math.sqrt(MS_HOUR / MS_PER_YEAR));
   const newsRows: GeneratedNews[] = [];
   const worldStart = market.startedAt.getTime();
 
@@ -136,7 +143,7 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
       });
       closedMs = 0;
     }
-    const candle = nextCandle(price, {
+    const step = nextCandle(price, {
       seed,
       asset,
       kind: "h",
@@ -147,7 +154,10 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
       ts: ts - worldStart,
       index: hourIndex,
       news,
+      vol,
     });
+    const candle = step.candle;
+    vol = step.vol;
     price = candle.close;
     rows.push({ ...candle, ts });
     for (const item of news) newsRows.push({ ...item, ts });

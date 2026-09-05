@@ -60,6 +60,8 @@ import { ema, rsi, sma } from "@/engine/market/indicators";
 import type { AssetClass, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
+import { useLiveTick } from "@/lib/game/useLiveTick";
+import assetsData from "@/data/assets.json";
 import { readTerminalPrefs, saveView, viewKey, writeTerminalPrefs } from "@/lib/game/terminalPrefs";
 import { fetchCandles } from "@/lib/game/worldClient";
 import Hint from "./Hint";
@@ -170,6 +172,8 @@ export const TF_MS: Record<string, number> = {
   "1w": 7 * 24 * 60 * 60_000,
   "1M": 30 * 24 * 60 * 60_000,
 };
+
+const ALL_ASSETS = assetsData as unknown as import("@/engine/entities/types").Asset[];
 
 const TF_LABEL: Record<string, string> = {
   "1m": "1м",
@@ -283,18 +287,38 @@ export default function PriceChart({
     writeTerminalPrefs({ tf: { ...(prefs.tf ?? {}), [style]: tfState } });
   }, [hydrated, style, tfState]);
 
-  // Между запросами последний бар «дышит» вслед за котировкой: иначе график
-  // замирает на пятнадцать секунд, хотя цена в шапке меняется. Считаем это
-  // при рендере — состояние тут заводить не за чем, значение производное.
-  const liveBars = useMemo(() => {
-    if (currentPrice == null || bars.length === 0) return bars;
+  // Последний бар растёт на глазах.
+  //
+  // Тик считается В БРАУЗЕРЕ тем же детерминированным путём, что на сервере
+  // (см. lib/game/useLiveTick): раньше свеча ждала ответа котировок и прыгала
+  // раз в несколько секунд — «минута прошла, появилась палка непонятно
+  // откуда». Теперь цена идёт непрерывно, шагом в две секунды, и к закрытию
+  // минуты сходится с серверной до цента, потому что это одна и та же
+  // функция.
+  //
+  // Котировка с сервера остаётся запасным вариантом: на старших таймфреймах
+  // и до загрузки сида тика нет, а показать что-то живое надо.
+  const lastMinuteBar = useMemo(() => {
+    if (bars.length === 0) return null;
     const last = bars[bars.length - 1];
-    if (last.c === currentPrice) return bars;
+    // Тик имеет смысл только на минутном ряду: внутри часового бара своя
+    // минутка нам неизвестна.
+    if ((TF_MS[tf] ?? 0) !== 60_000) return null;
+    return { ts: last.t, open: last.o, high: last.h, low: last.l, close: last.c, volume: last.v };
+  }, [bars, tf]);
+  const tickAsset = useMemo(() => ALL_ASSETS.find((a) => a.id === assetId), [assetId]);
+  const tick = useLiveTick(tickAsset, lastMinuteBar);
+  const livePrice = tick ?? currentPrice;
+
+  const liveBars = useMemo(() => {
+    if (livePrice == null || bars.length === 0) return bars;
+    const last = bars[bars.length - 1];
+    if (last.c === livePrice) return bars;
     return [
       ...bars.slice(0, -1),
-      { ...last, c: currentPrice, h: Math.max(last.h, currentPrice), l: Math.min(last.l, currentPrice) },
+      { ...last, c: livePrice, h: Math.max(last.h, livePrice), l: Math.min(last.l, livePrice) },
     ];
-  }, [bars, currentPrice]);
+  }, [bars, livePrice]);
 
   const candlesRef = useRef<Bar[]>(liveBars);
   const priceRef = useRef(currentPrice);
@@ -481,7 +505,7 @@ export default function PriceChart({
   // ── Отрисовка ───────────────────────────────────────────────────────────
   useEffect(() => {
     candlesRef.current = liveBars;
-    priceRef.current = currentPrice;
+    priceRef.current = livePrice;
     symbolRef.current = symbol;
     tRef.current = t;
     colorsRef.current = candleColors;
