@@ -19,6 +19,7 @@
 //   • 5m/15m/4h/1w/1M нигде не хранятся: собираются из хранимых рядов.
 import type { Asset, NewsImpact } from "@/engine/entities/types";
 import { NEWS_TEMPLATES, IMPACT_WEIGHTS, sectorLabel } from "@/engine/market/newsEngine";
+import macroData from "@/data/macroEvents.json";
 import { REGIME_PRESETS, REGIME_TRANSITIONS, type RegimePreset } from "@/engine/market/marketRegime";
 import type { MarketRegimeType } from "@/engine/entities/types";
 
@@ -175,6 +176,85 @@ export function isQuietHour(ts: number): boolean {
   return hour >= 22 || hour < 7;
 }
 
+// ── Календарь событий ─────────────────────────────────────────────────────
+//
+// Часть новостей известна ЗАРАНЕЕ: заседание по ставке, отчёт по занятости,
+// публикация инфляции. В настоящей торговле к ним готовятся — и именно
+// поэтому у нас был провал: игрок не мог ни к чему подготовиться, любая
+// новость приходила ниоткуда.
+//
+// Календарь показывает, ЧТО и КОГДА выйдет, но не показывает РЕЗУЛЬТАТ:
+// направление шока считается в тот же час, что и сама новость, и подсмотреть
+// его нельзя — иначе игра сводилась бы к чтению будущего.
+
+/** Сколько запланированных публикаций может быть в один день. */
+export const SCHEDULED_SLOTS_PER_DAY = 2;
+/** Вероятность, что слот занят. */
+export const SCHEDULED_SLOT_CHANCE = 0.55;
+
+export interface MacroEvent {
+  id: string;
+  impact: NewsImpact;
+  title: string;
+  shockRange: [number, number];
+}
+
+// У запланированных публикаций СВОИ заголовки, а не шаблоны обычных новостей.
+// Те написаны под подстановку инструмента или отрасли («квартальный отчёт по
+// {sector}»), и в календаре, где ни того ни другого ещё нет, получалось
+// «отчёт по — без сюрпризов» или «понизило прогноз по здравоохранение».
+// Макрособытие ни к кому не привязано: оно про экономику целиком.
+export const MACRO_EVENTS = macroData as MacroEvent[];
+
+export interface ScheduledEvent {
+  /** Время публикации. */
+  ts: number;
+  /** Идентификатор макрособытия. */
+  eventId: string;
+  /** Заголовок — известен заранее, в отличие от результата. */
+  title: string;
+  impact: NewsImpact;
+}
+
+const SCHEDULED_DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Запланировано ли событие ровно на этот час.
+ *
+ * Считается от номера суток и номера слота, поэтому один и тот же час у всех
+ * игроков даёт один и тот же ответ — как и всё остальное в этом генераторе.
+ */
+export function scheduledAt(seed: string, ts: number): ScheduledEvent | null {
+  const date = new Date(ts);
+  const day = date.getUTCDay();
+  // В выходные макростатистику не публикуют. Это же спасает от нелепости
+  // «заседание центробанка в воскресенье в календаре».
+  if (day === 0 || day === 6) return null;
+  const dayNum = Math.floor(ts / SCHEDULED_DAY_MS);
+  const hour = date.getUTCHours();
+
+  for (let slot = 0; slot < SCHEDULED_SLOTS_PER_DAY; slot++) {
+    if (rand(`${seed}|cal-on|${dayNum}|${slot}`) >= SCHEDULED_SLOT_CHANCE) continue;
+    // Публикации приходятся на рабочие часы: 8-17 UTC.
+    const slotHour = 8 + Math.floor(rand(`${seed}|cal-h|${dayNum}|${slot}`) * 10);
+    if (slotHour !== hour) continue;
+    const event = MACRO_EVENTS[Math.floor(rand(`${seed}|cal-ev|${dayNum}|${slot}`) * MACRO_EVENTS.length) % MACRO_EVENTS.length];
+    return { ts: Math.floor(ts / MS_HOUR) * MS_HOUR, eventId: event.id, title: event.title, impact: event.impact };
+  }
+  return null;
+}
+
+/** Расписание публикаций на промежуток — то, что показывает календарь. */
+export function scheduleBetween(seed: string, fromTs: number, toTs: number): ScheduledEvent[] {
+  const out: ScheduledEvent[] = [];
+  const start = Math.floor(fromTs / MS_HOUR) * MS_HOUR;
+  for (let ts = start; ts <= toTs; ts += MS_HOUR) {
+    const event = scheduledAt(seed, ts);
+    if (event) out.push(event);
+  }
+  return out;
+}
+
 export function newsForHour(
   seed: string,
   hourIndex: number,
@@ -184,12 +264,18 @@ export function newsForHour(
   // Необязательное: расчёты, которым лента не важна, передают только индекс.
   ts?: number,
 ): GeneratedNews[] {
+  // Запланированная публикация выходит ВСЕГДА: если календарь обещал
+  // событие на этот час, а его не случилось, календарь врёт — и готовиться
+  // по нему больше никто не станет.
+  const scheduled = ts != null ? scheduledAt(seed, ts) : null;
+
   const quiet = ts != null && isQuietHour(ts);
   const lambda = (NEWS_PER_DAY / 24) * (quiet ? OFF_HOURS_NEWS_FACTOR : 1);
   const roll = rand(`${seed}|news|${hourIndex}`);
-  if (roll >= 1 - Math.exp(-lambda)) return [];
+  if (!scheduled && roll >= 1 - Math.exp(-lambda)) return [];
 
-  const impact = pickImpact(rand(`${seed}|news-impact|${hourIndex}`));
+  const macro = scheduled ? MACRO_EVENTS.find((item) => item.id === scheduled.eventId) : undefined;
+  const impact = scheduled ? scheduled.impact : pickImpact(rand(`${seed}|news-impact|${hourIndex}`));
   const direction = rand(`${seed}|news-dir|${hourIndex}`) < 0.5 + Math.max(-0.25, Math.min(0.25, drift * 0.08)) ? 1 : -1;
   const wanted = direction === 1 ? "positive" : "negative";
   const pool = NEWS_TEMPLATES.filter((t) => t.impact === impact && (t.polarity === wanted || t.polarity === "mixed"));
@@ -204,9 +290,25 @@ export function newsForHour(
       ? sectors[Math.floor(rand(`${seed}|news-sector|${hourIndex}`) * sectors.length) % sectors.length]
       : null;
 
-  const [lo, hi] = template.shockRange;
+  // У макрособытия своя сила и свой заголовок: игрок готовился к «решению по
+  // ставке» — он и должен его увидеть. Направление при этом случайное:
+  // результат публикации заранее не известен, в этом и смысл.
+  const [lo, hi] = macro ? macro.shockRange : template.shockRange;
   const magnitude = lo + rand(`${seed}|news-mag|${hourIndex}`) * (hi - lo);
-  const sign = template.polarity === "positive" ? 1 : template.polarity === "negative" ? -1 : direction;
+  const sign = macro ? direction : template.polarity === "positive" ? 1 : template.polarity === "negative" ? -1 : direction;
+
+  if (macro) {
+    return [
+      {
+        ts: hourIndex * MS_HOUR,
+        assetId: null,
+        sector: null,
+        impact,
+        headline: macro.title,
+        shockPct: magnitude * sign,
+      },
+    ];
+  }
 
   return [
     {

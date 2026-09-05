@@ -161,14 +161,15 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     contractPoints: 0,
     // Только акции. Облигации приходят вместе со стилем Investing (см.
     // INVESTING_ASSET_IDS), остальные классы — наградой за контракты.
-    // Акции и крипта — с самого начала.
+    // Акции, крипта и форекс — с самого начала.
     //
-    // Крипта здесь не за красивые глаза: это ЕДИНСТВЕННЫЙ рынок, который
-    // работает в выходные. Пока она открывалась наградой за первое
-    // испытание, новичок, зашедший в субботу, не мог сделать ровно ничего —
-    // и это два дня из семи. Награду за первое испытание перенесли на
-    // индексы.
-    unlockedMarkets: ["stock", "crypto"],
+    // Дело не в щедрости, а в расписании. Крипта — единственный рынок,
+    // работающий в выходные; форекс идёт неделей одним куском, с вечера
+    // воскресенья до вечера пятницы. Вдвоём они закрывают календарь целиком:
+    // в любой момент, когда игрок зашёл, ему есть чем торговать. Пока эти
+    // рынки открывались наградами, новичок, заглянувший в субботу, не мог
+    // сделать ровно ничего — а это два дня из семи.
+    unlockedMarkets: ["stock", "crypto", "forex"],
     lastContractResult: null,
     daily: freshDailyState(),
     lastDailyCompleted: [],
@@ -249,11 +250,11 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
   // investing и обратно), и активов открытых позиций, а не жёстко
   // PHASE1_ASSET_IDS, как раньше (баг: смена стиля на investing не
   // переживала перезагрузку — activeAssets откатывался к 6 тикерам).
-  // Старые сохранения знают только про акции — крипту им добавляем: она
-  // открыта с начала (см. freshState), и отнимать её у тех, кто начал
+  // Старые сохранения знают только про акции — крипту и форекс добавляем:
+  // они открыты с начала (см. freshState), и отнимать их у тех, кто начал
   // раньше, было бы наказанием за раннее начало.
   const savedMarkets = (save.unlockedMarkets ?? ["stock"]) as AssetClass[];
-  const unlockedMarkets = savedMarkets.includes("crypto") ? savedMarkets : ([...savedMarkets, "crypto"] as AssetClass[]);
+  const unlockedMarkets = Array.from(new Set<AssetClass>([...savedMarkets, "stock", "crypto", "forex"]));
   const requiredIds = new Set<string>([
     ...PHASE1_ASSET_IDS,
     ...save.activeAssetIds,

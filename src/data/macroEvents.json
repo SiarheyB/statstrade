@@ -1,0 +1,14 @@
+[
+  { "id": "MACRO_RATE", "impact": "high", "title": "Решение центробанка по ключевой ставке", "shockRange": [0.012, 0.035] },
+  { "id": "MACRO_CPI", "impact": "high", "title": "Данные по инфляции за месяц", "shockRange": [0.01, 0.03] },
+  { "id": "MACRO_JOBS", "impact": "high", "title": "Отчёт по занятости и безработице", "shockRange": [0.01, 0.028] },
+  { "id": "MACRO_GDP", "impact": "medium", "title": "Оценка ВВП за квартал", "shockRange": [0.008, 0.022] },
+  { "id": "MACRO_MINUTES", "impact": "medium", "title": "Протокол последнего заседания центробанка", "shockRange": [0.006, 0.018] },
+  { "id": "MACRO_RETAIL", "impact": "medium", "title": "Данные по розничным продажам", "shockRange": [0.005, 0.016] },
+  { "id": "MACRO_PMI", "impact": "medium", "title": "Индекс деловой активности PMI", "shockRange": [0.005, 0.015] },
+  { "id": "MACRO_SPEECH", "impact": "medium", "title": "Выступление главы центробанка", "shockRange": [0.005, 0.02] },
+  { "id": "MACRO_OIL", "impact": "low", "title": "Отчёт по запасам нефти", "shockRange": [0.004, 0.012] },
+  { "id": "MACRO_INDUSTRY", "impact": "low", "title": "Данные по промышленному производству", "shockRange": [0.004, 0.012] },
+  { "id": "MACRO_TRADE", "impact": "low", "title": "Торговый баланс за месяц", "shockRange": [0.003, 0.01] },
+  { "id": "MACRO_CONSUMER", "impact": "low", "title": "Индекс потребительских настроений", "shockRange": [0.003, 0.01] }
+]

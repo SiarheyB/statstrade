@@ -60,6 +60,7 @@ import { ema, rsi, sma } from "@/engine/market/indicators";
 import type { AssetClass, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
+import { readTerminalPrefs, saveView, viewKey, writeTerminalPrefs } from "@/lib/game/terminalPrefs";
 import { fetchCandles } from "@/lib/game/worldClient";
 import Hint from "./Hint";
 import { useI18n } from "@/lib/i18n/provider";
@@ -232,6 +233,38 @@ export default function PriceChart({
   const [showMa, setShowMa] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [showRsi, setShowRsi] = useState(false);
+  // Пока настройки не прочитаны, данные не грузим: эффекты первого рендера
+  // видят дефолты, и без этого гейта в сеть уходит лишний запрос за чужим
+  // таймфреймом, а игрок успевает увидеть не тот график (тот же приём, что
+  // на форексе и карте ордеров).
+  const [hydrated, setHydrated] = useState(false);
+
+  // Чтение сохранённого — один раз, в эффекте: на сервере localStorage нет.
+  useEffect(() => {
+    const prefs = readTerminalPrefs();
+    const savedTf = prefs.tf?.[style];
+    if (savedTf && (TF_BY_STYLE[style] ?? TF_BY_STYLE.day).includes(savedTf)) setTf(savedTf);
+    if (typeof prefs.showMa === "boolean") setShowMa(prefs.showMa);
+    if (typeof prefs.showVolume === "boolean") setShowVolume(prefs.showVolume);
+    if (typeof prefs.showRsi === "boolean") setShowRsi(prefs.showRsi);
+    setHydrated(true);
+    // Стиль в зависимостях не нужен: набор таймфреймов у нового стиля свой,
+    // и подставлять в него сохранённый от старого — не то, чего ждут.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Тумблеры запоминаем сразу: их меняют редко, а лишний рендер тут не
+  // рождается — запись идёт в эффекте.
+  useEffect(() => {
+    if (!hydrated) return;
+    writeTerminalPrefs({ showMa, showVolume, showRsi });
+  }, [hydrated, showMa, showVolume, showRsi]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    const prefs = readTerminalPrefs();
+    writeTerminalPrefs({ tf: { ...(prefs.tf ?? {}), [style]: tfState } });
+  }, [hydrated, style, tfState]);
 
   // Между запросами последний бар «дышит» вслед за котировкой: иначе график
   // замирает на пятнадцать секунд, хотя цена в шапке меняется. Считаем это
@@ -264,6 +297,9 @@ export default function PriceChart({
   const dragRef = useRef<{ mode: DragMode; mx: number; my: number; startView: View } | null>(null);
   const draftRef = useRef<GameDrawing | null>(null);
   const redrawRef = useRef<() => void>(() => {});
+  // Через ref, чтобы обработчики жестов не пересоздавались на каждой смене
+  // инструмента или таймфрейма.
+  const persistViewRef = useRef<() => void>(() => {});
 
   const visibleCandles = useCallback(() => candlesRef.current, []);
 
@@ -361,8 +397,27 @@ export default function PriceChart({
   const resetView = useCallback(() => {
     viewRef.current = null;
     setFollowing(true);
+    if (assetId) saveView(assetId, tf, null);
     redrawRef.current();
-  }, []);
+  }, [assetId, tf]);
+
+  /**
+   * Запомнить текущий масштаб.
+   *
+   * Вызывается по окончании жеста, а не на каждом кадре: перетаскивание
+   * графика — это десятки событий в секунду, и писать в localStorage на
+   * каждом из них значит подвесить главный поток ради значения, которое
+   * через миллисекунду устареет.
+   */
+  const persistView = useCallback(() => {
+    if (!assetId) return;
+    const view = viewRef.current;
+    saveView(assetId, tf, view ? { i0: view.i0, i1: view.i1, y0: view.y0, y1: view.y1 } : null);
+  }, [assetId, tf]);
+
+  useEffect(() => {
+    persistViewRef.current = persistView;
+  }, [persistView]);
 
   // ── Данные: свечи приходят с сервера ────────────────────────────────────
   //
@@ -370,7 +425,7 @@ export default function PriceChart({
   // был свой рынок и восемь часов истории. Теперь ряд общий, лежит в базе, и
   // на длинных таймфреймах видно месяцы.
   useEffect(() => {
-    if (!assetId) return;
+    if (!assetId || !hydrated) return;
     let alive = true;
     // Старый ряд убираем СРАЗУ. Иначе между кликом по таймфрейму и ответом
     // сервера график секунду рисует минутные свечи в дневном окне, потом
@@ -380,8 +435,11 @@ export default function PriceChart({
     setLoading(true);
     // Окно просмотра тоже сбрасываем: границы, посчитанные для минуток, на
     // дневном ряду бессмысленны.
-    viewRef.current = null;
-    setFollowing(true);
+    // Восстанавливаем сохранённый масштаб для этой пары «инструмент —
+    // таймфрейм». Ничего не сохранено — идём в автоматический режим.
+    const saved = readTerminalPrefs().views?.[viewKey(assetId, tf)];
+    viewRef.current = saved ?? null;
+    setFollowing(saved == null);
 
     const load = async () => {
       const data = await fetchCandles(assetId, tf, 400);
@@ -401,7 +459,7 @@ export default function PriceChart({
       alive = false;
       clearInterval(timer);
     };
-  }, [assetId, tf]);
+  }, [assetId, tf, hydrated]);
 
   // ── Отрисовка ───────────────────────────────────────────────────────────
   useEffect(() => {
@@ -873,6 +931,8 @@ export default function PriceChart({
       }
       dragRef.current = null;
       canvas.style.cursor = "crosshair";
+      // Жест закончился — запоминаем масштаб.
+      persistViewRef.current();
       redrawRef.current();
     };
 
@@ -884,6 +944,7 @@ export default function PriceChart({
     const onDouble = () => {
       viewRef.current = null;
       setFollowing(true);
+      persistViewRef.current();
       redrawRef.current();
     };
 
@@ -907,6 +968,7 @@ export default function PriceChart({
         next = { ...next, y1: pCursor + fy * pSpan, y0: pCursor - (1 - fy) * pSpan };
       }
       viewRef.current = clampView(next);
+      persistViewRef.current();
       redrawRef.current();
     };
 

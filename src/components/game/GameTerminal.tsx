@@ -35,6 +35,7 @@ import OrderBook from "./OrderBook";
 import InvestingForecast from "./InvestingForecast";
 import DiversificationPanel from "./DiversificationPanel";
 import NewsFeed from "./NewsFeed";
+import GameCalendar from "./GameCalendar";
 import Screener from "./Screener";
 import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
@@ -344,20 +345,15 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       </div>
 
       {tab === "terminal" && (
-        // Две колонки, а не три разрозненных блока с пустотой под графиком.
-        //
-        // СЛЕВА — то, на что смотрят: график и прямо под ним открытые
-        // позиции с заявками. Раньше под графиком было пусто, а позиции
-        // уезжали на всю ширину экрана отдельной полосой — глазу приходилось
-        // ходить через весь монитор от свечи к своей сделке.
-        //
-        // СПРАВА — то, чем действуют: выбор инструмента, тикет, задания и
-        // скринер. Колонка липкая: тикет должен оставаться под рукой, когда
-        // список позиций внизу вырос и страница прокручена.
-        //
-        // Стакан — узкой колонкой ВПЛОТНУЮ к графику и во всю его высоту,
-        // как DOM в биржевом терминале: в скальпинге по нему принимают
-        // решение вместе со свечами.
+        <div className="space-y-4">
+        {/* Верхний ряд — рабочая область: график, стакан и колонка действий.
+            Позиции идут ПОД ним во всю ширину: у таблицы девять колонок, и
+            зажатая в треть экрана она переносила строки, а место справа от
+            неё всё равно пустовало.
+            Колонка действий липкая: тикет должен оставаться под рукой, когда
+            список позиций внизу вырос и страница прокручена.
+            Стакан — узкой колонкой вплотную к графику и во всю его высоту,
+            как DOM в биржевом терминале. */}
         <div
           className={`grid grid-cols-1 gap-4 items-start ${
             showOrderBook
@@ -365,30 +361,21 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               : "xl:grid-cols-[minmax(0,1fr)_minmax(320px,340px)]"
           }`}
         >
-          <div className="space-y-4 min-w-0">
-            <div className="card p-3 h-[clamp(420px,62vh,820px)]">
-              <PriceChart
-                assetId={assetId}
-                currentPrice={assetId ? game.prices[assetId] : undefined}
-                symbol={asset?.symbol ?? ""}
-                assetClass={asset?.assetClass}
-                style={currentStyle}
-                candleColors={candleColors}
-                drawings={assetId ? (game.drawings[assetId] ?? []) : []}
-                onAddDrawing={(drawing) => {
-                  if (assetId) addDrawing(assetId, drawing);
-                }}
-                onRemoveDrawing={(id) => {
-                  if (assetId) removeDrawing(assetId, id);
-                }}
-              />
-            </div>
-
-            <PositionsPanel
-              positions={game.account.positions}
-              prices={game.prices}
-              assets={game.activeAssets}
-              orders={game.account.pendingOrders}
+          <div className="card p-3 h-[clamp(420px,62vh,820px)] min-w-0">
+            <PriceChart
+              assetId={assetId}
+              currentPrice={assetId ? game.prices[assetId] : undefined}
+              symbol={asset?.symbol ?? ""}
+              assetClass={asset?.assetClass}
+              style={currentStyle}
+              candleColors={candleColors}
+              drawings={assetId ? (game.drawings[assetId] ?? []) : []}
+              onAddDrawing={(drawing) => {
+                if (assetId) addDrawing(assetId, drawing);
+              }}
+              onRemoveDrawing={(id) => {
+                if (assetId) removeDrawing(assetId, id);
+              }}
             />
           </div>
 
@@ -439,6 +426,14 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             )}
           </div>
         </div>
+
+        <PositionsPanel
+          positions={game.account.positions}
+          prices={game.prices}
+          assets={game.activeAssets}
+          orders={game.account.pendingOrders}
+        />
+        </div>
       )}
 
       {tab === "portfolio" && (
@@ -468,11 +463,10 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       )}
 
       {tab === "news" && (
-        <NewsFeed
+        <GameCalendar
           news={game.newsFeed}
           assets={game.activeAssets}
           gameElapsedMs={game.gameElapsedMs}
-          expanded
           radarAssetIds={perks.tools.newsRadar ? openPositionAssetIds : undefined}
         />
       )}

@@ -41,7 +41,7 @@
       "prestige": 25,
       "skillPoints": 2,
       "unlockMarkets": [
-        "forex"
+        "commodity"
       ]
     }
   },
@@ -57,7 +57,7 @@
       "prestige": 45,
       "skillPoints": 2,
       "unlockMarkets": [
-        "commodity"
+        "index"
       ]
     }
   },
@@ -69,12 +69,10 @@
     "durationDays": 30,
     "entryFee": 25000,
     "reward": {
-      "cash": 200000,
-      "prestige": 90,
+      "cash": 320000,
+      "prestige": 125,
       "skillPoints": 3,
-      "unlockMarkets": [
-        "index"
-      ]
+      "unlockMarkets": []
     }
   }
 ]

@@ -8,7 +8,7 @@
 // newsTemplates.json только на русском — см. комментарий у NewsEvent), в
 // отличие от подписей вокруг, которые переводятся как обычно.
 import { useI18n } from "@/lib/i18n/provider";
-import { fmtGameClock } from "@/lib/gameTime";
+
 import { GLOBAL_TARGET } from "@/engine/market/newsEngine";
 import type { Asset, NewsEvent, NewsImpact } from "@/engine/entities/types";
 
@@ -87,7 +87,18 @@ export default function NewsFeed({
                 <span className={`px-1.5 py-0.5 rounded shrink-0 ${IMPACT_STYLE[item.impact]}`}>
                   {t(`game.news.impact.${item.impact}`)}
                 </span>
-                <span className="text-faint tabular-nums shrink-0">{fmtGameClock(item.timestamp)}</span>
+                <span className="text-faint tabular-nums shrink-0">
+                  {/* Обычные дата и время, а не «Д20702 11:00»: игровое
+                      время идёт вровень с реальным, и счётчик дней от начала
+                      мира читался как ошибка. Новости приходят с сервера с
+                      настоящей меткой времени. */}
+                  {new Date(item.timestamp).toLocaleString(undefined, {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
                 <span className="flex-1 min-w-0">{item.headline}</span>
                 <span className="text-faint shrink-0">{targetLabel(item, assets, t("game.news.global"))}</span>
                 <span className={`tabular-nums shrink-0 w-14 text-right ${up ? "text-profit" : "text-loss"}`}>

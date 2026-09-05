@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isMarketOpen, nextOpen, sessionOf } from "@/lib/game/schedule";
-import { gapOpen, isQuietHour, MAX_GAP, newsForHour } from "@/lib/game/marketGen";
+import { gapOpen, isQuietHour, MAX_GAP, newsForHour, scheduleBetween } from "@/lib/game/marketGen";
 import type { Asset } from "@/engine/entities/types";
 
 const utc = (iso: string) => new Date(`${iso}Z`).getTime();
@@ -139,5 +139,116 @@ describe("новости в нерабочее время", () => {
     }
     expect(weekend).toBeGreaterThan(0); // мир не замирает
     expect(weekend).toBeLessThan(workday * 0.6); // но лента заметно тише
+  });
+});
+
+describe("календарь запланированных событий", () => {
+  const asset = {
+    id: "T",
+    symbol: "T",
+    name: "T",
+    assetClass: "stock",
+    sector: "tech",
+    correlationGroup: "tech",
+    baseVolatility: 0.3,
+    baseDrift: 0.05,
+    tickSize: 0.01,
+    startPrice: 100,
+  } as unknown as Parameters<typeof newsForHour>[2][number];
+
+  const WEEK = 7 * 24 * 3_600_000;
+  const from = utc("2026-09-07T00:00");
+
+  it("расписание детерминировано: тот же сид и промежуток дают то же самое", () => {
+    const a = scheduleBetween("s", from, from + WEEK);
+    const b = scheduleBetween("s", from, from + WEEK);
+    expect(a).toEqual(b);
+  });
+
+  it("разные сиды дают разные расписания", () => {
+    const a = scheduleBetween("s", from, from + WEEK);
+    const b = scheduleBetween("other", from, from + WEEK);
+    expect(a).not.toEqual(b);
+  });
+
+  it("за неделю набирается несколько публикаций, но не десятки", () => {
+    const week = scheduleBetween("s", from, from + WEEK);
+    expect(week.length).toBeGreaterThan(0);
+    expect(week.length).toBeLessThanOrEqual(2 * 5); // максимум два слота в будний день
+  });
+
+  it("в выходные макростатистику не публикуют", () => {
+    for (const event of scheduleBetween("s", from, from + 3 * WEEK)) {
+      const day = new Date(event.ts).getUTCDay();
+      expect(day === 0 || day === 6).toBe(false);
+    }
+  });
+
+  it("публикации приходятся на рабочие часы", () => {
+    for (const event of scheduleBetween("s", from, from + 3 * WEEK)) {
+      const hour = new Date(event.ts).getUTCHours();
+      expect(hour).toBeGreaterThanOrEqual(8);
+      expect(hour).toBeLessThan(18);
+    }
+  });
+
+  it("обещанное календарём событие обязательно выходит в свой час", () => {
+    // Календарь, который иногда врёт, бесполезен: готовиться по нему
+    // перестанут после первого промаха.
+    const events = scheduleBetween("s", from, from + 3 * WEEK);
+    expect(events.length).toBeGreaterThan(0);
+    for (const event of events) {
+      const hourIndex = Math.round(event.ts / 3_600_000);
+      const news = newsForHour("s", hourIndex, [asset], 1, event.ts);
+      expect(news.length).toBeGreaterThan(0);
+      expect(news[0].impact).toBe(event.impact);
+    }
+  });
+
+  it("календарь не выдаёт результат: заранее известны время, сила и заголовок", () => {
+    // Направления и величины шока в событии нет и быть не должно — иначе
+    // игра свелась бы к чтению будущего.
+    const event = scheduleBetween("s", from, from + 3 * WEEK)[0];
+    expect(event).toBeDefined();
+    expect(Object.keys(event).sort()).toEqual(["eventId", "impact", "title", "ts"]);
+    expect(event).not.toHaveProperty("shockPct");
+  });
+
+  it("заголовки готовы целиком — без дыр от подстановок", () => {
+    // Шаблоны обычных новостей писались под подстановку инструмента или
+    // отрасли, и в календаре, где ни того ни другого ещё нет, получалось
+    // «отчёт по — без сюрпризов». У макрособытий свои формулировки.
+    for (const event of scheduleBetween("s", from, from + 6 * WEEK)) {
+      expect(event.title).not.toMatch(/[{}]/);
+      expect(event.title.length).toBeGreaterThan(10);
+    }
+  });
+
+  it("обещанный заголовок и выходит: игрок ждал ставку — увидел ставку", () => {
+    for (const event of scheduleBetween("s", from, from + 3 * WEEK)) {
+      const hourIndex = Math.round(event.ts / 3_600_000);
+      const news = newsForHour("s", hourIndex, [asset], 1, event.ts);
+      expect(news[0].headline).toBe(event.title);
+    }
+  });
+
+  it("макрособытие бьёт по всему рынку, а не по одной бумаге", () => {
+    for (const event of scheduleBetween("s", from, from + 3 * WEEK)) {
+      const hourIndex = Math.round(event.ts / 3_600_000);
+      const news = newsForHour("s", hourIndex, [asset], 1, event.ts);
+      expect(news[0].assetId).toBeNull();
+      expect(news[0].sector).toBeNull();
+    }
+  });
+
+  it("направление публикации не предопределено — иначе календарь стал бы подсказкой", () => {
+    const events = scheduleBetween("s", from, from + 26 * WEEK);
+    const signs = new Set(
+      events.map((event) => {
+        const hourIndex = Math.round(event.ts / 3_600_000);
+        return Math.sign(newsForHour("s", hourIndex, [asset], 1, event.ts)[0]?.shockPct ?? 0);
+      }),
+    );
+    expect(signs.size).toBeGreaterThan(1);
   });
 });
