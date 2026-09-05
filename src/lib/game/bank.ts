@@ -24,22 +24,30 @@ import {
   type CreditProfile,
 } from "@/lib/game/credit";
 
+/** Стартовый капитал банка — один триллион. */
+export const DEFAULT_BANK_CAPITAL = 1_000_000_000_000;
 /**
- * Стартовый капитал банка.
+ * Сколько акций выпущено при основании.
  *
- * В задании было «1т$». Тысячей банк не выдаст ни одного кредита, поэтому
- * читаю это как миллион — сумма, с которой банк может работать с первого дня
- * и при этом заметно расти на процентах. Настраивается в админке.
+ * Десять миллиардов на триллион капитала дают балансовую цену в сто долларов
+ * за акцию. Число выбрано именно из этого: акция за десять миллионов не
+ * торгуется, её нельзя купить на стартовые деньги. У настоящих банков
+ * порядок тот же — миллиарды акций по двузначной-трёхзначной цене.
  */
-export const DEFAULT_BANK_CAPITAL = 1_000_000;
-/** Сколько акций выпущено при основании. */
-export const BANK_TOTAL_SHARES = 100_000;
-/** Купон по облигациям банка, годовых. */
-export const BOND_COUPON_PCT = 6;
-/** Сроки облигаций, дни. */
-export const BOND_TERMS = [7, 30, 90];
-/** Минимальная сумма в облигацию. */
-export const MIN_BOND = 500;
+export const BANK_TOTAL_SHARES = 10_000_000_000;
+/**
+ * Ставка по ВКЛАДУ, годовых.
+ *
+ * Вклад и облигация — разные вещи, и путать их нельзя. Вклад открывается
+ * прямо в банке, лежит до срока и гасится по номиналу с процентами: результат
+ * известен заранее. Облигация банка (тикер BNKB) торгуется на бирже, её цена
+ * ходит, и продать её можно в любой момент — но по той цене, что дают.
+ */
+export const DEPOSIT_RATE_PCT = 6;
+/** Сроки вкладов, дни. */
+export const DEPOSIT_TERMS = [7, 30, 90];
+/** Минимальная сумма вклада. */
+export const MIN_DEPOSIT = 500;
 /**
  * Какую долю капитала банк держит в резерве.
  *
@@ -48,6 +56,10 @@ export const MIN_BOND = 500;
  * норматив достаточности капитала, здесь — простая доля.
  */
 export const RESERVE_RATIO = 0.2;
+
+/** Инструменты банка на бирже. */
+export const BANK_SHARE_ASSET = "STK_GAMEBANK";
+export const BANK_BOND_ASSET = "BND_GAMEBANK";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -89,14 +101,14 @@ export function lendingCapacity(bank: { capital: number; lentOut: number; bondsI
 }
 
 /**
- * Балансовая стоимость акции.
+ * БАЛАНСОВАЯ стоимость акции: капитал за вычетом долга, делённый на акции.
  *
- * Капитал за вычетом долга по облигациям, делённый на выпущенные акции. Это
- * самый честный способ оценить банк, у которого нет биржевых котировок: цена
- * прямо следует за тем, как он работает — заработал на процентах, акция
- * подорожала; получил невозврат, подешевела.
+ * Это не цена на бирже, а ориентир — сколько банк стоит «по бумагам».
+ * Биржевая цена акции BNKX ходит сама и может быть выше или ниже балансовой;
+ * их отношение (P/B) — обычный способ понять, дорого банк оценён или дёшево,
+ * и здесь он работает так же.
  */
-export function sharePrice(bank: { capital: number; bondsIssued: number; totalShares: number }): number {
+export function bookValuePerShare(bank: { capital: number; bondsIssued: number; totalShares: number }): number {
   const equity = Math.max(0, bank.capital - bank.bondsIssued);
   return Math.max(0.01, equity / Math.max(1, bank.totalShares));
 }
@@ -332,13 +344,13 @@ export async function buyBond(
   amount: number,
   termDays: number,
 ): Promise<BankResult<{ id: string; maturesAt: number; couponPct: number; payout: number }>> {
-  if (!(amount >= MIN_BOND)) return { ok: false, error: "too_small" };
-  const term = BOND_TERMS.includes(termDays) ? termDays : BOND_TERMS[0];
+  if (!(amount >= MIN_DEPOSIT)) return { ok: false, error: "too_small" };
+  const term = DEPOSIT_TERMS.includes(termDays) ? termDays : DEPOSIT_TERMS[0];
   const bank = await getBank();
 
   // Купон выше на длинном сроке: деньги, отданные надолго, стоят дороже —
   // это обычная форма кривой доходности.
-  const couponPct = BOND_COUPON_PCT * (term >= 90 ? 1.5 : term >= 30 ? 1.2 : 1);
+  const couponPct = DEPOSIT_RATE_PCT * (term >= 90 ? 1.5 : term >= 30 ? 1.2 : 1);
   const maturesAt = new Date(Date.now() + term * DAY_MS);
   const payout = amount * (1 + (couponPct / 100) * (term / 365));
 
@@ -386,12 +398,21 @@ export async function redeemBond(playerId: string, bondId: string, now = Date.no
 // на мир, и держателей поначалу единицы; зато цена честно следует за тем, как
 // банк работает.
 
+/**
+ * Первичное размещение акций банка.
+ *
+ * Цена — БИРЖЕВАЯ, а не балансовая, и это принципиально. Продавай банк свои
+ * акции по балансу, пока на бирже они стоят дороже, — получилась бы вечная
+ * бесплатная разница: купил у банка, продал на бирже, повторил. Настоящие
+ * банки размещают допэмиссию по рыночной цене ровно поэтому.
+ */
 export async function tradeBankShares(
   playerId: string,
   quantity: number,
+  marketPrice: number,
 ): Promise<BankResult<{ shares: number; price: number; total: number }>> {
   const bank = await getBank();
-  const price = sharePrice(bank);
+  const price = marketPrice > 0 ? marketPrice : bookValuePerShare(bank);
   const holding = await prisma.gameBankShare.findUnique({ where: { playerId } });
   const owned = holding?.shares ?? 0;
 
@@ -488,7 +509,7 @@ export async function bankSummary(playerId: string, equity: number, bankruptcies
       interestEarned: bank.interestEarned,
       lossesTaken: bank.lossesTaken,
       capacity: lendingCapacity(bank),
-      sharePrice: sharePrice(bank),
+      bookValuePerShare: bookValuePerShare(bank),
       sharesAvailable: bank.totalShares - bank.sharesSold,
       totalShares: bank.totalShares,
       foundedAt: bank.foundedAt.getTime(),
@@ -512,7 +533,8 @@ export async function bankSummary(playerId: string, equity: number, bankruptcies
     })),
     shares: { owned: shares?.shares ?? 0, avgPrice: shares?.avgPrice ?? 0 },
     repossessed,
-    bondTerms: BOND_TERMS,
-    bondCouponPct: BOND_COUPON_PCT,
+    depositTerms: DEPOSIT_TERMS,
+    depositRatePct: DEPOSIT_RATE_PCT,
+    tickers: { share: BANK_SHARE_ASSET, bond: BANK_BOND_ASSET },
   };
 }

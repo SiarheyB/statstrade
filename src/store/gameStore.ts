@@ -59,7 +59,18 @@ const ALL_ASSETS = assetsData as Asset[];
 // Фаза 1: 6 тикеров-акций (спека — «5-10 тикеров»), 2 сектора для
 // будущей наглядности корреляций в Фазе 3. Другие 65 активов уже лежат в
 // assets.json, но не активны, пока не подключатся соответствующие фазы.
-export const PHASE1_ASSET_IDS = ["STK_NEXTEK", "STK_QUANTA", "STK_PIXELON", "STK_IRONCORE", "STK_PETROVA", "STK_SOLARIS"];
+// Акция банка входит в стартовый набор: банк — центральный участник мира, и
+// возможность купить его долю должна быть с первого дня, а не после
+// переключения на инвестиции.
+export const PHASE1_ASSET_IDS = [
+  "STK_NEXTEK",
+  "STK_QUANTA",
+  "STK_PIXELON",
+  "STK_IRONCORE",
+  "STK_PETROVA",
+  "STK_SOLARIS",
+  "STK_GAMEBANK",
+];
 
 // Фаза 2 (раздел 15): «Добавить Scalping и Swing режимы» — к day добавляются
 // ещё два. Фаза 5 добавляет Investing (buy&hold, дивиденды) отдельной веткой

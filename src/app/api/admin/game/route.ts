@@ -3,6 +3,7 @@ import { getAdminSession, notFound } from "@/lib/admin";
 import { serverError } from "@/lib/api";
 import { prisma } from "@/lib/db";
 import { ALL_ASSETS } from "@/lib/game/marketStore";
+import { getBank } from "@/lib/game/bank";
 import { DEFAULT_MUTE_MINUTES, mutePlayer, recentMessagesForReview, removeMessage } from "@/lib/game/social";
 
 export const dynamic = "force-dynamic";
@@ -178,6 +179,21 @@ export async function POST(req: Request) {
       const minutes = Number.isFinite(body.minutes) ? Math.max(0, Math.min(60 * 24 * 30, body.minutes!)) : DEFAULT_MUTE_MINUTES;
       const until = await mutePlayer(body.playerId, minutes);
       return NextResponse.json({ ok: true, mutedUntil: until?.getTime() ?? null });
+    }
+
+    // Пересоздать банк: стирает его состояние и заводит заново со стартовым
+    // капиталом. Кредиты, вклады и доли игроков при этом удаляются — это
+    // именно «начать банк с нуля», а не подкрутить цифру.
+    if (body.action === "resetBank") {
+      await prisma.$transaction([
+        prisma.gameBankLoan.deleteMany({}),
+        prisma.gameBankBond.deleteMany({}),
+        prisma.gameBankShare.deleteMany({}),
+        prisma.gameRepossessed.deleteMany({}),
+        prisma.gameBank.deleteMany({}),
+      ]);
+      const bank = await getBank();
+      return NextResponse.json({ ok: true, capital: bank.capital, totalShares: bank.totalShares });
     }
 
     if (body.action !== "rebuildMarket") {

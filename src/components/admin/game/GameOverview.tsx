@@ -22,6 +22,28 @@ export default function GameOverview({ stats }: { stats: GameStats }) {
   const [rebuildResult, setRebuildResult] = useState<string | null>(null);
   const { players, market, loans } = stats;
 
+  async function resetBank() {
+    setRebuilding(true);
+    setRebuildResult(null);
+    try {
+      const res = await fetch("/api/admin/game", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "resetBank" }),
+      });
+      const data = await res.json();
+      setRebuildResult(
+        res.ok
+          ? `Банк создан заново: капитал ${Math.round(data.capital).toLocaleString("ru-RU")} $, акций ${Number(data.totalShares).toLocaleString("ru-RU")}.`
+          : (data.error ?? "Не удалось пересоздать банк"),
+      );
+    } catch {
+      setRebuildResult("Не удалось пересоздать банк");
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
   async function rebuild() {
     setRebuilding(true);
     setRebuildResult(null);
@@ -135,6 +157,19 @@ export default function GameOverview({ stats }: { stats: GameStats }) {
             восстановится ТОЧНО ТАКИМ ЖЕ. Нужно, когда старая история перестала соответствовать
             правилам: поменяли волатильность в настройках баланса, добавили расписание торгов,
             завели новый инструмент.
+          </p>
+          <button
+            type="button"
+            onClick={resetBank}
+            disabled={rebuilding}
+            className="input-base ml-2 px-3 py-1.5 text-xs hover:border-border-strong disabled:opacity-50"
+          >
+            Пересоздать банк
+          </button>
+          <p className="mt-2 text-[11px] text-faint max-w-prose">
+            Пересоздание банка стирает его состояние целиком: капитал возвращается к стартовому,
+            выданные кредиты, вклады, доли игроков и витрина изъятого удаляются. Это «начать банк
+            с нуля», а не подкрутить цифру.
           </p>
           {rebuildResult && <div className="mt-2 text-[11px] text-profit">{rebuildResult}</div>}
         </div>

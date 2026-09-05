@@ -19,6 +19,8 @@ import { useGameStore } from "@/store/gameStore";
 import { SHOP_ITEMS, getShopItem } from "@/engine/economy/shop";
 import { canPledge, collateralLoan } from "@/lib/game/credit";
 import { HintLabel } from "./Hint";
+import BankArt from "./BankArt";
+import { symbolOf } from "@/lib/game/assetNames";
 
 interface BankData {
   bank: {
@@ -28,7 +30,7 @@ interface BankData {
     interestEarned: number;
     lossesTaken: number;
     capacity: number;
-    sharePrice: number;
+    bookValuePerShare: number;
     sharesAvailable: number;
     totalShares: number;
     foundedAt: number;
@@ -45,8 +47,9 @@ interface BankData {
   bonds: { id: string; amount: number; couponPct: number; maturesAt: number; payout: number; matured: boolean }[];
   shares: { owned: number; avgPrice: number };
   repossessed: { id: string; itemId: string; price: number; shopPrice: number }[];
-  bondTerms: number[];
-  bondCouponPct: number;
+  depositTerms: number[];
+  depositRatePct: number;
+  tickers: { share: string; bond: string };
 }
 
 export default function BankPanel() {
@@ -55,6 +58,7 @@ export default function BankPanel() {
   const wallet = useGameStore((s) => s.game.wallet);
   const bankruptcies = useGameStore((s) => s.game.career.bankruptcies);
   const owned = useGameStore((s) => s.game.lifestyle.ownedItemIds);
+  const prices = useGameStore((s) => s.game.prices);
   const applyWorldCash = useGameStore((s) => s.applyWorldCash);
   const receiveItem = useGameStore((s) => s.receiveItem);
   const moveToWalletFromWorld = useGameStore((s) => s.creditWallet);
@@ -105,6 +109,13 @@ export default function BankPanel() {
   if (!data) return <div className="card p-4 text-sm text-loss">{t("game.bank.failed")}</div>;
 
   const { bank, credit } = data;
+  // Акция и облигация банка торгуются на бирже наравне с остальными
+  // инструментами — со своим тикером, графиком и историей. Банк размещает
+  // акции по БИРЖЕВОЙ цене: продавай он по балансовой, пока на бирже дороже,
+  // получилась бы вечная бесплатная разница.
+  const shareSymbol = symbolOf(data.tickers.share);
+  const bondSymbol = symbolOf(data.tickers.bond);
+  const marketPrice = prices[data.tickers.share] ?? null;
   const pledgeable = SHOP_ITEMS.filter((item) => owned.includes(item.id) && canPledge(item.id));
   const pledged = collateral ? getShopItem(collateral) : undefined;
   const limit = pledged ? collateralLoan(pledged) : credit.unsecuredLimit;
@@ -113,6 +124,9 @@ export default function BankPanel() {
   return (
     <div className="space-y-4">
       <div className="card p-4 space-y-3">
+        <div className="-mx-4 -mt-4 mb-1 overflow-hidden rounded-t-xl border-b border-border">
+          <BankArt capital={bank.capital} />
+        </div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="inline-flex items-center gap-2 text-sm font-medium">
             <Landmark size={15} className="text-accent" />
@@ -283,8 +297,9 @@ export default function BankPanel() {
 
       {/* Облигации */}
       <div className="card p-4 space-y-3">
-        <div className="text-sm font-medium">{t("game.bank.bonds")}</div>
-        <p className="text-[11px] text-faint max-w-prose">{t("game.bank.bondsHint")}</p>
+        <div className="text-sm font-medium">{t("game.bank.deposits")}</div>
+        <p className="text-[11px] text-faint max-w-prose">{t("game.bank.depositsHint")}</p>
+        <p className="text-[11px] text-accent">{t("game.bank.bondOnExchange", { ticker: bondSymbol })}</p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="text-xs text-muted">
             {t("game.bank.amount")}
@@ -302,7 +317,7 @@ export default function BankPanel() {
               onChange={(e) => setBondTerm(Number(e.target.value))}
               className="input-base mt-1 block px-2 py-1.5 text-sm"
             >
-              {data.bondTerms.map((days) => (
+              {data.depositTerms.map((days) => (
                 <option key={days} value={days}>
                   {days}
                 </option>
@@ -320,7 +335,7 @@ export default function BankPanel() {
             }
             className="px-3 py-2 rounded-lg text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40"
           >
-            {t("game.bank.buyBond")}
+            {t("game.bank.openDeposit")}
           </button>
         </div>
         {data.bonds.map((bond) => (
@@ -347,10 +362,14 @@ export default function BankPanel() {
       {/* Акции банка */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="text-sm font-medium">{t("game.bank.shares")}</div>
+          <div className="text-sm font-medium">
+            {t("game.bank.shares")}{" "}
+            <span className="text-xs text-accent">{shareSymbol}</span>
+          </div>
           <div className="text-sm tabular-nums">
-            {fmtUsd(bank.sharePrice)}{" "}
+            {marketPrice != null ? fmtUsd(marketPrice) : "—"}{" "}
             <span className="text-[11px] text-faint">
+              {t("game.bank.book", { price: fmtUsd(bank.bookValuePerShare) })} ·{" "}
               {t("game.bank.sharesOwned", { count: data.shares.owned })}
             </span>
           </div>
@@ -366,7 +385,7 @@ export default function BankPanel() {
           />
           <button
             type="button"
-            disabled={busy || !(Number(shareQty) > 0) || Number(shareQty) * bank.sharePrice > wallet}
+            disabled={busy || !(Number(shareQty) > 0) || (marketPrice ?? 0) * Number(shareQty) > wallet}
             onClick={() =>
               void act({ action: "shares", quantity: Number(shareQty) }, (json) => {
                 moveToWalletFromWorld(-Number(json.total));

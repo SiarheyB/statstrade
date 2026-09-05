@@ -1623,8 +1623,10 @@ model GameBank {
   bondsIssued    Float    @default(0)
   interestEarned Float    @default(0)
   lossesTaken    Float    @default(0)
-  totalShares    Int
-  sharesSold     Int      @default(0)
+  // Не Int: при капитале в триллион акций нужно десять миллиардов, а INT4
+  // хранит максимум два с небольшим.
+  totalShares    Float
+  sharesSold     Float    @default(0)
   foundedAt      DateTime @default(now())
 }
 

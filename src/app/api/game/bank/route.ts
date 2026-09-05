@@ -3,6 +3,8 @@ import { z } from "zod";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
+import { readQuotes } from "@/lib/game/marketStore";
+import { BANK_SHARE_ASSET } from "@/lib/game/bank";
 import {
   bankSummary,
   buyBond,
@@ -63,9 +65,17 @@ const schema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("repay"), loanId: z.string().max(60) }),
   z.object({ action: z.literal("bond"), amount: z.number(), termDays: z.number() }),
   z.object({ action: z.literal("redeem"), bondId: z.string().max(60) }),
-  z.object({ action: z.literal("shares"), quantity: z.number().min(-1e6).max(1e6) }),
+  // Цена акции берётся с БИРЖИ: банк размещает по рыночной, иначе на разнице
+  // между балансом и биржей получалась бы бесплатная бесконечная прибыль.
+  z.object({ action: z.literal("shares"), quantity: z.number().min(-1e9).max(1e9) }),
   z.object({ action: z.literal("buyRepossessed"), id: z.string().max(60) }),
 ]);
+
+/** Текущая биржевая цена акции банка. */
+async function bankSharePrice(): Promise<number> {
+  const quotes = await readQuotes([BANK_SHARE_ASSET]);
+  return quotes[BANK_SHARE_ASSET]?.price ?? 0;
+}
 
 export async function POST(req: Request) {
   const user = await getAuthUser();
@@ -94,7 +104,7 @@ export async function POST(req: Request) {
             : body.action === "redeem"
               ? await redeemBond(player.id, body.bondId)
               : body.action === "shares"
-                ? await tradeBankShares(player.id, body.quantity)
+                ? await tradeBankShares(player.id, body.quantity, await bankSharePrice())
                 : await buyRepossessed(player.id, body.id);
 
     if (!result.ok) return badRequest(MESSAGES[result.error] ?? "Не получилось");
