@@ -348,10 +348,22 @@ export function drawCandlesticks(
   // которых ось X идёт НЕ по календарному времени, а по номерам свечей
   // (игровой терминал: там ночи и выходные на оси места не занимают, и
   // вывести ширину из stepMs/xspan нельзя).
-  opts: { clusters?: boolean; colW?: number; bodyRatio?: number; up?: string; down?: string; bodyWidth?: number } = {},
+  // stepMs — явный шаг таймфрейма. По умолчанию выводится из первых двух
+  // свечей, но у рядов С ПРОПУСКАМИ (расписание торгов: ночи и выходные) это
+  // неверно — первые две свечи могут стоять через восемнадцать часов, и центр
+  // свечи уезжает на несколько баров вперёд.
+  opts: {
+    clusters?: boolean;
+    colW?: number;
+    bodyRatio?: number;
+    up?: string;
+    down?: string;
+    bodyWidth?: number;
+    stepMs?: number;
+  } = {},
 ) {
   if (candles.length < 2) return;
-  const stepMs = candles[1].t - candles[0].t;
+  const stepMs = opts.stepMs ?? candles[1].t - candles[0].t;
   const clusters = !!opts.clusters;
   const colW = opts.colW ?? 0;
   const bodyRatio = opts.bodyRatio ?? 0.7;

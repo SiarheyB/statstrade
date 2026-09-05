@@ -82,7 +82,7 @@ function sortBars(bars: Bar[]): Bar[] {
 type View = { i0: number; i1: number; y0: number; y1: number };
 
 /** Дробный номер свечи для момента времени. */
-function slotOf(bars: ChartCandle[], stepMs: number, ms: number): number {
+export function slotOf(bars: ChartCandle[], stepMs: number, ms: number): number {
   const n = bars.length;
   if (n === 0) return 0;
   if (ms <= bars[0].t) return (ms - bars[0].t) / stepMs;
@@ -100,7 +100,7 @@ function slotOf(bars: ChartCandle[], stepMs: number, ms: number): number {
 }
 
 /** Обратное преобразование: момент времени по дробному номеру свечи. */
-function timeOfSlot(bars: ChartCandle[], stepMs: number, slot: number): number {
+export function timeOfSlot(bars: ChartCandle[], stepMs: number, slot: number): number {
   const n = bars.length;
   if (n === 0) return slot * stepMs;
   if (slot <= 0) return bars[0].t + slot * stepMs;
@@ -285,8 +285,18 @@ export default function PriceChart({
 
   const followView = useCallback(
     (all: ChartCandle[]): View => {
-      const i1 = all.length;
-      const i0 = i1 - DEFAULT_VISIBLE_CANDLES;
+      // Просить больше свечей, чем есть, нельзя: на недельном и месячном
+      // таймфрейме у инструмента их полтора десятка, и окно на 260 баров
+      // сжимало весь ряд в левый угол, оставляя девять десятых экрана
+      // пустыми. Показываем столько, сколько есть, но не меньше минимума —
+      // иначе три свечи растянулись бы во весь экран.
+      const rightPad = 3; // немного места справа от текущей цены
+      const wanted = Math.min(
+        DEFAULT_VISIBLE_CANDLES,
+        Math.max(MIN_VISIBLE_CANDLES, all.length + rightPad),
+      );
+      const i1 = all.length + rightPad;
+      const i0 = i1 - wanted;
       return { i0, i1, ...priceRange(all, i0, i1) };
     },
     [priceRange],
@@ -443,7 +453,14 @@ export default function PriceChart({
         return;
       }
 
-      const stepMs = allCandles[1].t - allCandles[0].t || TF_MS[tf] || 60_000;
+      // Шаг берём ИЗ ТАЙМФРЕЙМА, а не из первых двух свечей ряда.
+      //
+      // Разница принципиальная с тех пор, как появилось расписание торгов:
+      // ряд начинается там, где начинается история инструмента, и это часто
+      // последний час сессии — расстояние до следующей свечи там не час, а
+      // восемнадцать. С таким «шагом» центр свечи (t + шаг/2) уезжал на
+      // шесть баров вперёд, и все свечи сессии рисовались одна на другой.
+      const stepMs = TF_MS[tf] ?? 60_000;
       stepRef.current = stepMs;
 
       const view = viewRef.current ?? followView(allCandles);
@@ -510,6 +527,9 @@ export default function PriceChart({
         // Ширина задаётся явно: вывести её из stepMs/xspan нельзя — ось
         // идёт по номерам свечей, а не по миллисекундам.
         bodyWidth: barW * BODY_RATIO,
+        // И шаг тоже: внутри рисовальщика он иначе выводится из первых двух
+        // свечей и наступает на те же грабли.
+        stepMs,
         up: colorsRef.current?.up,
         down: colorsRef.current?.down,
       });
