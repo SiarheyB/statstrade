@@ -118,6 +118,18 @@ export default function GameHeader({
           </div>
         </div>
 
+        {/* Долг спонсору. Показываем, пока он есть: игрок должен видеть, что
+            часть его прибыли сейчас чужая, — иначе удержание выглядит
+            ошибкой расчёта. */}
+        {game.sponsor && (
+          <Metric
+            label={t("game.sponsor.debtLabel")}
+            value={fmtUsd(game.sponsor.owed)}
+            tone="loss"
+            hint={t("game.sponsor.share") + `: ${game.sponsor.sharePct}%`}
+          />
+        )}
+
         {/* Стресс показывается, только когда он уже влияет на исполнение:
             спокойному игроку эта шкала не нужна и только шумит. */}
         {stress !== "calm" && (

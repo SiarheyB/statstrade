@@ -349,6 +349,26 @@ export interface GameDrawing {
   points: GameDrawingPoint[];
 }
 
+export interface SponsorDeal {
+  /** Сколько денег дали. */
+  stake: number;
+  /** Сколько ещё осталось вернуть. */
+  owed: number;
+  /** Какая доля КАЖДОЙ прибыльной сделки уходит спонсору, %. */
+  sharePct: number;
+  /** Когда договорились — для истории и для UI. */
+  signedAt: number;
+  /**
+   * Сколько записей журнала уже учтено при расчёте доли.
+   *
+   * Доля считается по журналу, а не по месту закрытия позиции, потому что
+   * закрывают её три разных пути: стоп, ликвидация и рука игрока — и только
+   * журнал видит все три одинаково. Счётчик нужен, чтобы одна и та же
+   * сделка не оплатила долю дважды.
+   */
+  settledTrades: number;
+}
+
 export interface SaveGame {
   version: string; // для миграций схемы между версиями игры
   savedAt: number;
@@ -391,6 +411,11 @@ export interface SaveGame {
   bots: AlgoBot[];
   // Разметка игрока по инструментам.
   drawings: Record<string, GameDrawing[]>;
+  // Договор со спонсором после разорения и флаг «счёт разорён, ответа ещё
+  // не было». Необязательные: сохранения, сделанные до их появления, просто
+  // не знают про долг.
+  sponsor?: SponsorDeal | null;
+  wipedOut?: boolean;
   onboardingDone: boolean;
   disclaimerSeen: boolean;
 }

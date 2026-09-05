@@ -27,6 +27,7 @@ import type {
 } from "@/engine/entities/types";
 import { applyContractReward, evaluateContract, getContract } from "@/engine/player/contracts";
 import { perkEffects } from "@/engine/player/perks";
+import { applySponsorCut, isWipedOut, sponsorCut, type SponsorDeal } from "@/engine/player/bailout";
 import { orderTriggers, trailStop, triggerLevel } from "@/engine/player/pendingOrders";
 import { isMarketOpen } from "@/lib/game/schedule";
 import { evaluateDaily, freshDailyState, type DailyState, type DailyTask } from "@/engine/player/dailyTasks";
@@ -124,6 +125,12 @@ export interface GameState {
   lastDailyCompleted: DailyTask[];
   bots: AlgoBot[];
   drawings: Record<string, GameDrawing[]>;
+  // Договор со спонсором после разорения: пока он жив, доля прибыли уходит
+  // не игроку. null — игрок никому не должен.
+  sponsor: SponsorDeal | null;
+  // Счёт разорён и спонсор ещё не предложен: UI показывает по этому флагу
+  // предложение и гасит его, когда игрок ответил.
+  wipedOut: boolean;
 }
 
 /**
@@ -513,6 +520,27 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     recalculateAccountMetrics(account, prices);
   }
 
+  // Доля спонсора. Считается по журналу, а не в момент закрытия позиции:
+  // закрывают её три разных пути (стоп, ликвидация, рука игрока), и только
+  // журнал видит все три одинаково. Счётчик учтённых сделок в договоре не
+  // даёт одной сделке заплатить долю дважды.
+  let sponsor = state.sponsor;
+  if (sponsor) {
+    const fresh = account.journal.slice(sponsor.settledTrades);
+    if (fresh.length > 0) {
+      let cut = 0;
+      for (const entry of fresh) cut += sponsorCut(sponsor, entry.pnl);
+      account.balance -= cut;
+      sponsor = applySponsorCut(sponsor, cut, account.journal.length);
+      recalculateAccountMetrics(account, prices);
+    }
+  }
+
+  // Разорение: денег почти нет и закрывать больше нечего. Флаг поднимается
+  // один раз — гасит его UI, когда игрок ответит на предложение спонсора.
+  const wipedOut =
+    state.wipedOut || (sponsor == null && isWipedOut(account.equity, account.positions, tuning.startingBalance));
+
   // 10. Смена игрового дня — фиксируем эквити для дневного результата.
   const dayStartEquity =
     gameCalendarDay !== state.gameCalendarDay || state.dayStartEquity == null
@@ -536,5 +564,7 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
     lastDividendQuarter,
     lifestyle,
     lastUpkeepMonth,
+    sponsor,
+    wipedOut,
   };
 }

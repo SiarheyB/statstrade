@@ -20,6 +20,7 @@ import type {
   TradingStyle,
 } from "@/engine/entities/types";
 import { validateOrder } from "@/engine/player/pendingOrders";
+import { sponsorOffer, WIPEOUT_PRESTIGE_PENALTY } from "@/engine/player/bailout";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 import { applyPositionClose, applyPositionOpen, gameTick, MONTH_MS, type GameState } from "@/engine/gameLoop";
@@ -157,6 +158,8 @@ function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
     lastDailyCompleted: [],
     bots: [],
     drawings: {},
+    sponsor: null,
+    wipedOut: false,
   };
 }
 
@@ -186,6 +189,8 @@ function stateToSave(state: GameState, onboardingDone: boolean, disclaimerSeen: 
     daily: state.daily,
     bots: state.bots,
     drawings: state.drawings,
+    sponsor: state.sponsor,
+    wipedOut: state.wipedOut,
     onboardingDone,
     disclaimerSeen,
   };
@@ -275,6 +280,10 @@ function saveToState(save: SaveGame, tuning: GameTuning): GameState {
     lastDailyCompleted: [],
     bots: save.bots ?? [],
     drawings: save.drawings ?? {},
+    // Сохранения до появления спонсора этих полей не знают — у них просто
+    // нет долга и нет разорения.
+    sponsor: save.sponsor ?? null,
+    wipedOut: save.wipedOut ?? false,
     // Настройки баланса НЕ сохраняются: они приходят с сервера при каждой
     // загрузке страницы, иначе правка в админке не действовала бы на тех, у
     // кого уже есть сохранение.
@@ -343,6 +352,10 @@ interface GameStoreState {
     trailingPct?: number;
   }) => OpenPositionResult;
   cancelOrder: (orderId: string) => void;
+  /** Принять деньги спонсора после разорения. */
+  acceptSponsor: () => void;
+  /** Отказаться: счёт остаётся как есть, предложение больше не всплывает. */
+  declineSponsor: () => void;
   setTrailing: (positionId: string, trailingPct: number | undefined) => void;
   setStopLoss: (positionId: string, price: number | undefined) => void;
   setTakeProfit: (positionId: string, price: number | undefined) => void;
@@ -686,6 +699,34 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       game: { ...s.game, account: { ...s.game.account, pendingOrders: [...(s.game.account.pendingOrders ?? []), order] } },
     }));
     return { ok: true };
+  },
+
+  acceptSponsor: () => {
+    const { game } = get();
+    if (game.sponsor) return; // один долг за раз
+    const deal = sponsorOffer(game.tuning.startingBalance);
+    // Счётчик учтённых сделок ставим на текущую длину журнала: доля берётся
+    // только с будущей прибыли, а не задним числом со всей истории.
+    const sponsor = { ...deal, settledTrades: game.account.journal.length };
+    set((s) => ({
+      game: {
+        ...s.game,
+        sponsor,
+        wipedOut: false,
+        account: {
+          ...s.game.account,
+          balance: s.game.account.balance + deal.stake,
+          // Разорение стоит репутации: иначе оно превратилось бы в способ
+          // бесплатно перезагружать счёт, когда сделка не пошла.
+          reputation: Math.max(0, s.game.account.reputation - WIPEOUT_PRESTIGE_PENALTY),
+        },
+      },
+    }));
+    get().notify("info", "sponsor");
+  },
+
+  declineSponsor: () => {
+    set((s) => ({ game: { ...s.game, wipedOut: false } }));
   },
 
   cancelOrder: (orderId) => {

@@ -11,7 +11,7 @@ vi.mock("@/persistence/gameDb", () => ({
 
 import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS } from "@/store/gameStore";
 import { DEFAULT_THEME_ID, freshLifestyle, getShopItem } from "@/engine/economy/shop";
-import { MONTH_MS } from "@/engine/gameLoop";
+import { gameTick, MONTH_MS } from "@/engine/gameLoop";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
 
 const ASSET_ID = PHASE1_ASSET_IDS[0];
@@ -436,5 +436,98 @@ describe("магазин (раздел 13)", () => {
     await useGameStore.getState().init();
     expect(useGameStore.getState().game.lastUpkeepMonth).toBe(30);
     expect(useGameStore.getState().game.lifestyle.ownedItemIds).toEqual([DEFAULT_THEME_ID]);
+  });
+});
+
+describe("разорение и спонсор", () => {
+  function wipeOut() {
+    useGameStore.setState((s) => ({
+      ...s,
+      game: {
+        ...s.game,
+        sponsor: null,
+        wipedOut: false,
+        account: { ...s.game.account, balance: 50, equity: 50, positions: [], pendingOrders: [], journal: [] },
+      },
+    }));
+  }
+
+  it("движок сам замечает разорение и поднимает флаг", () => {
+    wipeOut();
+    const next = gameTick(1000, useGameStore.getState().game);
+    expect(next.wipedOut).toBe(true);
+  });
+
+  it("принятая сделка даёт деньги, забирает репутацию и заводит долг", () => {
+    wipeOut();
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, wipedOut: true } }));
+    const reputationBefore = useGameStore.getState().game.account.reputation;
+    useGameStore.getState().acceptSponsor();
+    const g = useGameStore.getState().game;
+    expect(g.sponsor).not.toBeNull();
+    expect(g.account.balance).toBeGreaterThan(50);
+    expect(g.account.reputation).toBeLessThanOrEqual(reputationBefore);
+    expect(g.wipedOut).toBe(false);
+  });
+
+  it("доля списывается с прибыльной сделки и не трогает убыточную", () => {
+    wipeOut();
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, wipedOut: true } }));
+    useGameStore.getState().acceptSponsor();
+
+    const withDeal = useGameStore.getState().game;
+    const owedBefore = withDeal.sponsor!.owed;
+    const balanceBefore = withDeal.account.balance;
+
+    // Прибыльная сделка в журнале — спонсор берёт свою треть.
+    const profitable = {
+      ...withDeal,
+      account: {
+        ...withDeal.account,
+        journal: [...withDeal.account.journal, { id: "j1", positionId: "p1", timestampClosed: Date.now(), gameDay: 0, pnl: 1000, rMultiple: 1, tags: [] }],
+      },
+    };
+    const afterProfit = gameTick(1000, profitable);
+    expect(afterProfit.sponsor!.owed).toBeCloseTo(owedBefore - 300, 0);
+    expect(afterProfit.account.balance).toBeCloseTo(balanceBefore - 300, 0);
+
+    // Убыточная — ничего не берёт.
+    const losing = {
+      ...afterProfit,
+      account: {
+        ...afterProfit.account,
+        journal: [...afterProfit.account.journal, { id: "j2", positionId: "p2", timestampClosed: Date.now(), gameDay: 0, pnl: -500, rMultiple: -1, tags: [] }],
+      },
+    };
+    const afterLoss = gameTick(1000, losing);
+    expect(afterLoss.sponsor!.owed).toBeCloseTo(afterProfit.sponsor!.owed, 0);
+  });
+
+  it("одна и та же сделка не платит долю дважды", () => {
+    wipeOut();
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, wipedOut: true } }));
+    useGameStore.getState().acceptSponsor();
+    const g = useGameStore.getState().game;
+    const withTrade = {
+      ...g,
+      account: {
+        ...g.account,
+        journal: [...g.account.journal, { id: "j1", positionId: "p1", timestampClosed: Date.now(), gameDay: 0, pnl: 1000, rMultiple: 1, tags: [] }],
+      },
+    };
+    const once = gameTick(1000, withTrade);
+    const twice = gameTick(1000, once);
+    expect(twice.sponsor!.owed).toBe(once.sponsor!.owed);
+    expect(twice.account.balance).toBeCloseTo(once.account.balance, 0);
+  });
+
+  it("отказ гасит предложение и оставляет счёт как есть", () => {
+    wipeOut();
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, wipedOut: true } }));
+    useGameStore.getState().declineSponsor();
+    const g = useGameStore.getState().game;
+    expect(g.wipedOut).toBe(false);
+    expect(g.sponsor).toBeNull();
+    expect(g.account.balance).toBe(50);
   });
 });

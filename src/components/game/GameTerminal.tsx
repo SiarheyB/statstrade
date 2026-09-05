@@ -53,6 +53,7 @@ import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
 import GameDisclaimer from "./GameDisclaimer";
 import GameOnboarding from "./GameOnboarding";
+import SponsorModal from "./SponsorModal";
 
 const STYLE_LABEL_KEY: Record<TradingStyle, string> = {
   scalping: "game.style.scalping",
@@ -245,6 +246,9 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       <OfflineReportModal />
       {!disclaimerSeen && <GameDisclaimer />}
       {disclaimerSeen && !onboardingDone && <GameOnboarding />}
+      {/* Разорение показываем только после вводных окон: новичок, ещё не
+          принявший дисклеймер, разориться не успел. */}
+      {disclaimerSeen && onboardingDone && <SponsorModal />}
 
       <GameHeader game={game} styleLabel={t(STYLE_LABEL_KEY[currentStyle])} playerName={name} />
 
