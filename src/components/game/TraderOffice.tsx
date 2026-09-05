@@ -71,8 +71,10 @@ export default function TraderOffice({
             </linearGradient>
           </defs>
 
-          {/* Стена и окно */}
+          {/* Стена, пол и окно. Пол отделён по тону: без него сцена читалась
+              как плоская наклейка, а не как комната. */}
           <rect x="0" y="0" width="640" height="280" fill="var(--color-surface)" />
+          <rect x="0" y="212" width="640" height="68" fill="#12161f" />
           <rect x="40" y="20" width="560" height="150" rx="6" fill="url(#office-sky)" />
 
           {view === "sea" && (
@@ -122,8 +124,13 @@ export default function TraderOffice({
 
           <rect x="40" y="20" width="560" height="150" rx="6" fill="none" stroke="var(--color-border)" strokeWidth="3" />
 
+          {/* Свет от мониторов на столе: сцена «включена», а не выключена. */}
+          <ellipse cx="320" cy="200" rx="210" ry="20" fill="var(--color-accent)" opacity="0.07" />
+
           {/* Стол */}
           <rect x="20" y="196" width="600" height="16" rx="4" fill="url(#office-desk)" />
+          {/* Тень под столом — глубина сцены. */}
+          <rect x="20" y="212" width="600" height="6" fill="#0b0e14" opacity="0.5" />
           <rect x="60" y="212" width="10" height="56" fill="#1a2130" />
           <rect x="570" y="212" width="10" height="56" fill="#1a2130" />
 
@@ -196,6 +203,22 @@ export default function TraderOffice({
             </g>
           )}
 
+          {/* Обстановка вокруг рабочего места. Появляется вместе с жильём:
+              в съёмной комнате её нет, в своей квартире — есть. */}
+          {owned.includes("life_studio") || owned.includes("life_penthouse") || owned.includes("life_seaside") ? (
+            <g>
+              {/* Растение у окна */}
+              <rect x="26" y="182" width="26" height="30" rx="3" fill="#2a2118" />
+              <path d="M39 182 C 30 168, 28 152, 34 142" stroke="#3f7a52" strokeWidth="3" fill="none" strokeLinecap="round" />
+              <path d="M39 182 C 48 170, 52 156, 47 146" stroke="#4a8f60" strokeWidth="3" fill="none" strokeLinecap="round" />
+              <path d="M39 184 C 34 172, 40 160, 39 150" stroke="#356b47" strokeWidth="3" fill="none" strokeLinecap="round" />
+              {/* Торшер */}
+              <line x1="606" y1="212" x2="606" y2="150" stroke="#2b3546" strokeWidth="3" />
+              <path d="M594 150 h24 l-6 -16 h-12 z" fill="#e8c67a" opacity="0.85" />
+              <ellipse cx="606" cy="176" rx="26" ry="26" fill="#e8c67a" opacity="0.07" />
+            </g>
+          ) : null}
+
           {/* Мелочи на столе — только купленные */}
           {owned.includes("gear_coffee") && (
             <g>
@@ -246,14 +269,18 @@ export default function TraderOffice({
         </svg>
       </div>
 
+      {/* Всё купленное подписью под сценой. Раньше здесь было четыре
+          избранных предмета — остальные покупки не появлялись нигде, и
+          человек не понимал, за что заплатил. */}
       <div className="mt-2 flex flex-wrap gap-1.5">
-        {owned.length === 0 && <span className="text-xs text-faint">{t("game.career.nothingOwned")}</span>}
-        {["life_car", "life_yacht", "status_whale", "status_analyst"].map((id) =>
-          owned.includes(id) ? (
+        {owned.length === 0 ? (
+          <span className="text-xs text-faint">{t("game.career.nothingOwned")}</span>
+        ) : (
+          owned.map((id) => (
             <span key={id} className="rounded-lg bg-surface-2 px-2 py-1 text-[11px] text-muted">
               {t(`game.shop.item.${id}.name`)}
             </span>
-          ) : null,
+          ))
         )}
       </div>
     </div>
