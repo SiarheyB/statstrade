@@ -66,34 +66,64 @@ function ago(ts: number | null): string {
   return hours < 24 ? `${hours} ч назад` : `${Math.round(hours / 24)} д назад`;
 }
 
-/** Ползунок с числом: у процентов важна не точность, а понимание порядка. */
+/**
+ * Ползунок с числом.
+ *
+ * Тянется он ЛОКАЛЬНО, а на сервер значение уходит один раз — когда отпустили.
+ * Иначе каждое движение пальца било запросом и перезагрузкой всего списка, а
+ * список возвращал ещё старое значение: курсор дёргался назад и двигался
+ * рывками. Для процентов важен порядок, а не точность, — тем более незачем
+ * платить сотней запросов за один жест.
+ */
 function Slider({
   label,
   hint,
   value,
   min,
   max,
-  onChange,
+  onCommit,
 }: {
   label: string;
   hint: string;
   value: number;
   min: number;
   max: number;
-  onChange: (value: number) => void;
+  /** Вызывается ОДИН раз, когда ползунок отпустили. */
+  onCommit: (value: number) => void;
 }) {
+  const [local, setLocal] = useState(value);
+  const [seen, setSeen] = useState(value);
+  // Значение снаружи изменилось (перезагрузили список, сбросили бота) —
+  // подхватываем его прямо на рендере. Эффект здесь был бы лишним кадром с
+  // чужим числом.
+  if (value !== seen) {
+    setSeen(value);
+    setLocal(value);
+  }
+
+  // Отпустили, ничего не изменив, — запрос не нужен: до этого правила
+  // каждый случайный клик по ползунку писал в базу.
+  const commit = () => {
+    if (local !== seen) onCommit(local);
+  };
+
   return (
     <label className="block">
       <div className="flex items-baseline justify-between gap-2">
         <span className="text-xs text-muted">{label}</span>
-        <span className="text-xs tabular-nums">{value}%</span>
+        <span className="text-xs tabular-nums">{local}%</span>
       </div>
       <input
         type="range"
         min={min}
         max={max}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
+        value={local}
+        onChange={(e) => setLocal(Number(e.target.value))}
+        // Мышь, палец и клавиатура — три способа отпустить ползунок, и ни
+        // один из них не покрывает остальные.
+        onPointerUp={commit}
+        onKeyUp={commit}
+        onBlur={commit}
         className="w-full accent-accent"
       />
       <span className="text-[11px] text-faint">{hint}</span>
@@ -254,7 +284,7 @@ export default function GameBots() {
               value={draft.skillPct}
               min={0}
               max={100}
-              onChange={(skillPct) => setDraft({ ...draft, skillPct })}
+              onCommit={(skillPct) => setDraft({ ...draft, skillPct })}
             />
             <Slider
               label="Стремление"
@@ -262,7 +292,7 @@ export default function GameBots() {
               value={draft.riskPct}
               min={5}
               max={400}
-              onChange={(riskPct) => setDraft({ ...draft, riskPct })}
+              onCommit={(riskPct) => setDraft({ ...draft, riskPct })}
             />
             <Slider
               label="Глубина ИИ"
@@ -270,7 +300,7 @@ export default function GameBots() {
               value={draft.aiPct}
               min={0}
               max={100}
-              onChange={(aiPct) => setDraft({ ...draft, aiPct })}
+              onCommit={(aiPct) => setDraft({ ...draft, aiPct })}
             />
             <label className="block">
               <span className="text-xs text-muted">Стартовый счёт, $</span>
@@ -364,7 +394,7 @@ export default function GameBots() {
               value={bot.skillPct}
               min={0}
               max={100}
-              onChange={(skillPct) => void patch(bot.id, { skillPct })}
+              onCommit={(skillPct) => void patch(bot.id, { skillPct })}
             />
             <Slider
               label="Стремление"
@@ -372,7 +402,7 @@ export default function GameBots() {
               value={bot.riskPct}
               min={5}
               max={400}
-              onChange={(riskPct) => void patch(bot.id, { riskPct })}
+              onCommit={(riskPct) => void patch(bot.id, { riskPct })}
             />
             <Slider
               label="Глубина ИИ"
@@ -380,7 +410,7 @@ export default function GameBots() {
               value={bot.aiPct}
               min={0}
               max={100}
-              onChange={(aiPct) => void patch(bot.id, { aiPct })}
+              onCommit={(aiPct) => void patch(bot.id, { aiPct })}
             />
           </div>
 
