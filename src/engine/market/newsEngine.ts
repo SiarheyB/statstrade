@@ -217,6 +217,28 @@ export function generateNews(
  * ускорении (трое игровых суток за тик) иначе прилетало бы по 4-5 событий
  * разом, и лента превращалась бы в мусор.
  */
+/**
+ * Насыщенность новостями КОНКРЕТНОГО дня.
+ *
+ * Ровно N новостей каждый день — это расписание, а не новости: за неделю
+ * игрок привыкает к ритму и перестаёт их читать. Поэтому админ задаёт базу и
+ * разброс («10 плюс половина» — это 10–15), а день выбирает число внутри
+ * полосы. Выбор ДЕТЕРМИНИРОВАННЫЙ: внутри одного дня насыщенность не должна
+ * прыгать от тика к тику, иначе тихое утро и шторм после обеда — один и тот
+ * же день.
+ */
+export function dailyNewsRate(perDay: number, spread: number, dayIndex: number): number {
+  if (!(spread > 0)) return perDay;
+  // Дешёвый детерминированный хэш дня: свой, а не rng, — rng тут общий и
+  // «съеденное» им число сдвинуло бы всю остальную генерацию.
+  let h = (dayIndex + 1) * 2654435761;
+  h ^= h >>> 15;
+  h = Math.imul(h, 2246822519);
+  h ^= h >>> 13;
+  const unit = ((h >>> 0) % 100000) / 100000;
+  return perDay * (1 + spread * unit);
+}
+
 export function maybeGenerateNews(
   dtGameMs: number,
   assets: Asset[],
@@ -224,12 +246,13 @@ export function maybeGenerateNews(
   gameElapsedMs: number,
   candleIntervalMs: number,
   rng: () => number,
-  tuning?: { perGameDay?: number; blackSwanWeight?: number },
+  tuning?: { perGameDay?: number; spread?: number; blackSwanWeight?: number },
 ): NewsEvent | null {
   const days = dtGameMs / (24 * 60 * 60 * 1000);
   if (!(days > 0)) return null;
-  const perDay = tuning?.perGameDay ?? NEWS_PER_GAME_DAY;
-  if (perDay <= 0) return null; // админ выключил новости совсем
+  const base = tuning?.perGameDay ?? NEWS_PER_GAME_DAY;
+  if (base <= 0) return null; // админ выключил новости совсем
+  const perDay = dailyNewsRate(base, tuning?.spread ?? 0, Math.floor(gameElapsedMs / (24 * 60 * 60 * 1000)));
   const lambda = perDay * days;
   const probability = 1 - Math.exp(-lambda);
   if (rng() >= probability) return null;

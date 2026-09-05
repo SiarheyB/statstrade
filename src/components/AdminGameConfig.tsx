@@ -38,7 +38,8 @@ const GROUPS: { title: string; hint: string; fields: { key: string; label: strin
     hint: "Насколько живой и опасный рынок видит игрок.",
     fields: [
       { key: "volatilityPct", label: "Волатильность", unit: "%", step: 5 },
-      { key: "newsPerGameDay", label: "Новостей в игровой день", unit: "шт", step: 0.5 },
+      { key: "newsPerDay", label: "Новостей в день, не меньше", unit: "шт", step: 1 },
+      { key: "newsSpreadPct", label: "Разброс новостей сверх базы", unit: "%", step: 5 },
       { key: "blackSwanPerMille", label: "Чёрных лебедей", unit: "‰", step: 1 },
     ],
   },

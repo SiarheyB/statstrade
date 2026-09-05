@@ -11,6 +11,7 @@
 import { prisma } from "@/lib/db";
 import assetsData from "@/data/assets.json";
 import { isMarketOpen } from "@/lib/game/schedule";
+import { getFeatureConfig } from "@/lib/featureConfig";
 import type { Asset } from "@/engine/entities/types";
 import {
   aggregate,
@@ -23,6 +24,9 @@ import {
   MS_MINUTE,
   MS_PER_YEAR,
   newsForHour,
+  newsRateForDay,
+  NEWS_PER_DAY,
+  NEWS_SPREAD,
   nextCandle,
   rand,
   regimeTimeline,
@@ -81,6 +85,29 @@ export async function getMarket() {
 }
 
 /** Часовые бары инструмента, которых ещё нет в базе, — досчитать и записать. */
+/**
+ * Частота новостей из админки.
+ *
+ * Читается один раз на прогон догона, а не на каждый час: это одна и та же
+ * строка конфигурации, и дёргать базу на каждом часу полутора лет истории
+ * значило бы тысячи одинаковых запросов.
+ */
+async function newsRateConfig(): Promise<{ perDay: number; spread: number }> {
+  try {
+    const game = await getFeatureConfig("game");
+    const raw = game as unknown as Record<string, unknown>;
+    const perDay = typeof raw.newsPerDay === "number" ? raw.newsPerDay : NEWS_PER_DAY;
+    const spreadPct = typeof raw.newsSpreadPct === "number" ? raw.newsSpreadPct : NEWS_SPREAD * 100;
+    return {
+      perDay: Math.max(0, Math.min(24, perDay)),
+      spread: Math.max(0, Math.min(3, spreadPct / 100)),
+    };
+  } catch {
+    // Конфигурации нет (тесты, первый запуск) — мир живёт на своих числах.
+    return { perDay: NEWS_PER_DAY, spread: NEWS_SPREAD };
+  }
+}
+
 export async function ensureHistory(assetId: string, now = Date.now()): Promise<void> {
   const asset = getAsset(assetId);
   if (!asset) return;
@@ -101,6 +128,11 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
   const cursor = last ? last.ts.getTime() + MS_HOUR : assetStart;
   let price = last ? last.close : asset.startPrice ?? 100;
   if (cursor > lastHourStart) return; // всё уже посчитано
+
+  // Частоту новостей задаёт админка (/admin/game). Прошлое от этого не
+  // меняется: часы, которые уже посчитаны и лежат в базе, не пересчитываются
+  // никогда — правка знобит только будущее.
+  const newsRate = await newsRateConfig();
 
   // Режимы считаются от начала мира: индекс дня общий для всех инструментов,
   // иначе «кризис» у разных бумаг случался бы в разные дни.
@@ -125,7 +157,14 @@ export async function ensureHistory(assetId: string, now = Date.now()): Promise<
     const hourIndex = Math.round((ts - worldStart) / MS_HOUR);
     const dayIndex = Math.max(0, Math.floor((ts - worldStart) / MS_DAY));
     const regime = regimes[Math.min(regimes.length - 1, dayIndex)];
-    const news = newsForHour(seed, hourIndex, ALL_ASSETS, regime.preset.driftModifier, ts);
+    const news = newsForHour(
+      seed,
+      hourIndex,
+      ALL_ASSETS,
+      regime.preset.driftModifier,
+      ts,
+      newsRateForDay(newsRate.perDay, newsRate.spread, dayIndex),
+    );
     if (!isMarketOpen(asset.assetClass, ts)) {
       // Новости закрытого часа сохраняем: лента мира общая, и игрок должен
       // прочитать в воскресенье то, что откроет цену в понедельник.

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  newsRateForDay,
   aggregate,
   bridgeMinutes,
   freshVolState,
@@ -265,5 +266,28 @@ describe("минутки внутри часа (мост Броуна)", () => {
     expect(partial).toHaveLength(15);
     // и это ровно те же первые минутки, что и в полном часе
     expect(partial).toEqual(bridgeMinutes(hour, asset, SEED, 12).slice(0, 15));
+  });
+});
+
+
+describe("частота новостей по дням", () => {
+  it("без разброса частота ровно базовая", () => {
+    expect(newsRateForDay(4, 0, 10)).toBe(4);
+  });
+
+  it("с разбросом держится внутри полосы «база … база×(1+разброс)»", () => {
+    for (let day = 0; day < 200; day++) {
+      const rate = newsRateForDay(10, 0.5, day);
+      expect(rate).toBeGreaterThanOrEqual(10);
+      expect(rate).toBeLessThanOrEqual(15);
+    }
+  });
+
+  it("день выбирает своё число, но одно и то же при каждом расчёте", () => {
+    // Внутри суток частота не должна скакать: иначе тихое утро и шторм
+    // после обеда — это один день.
+    expect(newsRateForDay(10, 0.5, 42)).toBe(newsRateForDay(10, 0.5, 42));
+    const rates = new Set(Array.from({ length: 50 }, (_, day) => newsRateForDay(10, 0.5, day)));
+    expect(rates.size).toBeGreaterThan(20);
   });
 });
