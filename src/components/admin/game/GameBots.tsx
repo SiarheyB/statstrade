@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Bot, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { fmtUsd } from "@/lib/format";
+import Hint from "@/components/game/Hint";
 
 interface BotPosition {
   id: string;
@@ -57,6 +58,33 @@ const STYLES = [
 
 const STYLE_LABEL: Record<string, string> = Object.fromEntries(STYLES.map((s) => [s.id, s.label]));
 
+/**
+ * Что делает каждая ручка и куда её ставить.
+ *
+ * Однострочной подписи под ползунком мало: «доля верных решений» не отвечает
+ * ни на вопрос «сколько это в деньгах», ни на «а сколько ставить». Тем более
+ * что одна из ручек — прямые деньги за токены, и узнавать об этом по счёту от
+ * OpenRouter не должен никто.
+ */
+const SLIDER_HELP = {
+  skill: [
+    "Как часто бот угадывает направление сделки: из ста входов столько окажутся в его сторону.",
+    "50% — монетка: такой счёт медленно тает на разнице цен. 60–70% — крепкий трейдер, обгоняет рынок. Выше 85% бот почти не ошибается, и догнать его в рейтинге нельзя.",
+    "Разумно 45–75%. Непобедимый бот убивает смысл соревнования быстрее, чем пустой мир.",
+  ].join(" "),
+  risk: [
+    "Какую долю счёта бот ставит в одну идею: 100% — это четверть счёта на позицию, 200% — половина.",
+    "На доходность в среднем не влияет: множит и прибыль, и убыток. Меняется характер — осторожный бот почти не колышется, азартный взлетает и падает на глазах.",
+    "Разумно 40–200%: ниже скучно, выше бот сгорает за пару дней.",
+  ].join(" "),
+  ai: [
+    "Доля решений, которые принимает языковая модель вместо встроенной логики. Модель видит котировки, новости и открытые позиции и объясняет вход своими словами — это то, что потом читают в чате и в «последней мысли».",
+    "0% — бот думает только правилами: бесплатно, без сети и без объяснений. 100% — каждое решение уходит запросом в OpenRouter.",
+    "Это ПРЯМО деньги, и идут они круглые сутки: бот ходит раз в пять минут и без игроков тоже. 35% на шести ботах — около 25 запросов в час.",
+    "Разумно 20–40% на массовку и больше — на одного-двух заметных ботов.",
+  ].join(" "),
+};
+
 function ago(ts: number | null): string {
   if (!ts) return "ни разу";
   const minutes = Math.round((Date.now() - ts) / 60_000);
@@ -78,6 +106,8 @@ function ago(ts: number | null): string {
 function Slider({
   label,
   hint,
+  help,
+  helpAlign = "start",
   value,
   min,
   max,
@@ -85,6 +115,13 @@ function Slider({
 }: {
   label: string;
   hint: string;
+  /** Полное объяснение: что это, зачем и сколько ставить. */
+  help: string;
+  /**
+   * Куда прижимать подсказку. У крайних колонок центрированная подсказка
+   * шириной в 380 пикселей вылезает за край экрана и обрезается.
+   */
+  helpAlign?: "start" | "center" | "end";
   value: number;
   min: number;
   max: number;
@@ -110,7 +147,11 @@ function Slider({
   return (
     <label className="block">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="text-xs text-muted">{label}</span>
+        <Hint text={help} wide align={helpAlign} className="text-xs text-muted">
+          <span className="cursor-help underline decoration-dotted decoration-from-font underline-offset-[3px]">
+            {label}
+          </span>
+        </Hint>
         <span className="text-xs tabular-nums">{local}%</span>
       </div>
       <input
@@ -248,9 +289,10 @@ export default function GameBots() {
           </div>
         </div>
         <p className="text-xs text-faint max-w-prose">
-          Бот торгует по-настоящему: у него есть деньги, открытые позиции и результат по ним. Ходит он
-          лениво — раз в пять минут, но только когда в мир кто-то смотрит: фоновый процесс ради
-          пустой комнаты держать незачем.
+          Бот торгует по-настоящему: у него есть деньги, открытые позиции и результат по ним. Ходит
+          он раз в пять минут и делает это ВСЕГДА — даже когда в игре нет ни одного человека. Мир,
+          который замирает без зрителя, — декорация: уходя спать, игрок должен возвращаться туда,
+          где за ночь что-то произошло.
         </p>
         {error && <div className="text-xs text-loss">{error}</div>}
       </div>
@@ -286,6 +328,7 @@ export default function GameBots() {
             <Slider
               label="Интеллект"
               hint="Как часто он оказывается прав. 50% — монетка."
+              help={SLIDER_HELP.skill}
               value={draft.skillPct}
               min={0}
               max={100}
@@ -294,6 +337,8 @@ export default function GameBots() {
             <Slider
               label="Стремление"
               hint="Какую долю счёта ставит в одну идею."
+              help={SLIDER_HELP.risk}
+              helpAlign="end"
               value={draft.riskPct}
               min={5}
               max={400}
@@ -302,6 +347,7 @@ export default function GameBots() {
             <Slider
               label="Глубина ИИ"
               hint="Доля решений, которые принимает модель. Это расход на токены."
+              help={SLIDER_HELP.ai}
               value={draft.aiPct}
               min={0}
               max={100}
@@ -396,6 +442,7 @@ export default function GameBots() {
             <Slider
               label="Интеллект"
               hint="Доля верных решений."
+              help={SLIDER_HELP.skill}
               value={bot.skillPct}
               min={0}
               max={100}
@@ -404,6 +451,7 @@ export default function GameBots() {
             <Slider
               label="Стремление"
               hint="Доля счёта в одной идее."
+              help={SLIDER_HELP.risk}
               value={bot.riskPct}
               min={5}
               max={400}
@@ -412,6 +460,8 @@ export default function GameBots() {
             <Slider
               label="Глубина ИИ"
               hint="Сколько решений принимает модель."
+              help={SLIDER_HELP.ai}
+              helpAlign="end"
               value={bot.aiPct}
               min={0}
               max={100}
