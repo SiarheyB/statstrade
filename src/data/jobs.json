@@ -3,7 +3,8 @@
     "id": "JOB_COURIER",
     "dailySalary": 120,
     "requires": {},
-    "advanceDays": 3
+    "advanceDays": 3,
+    "side": true
   },
   {
     "id": "JOB_CALLCENTER",

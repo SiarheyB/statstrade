@@ -47,7 +47,7 @@ export function freshLifestyle(): LifestyleState {
   };
 }
 
-export type PurchaseError = "unknown_item" | "already_owned" | "insufficient_funds" | "locked";
+export type PurchaseError = "unknown_item" | "already_owned" | "insufficient_funds" | "locked" | "employed";
 export type PurchaseCheck = { ok: true } | { ok: false; error: PurchaseError };
 
 /**
@@ -57,9 +57,23 @@ export type PurchaseCheck = { ok: true } | { ok: false; error: PurchaseError };
  * иначе на дорогом заблокированном предмете игрок видел бы «не хватает
  * денег» и копил бы зря, не понимая, что дело в репутации.
  */
-export function canPurchase(item: ShopItem | undefined, balance: number, lifestyle: LifestyleState, prestige: number): PurchaseCheck {
+export function canPurchase(
+  item: ShopItem | undefined,
+  balance: number,
+  lifestyle: LifestyleState,
+  prestige: number,
+  /**
+   * Работает ли игрок где-нибудь прямо сейчас.
+   *
+   * Лицензию фонда наёмному работнику не выдадут: свой фонд и работа по найму
+   * несовместимы, и разрешать открыть фонд «не увольняясь» — значит завести
+   * в игре положение, из которого правила приёма на работу выглядят враньём.
+   */
+  employed = false,
+): PurchaseCheck {
   if (!item) return { ok: false, error: "unknown_item" };
   if (lifestyle.ownedItemIds.includes(item.id)) return { ok: false, error: "already_owned" };
+  if (item.id === FUND_LICENSE_ITEM_ID && employed) return { ok: false, error: "employed" };
   if (prestige < item.requiresPrestige) return { ok: false, error: "locked" };
   if (item.price > balance) return { ok: false, error: "insufficient_funds" };
   return { ok: true };

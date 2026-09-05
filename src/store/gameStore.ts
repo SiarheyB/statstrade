@@ -12,6 +12,7 @@ import type {
   AssetClass,
   Candle,
   GameDrawing,
+  JobState,
   MarketRegime,
   NewsEvent,
   Order,
@@ -23,7 +24,7 @@ import { validateOrder } from "@/engine/player/pendingOrders";
 import { sponsorOffer, WIPEOUT_PRESTIGE_PENALTY } from "@/engine/player/bailout";
 import { freshStreak, streakReward, touchStreak } from "@/engine/player/achievements";
 import { freshTaxState } from "@/engine/economy/taxes";
-import { advanceAvailable, freshCareer, getJob, jobAvailable, JOBS } from "@/engine/player/jobs";
+import { advanceAvailable, freshCareer, getJob, hireError, isEmployed, jobAvailable, JOBS } from "@/engine/player/jobs";
 import { botRecord } from "@/engine/player/algoBots";
 import { makeRegime } from "@/engine/market/marketRegime";
 import { TRADING_STYLE_CONFIGS } from "@/engine/entities/tradingStyleConfigs";
@@ -40,7 +41,7 @@ import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkErro
 import { freshDailyState } from "@/engine/player/dailyTasks";
 import { catchUp, type OfflineReport } from "@/engine/offline";
 import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
-import { applyPurchase, canPurchase, equipTheme, freshLifestyle, getShopItem, releaseItem, settleUpkeepDebt, type PurchaseError } from "@/engine/economy/shop";
+import { applyPurchase, canPurchase, equipTheme, freshLifestyle, FUND_LICENSE_ITEM_ID, getShopItem, releaseItem, settleUpkeepDebt, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
 import {
@@ -493,9 +494,11 @@ interface GameStoreState {
   /** Устроиться на работу. */
   takeJob: (jobId: string) => void;
   /** Уволиться. */
-  quitJob: () => void;
+  /** Уволиться. По умолчанию с основной работы; "side" — бросить подработку. */
+  quitJob: (kind?: "main" | "side") => void;
   /** Взять аванс за несколько дней вперёд. */
-  takeAdvance: (amount: number) => void;
+  /** Взять аванс. По умолчанию по основной работе; "side" — по подработке. */
+  takeAdvance: (amount: number, kind?: "main" | "side") => void;
   /** Перевести наличные на брокерский счёт и обратно. */
   moveToBroker: (amount: number) => void;
   moveToWallet: (amount: number) => void;
@@ -953,36 +956,45 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       level: levels.length > 0 ? Math.max(...levels) : 0,
       contractsPassed: game.contracts.completedIds.length,
     };
-    if (!jobAvailable(job, stats)) return;
+    // Правила совмещения — в движке (player/jobs.ts): одна основная работа,
+    // курьер вдобавок, владельцу фонда — ничего.
+    const ownsFund = game.lifestyle.ownedItemIds.includes(FUND_LICENSE_ITEM_ID);
+    if (hireError(job, game.career, ownsFund, stats)) return;
+    const hired: JobState = { jobId, startedAt: Date.now(), paidUntil: Date.now(), advanceDebt: 0, earned: 0 };
     set((s) => ({
       game: {
         ...s.game,
         career: {
           ...s.game.career,
           // Зарплата начинает капать с этой секунды, а не с полуночи.
-          job: { jobId, startedAt: Date.now(), paidUntil: Date.now(), advanceDebt: 0, earned: 0 },
+          ...(job.side ? { sideJob: hired } : { job: hired }),
         },
       },
     }));
   },
 
-  quitJob: () => {
-    set((s) => ({ game: { ...s.game, career: { ...s.game.career, job: null } } }));
+  quitJob: (kind = "main") => {
+    set((s) => ({
+      game: { ...s.game, career: { ...s.game.career, ...(kind === "side" ? { sideJob: null } : { job: null }) } },
+    }));
   },
 
-  takeAdvance: (amount) => {
+  // Аванс берётся по конкретной ставке: у основной работы и подработки свои
+  // потолки, и складывать их в один лимит нельзя.
+  takeAdvance: (amount, kind = "main") => {
     const { game } = get();
-    const state = game.career.job;
+    const state = kind === "side" ? (game.career.sideJob ?? null) : game.career.job;
     const job = state ? getJob(state.jobId) : undefined;
     if (!state || !job) return;
     const available = advanceAvailable(state, job);
     const sum = Math.min(Math.max(0, amount), available);
     if (!(sum > 0)) return;
+    const updated = { ...state, advanceDebt: state.advanceDebt + sum };
     set((s) => ({
       game: {
         ...s.game,
         wallet: s.game.wallet + sum,
-        career: { ...s.game.career, job: { ...state, advanceDebt: state.advanceDebt + sum } },
+        career: { ...s.game.career, ...(kind === "side" ? { sideJob: updated } : { job: updated }) },
       },
     }));
   },
@@ -1448,7 +1460,13 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   purchaseShopItem: (itemId) => {
     const { game } = get();
     const item = getShopItem(itemId);
-    const check = canPurchase(item, game.account.balance, game.lifestyle, game.account.reputation);
+    const check = canPurchase(
+      item,
+      game.account.balance,
+      game.lifestyle,
+      game.account.reputation,
+      isEmployed(game.career),
+    );
     if (!check.ok || !item) return check.ok ? { ok: false, error: "unknown_item" } : check;
     const account: Account = { ...game.account, positions: [...game.account.positions], journal: [...game.account.journal] };
     const lifestyle = applyPurchase(account, game.lifestyle, item);

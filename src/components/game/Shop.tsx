@@ -13,6 +13,7 @@ import { Lock } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
+import { isEmployed } from "@/engine/player/jobs";
 import {
   canPurchase,
   FORCED_SALE_RATE,
@@ -47,7 +48,11 @@ function ItemCard({ item, owned }: { item: ShopItem; owned: boolean }) {
   const equipTheme = useGameStore((s) => s.equipShopTheme);
   const sell = useGameStore((s) => s.sellShopItem);
 
-  const check = canPurchase(item, balance, lifestyle, prestige);
+  // Лицензию фонда наёмному работнику не продают — правило то же, что у
+  // приёма на работу с той стороны (player/jobs.ts).
+  const employed = useGameStore((s) => isEmployed(s.game.career));
+  const check = canPurchase(item, balance, lifestyle, prestige, employed);
+  const blockedByJob = !check.ok && check.error === "employed";
   const locked = !check.ok && check.error === "locked";
   const equipped = lifestyle.equippedThemeId === item.id;
 
@@ -119,11 +124,21 @@ function ItemCard({ item, owned }: { item: ShopItem; owned: boolean }) {
           type="button"
           disabled={!check.ok}
           onClick={() => purchase(item.id)}
-          title={locked ? t("game.shop.lockedHint", { prestige: item.requiresPrestige }) : undefined}
+          title={
+            blockedByJob
+              ? t("game.shop.employedHint")
+              : locked
+                ? t("game.shop.lockedHint", { prestige: item.requiresPrestige })
+                : undefined
+          }
           className="w-full px-3 py-1.5 rounded-lg text-xs font-medium transition bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center justify-center gap-1"
         >
-          {locked && <Lock size={12} />}
-          {locked ? t("game.shop.locked", { prestige: item.requiresPrestige }) : t("game.shop.buy")}
+          {(locked || blockedByJob) && <Lock size={12} />}
+          {blockedByJob
+            ? t("game.shop.employed")
+            : locked
+              ? t("game.shop.locked", { prestige: item.requiresPrestige })
+              : t("game.shop.buy")}
         </button>
       )}
     </div>

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { accrueSalary, advanceAvailable, freshCareer, getJob, jobAvailable, JOBS } from "@/engine/player/jobs";
+import { accrueSalary, advanceAvailable, freshCareer, getJob, hireError, isEmployed, jobAvailable, JOBS } from "@/engine/player/jobs";
 
 const DAY = 24 * 60 * 60 * 1000;
 const job = JOBS[0];
@@ -75,5 +75,50 @@ describe("карьера", () => {
     const career = freshCareer();
     expect(career.job).toBeNull();
     expect(career.bankruptcies).toBe(0);
+  });
+});
+
+describe("кем можно быть одновременно", () => {
+  const stats = { prestige: 100, level: 5, contractsPassed: 1 };
+  const courier = getJob("JOB_COURIER")!;
+  const callcenter = getJob("JOB_CALLCENTER")!;
+  const backoffice = getJob("JOB_BACKOFFICE")!;
+
+  it("владельца фонда не берут никуда, даже курьером", () => {
+    expect(hireError(courier, freshCareer(), true, stats)).toBe("owns_fund");
+    expect(hireError(backoffice, freshCareer(), true, stats)).toBe("owns_fund");
+  });
+
+  it("вторую основную работу взять нельзя, а курьера вдобавок — можно", () => {
+    const employed = {
+      ...freshCareer(),
+      job: { jobId: "JOB_CALLCENTER", startedAt: 0, paidUntil: 0, advanceDebt: 0, earned: 0 },
+    };
+    expect(hireError(backoffice, employed, false, stats)).toBe("already_employed");
+    expect(hireError(courier, employed, false, stats)).toBeNull();
+  });
+
+  it("подработка тоже одна", () => {
+    const moonlighting = {
+      ...freshCareer(),
+      sideJob: { jobId: "JOB_COURIER", startedAt: 0, paidUntil: 0, advanceDebt: 0, earned: 0 },
+    };
+    expect(hireError(courier, moonlighting, false, stats)).toBe("already_side");
+    // Основная при этом свободна.
+    expect(hireError(callcenter, moonlighting, false, stats)).toBeNull();
+  });
+
+  it("требования проверяются последними — сначала непреодолимое", () => {
+    const weak = { prestige: 0, level: 0, contractsPassed: 0 };
+    expect(hireError(callcenter, freshCareer(), false, weak)).toBe("locked");
+    // У владельца фонда причина другая, и престиж копить бесполезно.
+    expect(hireError(callcenter, freshCareer(), true, weak)).toBe("owns_fund");
+  });
+
+  it("занятость считает обе ставки", () => {
+    expect(isEmployed(freshCareer())).toBe(false);
+    expect(
+      isEmployed({ ...freshCareer(), sideJob: { jobId: "JOB_COURIER", startedAt: 0, paidUntil: 0, advanceDebt: 0, earned: 0 } }),
+    ).toBe(true);
   });
 });

@@ -29,6 +29,8 @@ export interface Job {
   requires: JobRequirements;
   /** За сколько дней вперёд можно взять аванс. */
   advanceDays: number;
+  /** Подработка: её одну можно совмещать с основной работой. */
+  side?: boolean;
 }
 
 export const JOBS = jobsData as Job[];
@@ -40,7 +42,53 @@ export function getJob(id: string): Job | undefined {
 
 
 export function freshCareer(): CareerState {
-  return { job: null, bankruptcies: 0, lastBankruptcyAt: null };
+  return { job: null, sideJob: null, bankruptcies: 0, lastBankruptcyAt: null };
+}
+
+// ── Кем можно быть одновременно ───────────────────────────────────────────
+//
+// В жизни человек не работает курьером, оператором и аналитиком разом, а
+// владелец фонда вообще не может быть у кого-то в найме: он сам работодатель,
+// и совмещать это с наймом ему не даёт закон. Игра, в которой можно занять
+// все ставки сразу, превращает работу в пассивный доход без выбора —
+// а выбор «работать или строить своё» и есть содержание этого раздела.
+//
+// Отсюда три правила:
+//   1) основная работа одна;
+//   2) курьер — подработка, его одного можно взять вдобавок;
+//   3) у владельца фонда работы нет вовсе — ни основной, ни подработки.
+//
+// Обратная сторона третьего правила — в магазине: лицензию фонда не продадут,
+// пока не уволишься отовсюду (canPurchase в economy/shop.ts).
+
+export type HireError = "locked" | "owns_fund" | "already_employed" | "already_side";
+
+/** Есть ли хоть какая-то работа: и основная, и подработка считаются. */
+export function isEmployed(career: CareerState): boolean {
+  return career.job !== null || (career.sideJob ?? null) !== null;
+}
+
+/**
+ * Почему нельзя устроиться. `null` — можно.
+ *
+ * Порядок важен для UI: сначала непреодолимое (свой фонд), потом занятость,
+ * и только в конце «не дотягиваешь» — иначе владелец фонда видел бы «нужен
+ * престиж» и копил бы репутацию зря.
+ */
+export function hireError(
+  job: Job,
+  career: CareerState,
+  ownsFund: boolean,
+  stats: { prestige: number; level: number; contractsPassed: number },
+): HireError | null {
+  if (ownsFund) return "owns_fund";
+  if (job.side) {
+    if ((career.sideJob ?? null) !== null) return "already_side";
+  } else if (career.job !== null) {
+    return "already_employed";
+  }
+  if (!jobAvailable(job, stats)) return "locked";
+  return null;
 }
 
 /** Доступна ли работа по текущим достижениям. */

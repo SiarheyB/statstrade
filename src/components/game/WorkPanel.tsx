@@ -14,16 +14,74 @@ import { useState } from "react";
 import { Briefcase, HandCoins, Wallet } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
-import { advanceAvailable, getJob, jobAvailable, JOBS } from "@/engine/player/jobs";
+import { advanceAvailable, getJob, hireError, JOBS, type Job } from "@/engine/player/jobs";
+import { FUND_LICENSE_ITEM_ID } from "@/engine/economy/shop";
+import type { JobState } from "@/engine/entities/types";
 import { useGameStore } from "@/store/gameStore";
-import { HintLabel } from "./Hint";
+import Hint, { HintLabel } from "./Hint";
+
+// Карточка занятой ставки. Одна и та же для основной работы и подработки:
+// отличаются они только подписью и тем, какую ставку освобождает увольнение.
+function HeldJob({ state, job, kind }: { state: JobState; job: Job; kind: "main" | "side" }) {
+  const { t } = useI18n();
+  const quitJob = useGameStore((s) => s.quitJob);
+  const takeAdvance = useGameStore((s) => s.takeAdvance);
+  const available = advanceAvailable(state, job);
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg bg-surface-2 p-3 space-y-1.5 text-sm">
+        <div className="flex flex-wrap items-baseline gap-2">
+          <span className="font-medium">{t(`game.job.${job.id}.name`)}</span>
+          <span className="text-[11px] uppercase tracking-[0.12em] text-accent">
+            {t(kind === "side" ? "game.work.sideJob" : "game.work.mainJob")}
+          </span>
+        </div>
+        <div className="text-xs text-faint">{t(`game.job.${job.id}.desc`)}</div>
+        <div className="flex flex-wrap gap-4 pt-1 text-xs">
+          <span>
+            <span className="text-muted">{t("game.work.salary")}: </span>
+            <span className="tabular-nums text-profit">{fmtUsd(job.dailySalary)}</span>
+          </span>
+          <span>
+            <span className="text-muted">{t("game.work.earned")}: </span>
+            <span className="tabular-nums">{fmtUsd(state.earned)}</span>
+          </span>
+          {state.advanceDebt > 0 && (
+            <span>
+              <span className="text-muted">{t("game.work.advanceDebt")}: </span>
+              <span className="tabular-nums text-loss">{fmtUsd(state.advanceDebt)}</span>
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          disabled={available <= 0}
+          onClick={() => takeAdvance(available, kind)}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40"
+        >
+          <HandCoins size={14} />
+          {t("game.work.takeAdvance", { amount: fmtUsd(available) })}
+        </button>
+        <button
+          type="button"
+          onClick={() => quitJob(kind)}
+          className="px-3 py-1.5 rounded-lg text-sm text-muted hover:text-loss transition"
+        >
+          {t("game.work.quit")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function WorkPanel() {
   const { t } = useI18n();
   const game = useGameStore((s) => s.game);
   const takeJob = useGameStore((s) => s.takeJob);
-  const quitJob = useGameStore((s) => s.quitJob);
-  const takeAdvance = useGameStore((s) => s.takeAdvance);
   const moveToBroker = useGameStore((s) => s.moveToBroker);
   const moveToWallet = useGameStore((s) => s.moveToWallet);
   const declareBankruptcy = useGameStore((s) => s.declareBankruptcy);
@@ -33,6 +91,9 @@ export default function WorkPanel() {
 
   const jobState = game.career.job;
   const job = jobState ? getJob(jobState.jobId) : undefined;
+  const sideState = game.career.sideJob ?? null;
+  const sideJob = sideState ? getJob(sideState.jobId) : undefined;
+  const ownsFund = game.lifestyle.ownedItemIds.includes(FUND_LICENSE_ITEM_ID);
   const levels = Object.values(game.account.skills).map((skill) => skill.level);
   const stats = {
     prestige: game.account.reputation,
@@ -99,73 +160,45 @@ export default function WorkPanel() {
           {t("game.work.title")}
         </div>
 
-        {jobState && job ? (
-          <div className="space-y-3">
-            <div className="rounded-lg bg-surface-2 p-3 space-y-1.5 text-sm">
-              <div className="font-medium">{t(`game.job.${job.id}.name`)}</div>
-              <div className="text-xs text-faint">{t(`game.job.${job.id}.desc`)}</div>
-              <div className="flex flex-wrap gap-4 pt-1 text-xs">
-                <span>
-                  <span className="text-muted">{t("game.work.salary")}: </span>
-                  <span className="tabular-nums text-profit">{fmtUsd(job.dailySalary)}</span>
-                </span>
-                <span>
-                  <span className="text-muted">{t("game.work.earned")}: </span>
-                  <span className="tabular-nums">{fmtUsd(jobState.earned)}</span>
-                </span>
-                {jobState.advanceDebt > 0 && (
-                  <span>
-                    <span className="text-muted">{t("game.work.advanceDebt")}: </span>
-                    <span className="tabular-nums text-loss">{fmtUsd(jobState.advanceDebt)}</span>
-                  </span>
-                )}
-              </div>
-            </div>
+        {/* Занятые ставки — сверху, вакансии — под ними: сначала «где я
+            работаю», потом «куда ещё можно». */}
+        {jobState && job && <HeldJob state={jobState} job={job} kind="main" />}
+        {sideState && sideJob && <HeldJob state={sideState} job={sideJob} kind="side" />}
+        {(jobState || sideState) && <p className="text-[11px] text-faint max-w-prose">{t("game.work.advanceHint")}</p>}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                disabled={advanceAvailable(jobState, job) <= 0}
-                onClick={() => takeAdvance(advanceAvailable(jobState, job))}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-40"
-              >
-                <HandCoins size={14} />
-                {t("game.work.takeAdvance", { amount: fmtUsd(advanceAvailable(jobState, job)) })}
-              </button>
-              <button
-                type="button"
-                onClick={quitJob}
-                className="px-3 py-1.5 rounded-lg text-sm text-muted hover:text-loss transition"
-              >
-                {t("game.work.quit")}
-              </button>
-            </div>
-            <p className="text-[11px] text-faint max-w-prose">{t("game.work.advanceHint")}</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-faint max-w-prose">{t("game.work.pickHint")}</p>
-            {JOBS.map((item) => {
-              const available = jobAvailable(item, stats);
-              return (
-                <div key={item.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm">
-                  <span className={`font-medium ${available ? "" : "text-faint"}`}>{t(`game.job.${item.id}.name`)}</span>
-                  <span className="text-xs text-faint flex-1 min-w-[160px]">{t(`game.job.${item.id}.desc`)}</span>
-                  <span className="tabular-nums text-profit">{fmtUsd(item.dailySalary)}</span>
+        <div className="space-y-2">
+          {/* Правила совмещения объясняем прямо здесь, а не только
+              заблокированной кнопкой: человек должен понимать, почему
+              вакансия недоступна, ДО того как ткнёт в неё. */}
+          <p className="text-xs text-faint max-w-prose">
+            {t(ownsFund ? "game.work.fundOwnerHint" : "game.work.pickHint")}
+          </p>
+          {JOBS.map((item) => {
+            const held = item.id === jobState?.jobId || item.id === sideState?.jobId;
+            if (held) return null;
+            const error = hireError(item, game.career, ownsFund, stats);
+            return (
+              <div key={item.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm">
+                <span className={`font-medium ${error ? "text-faint" : ""}`}>{t(`game.job.${item.id}.name`)}</span>
+                {item.side && (
+                  <span className="text-[10px] uppercase tracking-[0.12em] text-accent">{t("game.work.sideJob")}</span>
+                )}
+                <span className="text-xs text-faint flex-1 min-w-[160px]">{t(`game.job.${item.id}.desc`)}</span>
+                <span className="tabular-nums text-profit">{fmtUsd(item.dailySalary)}</span>
+                <Hint text={error ? t(`game.work.hire.${error}`) : t("game.work.takeHint")} side="top" align="end">
                   <button
                     type="button"
-                    disabled={!available}
+                    disabled={error !== null}
                     onClick={() => takeJob(item.id)}
                     className="px-3 py-1 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-30"
-                    title={available ? undefined : t("game.work.locked")}
                   >
                     {t("game.work.take")}
                   </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                </Hint>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       <div className="card p-4">

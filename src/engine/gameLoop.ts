@@ -765,6 +765,7 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
   // разделения.
   let career = state.career;
   let wallet = state.wallet;
+  // Зарплата идёт по обеим ставкам: основной и подработке (курьер).
   if (career.job) {
     const job = getJob(career.job.jobId);
     if (job) {
@@ -772,6 +773,16 @@ export function gameTick(dtRealMs: number, state: GameState): GameState {
       if (salary.paid > 0 || salary.state !== career.job) {
         wallet += salary.paid;
         career = { ...career, job: salary.state };
+      }
+    }
+  }
+  if (career.sideJob) {
+    const job = getJob(career.sideJob.jobId);
+    if (job) {
+      const salary = accrueSalary(career.sideJob, job, Date.now());
+      if (salary.paid > 0 || salary.state !== career.sideJob) {
+        wallet += salary.paid;
+        career = { ...career, sideJob: salary.state };
       }
     }
   }

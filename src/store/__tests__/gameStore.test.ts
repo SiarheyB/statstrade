@@ -603,8 +603,45 @@ describe("банкротство и работа", () => {
   });
 
   it("кнопки «начать заново» у игрока нет — есть работа", () => {
+    // Курьер — подработка, поэтому занимает вторую ставку, а не основную.
     useGameStore.getState().takeJob("JOB_COURIER");
-    expect(useGameStore.getState().game.career.job?.jobId).toBe("JOB_COURIER");
+    expect(useGameStore.getState().game.career.sideJob?.jobId).toBe("JOB_COURIER");
+  });
+
+  it("на двух основных ставках сразу не работают, а курьер идёт вдобавок", () => {
+    useGameStore.getState().quitJob();
+    useGameStore.getState().quitJob("side");
+    useGameStore.setState((s) => ({ ...s, game: { ...s.game, account: { ...s.game.account, reputation: 100 } } }));
+    useGameStore.getState().takeJob("JOB_CALLCENTER");
+    useGameStore.getState().takeJob("JOB_BACKOFFICE");
+    // Вторая основная работа не берётся: сначала надо уволиться.
+    expect(useGameStore.getState().game.career.job?.jobId).toBe("JOB_CALLCENTER");
+    useGameStore.getState().takeJob("JOB_COURIER");
+    expect(useGameStore.getState().game.career.sideJob?.jobId).toBe("JOB_COURIER");
+  });
+
+  it("владельца фонда не берут в найм, а наёмному не продают лицензию фонда", () => {
+    useGameStore.getState().quitJob();
+    useGameStore.getState().quitJob("side");
+    useGameStore.setState((s) => ({
+      ...s,
+      game: {
+        ...s.game,
+        account: { ...s.game.account, balance: 100_000, reputation: 100 },
+        lifestyle: { ...s.game.lifestyle, ownedItemIds: [...s.game.lifestyle.ownedItemIds, "status_fund"] },
+      },
+    }));
+    useGameStore.getState().takeJob("JOB_COURIER");
+    expect(useGameStore.getState().game.career.sideJob ?? null).toBeNull();
+
+    // И то же правило с другой стороны: устроенному лицензию не продадут.
+    useGameStore.setState((s) => ({
+      ...s,
+      game: { ...s.game, lifestyle: { ...s.game.lifestyle, ownedItemIds: ["theme_classic"] } },
+    }));
+    useGameStore.getState().takeJob("JOB_COURIER");
+    const result = useGameStore.getState().purchaseShopItem("status_fund");
+    expect(result).toEqual({ ok: false, error: "employed" });
   });
 
   it("на работу с требованиями без репутации не берут", () => {
@@ -615,12 +652,13 @@ describe("банкротство и работа", () => {
   });
 
   it("аванс попадает в наличные и создаёт долг", () => {
+    useGameStore.getState().quitJob("side");
     useGameStore.getState().takeJob("JOB_COURIER");
     useGameStore.setState((s) => ({ ...s, game: { ...s.game, wallet: 0 } }));
-    useGameStore.getState().takeAdvance(200);
+    useGameStore.getState().takeAdvance(200, "side");
     const g = useGameStore.getState().game;
     expect(g.wallet).toBeGreaterThan(0);
-    expect(g.career.job!.advanceDebt).toBeGreaterThan(0);
+    expect(g.career.sideJob!.advanceDebt).toBeGreaterThan(0);
   });
 
   it("деньги переходят между наличными и брокерским счётом, но не появляются из воздуха", () => {
