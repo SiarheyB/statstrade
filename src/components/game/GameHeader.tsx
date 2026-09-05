@@ -29,12 +29,15 @@ function Metric({
   value,
   tone,
   hint,
+  hintTone,
   tip,
 }: {
   label: string;
   value: string;
   tone?: "profit" | "loss";
   hint?: string;
+  /** Цвет подписи под цифрой: дневной результат тоже бывает отрицательным. */
+  hintTone?: "profit" | "loss";
   /** Что эта цифра означает. Без пояснения половина шапки — набор терминов. */
   tip?: string;
 }) {
@@ -50,7 +53,15 @@ function Metric({
       >
         {value}
       </div>
-      {hint && <div className="text-[11px] text-faint truncate">{hint}</div>}
+      {hint && (
+        <div
+          className={`text-[11px] truncate ${
+            hintTone === "profit" ? "text-profit" : hintTone === "loss" ? "text-loss" : "text-faint"
+          }`}
+        >
+          {hint}
+        </div>
+      )}
     </div>
   );
 }
@@ -108,19 +119,25 @@ export default function GameHeader({
           </div>
         </div>
 
+        {/* Цвет самой цифры — по ЗНАКУ СУММЫ, а не по дневному результату.
+            Раньше уход в минус оставался зелёным: день закончился в плюс, и
+            эквити красилась зелёным, хотя на счёте был минус. Дневной итог
+            красится отдельно, своей строкой под цифрой. */}
         <Metric
           label={t("game.stat.equity")}
           value={fmtUsd(game.account.equity)}
-          tone={dayPnl >= 0 ? "profit" : "loss"}
+          tone={game.account.equity < 0 ? "loss" : dayPnl > 0 ? "profit" : dayPnl < 0 ? "loss" : undefined}
           hint={t("game.header.today", {
             amount: `${dayPnl >= 0 ? "+" : ""}${fmtUsd(dayPnl)}`,
             pct: `${dayPnl >= 0 ? "+" : ""}${dayPnlPct.toFixed(2)}%`,
           })}
+          hintTone={dayPnl > 0 ? "profit" : dayPnl < 0 ? "loss" : undefined}
           tip={t("game.tip.equity")}
         />
         <Metric
           label={t("game.stat.balance")}
           value={fmtUsd(game.account.balance)}
+          tone={game.account.balance < 0 ? "loss" : undefined}
           hint={marginUsed > 0 ? t("game.header.marginUsed", { amount: fmtUsd(marginUsed) }) : undefined}
           tip={t("game.tip.balance")}
         />

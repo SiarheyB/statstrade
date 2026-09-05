@@ -17,12 +17,20 @@ export default function Hint({
   text,
   children,
   side = "bottom",
+  align = "center",
   className = "",
 }: {
   text: string;
   children: ReactNode;
   /** Сверху — там, где снизу нет места (нижние строки таблиц). */
   side?: "bottom" | "top";
+  /**
+   * Куда прижимать подсказку по горизонтали.
+   *
+   * У элемента, стоящего вплотную к правому краю, подсказка по центру
+   * вылезает за экран и обрезается — для таких нужен «end».
+   */
+  align?: "center" | "start" | "end";
   className?: string;
 }) {
   return (
@@ -34,9 +42,9 @@ export default function Hint({
         // focus-within: после клика кнопка остаётся в фокусе, и подсказка
         // висела на экране, пока фокус не уйдёт куда-то ещё — по две-три
         // штуки одновременно поверх графика.
-        className={`pointer-events-none absolute left-1/2 z-50 hidden w-max max-w-[240px] -translate-x-1/2 rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-fg shadow-lg group-hover:block group-has-[:focus-visible]:block ${
+        className={`pointer-events-none absolute z-50 hidden w-max max-w-[240px] rounded-lg border border-border bg-surface px-2.5 py-1.5 text-[11px] font-normal normal-case leading-snug tracking-normal text-fg shadow-lg group-hover:block group-has-[:focus-visible]:block ${
           side === "bottom" ? "top-full mt-1.5" : "bottom-full mb-1.5"
-        }`}
+        } ${align === "end" ? "right-0" : align === "start" ? "left-0" : "left-1/2 -translate-x-1/2"}`}
       >
         {text}
       </span>

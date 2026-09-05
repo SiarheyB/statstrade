@@ -2012,6 +2012,11 @@ const en: Dict = {
   "game.regime.crisis": "Crisis",
   "game.regime.daysShort": "d",
   "game.regime.hint": "The market has been in this regime for {days} game days. A regime shifts the drift and volatility of every asset at once.",
+  "game.regime.explain": "The mood of the WHOLE market, not of one instrument: right now it is a {regime}, held for {days} days. It {drift}, and moves are {vol}% in size against the usual. It decides nothing on its own — a single stock can rise in a bear market, it is simply swimming against the current.",
+  "game.regime.drift.down": "turns the general trend downwards",
+  "game.regime.drift.weaker": "weakens the general trend",
+  "game.regime.drift.stronger": "strengthens the general trend",
+  "game.regime.drift.same": "leaves the trend as it is",
 
   // Панель графика: таймфреймы и управление масштабом.
   "game.chart.tfLabel": "candle timeframe (game time)",
@@ -4359,6 +4364,11 @@ const ru: Dict = {
   "game.regime.crisis": "Кризис",
   "game.regime.daysShort": "д",
   "game.regime.hint": "Рынок в этом режиме уже {days} игровых дней. Режим меняет снос и волатильность сразу у всех активов.",
+  "game.regime.explain": "Настроение ВСЕГО рынка, а не одного инструмента: сейчас это {regime}, держится {days} дн. Он {drift}, а размах движений — {vol}% к обычному. Сам по себе он ничего не решает: отдельная акция может расти и на медвежьем рынке — просто ей приходится идти против течения.",
+  "game.regime.drift.down": "разворачивает общий тренд вниз",
+  "game.regime.drift.weaker": "ослабляет общий тренд",
+  "game.regime.drift.stronger": "усиливает общий тренд",
+  "game.regime.drift.same": "оставляет тренд как есть",
 
   // Панель графика: таймфреймы и управление масштабом.
   "game.chart.tfLabel": "таймфрейм свечи (игровое время)",
