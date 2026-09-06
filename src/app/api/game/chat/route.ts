@@ -1,7 +1,8 @@
 import { tickBots } from "@/lib/game/bots";
 import { NextResponse, after } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
 import {
@@ -28,6 +29,8 @@ const MESSAGES: Record<string, string> = {
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "read");
+  if (wait) return tooManyRequests(wait);
   try {
     // Такт ботов дёргаем и отсюда: человек ждёт ответа именно в чате, а не на
     // вкладке мира. Не ждём результата — запрос к модели может занять
@@ -63,23 +66,45 @@ export async function GET(req: Request) {
   }
 }
 
+/**
+ * Разметка к идее с графиком.
+ *
+ * Раньше здесь стоял `z.unknown()`: принимался любой JSON любого размера, и
+ * тело запроса целиком читалось в память ДО всех проверок — ни пауза между
+ * сообщениями, ни мут от этого не спасали. Теперь форма задана точно:
+ * пятьдесят фигур, у каждой не больше сотни точек, числа конечные.
+ */
+const drawingSchema = z
+  .array(
+    z.object({
+      id: z.string().max(60).optional(),
+      kind: z.string().max(20),
+      points: z
+        .array(z.object({ t: z.number().finite(), price: z.number().finite() }))
+        .max(100),
+    }),
+  )
+  .max(50);
+
 const schema = z.object({
   channel: z.string().max(20),
   text: z.string().max(1000),
   // Идея с графиком: инструмент, таймфрейм и разметка автора.
   assetId: z.string().max(60).nullable().optional(),
   tf: z.string().max(8).nullable().optional(),
-  drawings: z.unknown().optional(),
+  drawings: drawingSchema.optional(),
 });
 
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "chat");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
     const channel = normalizeChannel(parsed.data.channel, player.fundId);

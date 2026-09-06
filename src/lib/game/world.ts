@@ -26,6 +26,13 @@ export const FEED_SIZE = 30;
 // синхронизируется примерно раз в минуту, а рост в 4 раза за минуту не
 // получается даже на самом быстром стиле с максимальным плечом.
 export const MAX_EQUITY_GROWTH_PER_SYNC = 4;
+/**
+ * Планка, ниже которой эквити не режем.
+ *
+ * Нужна первому синку, когда прошлого значения ещё нет: стартовый капитал
+ * (10 000) плюс запас на первую удачную сделку.
+ */
+export const MIN_PLAUSIBLE_EQUITY = 15_000;
 
 export interface PlayerSnapshot {
   fundName: string | null;
@@ -45,7 +52,12 @@ export interface WorldEventPayload {
 
 /** Ник по умолчанию — из почты, но без домена: почту в мире не показываем. */
 export function defaultNickname(email: string, seed: string): string {
-  const base = email.split("@")[0].replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 12) || "trader";
+  // ПОЧЕМУ НЕ ИЗ ПОЧТЫ. Раньше ник собирался из локальной части адреса, и
+  // человек, не заполнивший имя, оказывался в публичном рейтинге и общем чате
+  // как «ivan.petrov» — то есть отдавал половину своей почты всем игрокам
+  // мира. Имя в игре человек выбирает сам (PlayerNameGate), а если не выбрал —
+  // получает нейтральное, не говорящее о нём ничего.
+  const base = "Трейдер";
   return `${base}-${seed.slice(-4)}`;
 }
 
@@ -114,9 +126,29 @@ export async function ensurePlayer(userId: string, email: string, displayName?: 
  * Режет неправдоподобные значения. Не «ловит читера» — просто не даёт одному
  * запросу переписать рейтинг числом с потолка.
  */
-export function clampSnapshot(snapshot: PlayerSnapshot, previousEquity: number): PlayerSnapshot {
+export function clampSnapshot(
+  snapshot: PlayerSnapshot,
+  previousEquity: number,
+  /** Сколько прошло с прошлой синхронизации, мс. */
+  sinceLastSyncMs = 60_000,
+): PlayerSnapshot {
   const finite = (value: number, fallback = 0) => (Number.isFinite(value) ? value : fallback);
-  const maxEquity = Math.max(previousEquity * MAX_EQUITY_GROWTH_PER_SYNC, 100_000);
+  // Рост считается ОТ ВРЕМЕНИ, а не от числа вызовов.
+  //
+  // Раньше потолок был «вчетверо за вызов», и это ничего не значило: вызовов
+  // можно сделать сколько угодно, и двадцать запросов подряд давали 4^20.
+  // Теперь учетверение разрешено раз в минуту реального времени — за час
+  // отсутствия набегает большой запас (он и нужен: игрок мог всё это время
+  // торговать), но десять запросов в одну секунду дают ровно один шаг.
+  // Нижняя граница НЕ единица, а две сотых минуты: иначе каждый вызов, даже
+  // мгновенный, снова разрешал бы учетверение — то есть ровно та дыра, от
+  // которой мы уходим. Запрос через секунду после прошлого прибавляет
+  // считанные проценты, через час — большой запас.
+  const minutes = Math.max(0.02, Math.min(24 * 60, sinceLastSyncMs / 60_000));
+  // Нижняя планка — стартовый капитал с запасом, а не сто тысяч, как было:
+  // сто тысяч давали любому аккаунту право с порога объявить себя вдесятеро
+  // богаче старта, и никакой рост от времени этого уже не сдерживал.
+  const maxEquity = Math.max(previousEquity * Math.pow(MAX_EQUITY_GROWTH_PER_SYNC, minutes), MIN_PLAUSIBLE_EQUITY);
   return {
     fundName: snapshot.fundName ? snapshot.fundName.slice(0, 40) : null,
     rankKey: String(snapshot.rankKey).slice(0, 20),
@@ -143,7 +175,8 @@ export async function recordEvent(playerId: string | null, kind: string, payload
  */
 export async function syncPlayer(userId: string, email: string, snapshot: PlayerSnapshot, displayName?: string | null) {
   const player = await ensurePlayer(userId, email, displayName);
-  const clean = clampSnapshot(snapshot, player.equity || snapshot.equity);
+  const sinceLastSync = player.lastSyncAt ? Date.now() - player.lastSyncAt.getTime() : 60_000;
+  const clean = clampSnapshot(snapshot, player.equity || snapshot.equity, sinceLastSync);
 
   // События мира — только на переходах, а не на каждом синке: лента должна
   // читаться, а не заливаться шумом раз в минуту.

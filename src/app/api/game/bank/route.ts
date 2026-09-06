@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
 import { readQuotes } from "@/lib/game/marketStore";
@@ -36,6 +37,8 @@ const query = z.object({ equity: z.number().min(0).max(1e12), bankruptcies: z.nu
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "read");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
@@ -52,18 +55,26 @@ export async function GET(req: Request) {
   }
 }
 
+// Потолок любой суммы, приходящей от клиента.
+//
+// Без него `z.number()` пропускал 1e308: два таких «вклада» превращали
+// капитал фонда в Infinity, после чего ни один рейтинг больше не
+// сортировался. Триллион — заведомо больше всего, что бывает в игре, и
+// заведомо далеко от границ double.
+const MAX_MONEY = 1e12;
+
 const schema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("loan"),
-    amount: z.number(),
-    termDays: z.number(),
+    amount: z.number().finite().min(0).max(MAX_MONEY),
+    termDays: z.number().finite().min(0).max(3650),
     collateralItem: z.string().max(60).nullable().optional(),
     ownedItems: z.array(z.string().max(60)).max(100).optional(),
     equity: z.number().min(0).max(1e12),
     bankruptcies: z.number().min(0).max(1000),
   }),
   z.object({ action: z.literal("repay"), loanId: z.string().max(60) }),
-  z.object({ action: z.literal("bond"), amount: z.number(), termDays: z.number() }),
+  z.object({ action: z.literal("bond"), amount: z.number().finite().min(0).max(MAX_MONEY), termDays: z.number().finite().min(0).max(3650) }),
   z.object({ action: z.literal("redeem"), bondId: z.string().max(60) }),
   // Цена акции берётся с БИРЖИ: банк размещает по рыночной, иначе на разнице
   // между балансом и биржей получалась бы бесплатная бесконечная прибыль.
@@ -80,11 +91,13 @@ async function bankSharePrice(): Promise<number> {
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "money");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
     const body = parsed.data;

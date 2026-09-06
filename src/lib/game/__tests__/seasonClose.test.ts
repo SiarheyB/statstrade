@@ -21,6 +21,14 @@ vi.mock("@/lib/db", () => ({
         if (db.season) db.season.closedAt = args.data.closedAt as Date;
         return db.season;
       }),
+      // Заявка на закрытие: закрывает только НЕЗАКРЫТЫЙ сезон и говорит,
+      // сколько строк тронула. Второй вызов должен получить ноль — на этом
+      // держится защита от двойной раздачи призов.
+      updateMany: vi.fn(async (args: { data: Record<string, unknown> }) => {
+        if (!db.season || db.season.closedAt) return { count: 0 };
+        db.season.closedAt = args.data.closedAt as Date;
+        return { count: 1 };
+      }),
       create: vi.fn(async () => db.season),
     },
     gamePlayer: {

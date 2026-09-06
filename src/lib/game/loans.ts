@@ -119,10 +119,14 @@ export async function takeLoan(
   }
 
   const dueGameDay = borrowerGameDay + loan.dueGameDay;
-  await prisma.gameLoan.update({
-    where: { id: loanId },
+  // Заявка на заём: условие «ещё предложен» стоит В САМОМ апдейте. Проверки
+  // выше мало — двое, нажавших «взять» одновременно, проходили её оба, и
+  // деньги себе записывали оба, а кредитор получал возврат один раз.
+  const taken = await prisma.gameLoan.updateMany({
+    where: { id: loanId, status: "offered" },
     data: { borrowerId, status: "active", takenAt: new Date(), dueGameDay },
   });
+  if (taken.count === 0) return { ok: false, error: "already_taken" };
   await recordEvent(borrowerId, "loan_taken", { nickname: borrowerNickname, amount: loan.amount });
   return { ok: true, value: { amount: loan.amount, dueGameDay } };
 }
@@ -143,8 +147,14 @@ export async function repayLoan(
   if (loan.status !== "active") return { ok: false, error: "not_active" };
 
   const paid = repayAmount(loan.amount, loan.interestPct);
+  // Та же заявка: без условия в апдейте два одновременных возврата платили
+  // кредитору дважды по одному займу.
+  const closed = await prisma.gameLoan.updateMany({
+    where: { id: loanId, status: "active" },
+    data: { status: "repaid", repaidAt: new Date() },
+  });
+  if (closed.count === 0) return { ok: false, error: "not_active" };
   await prisma.$transaction([
-    prisma.gameLoan.update({ where: { id: loanId }, data: { status: "repaid", repaidAt: new Date() } }),
     // Кредитору деньги приходят не «на сервер», а в очередь на получение:
     // он заберёт их в игру при следующей синхронизации.
     ...(loan.lenderId
@@ -176,13 +186,16 @@ export async function markOverdue(borrowerId: string, nickname: string, currentG
     select: { id: true, amount: true },
   });
   if (overdue.length === 0) return 0;
-  await prisma.gameLoan.updateMany({
-    where: { id: { in: overdue.map((l) => l.id) } },
+  // Штрафуем ровно за те займы, которые пометили МЫ: без условия по статусу
+  // две одновременные синхронизации роняли репутацию дважды за одну просрочку.
+  const marked = await prisma.gameLoan.updateMany({
+    where: { id: { in: overdue.map((l) => l.id) }, status: "active" },
     data: { status: "defaulted" },
   });
+  if (marked.count === 0) return 0;
   await prisma.gamePlayer.update({
     where: { id: borrowerId },
-    data: { reliability: { decrement: DEFAULT_RELIABILITY_PENALTY * overdue.length } },
+    data: { reliability: { decrement: DEFAULT_RELIABILITY_PENALTY * marked.count } },
   });
   await prisma.gamePlayer.updateMany({ where: { id: borrowerId, reliability: { lt: 0 } }, data: { reliability: 0 } });
   for (const loan of overdue) {

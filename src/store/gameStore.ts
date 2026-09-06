@@ -409,6 +409,7 @@ interface GameStoreState {
     trailingPct?: number;
     /** Чей сигнал копируем: при закрытии в плюс ведущему уйдёт его доля. */
     copiedFrom?: string;
+    copiedSignalId?: string;
     copyFeePct?: number;
   }) => OpenPositionResult;
   closePosition: (positionId: string, fraction?: number) => void;
@@ -761,7 +762,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     }
   },
 
-  openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit, trailingPct, copiedFrom, copyFeePct }) => {
+  openPosition: ({ assetId, side, size, leverage = 1, stopLoss, takeProfit, trailingPct, copiedFrom, copiedSignalId, copyFeePct }) => {
     const { game } = get();
     if (!(size > 0)) return { ok: false, error: "invalid_size" };
     // Потолок плеча — минимум из стиля и настройки админки (0 = не ограничивать).
@@ -791,6 +792,7 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
       takeProfit,
       trailingPct,
       copiedFrom,
+      copiedSignalId,
       copyFeePct,
       style: game.activeStyle.style,
     });
@@ -1125,12 +1127,14 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     // берём: наказывать подписчика за то, что чужой сигнал не сработал, —
     // двойная потеря. Результат берём из самой функции закрытия: искать
     // запись по id ненадёжно — у частичного закрытия он новый.
-    if (position.copiedFrom && realized > 0) {
+    if (position.copiedSignalId && realized > 0) {
       const feePct = position.copyFeePct ?? 0;
       const fee = realized * (feePct / 100);
       if (fee > 0) {
         get().applyWorldCash(-fee);
-        void signalsApi.fee(position.copiedFrom, realized, feePct);
+        // Ставку сервер посчитает сам по записи подписки: наша здесь — только
+        // чтобы списать со своего баланса ровно столько же.
+        void signalsApi.fee(position.copiedSignalId, realized);
       }
     }
   },

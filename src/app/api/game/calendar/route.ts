@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, serverError, tooManyRequests } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ALL_ASSETS, getMarket } from "@/lib/game/marketStore";
 import { earningsBetween, scheduleBetween } from "@/lib/game/marketGen";
@@ -20,6 +21,8 @@ const MAX_AHEAD_MS = 21 * 24 * 60 * 60 * 1000;
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "read");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });

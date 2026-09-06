@@ -84,8 +84,20 @@ async function startSeason(index: number, now: number) {
  * результаты. Идемпотентна — повторный вызов ничего не удвоит.
  */
 export async function closeSeason(seasonId: string) {
+  // ЗАЯВКА НА ЗАКРЫТИЕ — тем же приёмом, что заявка на такт бота.
+  //
+  // Сезон закрывается лениво, на первом же запросе после срока. Проверки
+  // «не закрыт ли» мало: два игрока, синхронизировавшихся в одну секунду,
+  // проходили её оба, и призы начислялись дважды. Отметка ставится ОДНИМ
+  // условным апдейтом — второй увидит ноль изменённых строк и уйдёт.
+  const claimed = await prisma.gameSeason.updateMany({
+    where: { id: seasonId, closedAt: null },
+    data: { closedAt: new Date() },
+  });
+  if (claimed.count === 0) return;
+
   const season = await prisma.gameSeason.findUnique({ where: { id: seasonId } });
-  if (!season || season.closedAt) return;
+  if (!season) return;
 
   const players = await prisma.gamePlayer.findMany({
     where: { seasonId, seasonStartEquity: { not: null }, isPublic: true },
@@ -106,7 +118,6 @@ export async function closeSeason(seasonId: string) {
   // Закрываем сезон ПЕРВЫМ действием транзакции: даже если начисление
   // упадёт, сезон не будет подводиться заново по кругу.
   await prisma.$transaction([
-    prisma.gameSeason.update({ where: { id: seasonId }, data: { closedAt: new Date() } }),
     ...ranked.map((p, i) => {
       const prize = paid(i + 1, p.returnPct);
       return prisma.gameSeasonResult.create({

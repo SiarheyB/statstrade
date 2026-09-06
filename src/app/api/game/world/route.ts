@@ -1,6 +1,7 @@
 import { tickBots } from "@/lib/game/bots";
 import { NextResponse, after } from "next/server";
-import { getAuthUser, unauthorized, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, serverError, tooManyRequests } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer, leaderboard, worldFeed } from "@/lib/game/world";
 import { creditLimit, loanBoard } from "@/lib/game/loans";
@@ -20,6 +21,8 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "read");
+  if (wait) return tooManyRequests(wait);
   try {
     // Не ждём ботов: их такт может уйти в языковую модель на секунду-другую,
     // а мир должен открыться сразу.

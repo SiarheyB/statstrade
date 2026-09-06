@@ -78,8 +78,16 @@ async function startTournament(index: number, now: number) {
  * Подвести итоги: расставить места и раздать фонд. Идемпотентна.
  */
 export async function closeTournament(tournamentId: string) {
+  // Заявка на закрытие: см. тот же приём в closeSeason. Без неё два
+  // одновременных запроса подводили итоги дважды и дважды раздавали фонд.
+  const claimed = await prisma.gameTournament.updateMany({
+    where: { id: tournamentId, closedAt: null },
+    data: { closedAt: new Date() },
+  });
+  if (claimed.count === 0) return;
+
   const tournament = await prisma.gameTournament.findUnique({ where: { id: tournamentId } });
-  if (!tournament || tournament.closedAt) return;
+  if (!tournament) return;
 
   const entries = await prisma.gameTournamentEntry.findMany({ where: { tournamentId } });
   const ranked = entries
@@ -88,10 +96,7 @@ export async function closeTournament(tournamentId: string) {
 
   const enough = ranked.length >= TOURNAMENT_MIN_PLAYERS;
 
-  // Закрываем ПЕРВЫМ действием: даже если начисление упадёт, турнир не будет
-  // подводиться заново по кругу.
   await prisma.$transaction([
-    prisma.gameTournament.update({ where: { id: tournamentId }, data: { closedAt: new Date() } }),
     ...ranked.map((entry, i) => {
       // Участников мало — возвращаем взнос всем: обмен взносами между двумя
       // людьми это не соревнование.

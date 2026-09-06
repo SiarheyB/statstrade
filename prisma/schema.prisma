@@ -1352,6 +1352,7 @@ model GamePlayer {
   seizedItems       String?
   ledSubscriptions  GameSubscription[] @relation("SignalLeader")
   subscriptions     GameSubscription[] @relation("SignalFollower")
+  signalSettlements GameSignalSettlement[] @relation("SignalSettlement")
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
 
@@ -1648,9 +1649,10 @@ model GameTournamentEntry {
 // своим размером и своими деньгами: размер позиции остаётся решением того,
 // кто рискует.
 model GameSignal {
-  id        String   @id @default(cuid())
-  authorId  String
-  author    GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  id          String   @id @default(cuid())
+  authorId    String
+  author      GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  settlements GameSignalSettlement[]
   assetId   String
   side      String
   price     Float
@@ -1662,6 +1664,31 @@ model GameSignal {
 
   @@index([authorId, createdAt])
   @@index([createdAt])
+}
+
+// Что уже оплачено по сигналу.
+//
+// Раньше комиссия ведущему начислялась по одному лишь слову клиента: пришёл
+// запрос «я заработал миллиард, отдай долю» — сервер отдавал. Ни подписки, ни
+// сделки, ни повторов он не проверял, и цикл таких запросов печатал деньги
+// любому аккаунту. Теперь у каждой пары «сигнал + подписчик» есть строка с
+// накопленной оплаченной прибылью: она и делает начисление идемпотентным, и
+// держит потолок.
+model GameSignalSettlement {
+  id         String   @id @default(cuid())
+  signalId   String
+  signal     GameSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  followerId String
+  follower   GamePlayer @relation("SignalSettlement", fields: [followerId], references: [id], onDelete: Cascade)
+  /** Сколько прибыли по этому сигналу уже оплачено — потолок для добавок. */
+  paidProfit Float    @default(0)
+  /** Сколько всего ушло ведущему: для разбирательств и статистики. */
+  paidFee    Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([signalId, followerId])
+  @@index([followerId])
 }
 
 model GameSubscription {

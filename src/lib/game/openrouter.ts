@@ -11,6 +11,8 @@
 // подставлять заранее заготовленные фразы нельзя: набор из двадцати реплик
 // выдаёт бота с третьего сообщения вернее, чем молчание.
 
+import { takeAiCall } from "@/lib/game/aiBudget";
+
 const ENDPOINT = "https://openrouter.ai/api/v1/chat/completions";
 
 /** Модель по умолчанию: дешёвая и быстрая, для коротких реплик в чате. */
@@ -38,6 +40,10 @@ export async function askModel(
 ): Promise<string | null> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) return null;
+  // Предохранитель по расходу. Один общий счётчик на все обращения: и такт
+  // ботов, и ответы на вопросы идут через эту функцию, а платит за них всех
+  // один счёт.
+  if (!takeAiCall()) return null;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? 12_000);

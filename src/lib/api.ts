@@ -54,6 +54,28 @@ export async function getAuthUser(): Promise<SessionPayload | null> {
   return session;
 }
 
+/**
+ * Прочитать тело запроса, отказав слишком большому ДО разбора.
+ *
+ * `req.json()` буферизует всё, что прислали, и только потом за дело берётся
+ * zod: прислав десяток мегабайт, можно было съесть память контейнера, ничего
+ * не нарушив формально. Здесь мы смотрим на заявленную длину и на реально
+ * прочитанное — заголовку верить нельзя, но начинать проверку с него дешевле.
+ *
+ * Возвращает `null`, если тело не подходит: маршрут отвечает 400.
+ */
+export async function readJsonBody(req: Request, maxBytes = 64 * 1024): Promise<unknown | null> {
+  const declared = Number(req.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) return null;
+  const text = await req.text();
+  if (text.length > maxBytes) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export function unauthorized() {
   return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
 }

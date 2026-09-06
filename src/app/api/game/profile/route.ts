@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { prisma } from "@/lib/db";
 import { ensurePlayer } from "@/lib/game/world";
 
@@ -17,8 +18,10 @@ const schema = z.object({
 export async function PATCH(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "write");
+  if (wait) return tooManyRequests(wait);
   try {
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
 

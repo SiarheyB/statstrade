@@ -17,34 +17,54 @@ import type { Asset } from "@/engine/entities/types";
 /** Как часто пересчитываем цену. Две секунды — шаг тика в генераторе. */
 export const TICK_INTERVAL_MS = 2000;
 
-let cachedSeed: string | null = null;
-let seedPromise: Promise<string | null> | null = null;
+let cachedKey: { value: string; expiresAt: number } | null = null;
+let keyPromise: Promise<string | null> | null = null;
 
 /**
- * Сид мира. Запрашивается один раз на всю вкладку: он не меняется, пока
- * админ не пересобрал рынок, а лишний запрос на каждый компонент — это
- * ровно та экономия, ради которой тики и считаются на клиенте.
+ * Ключ тиков. Живёт ОДИН ЧАС и запрашивается один раз на вкладку — пока не
+ * истечёт.
+ *
+ * Раньше здесь лежал сид мира, и это была дыра: генератор рынка едет в этот
+ * же бандл, поэтому с сидом на руках можно было посчитать любой будущий бар,
+ * а не только текущую минуту. Часовой ключ даёт ту же случайность внутри
+ * минуты и не даёт ничего за её пределами.
  */
-export function useMarketSeed(): string | null {
-  const [seed, setSeed] = useState<string | null>(cachedSeed);
+export function useTickKey(): string | null {
+  const [key, setKey] = useState<string | null>(cachedKey?.value ?? null);
   useEffect(() => {
-    if (cachedSeed) return;
-    seedPromise ??= fetch("/api/game/market")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        cachedSeed = data?.seed ?? null;
-        return cachedSeed;
-      })
-      .catch(() => null);
     let alive = true;
-    void seedPromise.then((value) => {
-      if (alive) setSeed(value);
-    });
+    const load = () => {
+      if (cachedKey && cachedKey.expiresAt > Date.now()) {
+        setKey(cachedKey.value);
+        return;
+      }
+      keyPromise ??= fetch("/api/game/market")
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (!data?.tickKey) return null;
+          cachedKey = { value: data.tickKey, expiresAt: data.tickKeyExpiresAt ?? Date.now() + 3_600_000 };
+          return cachedKey.value;
+        })
+        .catch(() => null)
+        .finally(() => {
+          // Промис снимаем всегда: следующий час должен сходить за новым
+          // ключом, а не получить закешированный отказ.
+          keyPromise = null;
+        });
+      void keyPromise.then((value) => {
+        if (alive) setKey(value);
+      });
+    };
+    load();
+    // Час прошёл — ключ протух. Проверяем раз в минуту: точность здесь не
+    // нужна, а таймер на час пережил бы усыпление вкладки не всегда.
+    const timer = setInterval(load, 60_000);
     return () => {
       alive = false;
+      clearInterval(timer);
     };
   }, []);
-  return seed;
+  return key;
 }
 
 /**
@@ -54,7 +74,7 @@ export function useMarketSeed(): string | null {
  * закрылась — тогда показывать надо её закрытие, а не выдуманное значение.
  */
 export function useLiveTick(asset: Asset | undefined, lastMinute: GeneratedCandle | null): number | null {
-  const seed = useMarketSeed();
+  const seed = useTickKey();
   const [price, setPrice] = useState<number | null>(null);
   // Через ref, чтобы таймер не пересоздавался на каждой смене минутки.
   // Пишем ref в эффекте, а не в теле: React справедливо запрещает трогать

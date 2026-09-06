@@ -64,15 +64,20 @@ describe("clampSnapshot", () => {
 });
 
 describe("имя игрока", () => {
-  it("по умолчанию берётся из почты без домена", () => {
+  it("по умолчанию НЕ выдаёт почту", () => {
+    // Раньше ник собирался из локальной части адреса, и человек без имени
+    // оказывался в публичном рейтинге как «trader.pro» — то есть отдавал
+    // половину почты всем игрокам мира.
     const nick = defaultNickname("trader.pro@example.com", "abcd1234");
     expect(nick).not.toContain("@");
+    expect(nick).not.toContain("trader.pro");
     expect(nick).not.toContain("example.com");
-    expect(nick.startsWith("traderpro")).toBe(true);
+    expect(nick).toBe("Трейдер-1234");
   });
 
-  it("почта без пригодных символов не оставляет пустое имя", () => {
-    expect(defaultNickname("!!!@example.com", "abcd1234").startsWith("trader")).toBe(true);
+  it("имя получается всегда, какой бы ни была почта", () => {
+    expect(defaultNickname("!!!@example.com", "abcd1234")).toBe("Трейдер-1234");
+    expect(defaultNickname("", "wxyz9999")).toBe("Трейдер-9999");
   });
 
   it("принимает кириллицу, цифры, пробел и дефис", () => {
@@ -150,7 +155,7 @@ describe("имя из профиля в мире", () => {
     // normalizeNickname вернёт null — вызывающий код (ensurePlayer) в этом
     // случае берёт defaultNickname.
     expect(normalizeNickname("!!")).toBeNull();
-    expect(defaultNickname("someone@example.com", "abcd1234")).toContain("someone");
+    expect(defaultNickname("someone@example.com", "abcd1234")).toBe("Трейдер-1234");
   });
 });
 

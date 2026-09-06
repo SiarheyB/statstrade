@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
 import { prisma } from "@/lib/db";
@@ -26,6 +27,8 @@ const MESSAGES: Record<string, string> = {
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "read");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
@@ -49,11 +52,13 @@ const schema = z.discriminatedUnion("action", [
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "write");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
     const fund = await prisma.gameFund.findUnique({ where: { ownerId: player.id }, select: { id: true } });

@@ -27,14 +27,19 @@ export function botLoopDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.GAME_BOTS_LIVE === "false";
 }
 
+/** Как часто убираем старые данные. */
+export const PURGE_EVERY_MS = 60 * 60 * 1000;
+let lastPurgeAt = 0;
+
 /** Один оборот: завести недостающих ботов и дать всем походить. */
-export async function botLoopTick(): Promise<void> {
-  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }, { purgeExpiredChats }] =
+export async function botLoopTick(now = Date.now()): Promise<void> {
+  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }, { purgeExpiredChats }, { purgeOldMarketData }] =
     await Promise.all([
       import("@/lib/featureConfig"),
       import("@/lib/game/bots"),
       import("@/lib/cronHeartbeat"),
       import("@/lib/game/social"),
+      import("@/lib/game/marketStore"),
     ]);
 
   // Раздел выключен админом — мир стоит целиком, и боты вместе с ним. Иначе
@@ -50,6 +55,19 @@ export async function botLoopTick(): Promise<void> {
   for (const row of cleared) {
     console.log(`[game-bots] чат «${row.channel}» очищен: ${row.removed} сообщений`);
   }
+  // Чистка старых свечей, новостей и ленты мира — раз в час, а не каждый
+  // такт: удалять по одной минуте нечего, а лишний DELETE по большой таблице
+  // на слабом сервере заметен. Без этой уборки таблица свечей растёт вечно.
+  if (now - lastPurgeAt >= PURGE_EVERY_MS) {
+    lastPurgeAt = now;
+    const removed = await purgeOldMarketData();
+    if (removed.candles + removed.news + removed.events > 0) {
+      console.log(
+        `[game-bots] убрано старого: свечей ${removed.candles}, новостей ${removed.news}, событий ${removed.events}`,
+      );
+    }
+  }
+
   const result = await tickBots();
   if (result.moved > 0 || result.spoke > 0) {
     await recordCronRun("game.bots", "scheduler");

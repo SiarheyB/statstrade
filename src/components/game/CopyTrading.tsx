@@ -89,6 +89,7 @@ export default function CopyTrading() {
         ? price * (1 + (signal.takePct / 100) * (side === "long" ? 1 : -1))
         : undefined,
       copiedFrom: signal.author.id,
+      copiedSignalId: signal.id,
       copyFeePct: signal.feePct,
     });
     if (!result.ok) {

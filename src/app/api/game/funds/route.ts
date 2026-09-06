@@ -1,24 +1,33 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { ensurePlayer } from "@/lib/game/world";
 import { createFund, depositToFund, joinFund, leaveFund, payoutFund, withdrawFromFund } from "@/lib/game/funds";
 
 export const dynamic = "force-dynamic";
 
+// Потолок любой суммы, приходящей от клиента.
+//
+// Без него `z.number()` пропускал 1e308: два таких «вклада» превращали
+// капитал фонда в Infinity, после чего ни один рейтинг больше не
+// сортировался. Триллион — заведомо больше всего, что бывает в игре, и
+// заведомо далеко от границ double.
+const MAX_MONEY = 1e12;
+
 const schema = z.discriminatedUnion("action", [
   z.object({
     action: z.literal("create"),
     name: z.string().min(1).max(40),
     motto: z.string().max(120).optional(),
-    feePct: z.number(),
+    feePct: z.number().finite().min(0).max(100),
   }),
   z.object({ action: z.literal("join"), fundId: z.string().min(1).max(60) }),
   z.object({ action: z.literal("leave") }),
-  z.object({ action: z.literal("deposit"), amount: z.number() }),
-  z.object({ action: z.literal("withdraw"), amount: z.number() }),
-  z.object({ action: z.literal("payout"), amount: z.number() }),
+  z.object({ action: z.literal("deposit"), amount: z.number().finite().min(0).max(MAX_MONEY) }),
+  z.object({ action: z.literal("withdraw"), amount: z.number().finite().min(0).max(MAX_MONEY) }),
+  z.object({ action: z.literal("payout"), amount: z.number().finite().min(0).max(MAX_MONEY) }),
 ]);
 
 const MESSAGES: Record<string, string> = {
@@ -38,11 +47,13 @@ const MESSAGES: Record<string, string> = {
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "money");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
     const body = parsed.data;

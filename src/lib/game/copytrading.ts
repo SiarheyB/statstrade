@@ -183,10 +183,61 @@ export async function leaders(playerId: string, limit = 20) {
  *
  * Деньги — в очередь на получение, тем же каналом, что проценты по займам и
  * призы: игровой баланс живёт в браузере, сервер ведёт обязательства.
+ *
+ * КЛИЕНТУ ЗДЕСЬ НЕ ВЕРЯТ НИ В ЧЁМ, КРОМЕ РАЗМЕРА ПРИБЫЛИ. Раньше он присылал
+ * и получателя, и ставку комиссии, и сумму — сервер начислял, не проверяя ни
+ * подписки, ни сделки, ни повторов. Цикл таких запросов печатал деньги на
+ * любой аккаунт, а деньги эти уходили в общий мир: рейтинги, капиталы фондов,
+ * витрины. Теперь:
+ *
+ *  - получатель берётся из АВТОРА сигнала, а не из запроса;
+ *  - ставка — из записи подписки, которую подписчик не редактирует;
+ *  - без активной подписки не платят вовсе;
+ *  - каждая пара «сигнал + подписчик» копит оплаченное, поэтому повтор
+ *    запроса ничего не добавляет, а частичные закрытия складываются;
+ *  - потолок прибыли по одному сигналу — эквити подписчика: заработать с
+ *    одной сделки больше собственного счёта нельзя, а «миллиард» с копеечной
+ *    позиции именно так и выглядел.
  */
-export async function payLeaderFee(leaderId: string, profit: number, feePct: number): Promise<number> {
-  if (!(profit > 0) || !(feePct > 0)) return 0;
-  const fee = profit * (feePct / 100);
-  await prisma.gamePlayer.update({ where: { id: leaderId }, data: { pendingPayout: { increment: fee } } });
+export async function payLeaderFee(
+  followerId: string,
+  signalId: string,
+  profit: number,
+): Promise<number> {
+  if (!(profit > 0)) return 0;
+
+  const signal = await prisma.gameSignal.findUnique({
+    where: { id: signalId },
+    select: { id: true, authorId: true },
+  });
+  if (!signal || signal.authorId === followerId) return 0;
+
+  const [subscription, follower] = await Promise.all([
+    prisma.gameSubscription.findUnique({
+      where: { leaderId_followerId: { leaderId: signal.authorId, followerId } },
+      select: { feePct: true },
+    }),
+    prisma.gamePlayer.findUnique({ where: { id: followerId }, select: { equity: true } }),
+  ]);
+  if (!subscription || !(subscription.feePct > 0)) return 0;
+
+  const cap = Math.max(0, follower?.equity ?? 0);
+  const settlement = await prisma.gameSignalSettlement.findUnique({
+    where: { signalId_followerId: { signalId, followerId } },
+    select: { paidProfit: true },
+  });
+  const alreadyPaid = settlement?.paidProfit ?? 0;
+  const allowed = Math.min(profit, Math.max(0, cap - alreadyPaid));
+  if (!(allowed > 0)) return 0;
+
+  const fee = allowed * (subscription.feePct / 100);
+  await prisma.$transaction([
+    prisma.gameSignalSettlement.upsert({
+      where: { signalId_followerId: { signalId, followerId } },
+      create: { signalId, followerId, paidProfit: allowed, paidFee: fee },
+      update: { paidProfit: { increment: allowed }, paidFee: { increment: fee } },
+    }),
+    prisma.gamePlayer.update({ where: { id: signal.authorId }, data: { pendingPayout: { increment: fee } } }),
+  ]);
   return fee;
 }

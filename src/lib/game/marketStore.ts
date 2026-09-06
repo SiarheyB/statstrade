@@ -108,7 +108,30 @@ async function newsRateConfig(): Promise<{ perDay: number; spread: number }> {
   }
 }
 
+/**
+ * Идущие прямо сейчас расчёты истории — по одному на инструмент.
+ *
+ * Холодный расчёт одного инструмента — это до 18 месяцев часовых свечей, и
+ * замер даёт больше секунды чистого процессорного времени (на слабом сервере
+ * — несколько). Node однопоточный: всё это время приложение не обслуживает
+ * никого. Без замка десять параллельных запросов считали ОДНО И ТО ЖЕ десять
+ * раз — `skipDuplicates` спасал данные, но не процессор.
+ *
+ * Замок процессный, не общий на кластер: приложение живёт одним контейнером
+ * (см. docker-compose.prod.yml). При росте до нескольких реплик сюда нужен
+ * advisory lock Postgres.
+ */
+const running = new Map<string, Promise<void>>();
+
 export async function ensureHistory(assetId: string, now = Date.now()): Promise<void> {
+  const inFlight = running.get(assetId);
+  if (inFlight) return inFlight;
+  const task = generateHistory(assetId, now).finally(() => running.delete(assetId));
+  running.set(assetId, task);
+  return task;
+}
+
+async function generateHistory(assetId: string, now: number): Promise<void> {
   const asset = getAsset(assetId);
   if (!asset) return;
   const market = await getMarket();
@@ -352,13 +375,63 @@ export interface Quote {
  * Текущие цены инструментов. Это последняя минутка текущего часа — та же
  * цена, которую игрок видит на графике.
  */
+// ── Ретенция ──────────────────────────────────────────────────────────────
+//
+// Замер на рабочей базе: 280 тысяч часовых свечей и 118 МБ на 67 из 81
+// инструмента, плюс около двух мегабайт в сутки — навсегда. Полный мир с
+// историей за все 18 месяцев — это больше миллиона строк. Ровно та же
+// история, что была с PageView (см. docs/SELF_HOSTING.md §9.3), только там
+// её чистит крон, а здесь не чистило ничто.
+//
+// Часовые свечи держим столько, сколько нужно графику: самый долгий
+// таймфрейм в терминале — недельный, и полгода часовых баров покрывают его с
+// запасом. Дневные не трогаем вовсе: они мелкие, а история «с начала мира»
+// нужна и рейтингу, и графику на годовом масштабе.
+
+/** Сколько дней держим часовые свечи. */
+export const CANDLE_RETENTION_DAYS = Number(process.env.GAME_CANDLE_RETENTION_DAYS ?? 180);
+/** Сколько дней держим ленту мира и новости. */
+export const EVENT_RETENTION_DAYS = Number(process.env.GAME_EVENT_RETENTION_DAYS ?? 30);
+
+/**
+ * Убрать то, что уже никому не показывается.
+ *
+ * Вызывается из цикла ботов — единственного места, которое работает и без
+ * игроков. Дневные свечи и результаты сезонов не трогаются: это история мира,
+ * а не кэш.
+ */
+export async function purgeOldMarketData(now = Date.now()): Promise<{ candles: number; news: number; events: number }> {
+  const candleEdge = new Date(now - CANDLE_RETENTION_DAYS * MS_DAY);
+  const eventEdge = new Date(now - EVENT_RETENTION_DAYS * MS_DAY);
+  const [candles, news, events] = await Promise.all([
+    prisma.gameCandle.deleteMany({ where: { tf: TF_1H, ts: { lt: candleEdge } } }),
+    prisma.gameMarketNews.deleteMany({ where: { ts: { lt: eventEdge } } }),
+    prisma.gameWorldEvent.deleteMany({ where: { createdAt: { lt: eventEdge } } }),
+  ]);
+  return { candles: candles.count, news: news.count, events: events.count };
+}
+
 export async function readQuotes(assetIds: string[], now = Date.now()): Promise<Record<string, Quote>> {
   const unique = Array.from(new Set(assetIds)).filter((id) => !!getAsset(id));
   const market = await getMarket();
   const currentHour = floorTo(now, MS_HOUR);
   const quotes: Record<string, Quote> = {};
 
-  await Promise.all(unique.map((id) => ensureHistory(id, now)));
+  // Кому история и правда нужна — выясняем ОДНИМ запросом.
+  //
+  // Раньше здесь на каждый инструмент уходил свой ensureHistory, а он на
+  // входе делает findFirst. Замер: 60 инструментов — 62 запроса в базу на
+  // один опрос котировок, то есть 15 запросов в секунду с одного игрока при
+  // опросе раз в четыре секунды. Двадцать игроков — триста запросов в секунду
+  // на ровном месте.
+  const fresh = await prisma.gameCandle.groupBy({
+    by: ["assetId"],
+    where: { assetId: { in: unique }, tf: TF_1H },
+    _max: { ts: true },
+  });
+  const lastByAsset = new Map(fresh.map((row) => [row.assetId, row._max.ts?.getTime() ?? 0]));
+  const stale = unique.filter((id) => (lastByAsset.get(id) ?? 0) < currentHour);
+  if (stale.length > 0) await Promise.all(stale.map((id) => ensureHistory(id, now)));
   const dayStart = new Date(floorTo(now, MS_DAY));
   const [rows, dayRows] = await Promise.all([
     prisma.gameCandle.findMany({ where: { assetId: { in: unique }, tf: TF_1H, ts: new Date(currentHour) } }),

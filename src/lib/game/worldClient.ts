@@ -417,9 +417,14 @@ export const signals = {
   /** Публикует клиент ведущего в момент открытия позиции. */
   publish: (body: { assetId: string; side: string; price: number; stopPct?: number | null; takePct?: number | null }) =>
     post<{ ok: true }>("/api/game/signals", { action: "publish", ...body }),
-  /** Подписчик закрыл скопированную сделку в плюс — платим ведущему. */
-  fee: (leaderId: string, profit: number, feePct: number) =>
-    post<{ fee: number }>("/api/game/signals", { action: "fee", leaderId, profit, feePct }),
+  /**
+   * Подписчик закрыл скопированную сделку в плюс — платим ведущему.
+   *
+   * Отправляем только сигнал и прибыль: получателя и ставку сервер берёт из
+   * своих записей, потому что клиенту в этом верить нельзя.
+   */
+  fee: (signalId: string, profit: number) =>
+    post<{ fee: number }>("/api/game/signals", { action: "fee", signalId, profit }),
 };
 
 export interface FundListing {

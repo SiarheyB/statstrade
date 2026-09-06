@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError, tooManyRequests, readJsonBody } from "@/lib/api";
+import { checkGameLimit } from "@/lib/game/limits";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { syncPlayer } from "@/lib/game/world";
 import { prisma } from "@/lib/db";
@@ -8,16 +9,24 @@ import { markOverdue } from "@/lib/game/loans";
 
 export const dynamic = "force-dynamic";
 
+// Потолок любой суммы, приходящей от клиента.
+//
+// Без него `z.number()` пропускал 1e308: два таких «вклада» превращали
+// капитал фонда в Infinity, после чего ни один рейтинг больше не
+// сортировался. Триллион — заведомо больше всего, что бывает в игре, и
+// заведомо далеко от границ double.
+const MAX_MONEY = 1e12;
+
 const schema = z.object({
   fundName: z.string().max(40).nullable().optional(),
   rankKey: z.string().max(20),
-  prestige: z.number(),
-  level: z.number(),
-  equity: z.number(),
-  contractsPassed: z.number(),
-  bestContractPct: z.number(),
+  prestige: z.number().finite(),
+  level: z.number().finite(),
+  equity: z.number().finite().min(0).max(MAX_MONEY),
+  contractsPassed: z.number().finite(),
+  bestContractPct: z.number().finite(),
   activeStyle: z.string().max(20),
-  gameDay: z.number(),
+  gameDay: z.number().finite().min(0).max(1_000_000),
 });
 
 /**
@@ -32,11 +41,13 @@ const schema = z.object({
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const wait = checkGameLimit(user.userId, "sync");
+  if (wait) return tooManyRequests(wait);
   try {
     const feature = await getFeatureConfig("game");
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
 
-    const parsed = schema.safeParse(await req.json());
+    const parsed = schema.safeParse(await readJsonBody(req));
     if (!parsed.success) return badRequest("Проверьте данные");
 
     // Имя из профиля проекта: при первом создании игрового профиля ник

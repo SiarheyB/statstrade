@@ -281,7 +281,19 @@ export async function collectOverdue(now = Date.now()): Promise<number> {
   if (overdue.length === 0) return 0;
   const bank = await getBank();
 
+  let collected = 0;
   for (const loan of overdue) {
+    // Заявка на взыскание: помечаем заём просроченным ПЕРВЫМ действием и
+    // только по ещё активному. Взыскание запускается лениво, на первом же
+    // запросе к банку, — и два одновременных запроса изымали залог дважды:
+    // в списке изъятого появлялись две записи, а капитал банка дважды
+    // получал по одному и тому же убытку.
+    const claimed = await prisma.gameBankLoan.updateMany({
+      where: { id: loan.id, status: "active" },
+      data: { status: "defaulted" },
+    });
+    if (claimed.count === 0) continue;
+    collected++;
     const item = loan.collateralItem ? getShopItem(loan.collateralItem) : undefined;
     // Изъятое банк не оставляет себе: ему нужны деньги, а не яхта. Продаёт
     // со скидкой — для остальных игроков это способ купить дорогую вещь
@@ -294,7 +306,6 @@ export async function collectOverdue(now = Date.now()): Promise<number> {
     if (loan.collateralItem) seized.push(loan.collateralItem);
 
     await prisma.$transaction([
-      prisma.gameBankLoan.update({ where: { id: loan.id }, data: { status: "defaulted" } }),
       prisma.gameBank.update({
         where: { id: bank.id },
         data: {
@@ -328,7 +339,7 @@ export async function collectOverdue(now = Date.now()): Promise<number> {
       }),
     ]);
   }
-  return overdue.length;
+  return collected;
 }
 
 // ── Облигации банка ───────────────────────────────────────────────────────
@@ -440,8 +451,16 @@ export async function tradeBankShares(
   const sell = Math.min(owned, -quantity);
   if (!(sell > 0)) return { ok: false, error: "too_small" };
   const total = price * sell;
+  // Списываем бумаги ЗАЯВКОЙ: условие «их и правда столько» стоит в самом
+  // апдейте. Без него два одновременных запроса на продажу всего пакета
+  // проходили проверку оба — игрок получал деньги дважды, а капитал банка
+  // уменьшался дважды за один и тот же пакет.
+  const sold = await prisma.gameBankShare.updateMany({
+    where: { playerId, shares: { gte: sell } },
+    data: { shares: { decrement: sell } },
+  });
+  if (sold.count === 0) return { ok: false, error: "too_small" };
   await prisma.$transaction([
-    prisma.gameBankShare.update({ where: { playerId }, data: { shares: owned - sell } }),
     prisma.gameBank.update({
       where: { id: bank.id },
       data: { sharesSold: { decrement: sell }, capital: { decrement: total } },
@@ -479,12 +498,17 @@ export async function buyRepossessed(playerId: string, id: string): Promise<Bank
   if (row.soldAt) return { ok: false, error: "sold_out" };
   const bank = await getBank();
 
-  await prisma.$transaction([
-    prisma.gameRepossessed.update({ where: { id }, data: { soldToId: playerId, soldAt: new Date() } }),
-    // Выручка от продажи залога возвращается в капитал: именно ради неё банк
-    // и берёт обеспечение.
-    prisma.gameBank.update({ where: { id: bank.id }, data: { capital: { increment: row.price } } }),
-  ]);
+  // Заявка на покупку: вещь одна, покупателей может быть двое. Условие
+  // «ещё не продана» стоит в самом апдейте — второй покупатель получит отказ,
+  // а не ту же яхту и второй раз пополненный капитал банка.
+  const bought = await prisma.gameRepossessed.updateMany({
+    where: { id, soldAt: null },
+    data: { soldToId: playerId, soldAt: new Date() },
+  });
+  if (bought.count === 0) return { ok: false, error: "sold_out" };
+  // Выручка от продажи залога возвращается в капитал: именно ради неё банк
+  // и берёт обеспечение.
+  await prisma.gameBank.update({ where: { id: bank.id }, data: { capital: { increment: row.price } } });
 
   return { ok: true, value: { itemId: row.itemId, price: row.price } };
 }
