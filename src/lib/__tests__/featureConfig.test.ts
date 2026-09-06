@@ -25,6 +25,21 @@ describe("featureConfig — кэш", () => {
     expect(v.enabled).toBe(true);
   });
 
+  // gamePublicAccess — исключение из общего правила «включено по умолчанию»:
+  // мир сначала обкатывается на создателе и ботах, и свежая установка (или
+  // БД без этой строки) не должна открывать доступ обычным пользователям
+  // сама по себе. Админ этим флагом не ограничен — см. dashboard/game/page.tsx.
+  it("нет строки для gamePublicAccess в БД — фича ВЫКЛЮЧЕНА по умолчанию", async () => {
+    const v = await getFeatureConfig("gamePublicAccess");
+    expect(v.enabled).toBe(false);
+  });
+
+  it("явная строка в БД перекрывает default-выключенность gamePublicAccess", async () => {
+    findMany.mockResolvedValue([{ key: "gamePublicAccess", enabled: true, config: null }]);
+    const v = await getFeatureConfig("gamePublicAccess");
+    expect(v.enabled).toBe(true);
+  });
+
   it("строка из БД перекрывает дефолты", async () => {
     findMany.mockResolvedValue([
       { key: "monteCarlo", enabled: false, config: JSON.stringify({ simulations: 7 }) },

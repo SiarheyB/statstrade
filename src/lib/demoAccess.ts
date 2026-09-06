@@ -31,6 +31,12 @@ export const DEMO_BLOCKED_PAGES = [
   "/dashboard/orderflow",
   "/dashboard/recommendations",
   "/dashboard/forex",
+  // Игра закрыта в демо не из-за содержания, а из-за цены запроса: заход в
+  // неё генерирует историю рынка (секунды процессорного времени на каждый
+  // новый инструмент) и дёргает такт ботов, а такт ходит в языковую модель за
+  // деньги. Демо — один общий аккаунт без регистрации, и оставлять за ним обе
+  // эти двери нельзя.
+  "/dashboard/game",
 ] as const;
 
 /**
@@ -47,6 +53,7 @@ export const DEMO_BLOCKED_API = [
   "/api/orderflow",
   "/api/recommendations",
   "/api/forex",
+  "/api/game",
 ] as const;
 
 function matches(pathname: string, prefixes: readonly string[]): boolean {

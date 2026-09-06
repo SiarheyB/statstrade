@@ -66,7 +66,15 @@ export function invalidateFeatureCache(): void {
 export async function getFeatureConfig<K extends FeatureKey>(key: K): Promise<FeatureConfigValue<K>> {
   const defaults = stripMeta(FEATURE_DEFAULTS[key]);
   const row = (await featureRows()).get(key);
-  if (!row) return { enabled: true, ...defaults } as FeatureConfigValue<K>;
+  if (!row) {
+    // Большинство фич по умолчанию включены (defaultEnabled не задан) — их
+    // отсутствие в БД не должно ничего скрывать. Явный defaultEnabled:false
+    // (см. gamePublicAccess) — исключение для тумблеров, где включённость
+    // «по умолчанию, пока никто не трогал» была бы утечкой доступа, а не
+    // удобством.
+    const defaultEnabled = (FEATURE_DEFAULTS[key] as { defaultEnabled?: boolean }).defaultEnabled ?? true;
+    return { enabled: defaultEnabled, ...defaults } as FeatureConfigValue<K>;
+  }
   let overrides: Record<string, unknown> = {};
   if (row.config) {
     try {

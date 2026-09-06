@@ -46,6 +46,7 @@ model User {
   shareLinks           ShareLink[]
   drawings             UserDrawing[]
   cloudStorageAccounts CloudStorageAccount[]
+  gamePlayer           GamePlayer?
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -1256,4 +1257,629 @@ model TrafficDaily {
 
   @@id([day, kind, scope, key])
   @@index([day])
+}
+
+
+// ─── Игра-симулятор: общий мир ─────────────────────────────────────────────
+//
+// Сама симуляция рынка живёт в браузере игрока (движок в src/engine, прогресс
+// в IndexedDB) — на сервере лежит только ОБЩИЙ слой: кто есть кто, кто чего
+// добился, кто кому должен и какие фонды собраны. Так игроки видят друг
+// друга и соревнуются, а сервер не тикает симуляцию за каждого.
+//
+// Следствие, о котором нужно помнить: показатели присылает клиент, то есть
+// теоретически их можно подделать. Поэтому (а) в рейтинге считаются
+// достижения, которые дороже подделывать, чем заработать (пройденные
+// испытания, ранг), (б) сервер режет неправдоподобные скачки при синхронизации
+// (см. src/lib/game/world.ts), (в) деньги между игроками ходят только через
+// записи GameLoan/GameFundEntry, которые ведёт сервер.
+
+model GamePlayer {
+  id              String   @id @default(cuid())
+  // У бота пользователя нет. Заводить ботам фиктивные учётные записи было бы
+  // хуже: они попали бы в списки пользователей, в аналитику и в рассылки —
+  // а это враньё уже не игроку, а самим себе.
+  userId          String?  @unique
+  user            User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isBot           Boolean  @default(false)
+  // Характер бота: от него зависит и стиль торговли, и манера речи.
+  persona         String?
+  // Роль на рынке — отдельно от характера (persona): обычный бот наблюдает
+  // за ценой и торгует на равных с игроком, а эти трое реально её двигают
+  // (см. lib/game/marketMovers.ts). null — обычный бот, как и раньше.
+  botRole         String?
+  // Когда бот в последний раз что-то делал — по этой отметке идёт ленивый такт.
+  lastBotActAt    DateTime?
+  // Настройки бота. Заполнены только у ботов; у характеров из справочника
+  // (botPersonas.json) служат переопределением, у созданных в админке —
+  // единственным источником правды.
+  //
+  // botSkill — «интеллект»: доля решений, которые оказываются верными.
+  // botRisk — «стремление»: какую долю счёта он готов ставить в одну идею.
+  // botAiPct — насколько глубоко думает моделью: доля решений, которые
+  //   принимает ИИ, а не встроенная логика. 0 — ИИ не используется вовсе.
+  botSkill        Float?
+  botRisk         Float?
+  botAiPct        Int?
+  botVoice        String?
+  // Свободные деньги бота. Эквити = деньги + позиции по рынку, и без этого
+  // поля бот не мог бы «сидеть в кэше»: любое падение било бы по нему целиком.
+  botCash         Float?
+  // Выключенный бот остаётся в рейтинге, но перестаёт шевелиться.
+  botActive       Boolean  @default(true)
+  // Последняя мысль: чем бот объяснил своё решение. Видно в админке —
+  // иначе про ИИ-бота нельзя понять, думает он или просто жжёт токены.
+  botPlan         String?
+  botPositions    GameBotPosition[]
+  // Публичное имя в мире игры. Отдельно от User.name: в игру человек может
+  // захотеть зайти под псевдонимом, а почта и настоящее имя тут ни при чём.
+  nickname        String   @unique
+  fundName        String?
+  rankKey         String   @default("retail")
+  prestige        Int      @default(0)
+  level           Int      @default(0)
+  equity          Float    @default(0)
+  peakEquity      Float    @default(0)
+  contractsPassed Int      @default(0)
+  bestContractPct Float    @default(0)
+  activeStyle     String   @default("day")
+  gameDay         Int      @default(0)
+  // Репутация заёмщика: 100 у всех новых, падает за просрочку. Ниже порога
+  // (см. lib/game/loans.ts) новые займы не выдаются.
+  reliability     Int      @default(100)
+  // Деньги, которые игроку должны вернуть, но он ещё не забрал их в игру
+  // (проценты по выданным займам, выплаты фонда). Клиент забирает их при
+  // следующей синхронизации и зачисляет на игровой баланс.
+  pendingPayout   Float    @default(0)
+  isPublic        Boolean  @default(true)
+  // Сезон: в каком идёт зачёт и с какой эквити игрок в него вошёл. Считается
+  // РОСТ от этой отметки, а не абсолютные деньги — иначе сезон выигрывал бы
+  // тот, кто просто дольше играет.
+  seasonId          String?
+  season            GameSeason? @relation(fields: [seasonId], references: [id], onDelete: SetNull)
+  seasonStartEquity Float?
+  // Мут в чате со сроком, а не вечный бан: почти всё лечится паузой, а
+  // вечная блокировка требует ручного снятия, про которое забывают.
+  mutedUntil        DateTime?
+  seasonResults     GameSeasonResult[]
+  tournamentEntries GameTournamentEntry[]
+  // Копитрейдинг: открыт ли игрок для подписки и почём.
+  signalsOpen       Boolean @default(false)
+  signalFeePct      Float   @default(20)
+  signals           GameSignal[]
+  // Банк: кредиты, облигации и доля в акциях.
+  bankLoans         GameBankLoan[]
+  bankBonds         GameBankBond[]
+  bankShares        GameBankShare?
+  // Вещи, изъятые банком за просрочку. Клиент забирает список на
+  // синхронизации и убирает предметы у себя: сервер имущество не хранит.
+  seizedItems       String?
+  // Вещи, выигранные на аукционе изъятого. Та же схема доставки, что у
+  // seizedItems: сервер держит только факт до ближайшей синхронизации,
+  // клиент забирает список и один раз добавляет предметы себе.
+  wonItems          String?
+  ledSubscriptions  GameSubscription[] @relation("SignalLeader")
+  subscriptions     GameSubscription[] @relation("SignalFollower")
+  signalSettlements GameSignalSettlement[] @relation("SignalSettlement")
+  ownedBank         GameUserBank?
+  createdAt       DateTime @default(now())
+  lastSyncAt      DateTime @default(now())
+
+  fundId          String?
+  fund            GameFund? @relation("fundMembers", fields: [fundId], references: [id])
+  ownedFund       GameFund? @relation("fundOwner")
+  loansGiven      GameLoan[] @relation("loanLender")
+  loansTaken      GameLoan[] @relation("loanBorrower")
+  fundEntries     GameFundEntry[]
+  worldEvents     GameWorldEvent[]
+  chatMessages    GameChatMessage[]
+  strategies      GameStrategy[]
+  strategyBuys    GameStrategyPurchase[]
+
+  @@index([prestige])
+  @@index([lastSyncAt])
+}
+
+/**
+ * Открытая позиция бота.
+ *
+ * Раньше счёт бота двигался «в среднем по рынку» — красивое число, за
+ * которым ничего не стоит: бот не мог ни ошибиться в конкретной бумаге, ни
+ * пересидеть падение, ни выйти в кэш перед новостью. Настоящая позиция
+ * делает его участником рынка, а не индикатором.
+ */
+model GameBotPosition {
+  id         String   @id @default(cuid())
+  botId      String
+  bot        GamePlayer @relation(fields: [botId], references: [id], onDelete: Cascade)
+  assetId    String
+  side       String   // long | short
+  qty        Float
+  entryPrice Float
+  openedAt   DateTime @default(now())
+  // Чем бот объяснил вход. Для ИИ-решения — его собственными словами.
+  reason     String?
+
+  @@index([botId])
+  @@index([assetId])
+}
+
+model GameFund {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  motto       String?
+  ownerId     String   @unique
+  owner       GamePlayer @relation("fundOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  // Общий котёл: сумма взносов участников минус выплаты. Деньги приходят из
+  // игровых балансов участников (клиент списывает у себя, сервер записывает).
+  capital     Float    @default(0)
+  // Доля прибыли, которую фонд удерживает при выплате (как у настоящих).
+  feePct      Float    @default(20)
+  createdAt   DateTime @default(now())
+  members     GamePlayer[] @relation("fundMembers")
+  entries     GameFundEntry[]
+  listing     GameListing?
+
+  @@index([capital])
+}
+
+// Листинг фонда на бирже.
+//
+// Генератор рынка статичен: инструменты лежат в assets.json и не меняются,
+// иначе история перестала бы воспроизводиться. Фонды же создаются на ходу.
+// Отсюда зарезервированные СЛОТЫ: восемь инструментов заранее лежат в
+// справочнике, а при листинге слот закрепляется за фондом и получает его имя
+// и тикер. Генератор про фонды не знает вовсе.
+// Листинг на бирже — общий механизм для фонда (одна запись: акция) и банка
+// пользователя (две записи на банк: акция и облигация — kind различает их).
+// Ровно ОДНО из fundId/bankId заполнено — это не enforced в схеме (Prisma не
+// умеет XOR), а проверяется в коде создания (listing.ts / userBank.ts).
+model GameListing {
+  id          String        @id @default(cuid())
+  kind        String        @default("fund_share") // "fund_share" | "bank_share" | "bank_bond"
+  fundId      String?       @unique
+  fund        GameFund?     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  bankId      String?
+  bank        GameUserBank? @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  assetId     String        @unique
+  ticker      String        @unique
+  name        String
+  totalShares Float
+  sharesSold  Float         @default(0)
+  listedAt    DateTime      @default(now())
+
+  @@index([bankId])
+}
+
+// Банк, основанный игроком — не клон центробанка (не выдаёт кредиты другим
+// игрокам, это отдельная и намного большая механика на будущее), а эмитент:
+// выпускает акции и облигации, торгуемые на бирже как любой другой
+// инструмент. Учреждение — редкое и стоит реальных денег (см.
+// BANK_CHARTER_DEPOSIT в lib/game/userBank.ts) — иначе банком становился бы
+// любой, кто скопил кругленькую сумму.
+model GameUserBank {
+  id          String    @id @default(cuid())
+  ownerId     String    @unique
+  owner       GamePlayer @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  motto       String?
+  // Капитал банка: выручка от размещения акций и облигаций (IPO), из неё
+  // считается балансовая стоимость акции — та же формула, что у GameBank.
+  capital     Float     @default(0)
+  bondsIssued Float     @default(0)
+  createdAt   DateTime  @default(now())
+  listings    GameListing[]
+}
+
+model GameFundEntry {
+  id        String   @id @default(cuid())
+  fundId    String
+  fund      GameFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // deposit — участник внёс, withdraw — забрал своё, payout — фонд выплатил долю прибыли.
+  kind      String
+  amount    Float
+  createdAt DateTime @default(now())
+
+  @@index([fundId, createdAt])
+  @@index([playerId])
+}
+
+model GameLoan {
+  id          String   @id @default(cuid())
+  lenderId    String?
+  lender      GamePlayer? @relation("loanLender", fields: [lenderId], references: [id], onDelete: SetNull)
+  borrowerId  String
+  borrower    GamePlayer  @relation("loanBorrower", fields: [borrowerId], references: [id], onDelete: Cascade)
+  amount      Float
+  interestPct Float
+  // Срок считается в ИГРОВЫХ днях заёмщика: у каждого своё игровое время, и
+  // привязывать долг к реальным дням было бы нечестно — на investing игровой
+  // месяц проходит за минуту.
+  dueGameDay  Int
+  // offered — предложение висит на бирже займов, active — деньги выданы,
+  // repaid — возвращены, defaulted — просрочено.
+  status      String   @default("offered")
+  createdAt   DateTime @default(now())
+  takenAt     DateTime?
+  repaidAt    DateTime?
+
+  @@index([status, createdAt])
+  @@index([borrowerId])
+  @@index([lenderId])
+}
+
+model GameWorldEvent {
+  id        String   @id @default(cuid())
+  playerId  String?
+  player    GamePlayer? @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // contract_passed | contract_failed | rank_up | fund_created | fund_joined |
+  // loan_offered | loan_taken | loan_repaid | loan_defaulted | big_win
+  kind      String
+  // JSON с деталями события — из него собирается строка в ленте мира.
+  payload   String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+
+// ─── Игра: общий рынок ─────────────────────────────────────────────────────
+//
+// Раньше рынок жил в браузере каждого игрока: у всех были свои цены, история
+// умирала вместе с сохранением, а сравнивать результаты в общем мире было не
+// с чем. Теперь рынок ОДИН на всех и лежит здесь.
+//
+// Как это устроено (подробно — src/lib/game/marketGen.ts): цены не хранятся
+// «просто так», они ДЕТЕРМИНИРОВАННО выводятся из сида мира и номера бара.
+// Одинаковые вход и номер бара всегда дают одинаковую цену, поэтому
+// генерацию можно доганять кусками, в любом порядке и с любого сервера — и
+// история не разъедется. В базе лежит результат: считать заново на каждый
+// запрос было бы дорого.
+
+model GameMarket {
+  // Одна строка на мир. id фиксирован, чтобы не плодить вселенные.
+  id          String   @id @default("world")
+  seed        String
+  // Начало истории: самая старая свеча, которую может увидеть игрок.
+  startedAt   DateTime
+  createdAt   DateTime @default(now())
+}
+
+model GameCandle {
+  assetId String
+  // Хранятся только "1h" и "1d" — костяк истории. Минутки НЕ хранятся: они
+  // достраиваются внутри часа мостом Броуна (см. marketGen.bridgeMinutes),
+  // который гарантированно приходит из открытия часа в его закрытие.
+  // Поэтому минутный и часовой графики не могут разойтись, а база не растёт
+  // на полмиллиона строк в сутки.
+  tf      String
+  ts      DateTime
+  open    Float
+  high    Float
+  low     Float
+  close   Float
+  volume  Float
+
+  @@id([assetId, tf, ts])
+  @@index([assetId, tf, ts])
+}
+
+model GameMarketNews {
+  id       String   @id @default(cuid())
+  ts       DateTime
+  // null в assetId — новость по всему рынку; sector — по отрасли.
+  assetId  String?
+  sector   String?
+  impact   String
+  headline String
+  shockPct Float
+
+  @@index([ts])
+  @@index([assetId, ts])
+}
+
+// ─── Игра: разговоры и обмен стратегиями ───────────────────────────────────
+//
+// Мир, в котором игроки видят друг друга только в таблице рейтинга, — это
+// ещё не мир. Здесь живут три вещи: общий чат, идея с графиком, приложенная
+// к сообщению, и рынок стратегий.
+//
+// Идея с графиком возможна ровно потому, что рынок теперь ОБЩИЙ: приложив к
+// сообщению инструмент, таймфрейм и свою разметку, игрок показывает
+// собеседнику ровно то же, что видит сам. Раньше, когда цены считал каждый
+// браузер, это не имело бы смысла.
+
+model GameChatMessage {
+  id        String   @id @default(cuid())
+  // "general" — общий зал, "market" — разговоры про инструменты,
+  // "fund:<id>" — закрытый канал фонда.
+  channel   String
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  text      String
+  // Прикреплённая идея: инструмент, таймфрейм и разметка (JSON точек).
+  assetId   String?
+  tf        String?
+  drawings  String?
+  // Снятое модератором сообщение не удаляется: пропавшая реплика выглядит
+  // как сбой, и разобраться потом, за что наказали, было бы нечем.
+  removedAt DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([channel, createdAt])
+}
+
+// Сезоны: вечный рейтинг мёртв для новичка — пришедший через месяц не
+// догонит первых никогда. Сезон считает только то, что сделано за его срок,
+// и заканчивается: это и повод начать, и повод вернуться к дате. Общий
+// прогресс (престиж, испытания, перки) сезон не трогает.
+model GameSeason {
+  id        String    @id @default(cuid())
+  index     Int       @unique
+  startedAt DateTime
+  endsAt    DateTime
+  // Проставляется, когда итоги подведены и награды разосланы.
+  closedAt  DateTime?
+  players   GamePlayer[]
+  results   GameSeasonResult[]
+
+  @@index([endsAt])
+}
+
+model GameSeasonResult {
+  id        String   @id @default(cuid())
+  seasonId  String
+  season    GameSeason @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  playerId  String
+  player    GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  rank      Int
+  returnPct Float
+  equity    Float
+  reward    Float    @default(0)
+  createdAt DateTime @default(now())
+
+  @@unique([seasonId, playerId])
+  @@index([playerId])
+}
+
+// Турниры: короткая дистанция с понятным концом. Сезон длится месяц, общий
+// рейтинг не кончается вовсе — а игроку нужно и «зашёл, три дня поторговал,
+// увидел итог». Взнос обязателен: без него турнир превращается в бесплатную
+// лотерею, где выгодно записаться и не играть.
+model GameTournament {
+  id        String    @id @default(cuid())
+  index     Int       @unique
+  startsAt  DateTime
+  endsAt    DateTime
+  entryFee  Float
+  // Призовой фонд копится из взносов участников.
+  prizePool Float     @default(0)
+  closedAt  DateTime?
+  entries   GameTournamentEntry[]
+
+  @@index([endsAt])
+}
+
+model GameTournamentEntry {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   GameTournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  playerId     String
+  player       GamePlayer     @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  // Эквити на входе: зачёт — рост от неё, а не абсолютные деньги, иначе
+  // турнир выигрывал бы самый богатый.
+  startEquity  Float
+  equity       Float
+  rank         Int?
+  reward       Float    @default(0)
+  joinedAt     DateTime @default(now())
+
+  @@unique([tournamentId, playerId])
+  @@index([playerId])
+}
+
+// Сигнал ведущего: что и в какую сторону он открыл.
+//
+// Сделки живут в браузере игрока, сервер их не видит и «зеркалить» позиции не
+// может. Ведущий публикует сигнал, а клиент подписчика открывает то же сам,
+// своим размером и своими деньгами: размер позиции остаётся решением того,
+// кто рискует.
+model GameSignal {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  settlements GameSignalSettlement[]
+  assetId   String
+  side      String
+  price     Float
+  // Стоп и тейк в ПРОЦЕНТАХ от входа: у подписчика своя цена входа, и
+  // копировать абсолютные уровни было бы бессмысленно.
+  stopPct   Float?
+  takePct   Float?
+  createdAt DateTime @default(now())
+
+  @@index([authorId, createdAt])
+  @@index([createdAt])
+}
+
+// Что уже оплачено по сигналу.
+//
+// Раньше комиссия ведущему начислялась по одному лишь слову клиента: пришёл
+// запрос «я заработал миллиард, отдай долю» — сервер отдавал. Ни подписки, ни
+// сделки, ни повторов он не проверял, и цикл таких запросов печатал деньги
+// любому аккаунту. Теперь у каждой пары «сигнал + подписчик» есть строка с
+// накопленной оплаченной прибылью: она и делает начисление идемпотентным, и
+// держит потолок.
+model GameSignalSettlement {
+  id         String   @id @default(cuid())
+  signalId   String
+  signal     GameSignal @relation(fields: [signalId], references: [id], onDelete: Cascade)
+  followerId String
+  follower   GamePlayer @relation("SignalSettlement", fields: [followerId], references: [id], onDelete: Cascade)
+  /** Сколько прибыли по этому сигналу уже оплачено — потолок для добавок. */
+  paidProfit Float    @default(0)
+  /** Сколько всего ушло ведущему: для разбирательств и статистики. */
+  paidFee    Float    @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([signalId, followerId])
+  @@index([followerId])
+}
+
+model GameSubscription {
+  id         String   @id @default(cuid())
+  leaderId   String
+  leader     GamePlayer @relation("SignalLeader", fields: [leaderId], references: [id], onDelete: Cascade)
+  followerId String
+  follower   GamePlayer @relation("SignalFollower", fields: [followerId], references: [id], onDelete: Cascade)
+  // Комиссия ведущего с ПРИБЫЛЬНОЙ скопированной сделки. С убытка не берётся:
+  // наказывать подписчика за то, что чужой сигнал не сработал, — двойная
+  // потеря.
+  feePct     Float
+  auto       Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@unique([leaderId, followerId])
+  @@index([followerId])
+}
+
+// Игровой банк — один на мир.
+//
+// До него занять можно было только у другого игрока: пока в мире два
+// человека, занять не у кого вовсе. Банк работает всегда — выдаёт кредиты,
+// зарабатывает на процентах, забирает залог за просрочку и продаёт изъятое
+// остальным. И развивается сам: капитал растёт на процентах и падает на
+// невозвратах, а от него зависит цена его акции.
+model GameBank {
+  id             String   @id @default(cuid())
+  // Кредитный пул: то, чем банк выдаёт займы, покупает облигации назад и
+  // из чего считалась цена акции ДО появления собственной торговли банка.
+  capital        Float
+  lentOut        Float    @default(0)
+  // Привлечено по облигациям — это ДОЛГ банка перед игроками.
+  bondsIssued    Float    @default(0)
+  interestEarned Float    @default(0)
+  lossesTaken    Float    @default(0)
+  // Не Int: при капитале в триллион акций нужно десять миллиардов, а INT4
+  // хранит максимум два с небольшим.
+  totalShares    Float
+  sharesSold     Float    @default(0)
+  foundedAt      DateTime @default(now())
+  // Торговый пул: часть капитала, отделённая под собственную биржевую
+  // торговлю банка (центробанк — см. GamePlayer.botRole="central_bank").
+  //
+  // Отдельно от `capital` НАМЕРЕННО: кредитный портфель и торговый счёт —
+  // разные по риску деньги, и смешивать их означало бы, что неудачная
+  // ставка на индекс подрывает способность банка выдавать кредиты. Прибыль
+  // и убыток от торговли меняют именно этот пул, а цена акции (см.
+  // bookValuePerShare) считается от суммы обоих — акционер видит оба риска,
+  // но они не перетекают друг в друга.
+  tradingPool    Float    @default(0)
+}
+
+model GameBankLoan {
+  id              String   @id @default(cuid())
+  playerId        String
+  player          GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  principal       Float
+  // Годовая ставка: считается из скоринга, чем хуже история — тем дороже.
+  ratePct         Float
+  termDays        Int
+  takenAt         DateTime @default(now())
+  dueAt           DateTime
+  repaidAt        DateTime?
+  status          String   @default("active")
+  // Залог — предмет из магазина. null означает кредит без обеспечения.
+  collateralItem  String?
+  collateralValue Float?
+
+  @@index([playerId, status])
+  @@index([dueAt])
+}
+
+model GameRepossessed {
+  id              String    @id @default(cuid())
+  itemId          String
+  fromId          String?
+  // Стартовая цена — она же резерв: аукцион не закрывается ниже неё, даже
+  // если ставок не было вовсе (тогда лот просто уходит на новый круг).
+  price           Float
+  // Аукцион, а не фиксированная цена: витрина изъятого раньше продавала
+  // первому нажавшему кнопку — редкую дорогую вещь тогда забирал не тот,
+  // кто ценит её больше, а тот, кто быстрее заметил. Торг решает это честно.
+  auctionEndsAt   DateTime
+  highestBid      Float?
+  highestBidderId String?
+  soldToId        String?
+  soldAt          DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([soldAt])
+  @@index([auctionEndsAt])
+}
+
+model GameBankBond {
+  id         String   @id @default(cuid())
+  playerId   String
+  player     GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  amount     Float
+  couponPct  Float
+  termDays   Int
+  boughtAt   DateTime @default(now())
+  maturesAt  DateTime
+  redeemedAt DateTime?
+
+  @@index([playerId])
+  @@index([maturesAt])
+}
+
+model GameBankShare {
+  id       String @id @default(cuid())
+  playerId String @unique
+  player   GamePlayer @relation(fields: [playerId], references: [id], onDelete: Cascade)
+  shares   Int    @default(0)
+  avgPrice Float  @default(0)
+}
+
+model GameStrategy {
+  id          String   @id @default(cuid())
+  authorId    String
+  author      GamePlayer @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  // Настройки алго-бота одной строкой JSON: правило входа, риск, стоп, тейк.
+  config      String
+  price       Float
+  purchases   Int      @default(0)
+  // Трек-рекорд: итоги бота АВТОРА по этой стратегии. Присылает клиент
+  // автора вместе с синхронизацией мира. Пусто, пока бот не наторговал —
+  // это честнее нуля, который читался бы как «стратегия убыточна».
+  botId       String?
+  trades      Int?
+  winRate     Float?
+  avgPnl      Float?
+  reportedAt  DateTime?
+  createdAt   DateTime @default(now())
+  buyers      GameStrategyPurchase[]
+
+  @@index([purchases])
+  @@index([authorId])
+}
+
+model GameStrategyPurchase {
+  id         String   @id @default(cuid())
+  strategyId String
+  strategy   GameStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+  buyerId    String
+  buyer      GamePlayer   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  price      Float
+  createdAt  DateTime @default(now())
+
+  // Купить одну и ту же стратегию дважды нельзя — это копия правил, а не
+  // расходник.
+  @@unique([strategyId, buyerId])
+  @@index([buyerId])
 }

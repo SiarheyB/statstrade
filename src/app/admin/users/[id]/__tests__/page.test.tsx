@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db";
 import AdminUserDetailPage from "../page";
@@ -37,6 +37,8 @@ vi.mock("@/lib/db", () => ({
   prisma: {
     user: { findUnique: vi.fn() },
     adminAudit: { findMany: vi.fn() },
+    // Игровой профиль есть не у каждого пользователя — по умолчанию его нет.
+    gamePlayer: { findUnique: vi.fn() },
   },
 }));
 
@@ -73,6 +75,7 @@ describe("AdminUserDetailPage", () => {
   });
 
   it("renders user details, accounts table and audit history", async () => {
+    (prisma.gamePlayer.findUnique as any).mockResolvedValue(null);
     (prisma.user.findUnique as any).mockResolvedValue(baseUser);
     (prisma.adminAudit.findMany as any).mockResolvedValue([
       {
@@ -87,8 +90,12 @@ describe("AdminUserDetailPage", () => {
     const ui = await AdminUserDetailPage({ params: Promise.resolve({ id: "user-1" }) });
     render(ui as React.ReactElement);
 
+    // Карточка разделена на вкладки: биржи и история действий живут в своих
+    // разделах, поэтому до них нужно дойти.
     expect(screen.getByText("trader@example.com")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("admin.userDetail.tab.accounts"));
     expect(screen.getByText("Binance")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("admin.userDetail.tab.history"));
     expect(screen.getByText("admin@example.com", { exact: false })).toBeInTheDocument();
     expect(screen.getByText(/reset_2fa/)).toBeInTheDocument();
   });
@@ -104,7 +111,9 @@ describe("AdminUserDetailPage", () => {
     const ui = await AdminUserDetailPage({ params: Promise.resolve({ id: "user-1" }) });
     render(ui as React.ReactElement);
 
+    fireEvent.click(screen.getByText("admin.userDetail.tab.accounts"));
     expect(screen.getByText("admin.userDetail.noAccounts")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("admin.userDetail.tab.history"));
     expect(screen.getByText("admin.userDetail.noHistory")).toBeInTheDocument();
   });
 
@@ -133,5 +142,45 @@ describe("AdminUserDetailPage", () => {
       AdminUserDetailPage({ params: Promise.resolve({ id: "missing" }) })
     ).rejects.toThrow("NOT_FOUND");
     expect(notFound).toHaveBeenCalled();
+  });
+
+  it("во вкладке «Игра» показывает игровой профиль, а без него — честное «не заходил»", async () => {
+    (prisma.user.findUnique as any).mockResolvedValue(baseUser);
+    (prisma.adminAudit.findMany as any).mockResolvedValue([]);
+    (prisma.gamePlayer.findUnique as any).mockResolvedValue(null);
+    const empty = await AdminUserDetailPage({ params: Promise.resolve({ id: "user-1" }) });
+    render(empty as React.ReactElement);
+    fireEvent.click(screen.getByText("admin.userDetail.tab.game"));
+    expect(screen.getByText(/ещё не заходил в игру/)).toBeInTheDocument();
+  });
+
+  it("во вкладке «Игра» видно снимок клиента и очередь получения", async () => {
+    (prisma.user.findUnique as any).mockResolvedValue(baseUser);
+    (prisma.adminAudit.findMany as any).mockResolvedValue([]);
+    (prisma.gamePlayer.findUnique as any).mockResolvedValue({
+      nickname: "ONYX",
+      rankKey: "pro",
+      prestige: 70,
+      level: 3,
+      equity: 2_068,
+      peakEquity: 190_000,
+      contractsPassed: 2,
+      bestContractPct: 8.5,
+      reliability: 100,
+      activeStyle: "day",
+      gameDay: 12,
+      pendingPayout: 500,
+      isPublic: true,
+      mutedUntil: null,
+      fundName: null,
+      lastSyncAt: new Date("2026-09-05T12:00:00Z"),
+      seasonStartEquity: 10_000,
+    });
+    const ui = await AdminUserDetailPage({ params: Promise.resolve({ id: "user-1" }) });
+    render(ui as React.ReactElement);
+    fireEvent.click(screen.getByText("admin.userDetail.tab.game"));
+    expect(screen.getByText("ONYX")).toBeInTheDocument();
+    // Сезонный результат считается от эквити на входе в сезон, а не от нуля.
+    expect(screen.getByText("-79.32%")).toBeInTheDocument();
   });
 });

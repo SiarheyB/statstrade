@@ -340,10 +340,30 @@ export function drawCandlesticks(
   plotX: number,
   plotW: number,
   xspan: number,
-  opts: { clusters?: boolean; colW?: number; bodyRatio?: number } = {},
+  // up/down — необязательное переопределение цветов свечей: игровой
+  // терминал (src/components/game/PriceChart.tsx) красит их по купленной в
+  // магазине теме. Без них — те же CHART_COLORS, что и на всех остальных
+  // графиках проекта, поэтому вызывающий код форекса/ордерфлоу не меняется.
+  // bodyWidth — явная ширина тела свечи в пикселях. Нужна графикам, у
+  // которых ось X идёт НЕ по календарному времени, а по номерам свечей
+  // (игровой терминал: там ночи и выходные на оси места не занимают, и
+  // вывести ширину из stepMs/xspan нельзя).
+  // stepMs — явный шаг таймфрейма. По умолчанию выводится из первых двух
+  // свечей, но у рядов С ПРОПУСКАМИ (расписание торгов: ночи и выходные) это
+  // неверно — первые две свечи могут стоять через восемнадцать часов, и центр
+  // свечи уезжает на несколько баров вперёд.
+  opts: {
+    clusters?: boolean;
+    colW?: number;
+    bodyRatio?: number;
+    up?: string;
+    down?: string;
+    bodyWidth?: number;
+    stepMs?: number;
+  } = {},
 ) {
   if (candles.length < 2) return;
-  const stepMs = candles[1].t - candles[0].t;
+  const stepMs = opts.stepMs ?? candles[1].t - candles[0].t;
   const clusters = !!opts.clusters;
   const colW = opts.colW ?? 0;
   const bodyRatio = opts.bodyRatio ?? 0.7;
@@ -352,14 +372,15 @@ export function drawCandlesticks(
     : 1;
   const cw = clusters
     ? wickW * 3
-    : Math.max(1, (stepMs / xspan) * plotW * bodyRatio);
+    : Math.max(1, opts.bodyWidth ?? (stepMs / xspan) * plotW * bodyRatio);
   ctx.lineWidth = wickW;
   for (const k of candles) {
     const x = sx(k.t + stepMs / 2);
     if (x < plotX - colW - 2 || x > plotX + plotW + colW + 2) continue;
     const up = k.c >= k.o;
-    ctx.strokeStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
-    ctx.fillStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
+    const color = up ? (opts.up ?? CHART_COLORS.up) : (opts.down ?? CHART_COLORS.down);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.moveTo(x, sy(k.h));
     ctx.lineTo(x, sy(k.l));
