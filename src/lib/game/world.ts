@@ -162,6 +162,28 @@ export function clampSnapshot(
   };
 }
 
+/**
+ * Эквити игрока, как её знает сервер.
+ *
+ * Единственный якорь, к которому привязана каждая операция, выпускающая
+ * РЕАЛЬНЫЕ, кросс-устройственные деньги (pendingPayout) без встречной
+ * стороны, которая эти деньги действительно платит: предложение займа,
+ * покупка облигации, покупка акций банка, вклад в фонд. Без такой привязки
+ * каждая из них — печатный станок: сумма бралась из запроса без проверки, а
+ * обратная операция (отмена займа, погашение облигации, продажа акций,
+ * выплата фонда) превращала её в pendingPayout безусловно.
+ *
+ * Эквити тоже не железобетонна — её можно раскрутить собственной игрой в
+ * пределах временного лимита роста (см. clampSnapshot), но это уже принятый
+ * риск для ОДНОГО аккаунта. Привязка к ней не останавливает читера, который
+ * обманывает сам себя, — она останавливает станок, печатающий деньги без
+ * связи вообще ни с чем.
+ */
+export async function playerEquity(playerId: string): Promise<number> {
+  const player = await prisma.gamePlayer.findUnique({ where: { id: playerId }, select: { equity: true } });
+  return Math.max(0, player?.equity ?? 0);
+}
+
 export async function recordEvent(playerId: string | null, kind: string, payload: WorldEventPayload): Promise<void> {
   await prisma.gameWorldEvent.create({
     data: { playerId, kind, payload: JSON.stringify(payload) },

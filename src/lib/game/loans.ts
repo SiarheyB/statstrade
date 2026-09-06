@@ -19,7 +19,7 @@
 // Отмена предложения возвращает сумму кредитору тем же способом — через
 // pendingPayout.
 import { prisma } from "@/lib/db";
-import { recordEvent } from "@/lib/game/world";
+import { playerEquity, recordEvent } from "@/lib/game/world";
 
 export const MIN_LOAN = 100;
 export const MAX_LOAN = 5_000_000;
@@ -64,6 +64,12 @@ export async function offerLoan(
   if (!(amount >= MIN_LOAN) || amount > MAX_LOAN) return { ok: false, error: "invalid_amount" };
   if (!(interestPct >= 0) || interestPct > MAX_INTEREST_PCT) return { ok: false, error: "invalid_interest" };
   if (!(termDays >= 1) || termDays > MAX_TERM_DAYS) return { ok: false, error: "invalid_term" };
+  // Предложение — это заявление «у меня есть эти деньги, я готов их дать».
+  // Раньше это ничем не проверялось: предложить и тут же отменить (cancelLoan
+  // возвращает всю сумму в pendingPayout) печатало деньги за один шаг, без
+  // единого встречного игрока. Сумма ограничена собственной эквити — занять
+  // больше, чем есть у самого кредитора, теперь нельзя.
+  if (amount > (await playerEquity(lenderId))) return { ok: false, error: "invalid_amount" };
 
   const loan = await prisma.gameLoan.create({
     data: {

@@ -11,7 +11,7 @@
 // внёс сам (плюс полученные выплаты) — иначе фонд превращался бы в кассу
 // для вывода чужих взносов.
 import { prisma } from "@/lib/db";
-import { recordEvent } from "@/lib/game/world";
+import { playerEquity, recordEvent } from "@/lib/game/world";
 
 export const FUND_CREATION_COST = 25_000;
 export const FUND_MIN_PRESTIGE = 60;
@@ -118,6 +118,12 @@ async function fundCapital(fundId: string): Promise<number> {
 export async function depositToFund(playerId: string, fundId: string | null, amount: number): Promise<FundResult<{ amount: number }>> {
   if (!fundId) return { ok: false, error: "not_member" };
   if (!(amount >= MIN_FUND_DEPOSIT)) return { ok: false, error: "invalid_amount" };
+  // Вклад раньше принимался любым числом и безусловно пополнял капитал
+  // фонда — общее, видимое всем состояние. Владелец фонда следующим шагом
+  // (payoutFund) превращает капитал в pendingPayout участникам — то есть
+  // фиктивный вклад отмывался в настоящие, кросс-устройственные деньги за
+  // один ход. Вклад не может превышать собственную эквити вкладчика.
+  if (amount > (await playerEquity(playerId))) return { ok: false, error: "invalid_amount" };
   await prisma.$transaction([
     prisma.gameFundEntry.create({ data: { fundId, playerId, kind: "deposit", amount } }),
     prisma.gameFund.update({ where: { id: fundId }, data: { capital: { increment: amount } } }),

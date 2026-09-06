@@ -13,6 +13,7 @@
 // очередь получения, что проценты по займам и призы сезона.
 import { prisma } from "@/lib/db";
 import { getShopItem } from "@/engine/economy/shop";
+import { playerEquity } from "@/lib/game/world";
 import {
   canPledge,
   collateralLoan,
@@ -356,6 +357,12 @@ export async function buyBond(
   termDays: number,
 ): Promise<BankResult<{ id: string; maturesAt: number; couponPct: number; payout: number }>> {
   if (!(amount >= MIN_DEPOSIT)) return { ok: false, error: "too_small" };
+  // Без этой проверки покупка ничего не стоила: сумма увеличивала капитал
+  // банка безусловно, а через срок возвращалась С КУПОНОМ в pendingPayout —
+  // печатный станок с задержкой в дни вместо секунд. Купить можно не больше
+  // собственной эквити: облигация — это вложение РЕАЛЬНЫХ денег, а не запись
+  // из воздуха.
+  if (amount > (await playerEquity(playerId))) return { ok: false, error: "too_small" };
   const term = DEPOSIT_TERMS.includes(termDays) ? termDays : DEPOSIT_TERMS[0];
   const bank = await getBank();
 
@@ -432,6 +439,14 @@ export async function tradeBankShares(
     const available = bank.totalShares - bank.sharesSold;
     if (quantity > available) return { ok: false, error: "sold_out" };
     const total = price * quantity;
+    // ГЛАВНАЯ ПРОВЕРКА ЭТОЙ ФУНКЦИИ. Покупка раньше увеличивала капитал
+    // банка безусловно — деньги за акции не откуда-то, а из воздуха. Продажа
+    // того же пакета следующим вызовом превращала его в pendingPayout, то
+    // есть buy→sell был печатным станком без единого шага, где хоть что-то
+    // проверялось. Общая стоимость купленного (по цене входа, не текущей)
+    // не может превышать эквити покупателя.
+    const alreadyInvested = (holding?.avgPrice ?? 0) * owned;
+    if (alreadyInvested + total > (await playerEquity(playerId))) return { ok: false, error: "too_small" };
     const avgPrice = owned > 0 ? ((holding?.avgPrice ?? 0) * owned + total) / (owned + quantity) : price;
     await prisma.$transaction([
       prisma.gameBankShare.upsert({
