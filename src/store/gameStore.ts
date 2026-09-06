@@ -149,7 +149,17 @@ function freshAccount(startingBalance = STARTING_BALANCE): Account {
 }
 
 function freshState(tuning: GameTuning = DEFAULT_TUNING): GameState {
-  const activeAssets = ALL_ASSETS.filter((a) => PHASE1_ASSET_IDS.includes(a.id));
+  // Крипта и форекс объявлены разблокированными с первого дня (см.
+  // unlockedMarkets ниже) именно ради того, чтобы новичку было чем
+  // торговать в любой момент, включая закрытые для акций часы/выходные. Но
+  // сам список инструментов раньше считался только по PHASE1_ASSET_IDS
+  // (шесть акций) — разблокировка была объявлена, а в тикете инструменты
+  // не появлялись, пока игрок сам не переключит стиль торговли (см.
+  // setActiveStyle, который досчитывает этот же набор). Итог: игрок,
+  // зашедший в закрытые для акций часы, упирался в «рынок закрыт» и не мог
+  // пройти первый шаг обучения — ту самую дыру и закрывает эта строка.
+  const startingIds = new Set([...PHASE1_ASSET_IDS, ...assetIdsForMarkets(["crypto", "forex"])]);
+  const activeAssets = ALL_ASSETS.filter((a) => startingIds.has(a.id));
   const prices: Record<string, number> = {};
   for (const a of activeAssets) prices[a.id] = seedPrice(a);
   return {

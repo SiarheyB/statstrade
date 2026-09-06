@@ -3,13 +3,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 const mocks = vi.hoisted(() => ({
   loadGame: vi.fn(),
   saveGame: vi.fn(),
+  deleteSave: vi.fn(),
 }));
 vi.mock("@/persistence/gameDb", () => ({
   loadGame: mocks.loadGame,
   saveGame: mocks.saveGame,
+  deleteSave: mocks.deleteSave,
 }));
 
-import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS } from "@/store/gameStore";
+import { useGameStore, PHASE1_ASSET_IDS, INVESTING_ASSET_IDS, assetIdsForMarkets } from "@/store/gameStore";
 import { DEFAULT_THEME_ID, freshLifestyle, getShopItem } from "@/engine/economy/shop";
 import { gameTick, MONTH_MS } from "@/engine/gameLoop";
 import { streakReward } from "@/engine/player/achievements";
@@ -358,6 +360,26 @@ describe("setActiveStyle", () => {
     useGameStore.getState().setActiveStyle("investing");
     const after = useGameStore.getState().game.activeAssets;
     expect(after).toHaveLength(before.length);
+  });
+});
+
+// Изолированно от остальных describe-блоков: тест выше на «плюс крипта»
+// (см. setActiveStyle) проходил бы даже без фикса — activeAssets к тому
+// моменту уже пополнен ПРЕДЫДУЩИМ тестом того же файла, вызвавшим
+// setActiveStyle («меняет activeStyle…»), которая эту часть чинит сама.
+// resetProgress() зовёт freshState() напрямую и целиком заменяет game —
+// никакой утечки состояния из соседних тестов.
+describe("resetProgress — свежий старт (freshState)", () => {
+  it("новый игрок сразу видит крипту и форекс — рынки, работающие в закрытые для акций часы", async () => {
+    await useGameStore.getState().resetProgress();
+    const ids = new Set(useGameStore.getState().game.activeAssets.map((a) => a.id));
+    for (const id of PHASE1_ASSET_IDS) expect(ids.has(id)).toBe(true);
+    const cryptoIds = assetIdsForMarkets(["crypto"]);
+    const forexIds = assetIdsForMarkets(["forex"]);
+    expect(cryptoIds.length).toBeGreaterThan(0);
+    expect(forexIds.length).toBeGreaterThan(0);
+    for (const id of cryptoIds) expect(ids.has(id)).toBe(true);
+    for (const id of forexIds) expect(ids.has(id)).toBe(true);
   });
 });
 

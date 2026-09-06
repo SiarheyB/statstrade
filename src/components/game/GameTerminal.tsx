@@ -27,6 +27,8 @@ import { readChartPrefs, writeChartPrefs, prefString } from "@/lib/chartPrefs";
 import { useGameStore, SELECTABLE_STYLES, STARTING_BALANCE } from "@/store/gameStore";
 import { activeTheme, getShopItem, sellValue } from "@/engine/economy/shop";
 import { perkEffects } from "@/engine/player/perks";
+import { isMarketOpen } from "@/lib/game/schedule";
+import { useMarketClock } from "@/lib/game/useMarketClock";
 import type { GameTuning } from "@/engine/entities/tuning";
 import type { TradingStyle } from "@/engine/entities/types";
 import PriceChart from "./PriceChart";
@@ -124,6 +126,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   const [name, setName] = useState<string | null>(playerName);
   const [tab, setTab] = useState<Tab>("terminal");
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
+  // Только для фолбэка на «первый инструмент с открытым рынком» ниже —
+  // Date.now() нельзя звать прямо в теле рендера (React считает это
+  // нечистотой), а начальное значение 0 безопасно: крипта открыта всегда,
+  // так что даже на первом клиентском рендере (до эффекта) фолбэк уже
+  // укажет на неё, а не зависнет на закрытой бирже.
+  const clockNow = useMarketClock();
   // Пока настройки не прочитаны, ничего не пишем обратно — иначе первый же
   // рендер затёр бы сохранённую вкладку дефолтом (тот же гейт, что у
   // форекса: см. CLAUDE.md, раздел про панель графика).
@@ -264,10 +272,15 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   }
 
   // Сохранённого инструмента может уже не быть в активном наборе (сменился
-  // стиль) — откатываемся на первый доступный, иначе селектор пустой.
+  // стиль) — откатываемся на первый доступный. Но «первый доступный» — это
+  // первый инструмент с ОТКРЫТЫМ рынком, а не просто первый в списке: набор
+  // начинается с акций (STK_NEXTEK), и без этой проверки игрок, зашедший в
+  // закрытые для бирж часы (вечер/выходные), упирался бы в «рынок закрыт» на
+  // самом первом экране — притом что крипта, доступная с первого дня именно
+  // ради круглосуточности, в это время открыта и стоит в том же списке.
   const assetId = game.activeAssets.some((a) => a.id === selectedAssetId)
     ? (selectedAssetId as string)
-    : game.activeAssets[0]?.id;
+    : (game.activeAssets.find((a) => isMarketOpen(a.assetClass, clockNow))?.id ?? game.activeAssets[0]?.id);
   const asset = game.activeAssets.find((a) => a.id === assetId);
   const currentStyle = game.activeStyle.style;
   const unreadNews = game.newsFeed.filter((n) => n.expiresAt > game.gameElapsedMs).length;
