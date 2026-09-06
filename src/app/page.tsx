@@ -42,6 +42,11 @@ export default async function Home() {
   // Раздел выключен админом — блок прячется целиком, как и в самом кабинете:
   // рекламировать то, что за дверью 404, было бы враньём.
   const gameEnabled = await getFeatureConfig("game").then((f) => f.enabled).catch(() => false);
+  // Отдельно от общего выключателя: пока мир обкатывается на себе и ботах
+  // (gamePublicAccess выключен), блок остаётся на лендинге, но зовёт не
+  // «войти», а честно говорит «скоро» — иначе гость регистрируется по
+  // кнопке и упирается в «недоступно для обычных пользователей» в кабинете.
+  const gamePublicAccess = await getFeatureConfig("gamePublicAccess").then((f) => f.enabled).catch(() => false);
 
 
   return (
@@ -161,7 +166,9 @@ export default async function Home() {
           t={t}
         />
 
-        {gameEnabled && <LandingGame instrumentsCount={gameAssets.length} t={t} />}
+        {gameEnabled && (
+          <LandingGame instrumentsCount={gameAssets.length} publicAccess={gamePublicAccess} t={t} />
+        )}
 
         {/* Цена — последним блоком: человек только что прочитал, что сервис
             умеет, и первый вопрос у него именно про деньги. */}
