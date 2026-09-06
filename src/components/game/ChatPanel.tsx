@@ -59,6 +59,13 @@ export default function ChatPanel({
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollBoxRef = useRef<HTMLDivElement>(null);
+  // Сколько сообщений было при прошлом апдейте: автоскролл должен сработать
+  // только когда пришло НОВОЕ сообщение, а не на каждый опрос — иначе окно
+  // читалось бы как «страница постоянно перезагружается»: опрос раз в 8с
+  // дёргал бы читателя вниз, даже если он листает историю вверх, ведь
+  // fetch() каждый раз возвращает новый массив, пусть и с тем же содержимым.
+  const lastCountRef = useRef(0);
 
   const apply = useCallback((feed: ChatFeed) => {
     setMessages(feed.messages);
@@ -92,8 +99,25 @@ export default function ChatPanel({
   }, [channel, load, apply]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: "end" });
+    // Автоскролл — только когда сообщений стало больше, и только если
+    // читатель и так был у низа (не оторвал его специально, промотав
+    // историю выше). Смена канала (0 -> N) не в счёт — при заходе видно
+    // низ ленты, а не первую строчку.
+    const grew = messages.length > lastCountRef.current;
+    lastCountRef.current = messages.length;
+    if (!grew) return;
+
+    const box = scrollBoxRef.current;
+    const nearBottom = !box || box.scrollHeight - box.scrollTop - box.clientHeight < 80;
+    if (nearBottom) bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // Смена канала — отдельный сброс счётчика: без него уход из общего чата
+  // (много сообщений) в пустой канал фонда посчитался бы как «стало
+  // меньше», а возврат обратно — как рост, и лента дёрнулась бы вниз зря.
+  useEffect(() => {
+    lastCountRef.current = 0;
+  }, [channel]);
 
   async function submit() {
     const value = text.trim();
@@ -151,7 +175,7 @@ export default function ChatPanel({
           })()}
       </div>
 
-      <div className="h-[320px] overflow-y-auto space-y-2 pr-1">
+      <div ref={scrollBoxRef} className="h-[320px] overflow-y-auto space-y-2 pr-1">
         {messages.length === 0 && <div className="text-xs text-faint">{t("game.chat.empty")}</div>}
         {messages.map((message) => (
           <div key={message.id} className="text-sm">
