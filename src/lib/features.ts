@@ -7,7 +7,7 @@
 // this number too high/low.
 
 export type FeatureKey = keyof typeof FEATURE_DEFAULTS;
-export const FEATURE_META_KEYS = ["label", "description", "fieldHelp"] as const;
+export const FEATURE_META_KEYS = ["label", "description", "fieldHelp", "defaultEnabled"] as const;
 
 export const FEATURE_DEFAULTS = {
   exitEfficiency: {
@@ -205,6 +205,13 @@ export const FEATURE_DEFAULTS = {
     description:
       "Прячет пункт меню «Игра» и блокирует страницу для ОБЫЧНЫХ пользователей, но не для админа — админ продолжает видеть раздел и может его тестировать (полезно до публичного релиза). Если общий выключатель «Игра» (game) выключен — этот переключатель не имеет значения, раздел скрыт для всех в любом случае.",
     fieldHelp: {},
+    // По умолчанию ВЫКЛЮЧЕН: мир сначала обкатывается на создателе и ботах,
+    // и открывать его случайно — раньше, чем кто-то нажмёт тумблер в
+    // /admin/game — не должно быть возможно. Без этого свежая строка в
+    // FeatureConfig (или БД без неё вовсе) включала бы доступ ВСЕМ сразу,
+    // как и любая другая фича в реестре, — для этого конкретного тумблера
+    // такое поведение было бы утечкой доступа, а не удобством.
+    defaultEnabled: false,
   },
 } as const;
 
