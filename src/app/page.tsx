@@ -12,6 +12,9 @@ import LandingSignal from "@/components/landing/LandingSignal";
 import LandingNews from "@/components/landing/LandingNews";
 import LandingFeatures from "@/components/landing/LandingFeatures";
 import LandingPricing from "@/components/landing/LandingPricing";
+import LandingGame from "@/components/landing/LandingGame";
+import { getFeatureConfig } from "@/lib/featureConfig";
+import gameAssets from "@/data/assets.json";
 import { BarChart3 } from "lucide-react";
 
 // Год запуска проекта — левая граница в «© 2026–20XX» футера. Когда текущий год
@@ -36,6 +39,10 @@ export default async function Home() {
     .then((metas) => metas.map((m) => m.name))
     .catch(() => Object.values(SUPPORTED_EXCHANGES).map((m) => m.name));
 
+  // Раздел выключен админом — блок прячется целиком, как и в самом кабинете:
+  // рекламировать то, что за дверью 404, было бы враньём.
+  const gameEnabled = await getFeatureConfig("game").then((f) => f.enabled).catch(() => false);
+
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -56,6 +63,11 @@ export default async function Home() {
           <Link href="/calendar" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("landing.nav.calendar")}
           </Link>
+          {gameEnabled && (
+            <Link href="#game" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
+              {t("landing.nav.game")}
+            </Link>
+          )}
           <Link href="/pricing" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("pricing.nav")}
           </Link>
@@ -148,6 +160,8 @@ export default async function Home() {
           exchanges={exchangeNames}
           t={t}
         />
+
+        {gameEnabled && <LandingGame instrumentsCount={gameAssets.length} t={t} />}
 
         {/* Цена — последним блоком: человек только что прочитал, что сервис
             умеет, и первый вопрос у него именно про деньги. */}
