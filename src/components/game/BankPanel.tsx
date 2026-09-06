@@ -75,7 +75,9 @@ export default function BankPanel() {
   const [shareQty, setShareQty] = useState("");
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/game/bank?equity=${Math.round(equity)}&bankruptcies=${bankruptcies}`);
+    // equity сюда больше не отправляется: сервер сам знает её из последней
+    // синхронизации — это и есть тот параметр, который раньше подделывался.
+    const res = await fetch(`/api/game/bank?bankruptcies=${bankruptcies}`);
     if (res.ok) setData((await res.json()) as BankData);
     setLoading(false);
   }, [equity, bankruptcies]);
@@ -238,7 +240,6 @@ export default function BankPanel() {
                   // Владение залогом сервер проверяет по этому списку:
                   // имущество живёт в браузере, и заложить чужую яхту нельзя.
                   ownedItems: owned,
-                  equity: Math.round(equity),
                   bankruptcies,
                 },
                 (json) => {

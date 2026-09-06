@@ -16,6 +16,7 @@
 // Брать с убыточной значило бы наказывать человека дважды за то, что чужой
 // сигнал не сработал.
 import { prisma } from "@/lib/db";
+import { Prisma } from "@prisma/client";
 
 /** Границы комиссии ведущего. */
 export const MIN_SIGNAL_FEE_PCT = 5;
@@ -199,6 +200,66 @@ export async function leaders(playerId: string, limit = 20) {
  *    одной сделки больше собственного счёта нельзя, а «миллиард» с копеечной
  *    позиции именно так и выглядел.
  */
+/**
+ * Читает остаток потолка, считает и списывает — целиком под SERIALIZABLE.
+ *
+ * ГОНКА, НАЙДЕННАЯ ПРИ НАГРУЗОЧНОЙ ПРОВЕРКЕ. Раньше «сколько ещё можно
+ * заплатить» читалось отдельным запросом, а решение принималось в коде —
+ * между чтением и записью помещался ЛЮБОЙ параллельный вызов. Пять закрытий
+ * одной позиции подряд видели один и тот же остаток и списывали впятеро
+ * больше потолка.
+ *
+ * SERIALIZABLE не блокирует конкурентов — она проигрывает второй транзакции,
+ * которая пересеклась с первой, серию (Postgres P2034) и заставляет её
+ * начать заново; тогда она читает уже обновлённый остаток. Один повтор
+ * покрывает почти всё: гонка на пару параллельных запросов длится
+ * миллисекунды.
+ */
+async function settleWithCap(
+  signalId: string,
+  followerId: string,
+  authorId: string,
+  profit: number,
+  cap: number,
+  feePct: number,
+): Promise<number> {
+  const attempt = () =>
+    prisma.$transaction(
+      async (tx) => {
+        const settlement = await tx.gameSignalSettlement.findUnique({
+          where: { signalId_followerId: { signalId, followerId } },
+          select: { paidProfit: true },
+        });
+        const allowed = Math.min(profit, Math.max(0, cap - (settlement?.paidProfit ?? 0)));
+        if (!(allowed > 0)) return 0;
+        const fee = allowed * (feePct / 100);
+        await tx.gameSignalSettlement.upsert({
+          where: { signalId_followerId: { signalId, followerId } },
+          create: { signalId, followerId, paidProfit: allowed, paidFee: fee },
+          update: { paidProfit: { increment: allowed }, paidFee: { increment: fee } },
+        });
+        await tx.gamePlayer.update({ where: { id: authorId }, data: { pendingPayout: { increment: fee } } });
+        return fee;
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+  try {
+    return await attempt();
+  } catch (err) {
+    // P2034 — ровно та гонка, ради которой это всё затевалось: вторая
+    // попытка читает уже посвежевший остаток и в норме проходит.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2034") {
+      try {
+        return await attempt();
+      } catch {
+        return 0;
+      }
+    }
+    throw err;
+  }
+}
+
 export async function payLeaderFee(
   followerId: string,
   signalId: string,
@@ -222,22 +283,6 @@ export async function payLeaderFee(
   if (!subscription || !(subscription.feePct > 0)) return 0;
 
   const cap = Math.max(0, follower?.equity ?? 0);
-  const settlement = await prisma.gameSignalSettlement.findUnique({
-    where: { signalId_followerId: { signalId, followerId } },
-    select: { paidProfit: true },
-  });
-  const alreadyPaid = settlement?.paidProfit ?? 0;
-  const allowed = Math.min(profit, Math.max(0, cap - alreadyPaid));
-  if (!(allowed > 0)) return 0;
-
-  const fee = allowed * (subscription.feePct / 100);
-  await prisma.$transaction([
-    prisma.gameSignalSettlement.upsert({
-      where: { signalId_followerId: { signalId, followerId } },
-      create: { signalId, followerId, paidProfit: allowed, paidFee: fee },
-      update: { paidProfit: { increment: allowed }, paidFee: { increment: fee } },
-    }),
-    prisma.gamePlayer.update({ where: { id: signal.authorId }, data: { pendingPayout: { increment: fee } } }),
-  ]);
+  const fee = await settleWithCap(signalId, followerId, signal.authorId, profit, cap, subscription.feePct);
   return fee;
 }

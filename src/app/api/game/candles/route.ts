@@ -22,12 +22,17 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const assetId = url.searchParams.get("assetId") ?? "";
     const tf = url.searchParams.get("tf") ?? "1m";
-    const limit = Number(url.searchParams.get("limit") ?? 300);
+    const rawLimit = Number(url.searchParams.get("limit") ?? 300);
+    // Ноль и отрицательные раньше тихо превращались в один бар вместо
+    // ошибки: readCandles внутри берёт Math.min(rawLimit, MAX_BARS), а с
+    // нуля/минуса это давало не «пусто», а какой-то случайный хвост запроса.
+    const limit = Number.isFinite(rawLimit) && rawLimit >= 1 ? Math.floor(rawLimit) : NaN;
 
     if (!getAsset(assetId)) return badRequest("Неизвестный инструмент");
     if (!TIMEFRAMES[tf]) return badRequest("Неизвестный таймфрейм");
+    if (!Number.isFinite(limit)) return badRequest("Неверный limit");
 
-    const candles = await readCandles(assetId, tf, Number.isFinite(limit) ? limit : 300);
+    const candles = await readCandles(assetId, tf, limit);
     return NextResponse.json({ assetId, tf, candles, maxBars: MAX_BARS });
   } catch (err) {
     return serverError((err as Error).message);

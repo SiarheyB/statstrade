@@ -117,11 +117,18 @@ export function bookValuePerShare(bank: { capital: number; bondsIssued: number; 
 // ── Скоринг и кредиты ─────────────────────────────────────────────────────
 
 /** Кредитное досье игрока: то, на что смотрит банк перед выдачей. */
-export async function creditFile(playerId: string, equity: number, bankruptcies: number) {
+export async function creditFile(playerId: string, bankruptcies: number) {
   const player = await prisma.gamePlayer.findUnique({
     where: { id: playerId },
-    select: { reliability: true, contractsPassed: true, createdAt: true },
+    select: { reliability: true, contractsPassed: true, createdAt: true, equity: true },
   });
+  // Эквити — С СЕРВЕРА, не из запроса. Раньше это было аргументом функции,
+  // и клиент, вызывающий /api/game/bank напрямую, подставлял туда что хотел:
+  // равити 1e12 при реальных десяти тысячах поднимало безусловный лимит до
+  // сотен миллиардов — подтверждено при нагрузочной проверке (298 млрд долга
+  // при эквити 0). unsecuredLimit пропорционален equity, так что подмена
+  // источника закрывает дыру целиком, не трогая формулу.
+  const equity = Math.max(0, player?.equity ?? 0);
   const active = await prisma.gameBankLoan.findMany({
     where: { playerId, status: "active" },
     select: { principal: true },
@@ -169,13 +176,12 @@ export const MIN_LOAN = 500;
 
 export async function takeBankLoan(
   playerId: string,
-  equity: number,
   bankruptcies: number,
   request: LoanRequest,
 ): Promise<BankResult<{ id: string; amount: number; ratePct: number; dueAt: number }>> {
   if (!(request.amount >= MIN_LOAN)) return { ok: false, error: "too_small" };
   const bank = await getBank();
-  const file = await creditFile(playerId, equity, bankruptcies);
+  const file = await creditFile(playerId, bankruptcies);
 
   let limit = file.unsecuredLimit;
   let rate = file.unsecuredRate;
@@ -529,11 +535,11 @@ export async function buyRepossessed(playerId: string, id: string): Promise<Bank
 }
 
 /** Сводка по банку для витрины. */
-export async function bankSummary(playerId: string, equity: number, bankruptcies: number, now = Date.now()) {
+export async function bankSummary(playerId: string, bankruptcies: number, now = Date.now()) {
   await collectOverdue(now);
   const bank = await getBank();
   const [file, loans, bonds, shares, repossessed] = await Promise.all([
-    creditFile(playerId, equity, bankruptcies),
+    creditFile(playerId, bankruptcies),
     prisma.gameBankLoan.findMany({ where: { playerId, status: "active" }, orderBy: { dueAt: "asc" } }),
     prisma.gameBankBond.findMany({ where: { playerId, redeemedAt: null }, orderBy: { maturesAt: "asc" } }),
     prisma.gameBankShare.findUnique({ where: { playerId } }),

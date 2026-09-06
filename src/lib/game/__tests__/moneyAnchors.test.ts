@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { prisma } from "@/lib/db";
 import { offerLoan, cancelLoan } from "@/lib/game/loans";
-import { buyBond, tradeBankShares, getBank } from "@/lib/game/bank";
+import { buyBond, tradeBankShares, getBank, takeBankLoan } from "@/lib/game/bank";
 import { depositToFund, createFund } from "@/lib/game/funds";
 
 // Четыре печатных станка, найденных при живом аудите (не в отчёте — их
@@ -97,5 +97,18 @@ describe("деньги не создаются без связи с эквити
     expect(tooMuch.ok).toBe(false);
     if (!tooMuch.ok) expect(tooMuch.error).toBe("invalid_amount");
     await prisma.gameFund.deleteMany({ where: { id: fund.value.id } });
+  });
+
+  it("кредит от банка считает эквити с сервера, не из запроса — раньше equity:1e12 из тела давало кредит на сотни миллиардов при реальном счёте 0", async () => {
+    // Найдено независимо двумя агентами при нагрузочной проверке: GET и POST
+    // принимали equity/bankruptcies как параметры запроса и передавали их
+    // прямо в скоринг — подставить туда что угодно мог кто угодно.
+    const huge = await takeBankLoan(poorId, 0, { amount: 500_000, termDays: 30 });
+    expect(huge.ok).toBe(false);
+
+    // Богатый (эквити 10 000 000) получает пропорционально большой лимит —
+    // и именно от РЕАЛЬНОЙ, а не заявленной суммы.
+    const ok = await takeBankLoan(richId, 0, { amount: 1000, termDays: 30 });
+    expect(ok.ok).toBe(true);
   });
 });

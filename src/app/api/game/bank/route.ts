@@ -31,7 +31,10 @@ const MESSAGES: Record<string, string> = {
   not_matured: "Срок ещё не вышел — досрочно погасить нельзя",
 };
 
-const query = z.object({ equity: z.number().min(0).max(1e12), bankruptcies: z.number().min(0).max(1000) });
+// equity сюда больше не принимается: раньше клиент присылал что хотел
+// (1e12 давало лимит в сотни миллиардов при реальной эквити 0 — подтверждено
+// при нагрузочной проверке), теперь её всегда читает сам bank.ts из базы.
+const query = z.object({ bankruptcies: z.number().min(0).max(1000) });
 
 /** Витрина банка: скоринг, кредиты, облигации, акции, изъятое. */
 export async function GET(req: Request) {
@@ -44,12 +47,11 @@ export async function GET(req: Request) {
     if (!feature.enabled) return NextResponse.json({ error: "Функция отключена" }, { status: 404 });
     const url = new URL(req.url);
     const parsed = query.safeParse({
-      equity: Number(url.searchParams.get("equity") ?? 0),
       bankruptcies: Number(url.searchParams.get("bankruptcies") ?? 0),
     });
     if (!parsed.success) return badRequest("Проверьте данные");
     const player = await ensurePlayer(user.userId, user.email);
-    return NextResponse.json(await bankSummary(player.id, parsed.data.equity, parsed.data.bankruptcies));
+    return NextResponse.json(await bankSummary(player.id, parsed.data.bankruptcies));
   } catch (err) {
     return serverError((err as Error).message);
   }
@@ -70,7 +72,6 @@ const schema = z.discriminatedUnion("action", [
     termDays: z.number().finite().min(0).max(3650),
     collateralItem: z.string().max(60).nullable().optional(),
     ownedItems: z.array(z.string().max(60)).max(100).optional(),
-    equity: z.number().min(0).max(1e12),
     bankruptcies: z.number().min(0).max(1000),
   }),
   z.object({ action: z.literal("repay"), loanId: z.string().max(60) }),
@@ -104,7 +105,7 @@ export async function POST(req: Request) {
 
     const result =
       body.action === "loan"
-        ? await takeBankLoan(player.id, body.equity, body.bankruptcies, {
+        ? await takeBankLoan(player.id, body.bankruptcies, {
             amount: body.amount,
             termDays: body.termDays,
             collateralItem: body.collateralItem ?? null,
