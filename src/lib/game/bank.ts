@@ -28,6 +28,16 @@ import {
 /** Стартовый капитал банка — один триллион. */
 export const DEFAULT_BANK_CAPITAL = 1_000_000_000_000;
 /**
+ * Доля триллиона, отделяемая под собственную биржевую торговлю банка
+ * (центробанк), а не под выдачу кредитов.
+ *
+ * 8%: заметный игрок — крупнее любого игрока-человека на порядки, — но не
+ * настолько большой, чтобы одним движением ломать инструмент об колено на
+ * каждом вмешательстве. Кредитный пул при этом почти не худеет: 92% от
+ * триллиона по-прежнему на порядки больше всего, что реально просят в долг.
+ */
+export const CENTRAL_BANK_TRADING_SHARE = 0.08;
+/**
  * Сколько акций выпущено при основании.
  *
  * Десять миллиардов на триллион капитала дают балансовую цену в сто долларов
@@ -86,7 +96,11 @@ export async function getBank() {
   if (existing) return existing;
   try {
     return await prisma.gameBank.create({
-      data: { capital: DEFAULT_BANK_CAPITAL, totalShares: BANK_TOTAL_SHARES },
+      data: {
+        capital: DEFAULT_BANK_CAPITAL * (1 - CENTRAL_BANK_TRADING_SHARE),
+        tradingPool: DEFAULT_BANK_CAPITAL * CENTRAL_BANK_TRADING_SHARE,
+        totalShares: BANK_TOTAL_SHARES,
+      },
     });
   } catch {
     const bank = await prisma.gameBank.findFirst();
@@ -98,7 +112,9 @@ export async function getBank() {
 /** Сколько банк может выдать прямо сейчас. */
 export function lendingCapacity(bank: { capital: number; lentOut: number; bondsIssued: number }): number {
   // Привлечённое по облигациям тоже можно выдавать — на этом банки и живут, —
-  // но резерв неприкосновенен.
+  // но резерв неприкосновенен. tradingPool сюда не входит: это отдельные
+  // деньги, отложенные под биржевую торговлю, а не под кредиты — см.
+  // комментарий у GameBank.tradingPool в schema.prisma.
   const funds = bank.capital + bank.bondsIssued;
   return Math.max(0, funds * (1 - RESERVE_RATIO) - bank.lentOut);
 }
@@ -111,8 +127,11 @@ export function lendingCapacity(bank: { capital: number; lentOut: number; bondsI
  * их отношение (P/B) — обычный способ понять, дорого банк оценён или дёшево,
  * и здесь он работает так же.
  */
-export function bookValuePerShare(bank: { capital: number; bondsIssued: number; totalShares: number }): number {
-  const equity = Math.max(0, bank.capital - bank.bondsIssued);
+export function bookValuePerShare(bank: { capital: number; bondsIssued: number; totalShares: number; tradingPool?: number }): number {
+  // Акционер владеет ОБОИМИ пулами — кредитным и торговым, — поэтому цена
+  // акции считается от их суммы: прибыль или убыток центробанка на бирже
+  // так же реален для держателя акций, как проценты по кредитам.
+  const equity = Math.max(0, bank.capital - bank.bondsIssued + (bank.tradingPool ?? 0));
   return Math.max(0.01, equity / Math.max(1, bank.totalShares));
 }
 

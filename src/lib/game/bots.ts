@@ -21,10 +21,13 @@
 // сообщения вернее, чем молчание. Нет ключа — боты торгуют, но молчат.
 import { prisma } from "@/lib/db";
 import personasData from "@/data/botPersonas.json";
-import { readNews, readQuotes, ALL_ASSETS } from "@/lib/game/marketStore";
+import { readNews, readQuotes, readRegime, ALL_ASSETS } from "@/lib/game/marketStore";
+import { getBank } from "@/lib/game/bank";
 import { askModel, openRouterConfigured } from "@/lib/game/openrouter";
 import { readMessages } from "@/lib/game/social";
 import { symbolOf } from "@/lib/game/assetNames";
+import { CENTRAL_BANK_ASSET_ID, centralBankStance, type MarketMoverRole } from "@/lib/game/marketMovers";
+import type { MarketRegimeType } from "@/engine/entities/types";
 import {
   botEquity,
   decideByRules,
@@ -48,6 +51,14 @@ export interface BotPersona {
   skill: number;
   /** Как он разговаривает. Уходит в модель как описание характера. */
   voice: string;
+  /**
+   * Роль на рынке (см. lib/game/marketMovers.ts). Отсутствует у обычных
+   * ботов-наблюдателей — только у тех троих, что реально двигают цену.
+   */
+  role?: MarketMoverRole;
+  /** Стартовый капитал — на порядки больше обычного (см. role). Для
+   * central_bank не используется: его равити берётся из GameBank.tradingPool. */
+  startEquity?: number;
 }
 
 export const BOT_PERSONAS = personasData as BotPersona[];
@@ -86,20 +97,28 @@ export async function ensureBots(): Promise<number> {
   for (const persona of BOT_PERSONAS) {
     if (have.has(persona.id)) continue;
     try {
+      // Центробанк торгует капиталом самого банка (GameBank.tradingPool), а
+      // не своим стартовым числом — иначе у банка и у бота были бы ДВЕ разные
+      // цифры «сколько денег в торговле», и они бы расходились с первого же
+      // тика. Хедж-фонд и маркетмейкер получают startEquity из справочника —
+      // это их и делает крупными игроками, а не обычными ботами-наблюдателями.
+      const startEquity =
+        persona.role === "central_bank" ? await getBank().then((b) => b.tradingPool) : (persona.startEquity ?? BOT_START_EQUITY);
       await prisma.gamePlayer.create({
         data: {
           nickname: persona.nickname,
           isBot: true,
           persona: persona.id,
+          botRole: persona.role ?? null,
           activeStyle: persona.style,
-          equity: BOT_START_EQUITY,
-          peakEquity: BOT_START_EQUITY,
+          equity: startEquity,
+          peakEquity: startEquity,
           // Настройки характера копируются в строку бота: дальше их правит
           // админка, и справочник больше не должен перебивать правку.
           botSkill: persona.skill,
           botRisk: persona.risk,
           botAiPct: DEFAULT_AI_PCT,
-          botCash: BOT_START_EQUITY,
+          botCash: startEquity,
           lastBotActAt: new Date(),
           lastSyncAt: new Date(),
         },
@@ -325,11 +344,41 @@ async function applyDecision(
   return { cash: decision.side === "long" ? cash - notional : cash, done: true };
 }
 
+/**
+ * Решение центробанка: единственный инструмент, детерминировано от режима.
+ *
+ * Не decideByRules — центробанк не «торгует идею», он проводит политику.
+ * Ставка целиком меняется, только когда режим требует другого направления;
+ * закрытие и открытие разнесены по тактам (закрыл сейчас — откроет заново
+ * следующим тактом, если политика всё ещё та же): реальный центробанк тоже
+ * не разворачивается внутри одного заседания.
+ */
+function decideCentralBank(positions: BotPositionView[], quotes: Record<string, QuoteView>, regimeType: MarketRegimeType): BotDecision {
+  const stance = centralBankStance(regimeType);
+  const current = positions.find((p) => p.assetId === CENTRAL_BANK_ASSET_ID);
+  const price = quotes[CENTRAL_BANK_ASSET_ID]?.price;
+
+  if (current && (stance.side === "flat" || current.side !== stance.side)) {
+    return { action: "close", positionId: current.id, reason: "режим сменился — сворачиваю прежнюю меру" };
+  }
+  if (!current && stance.side !== "flat" && price) {
+    return {
+      action: "open",
+      assetId: CENTRAL_BANK_ASSET_ID,
+      side: stance.side,
+      sizePct: stance.sharePct,
+      reason: stance.side === "long" ? "поддержка рынка" : "охлаждение перегрева",
+    };
+  }
+  return { action: "hold", reason: current ? "мера уже принята" : "вмешательство не требуется" };
+}
+
 /** Один такт одного бота: пересчёт счёта, решение и его исполнение. */
 async function tickOneBot(
   bot: {
     id: string;
     persona: string | null;
+    botRole: string | null;
     activeStyle: string;
     equity: number;
     peakEquity: number;
@@ -341,7 +390,9 @@ async function tickOneBot(
   quotes: Record<string, QuoteView>,
   news: { headline: string; impact: string }[],
   now: number,
+  regimeType: MarketRegimeType,
 ): Promise<{ equity: number; plan: string | null; acted: boolean }> {
+  const isCentralBank = bot.botRole === "central_bank";
   const settings = settingsOf(bot);
   const persona = personaOf(bot.persona);
   const watched = watchList(bot.activeStyle);
@@ -352,14 +403,14 @@ async function tickOneBot(
   let cash = bot.botCash ?? bot.equity;
   const equity = botEquity(cash, positions, quotes);
 
-  // Через модель думает не каждое решение: запрос стоит денег, и «глубина
-  // ИИ» в процентах — это ровно про то, сколько владелец игры готов на бота
-  // потратить.
-  const useModel = openRouterConfigured() && Math.random() * 100 < settings.aiPct;
-  const decision =
-    (useModel
-      ? await decideByModel(persona, settings, positions, quotes, watched, equity, cash, news)
-      : null) ?? decideByRules(settings, positions, quotes, watched, Math.random(), now);
+  // Центробанк моделью не думает никогда — его решение не мнение, а
+  // механическая мера по правилу, и «характер» ему взять неоткуда.
+  const useModel = !isCentralBank && openRouterConfigured() && Math.random() * 100 < settings.aiPct;
+  const decision = isCentralBank
+    ? decideCentralBank(positions, quotes, regimeType)
+    : ((useModel
+        ? await decideByModel(persona, settings, positions, quotes, watched, equity, cash, news)
+        : null) ?? decideByRules(settings, positions, quotes, watched, Math.random(), now));
 
   const applied = await applyDecision(bot.id, decision, cash, equity, positions, quotes);
   cash = applied.cash;
@@ -376,11 +427,21 @@ async function tickOneBot(
       equity: finalEquity,
       botCash: cash,
       peakEquity: Math.max(bot.peakEquity, finalEquity),
-      botPlan: `${useModel ? "ИИ" : "правила"} · ${plan}`.slice(0, 300),
+      botPlan: `${isCentralBank ? "политика" : useModel ? "ИИ" : "правила"} · ${plan}`.slice(0, 300),
       lastBotActAt: new Date(now),
       lastSyncAt: new Date(now),
     },
   });
+
+  // Центробанк торгует деньгами банка, а не своими: результат его сделок —
+  // это и есть изменение торгового пула, от которого считается цена акции
+  // (см. bookValuePerShare). Без этой синхронизации равити бота и капитал
+  // банка разошлись бы с первого же тика.
+  if (isCentralBank) {
+    const bank = await getBank();
+    await prisma.gameBank.update({ where: { id: bank.id }, data: { tradingPool: finalEquity } });
+  }
+
   return { equity: finalEquity, plan, acted: applied.done };
 }
 
@@ -447,10 +508,18 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
 
   // Котировки берутся ОДНИМ запросом на всех: инструментов у ботов десяток
   // на всех, а походов в базу иначе было бы по одному на бота.
-  const assetIds = Array.from(new Set(bots.flatMap((bot) => watchList(bot.activeStyle))));
+  // Центробанк торгует ОДНИМ инструментом вне своего watchList (стиль ему
+  // нужен только для ярлыка в админке) — котировку на него добавляем явно.
+  const needsCentralBankQuote = bots.some((bot) => bot.botRole === "central_bank");
+  const assetIds = Array.from(
+    new Set([...bots.flatMap((bot) => watchList(bot.activeStyle)), ...(needsCentralBankQuote ? [CENTRAL_BANK_ASSET_ID] : [])]),
+  );
   const quotes = await readQuotes(assetIds, now);
   // Новости последних суток — то же, что видит игрок в ленте.
   const news = await readNews(now - 24 * 60 * 60 * 1000, 12);
+  // Режим — ОДИН на всех ботов такта, а не на каждого свой: он и так общий
+  // факт мира (та же цифра, что в шапке терминала у игрока).
+  const regime = needsCentralBankQuote ? await readRegime(now) : null;
 
   // Кто написал последним: подряд две свои реплики в живом чате — редкость,
   // и именно она выдаёт бота быстрее содержания.
@@ -476,7 +545,7 @@ export async function tickBots(now = Date.now()): Promise<{ moved: number; spoke
     });
     if (claimed.count === 0) continue; // такт уже забрал другой запрос
 
-    const result = await tickOneBot(bot, quotes, news, now);
+    const result = await tickOneBot(bot, quotes, news, now, (regime?.type ?? "sideways") as MarketRegimeType);
     moved++;
 
     // Говорит не больше ОДНОГО бота за такт: чат, в котором трое пишут

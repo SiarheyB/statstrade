@@ -11,6 +11,7 @@
 import { prisma } from "@/lib/db";
 import assetsData from "@/data/assets.json";
 import { isMarketOpen } from "@/lib/game/schedule";
+import { BIG_PLAYER_RECENT_WINDOW_MS, bigPlayerDriftBias } from "@/lib/game/marketMovers";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import type { Asset } from "@/engine/entities/types";
 import {
@@ -123,6 +124,27 @@ async function newsRateConfig(): Promise<{ perDay: number; spread: number }> {
  */
 const running = new Map<string, Promise<void>>();
 
+/**
+ * Чистая (net) позиция хедж-фонда и маркетмейкера по инструменту — единым
+ * запросом, входные данные для marketMovers.bigPlayerDriftBias.
+ *
+ * Номинал считается по цене ВХОДА позиции, не по текущей котировке: свеча,
+ * которую вот-вот посчитают, ещё не существует, и брать для оценки цену,
+ * зависящую от результата этого же вычисления, было бы циклично.
+ */
+async function computeBigPlayerDrift(assetId: string): Promise<number> {
+  const positions = await prisma.gameBotPosition.findMany({
+    where: { assetId, bot: { botRole: { in: ["hedge_fund", "market_maker"] } } },
+    select: { side: true, qty: true, entryPrice: true },
+  });
+  if (positions.length === 0) return 0;
+  const netNotional = positions.reduce(
+    (sum, p) => sum + (p.side === "long" ? 1 : -1) * p.qty * p.entryPrice,
+    0,
+  );
+  return bigPlayerDriftBias(netNotional);
+}
+
 export async function ensureHistory(assetId: string, now = Date.now()): Promise<void> {
   const inFlight = running.get(assetId);
   if (inFlight) return inFlight;
@@ -176,6 +198,11 @@ async function generateHistory(assetId: string, now: number): Promise<void> {
   // выходных) — они копятся и разряжаются гэпом на открытии.
   let closedMs = 0;
 
+  // Живая позиция крупных ботов — ОДНИМ запросом до цикла, не на каждый час:
+  // это состояние «сейчас», а не история, и досчитывать им прошлое незачем
+  // (см. BIG_PLAYER_RECENT_WINDOW_MS в marketMovers.ts).
+  const bigPlayerDrift = await computeBigPlayerDrift(assetId);
+
   for (let ts = cursor; ts <= lastHourStart; ts += MS_HOUR) {
     const hourIndex = Math.round((ts - worldStart) / MS_HOUR);
     const dayIndex = Math.max(0, Math.floor((ts - worldStart) / MS_DAY));
@@ -217,6 +244,7 @@ async function generateHistory(assetId: string, now: number): Promise<void> {
       index: hourIndex,
       news,
       vol,
+      bigPlayerDrift: ts >= now - BIG_PLAYER_RECENT_WINDOW_MS ? bigPlayerDrift : undefined,
     });
     const candle = step.candle;
     vol = step.vol;

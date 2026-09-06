@@ -33,6 +33,7 @@ export { freshVolState, type VolState };
 import { NEWS_TEMPLATES, IMPACT_WEIGHTS, sectorLabel } from "@/engine/market/newsEngine";
 import macroData from "@/data/macroEvents.json";
 import { REGIME_PRESETS, REGIME_TRANSITIONS, type RegimePreset } from "@/engine/market/marketRegime";
+import { CENTRAL_BANK_ASSET_ID, centralBankDriftBias } from "@/lib/game/marketMovers";
 import type { MarketRegimeType } from "@/engine/entities/types";
 
 export const MS_MINUTE = 60_000;
@@ -516,6 +517,14 @@ export interface StepContext {
    * «поджатия» и «выносы», которых раньше не было (см. lib/game/candleShape).
    */
   vol: VolState;
+  /**
+   * Дополнительный снос от текущей позиции крупных ботов (хедж-фонд,
+   * маркетмейкер) — множитель к asset.baseDrift, той же природы, что
+   * regime.preset.driftModifier. Считается СНАРУЖИ (marketStore.ts, живое
+   * состояние ботов), а не внутри этой чистой функции — см. marketMovers.ts.
+   * Undefined/0 — крупных ботов у инструмента сейчас нет, поведение как раньше.
+   */
+  bigPlayerDrift?: number;
 }
 
 export interface StepResult {
@@ -540,7 +549,12 @@ export function nextCandle(prev: number, ctx: StepContext): StepResult {
   const ownZ = normal(`${seed}|z|${asset.id}|${kind}|${index}`);
   const z = GROUP_CORRELATION * groupZ + Math.sqrt(1 - GROUP_CORRELATION ** 2) * ownZ;
 
-  const mu = asset.baseDrift * regime.preset.driftModifier;
+  // Центробанк детерминирован: его решение — чистая функция режима, той же
+  // самой, что уже определяет μ и σ для всех остальных, поэтому его можно
+  // добавить прямо здесь, не читая ничего из базы и не открывая заново дыру
+  // с предсказуемостью сида (см. marketMovers.ts).
+  const cbBias = asset.id === CENTRAL_BANK_ASSET_ID ? centralBankDriftBias(regime.type) : 0;
+  const mu = asset.baseDrift * (regime.preset.driftModifier + cbBias + (ctx.bigPlayerDrift ?? 0));
 
   // Волатильность бара складывается из трёх множителей: собственной
   // (кластеризованной) дисперсии инструмента, часа суток и режима рынка.
