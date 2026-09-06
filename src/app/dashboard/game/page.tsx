@@ -54,6 +54,9 @@ export default async function GamePage() {
   // Настройки баланса читаются на сервере и уезжают в клиентский движок
   // пропсом: игра целиком клиентская, но её баланс должен подчиняться
   // админке (/admin/game) без передеплоя и без правок в чужих сохранениях.
-  const { enabled: _enabled, ...raw } = game;
+  // aiScenarios — текст для бот-решений на СЕРВЕРЕ (lib/game/bots.ts), не
+  // числовая настройка баланса: клиентскому движку он не нужен и не проходит
+  // приведение к Record<string, number> ниже.
+  const { enabled: _enabled, aiScenarios: _aiScenarios, ...raw } = game;
   return <GameTerminal tuning={tuningFromConfig(raw as Record<string, number>)} playerName={profile?.name ?? null} />;
 }

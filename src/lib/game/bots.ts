@@ -254,6 +254,21 @@ function toView(rows: { id: string; assetId: string; side: string; qty: number; 
  * строгим JSON — свободный текст здесь не нужен, объяснение уходит в поле
  * reason и потом показывается в админке.
  */
+/**
+ * Мандат бота — редактируемый в админке текст (featureConfig "game" →
+ * aiScenarios), с подстановкой {{nickname}}/{{style}}/{{context}}.
+ *
+ * Формат ответа (JSON) НЕ входит в этот текст и не редактируется: сломанный
+ * формат значит, что parseDecision не разберёт ни одного ответа ни у одного
+ * бота — цена правки в админке слишком велика для свободного текста здесь.
+ */
+export async function botMandate(role: string | null, vars: Record<string, string>): Promise<string> {
+  const { getFeatureConfig } = await import("@/lib/featureConfig");
+  const scenarios = (await getFeatureConfig("game")).aiScenarios as Record<string, string>;
+  const template = scenarios[role ?? "regular"] ?? scenarios.regular ?? "Ты — трейдер в биржевой игре.";
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? "");
+}
+
 async function decideByModel(
   persona: BotPersona | undefined,
   settings: BotSettings,
@@ -263,22 +278,27 @@ async function decideByModel(
   equity: number,
   cash: number,
   news: { headline: string; impact: string }[],
+  botRole: string | null = null,
 ): Promise<BotDecision | null> {
   const brief = marketBrief(watched, quotes, symbolOf, positions, news);
   const symbols = watched.map(symbolOf).join(", ");
+  const mandate = await botMandate(botRole, {
+    nickname: persona?.nickname ?? "трейдер",
+    style: settings.style,
+    context: `Стиль — «${settings.style}»: ${STYLE_BRIEF[settings.style] ?? "торгуешь по ситуации"}.`,
+  });
   const answer = await askModel(
     [
       {
         role: "system",
         content: [
-          `Ты — трейдер в биржевой игре${persona ? ` по имени ${persona.nickname}` : ""}.`,
-          `Твой стиль — «${settings.style}»: ${STYLE_BRIEF[settings.style] ?? "торгуешь по ситуации"}.`,
+          mandate,
           "Прими ОДНО решение и ответь только JSON, без пояснений вокруг:",
           '{"action":"open|close|hold","symbol":"ТИКЕР","side":"long|short","sizePct":число,"reason":"кратко почему"}',
           `Открывать можно только эти инструменты: ${symbols}.`,
           `Больше ${MAX_POSITIONS} позиций одновременно не держи. sizePct — доля счёта в процентах, от 5 до 60.`,
           "reason — одна фраза на русском, своими словами: что ты увидел на рынке.",
-        ].join(" "),
+        ].filter(Boolean).join(" "),
       },
       {
         role: "user",
@@ -353,7 +373,7 @@ async function applyDecision(
  * следующим тактом, если политика всё ещё та же): реальный центробанк тоже
  * не разворачивается внутри одного заседания.
  */
-function decideCentralBank(positions: BotPositionView[], quotes: Record<string, QuoteView>, regimeType: MarketRegimeType): BotDecision {
+export function decideCentralBank(positions: BotPositionView[], quotes: Record<string, QuoteView>, regimeType: MarketRegimeType): BotDecision {
   const stance = centralBankStance(regimeType);
   const current = positions.find((p) => p.assetId === CENTRAL_BANK_ASSET_ID);
   const price = quotes[CENTRAL_BANK_ASSET_ID]?.price;
@@ -371,6 +391,47 @@ function decideCentralBank(positions: BotPositionView[], quotes: Record<string, 
     };
   }
   return { action: "hold", reason: current ? "мера уже принята" : "вмешательство не требуется" };
+}
+
+/**
+ * Решение центробанка через модель — первая попытка, до decideCentralBank.
+ *
+ * Мандат объясняет ЗАДАЧУ (сглаживать крайности), а не отдаёт готовое
+ * действие: модель видит режим, текущую позицию и котировку флагманского
+ * индекса и решает сама. Формат ответа и разбор — те же, что у обычного
+ * бота (parseDecision), поэтому вся защита от вранья модели (проверка
+ * инструмента, обрезка sizePct до 5–60%) действует и здесь без дублирования.
+ */
+async function decideCentralBankByModel(
+  positions: BotPositionView[],
+  quotes: Record<string, QuoteView>,
+  regimeType: MarketRegimeType,
+): Promise<BotDecision | null> {
+  const symbol = symbolOf(CENTRAL_BANK_ASSET_ID);
+  const quote = quotes[CENTRAL_BANK_ASSET_ID];
+  const current = positions.find((p) => p.assetId === CENTRAL_BANK_ASSET_ID);
+  const mandate = await botMandate("central_bank", {
+    context: `Текущий режим рынка: ${regimeType}. ${quote ? `${symbol}: ${quote.price} (${quote.dayChangePct >= 0 ? "+" : ""}${quote.dayChangePct.toFixed(2)}% за день).` : ""} ${current ? `Твоя текущая позиция: ${current.side === "long" ? "лонг" : "шорт"} по ${symbol}.` : "Позиции сейчас нет."}`,
+  });
+  const answer = await askModel(
+    [
+      {
+        role: "system",
+        content: [
+          mandate,
+          "Прими ОДНО решение и ответь только JSON, без пояснений вокруг:",
+          '{"action":"open|close|hold","symbol":"ТИКЕР","side":"long|short","sizePct":число,"reason":"кратко почему"}',
+          `Вмешиваться можно только в ${symbol} — другого инструмента у тебя нет.`,
+          "sizePct — доля торгового пула в процентах, от 5 до 60: чем серьёзнее мера, тем больше.",
+          "reason — одна фраза на русском: чем вызвана мера или почему вмешательство не требуется.",
+        ].join(" "),
+      },
+      { role: "user", content: "Прими решение по описанной ситуации." },
+    ],
+    { maxTokens: 100 },
+  );
+  if (!answer) return null;
+  return parseDecision(answer, positions, { [symbol]: CENTRAL_BANK_ASSET_ID });
 }
 
 /** Один такт одного бота: пересчёт счёта, решение и его исполнение. */
@@ -403,13 +464,31 @@ async function tickOneBot(
   let cash = bot.botCash ?? bot.equity;
   const equity = botEquity(cash, positions, quotes);
 
-  // Центробанк моделью не думает никогда — его решение не мнение, а
-  // механическая мера по правилу, и «характер» ему взять неоткуда.
-  const useModel = !isCentralBank && openRouterConfigured() && Math.random() * 100 < settings.aiPct;
+  // Все три крупных игрока (центробанк, хедж-фонд, маркетмейкер) сначала
+  // пробуют думать моделью и только при её отказе — недоступен ключ,
+  // кончился дневной бюджет (aiBudget.ts), пустой/битый ответ — действуют по
+  // своему сценарию: центробанк по regime-политике, хедж-фонд и
+  // маркетмейкер по decideByRules. «Всегда проверять доступен ли ИИ» — это
+  // и есть openRouterConfigured() перед каждой попыткой, а askModel сама
+  // никогда не бросает исключение (см. lib/game/openrouter.ts) — отказ
+  // всегда приходит как null, а не как ошибка, которую можно забыть поймать.
+  //
+  // У ОБЫЧНЫХ ботов вероятность обращения к модели по-прежнему держит
+  // aiPct (админка, «глубина ИИ») — это осознанный порог по деньгам для
+  // массовки из десятка ботов, тикающих каждые пять минут. Крупные игроки
+  // немногочисленны (трое на весь мир), и их разговор с моделью — то, ради
+  // чего их вообще завели: играть с ними «по правилам, а не по мнению»
+  // означало бы вернуться к тому же decideByRules, что и у любого бота.
+  const isMarketMover = isCentralBank || bot.botRole === "hedge_fund" || bot.botRole === "market_maker";
+  const useModel = isCentralBank
+    ? false // у центробанка свой путь через decideCentralBankByModel ниже
+    : openRouterConfigured() && (isMarketMover || Math.random() * 100 < settings.aiPct);
+
   const decision = isCentralBank
-    ? decideCentralBank(positions, quotes, regimeType)
+    ? (openRouterConfigured() ? await decideCentralBankByModel(positions, quotes, regimeType) : null) ??
+      decideCentralBank(positions, quotes, regimeType)
     : ((useModel
-        ? await decideByModel(persona, settings, positions, quotes, watched, equity, cash, news)
+        ? await decideByModel(persona, settings, positions, quotes, watched, equity, cash, news, bot.botRole)
         : null) ?? decideByRules(settings, positions, quotes, watched, Math.random(), now));
 
   const applied = await applyDecision(bot.id, decision, cash, equity, positions, quotes);

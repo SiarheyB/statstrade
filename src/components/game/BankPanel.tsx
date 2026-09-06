@@ -13,7 +13,7 @@
 // банке) и витрина изъятого у неплательщиков.
 import { useCallback, useEffect, useState } from "react";
 import { useMarketClock } from "@/lib/game/useMarketClock";
-import { Landmark, ShieldAlert } from "lucide-react";
+import { Landmark, PiggyBank, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
@@ -81,6 +81,7 @@ export default function BankPanel() {
   const [bondAmount, setBondAmount] = useState("");
   const [bondTerm, setBondTerm] = useState(30);
   const [shareQty, setShareQty] = useState("");
+  const [section, setSection] = useState<"credit" | "bonds" | "shares" | "auction">("credit");
 
   const load = useCallback(async () => {
     // equity сюда больше не отправляется: сервер сам знает её из последней
@@ -168,6 +169,35 @@ export default function BankPanel() {
         </div>
       </div>
 
+      {/* Кредит, облигации, акции и аукцион — были одной длинной страницей:
+          чтобы дойти до акций, приходилось промотать мимо скоринга и формы
+          кредита. Тот же приём, что в карьере и магазине — вкладки вместо
+          вертикальной свалки. */}
+      <div className="flex flex-wrap items-center gap-1 w-fit rounded-lg bg-surface-2 p-1">
+        {(
+          [
+            ["credit", Wallet],
+            ["bonds", PiggyBank],
+            ["shares", TrendingUp],
+            ["auction", ShieldAlert],
+          ] as const
+        ).map(([id, Icon]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setSection(id)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md transition ${
+              section === id ? "bg-accent text-white" : "text-muted hover:text-fg"
+            }`}
+          >
+            <Icon size={14} />
+            {t(`game.bank.section.${id}`)}
+          </button>
+        ))}
+      </div>
+
+      {section === "credit" && (
+        <>
       {/* Скоринг */}
       <div className="card p-4 space-y-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -304,6 +334,11 @@ export default function BankPanel() {
         )}
       </div>
 
+        </>
+      )}
+
+      {section === "bonds" && (
+        <>
       {/* Облигации */}
       <div className="card p-4 space-y-3">
         <div className="text-sm font-medium">{t("game.bank.deposits")}</div>
@@ -368,6 +403,11 @@ export default function BankPanel() {
         ))}
       </div>
 
+        </>
+      )}
+
+      {section === "shares" && (
+        <>
       {/* Акции банка */}
       <div className="card p-4 space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -418,8 +458,10 @@ export default function BankPanel() {
         </div>
       </div>
 
-      {/* Изъятое — аукцион, а не фиксированная цена: редкую вещь получает тот,
-          кто предложил больше, а не тот, кто первым нажал кнопку. */}
+        </>
+      )}
+
+      {section === "auction" && (
       <div className="card p-4 space-y-2">
         <div className="inline-flex items-center gap-2 text-sm font-medium">
           <ShieldAlert size={15} className="text-loss" />
@@ -434,6 +476,7 @@ export default function BankPanel() {
           ))
         )}
       </div>
+      )}
     </div>
   );
 }

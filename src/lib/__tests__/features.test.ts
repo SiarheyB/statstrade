@@ -57,8 +57,13 @@ describe('features - FEATURE_DEFAULTS', () => {
       expect(def).toHaveProperty('description');
       expect(def).toHaveProperty('fieldHelp');
       // at least one numeric config field besides meta — except pure on/off toggles
+      // 'aiScenarios' — единственное текстовое исключение среди всех фич:
+      // сценарии для ИИ-решений ботов (lib/game/bots.ts, botMandate), не
+      // числовая настройка баланса. Правится отдельным блоком в /admin/game
+      // (AiScenarios.tsx), а не универсальной числовой формой.
+      const NON_NUMERIC_EXCEPTIONS = new Set(['aiScenarios']);
       const numericKeys = Object.keys(def).filter(
-        (k) => !FEATURE_META_KEYS.includes(k as (typeof FEATURE_META_KEYS)[number])
+        (k) => !FEATURE_META_KEYS.includes(k as (typeof FEATURE_META_KEYS)[number]) && !NON_NUMERIC_EXCEPTIONS.has(k)
       );
       if (PURE_TOGGLE_KEYS.has(key)) {
         expect(numericKeys.length).toBe(0);

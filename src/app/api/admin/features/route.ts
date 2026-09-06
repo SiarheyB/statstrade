@@ -26,7 +26,15 @@ const schema = z
   .object({
     key: z.string().min(1).max(60),
     enabled: z.boolean().optional(),
-    config: z.record(z.string(), z.number()).optional(),
+    // Числа — обычные настройки баланса. Вложенный объект строк — сценарии
+    // ИИ для ботов (aiScenarios): единственное текстовое поле среди
+    // конфигов фич, отсюда и расширение схемы сверх «просто чисел».
+    config: z
+      .record(
+        z.string(),
+        z.union([z.number(), z.record(z.string(), z.string().max(2000))]),
+      )
+      .optional(),
   })
   .refine((v) => v.enabled !== undefined || v.config !== undefined, {
     message: "Нужно указать enabled или config",

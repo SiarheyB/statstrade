@@ -16,6 +16,7 @@ import GameOverview from "./GameOverview";
 import GameChatModeration from "./GameChatModeration";
 import GamePlayers from "./GamePlayers";
 import GameBots from "./GameBots";
+import AiScenarios from "./AiScenarios";
 import type { GameStats } from "./types";
 
 const TABS = [
@@ -78,7 +79,12 @@ export default function AdminGameTabs() {
       {tab === "overview" && stats && <GameOverview stats={stats} />}
       {tab === "players" && stats && <GamePlayers stats={stats} />}
       {tab === "chat" && stats && <GameChatModeration stats={stats} loadedAt={loadedAt} />}
-      {tab === "bots" && <GameBots />}
+      {tab === "bots" && (
+        <div className="space-y-6">
+          <GameBots />
+          <AiScenarios />
+        </div>
+      )}
       {tab === "access" && <AdminGameConfig section="access" />}
       {tab === "balance" && <AdminGameConfig section="balance" />}
     </div>
