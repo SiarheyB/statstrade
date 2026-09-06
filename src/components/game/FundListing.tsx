@@ -54,7 +54,9 @@ export default function FundListingPanel() {
   const load = useCallback(async () => {
     const data = await fetchListings();
     if (!data) return;
-    setListings(data.listings);
+    // Ряд листингов общий с банками игроков — на доску фондов идут только
+    // акции фондов, иначе тут висели бы чужие бумаги.
+    setListings(data.listings.filter((row) => row.kind === "fund_share"));
     setRequirements(data.requirements);
     setMyFundId(data.myFundId);
   }, []);

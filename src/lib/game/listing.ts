@@ -158,11 +158,17 @@ export async function listFund(
   return { ok: true, value: { assetId: slot, ticker: clean } };
 }
 
-/** Все листинги: клиент переименовывает по ним слоты в своём справочнике. */
+/**
+ * Все листинги: клиент переименовывает по ним слоты в своём справочнике.
+ *
+ * Ряд общий для фондов и банков игроков — терминалу всё равно, кто эмитент,
+ * ему нужны тикер, имя и ориентир стоимости. Отличает их поле kind.
+ */
 export async function allListings() {
   const rows = await prisma.gameListing.findMany({
     orderBy: { listedAt: "asc" },
     select: {
+      kind: true,
       assetId: true,
       ticker: true,
       name: true,
@@ -170,23 +176,31 @@ export async function allListings() {
       sharesSold: true,
       listedAt: true,
       fund: { select: { id: true, capital: true, owner: { select: { nickname: true } } } },
+      bank: {
+        select: { id: true, capital: true, bondsIssued: true, owner: { select: { nickname: true } } },
+      },
     },
   });
-  return rows.map((row) => ({
-    assetId: row.assetId,
-    ticker: row.ticker,
-    name: row.name,
-    totalShares: row.totalShares,
-    sharesSold: row.sharesSold,
-    listedAt: row.listedAt.getTime(),
-    fundId: row.fund.id,
-    capital: row.fund.capital,
-    owner: row.fund.owner.nickname,
-    // Балансовая стоимость акции: капитал фонда на выпущенную акцию. Тот же
-    // ориентир, что у банка, и читается так же — дорого фонд оценён на бирже
-    // или дёшево.
-    bookValuePerShare: row.totalShares > 0 ? row.fund.capital / row.totalShares : 0,
-  }));
+  return rows.map((row) => {
+    // Балансовая стоимость бумаги: капитал эмитента на выпущенную бумагу.
+    // У банка из капитала вычитается долг по облигациям — иначе заём
+    // выглядел бы прибавкой к собственным средствам.
+    const capital = row.bank ? row.bank.capital - row.bank.bondsIssued : (row.fund?.capital ?? 0);
+    return {
+      kind: row.kind,
+      assetId: row.assetId,
+      ticker: row.ticker,
+      name: row.name,
+      totalShares: row.totalShares,
+      sharesSold: row.sharesSold,
+      listedAt: row.listedAt.getTime(),
+      fundId: row.fund?.id ?? null,
+      bankId: row.bank?.id ?? null,
+      capital,
+      owner: row.bank?.owner.nickname ?? row.fund?.owner.nickname ?? "—",
+      bookValuePerShare: row.totalShares > 0 ? capital / row.totalShares : 0,
+    };
+  });
 }
 
 /**

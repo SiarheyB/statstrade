@@ -431,14 +431,17 @@ export const signals = {
     post<{ fee: number }>("/api/game/signals", { action: "fee", signalId, profit }),
 };
 
+/** Бумага на бирже: акция фонда либо акция/облигация банка игрока. */
 export interface FundListing {
+  kind: string;
   assetId: string;
   ticker: string;
   name: string;
   totalShares: number;
   sharesSold: number;
   listedAt: number;
-  fundId: string;
+  fundId: string | null;
+  bankId: string | null;
   capital: number;
   owner: string;
   bookValuePerShare: number;

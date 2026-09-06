@@ -13,7 +13,7 @@
 // банке) и витрина изъятого у неплательщиков.
 import { useCallback, useEffect, useState } from "react";
 import { useMarketClock } from "@/lib/game/useMarketClock";
-import { Landmark, PiggyBank, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
+import { Building2, Landmark, PiggyBank, ShieldAlert, TrendingUp, Wallet } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
@@ -21,6 +21,7 @@ import { SHOP_ITEMS, getShopItem } from "@/engine/economy/shop";
 import { canPledge, collateralLoan } from "@/lib/game/credit";
 import { HintLabel } from "./Hint";
 import BankArt from "./BankArt";
+import MyBankPanel from "./MyBankPanel";
 import { symbolOf } from "@/lib/game/assetNames";
 
 interface BankData {
@@ -81,7 +82,7 @@ export default function BankPanel() {
   const [bondAmount, setBondAmount] = useState("");
   const [bondTerm, setBondTerm] = useState(30);
   const [shareQty, setShareQty] = useState("");
-  const [section, setSection] = useState<"credit" | "bonds" | "shares" | "auction">("credit");
+  const [section, setSection] = useState<"credit" | "bonds" | "shares" | "auction" | "mine">("credit");
 
   const load = useCallback(async () => {
     // equity сюда больше не отправляется: сервер сам знает её из последней
@@ -180,6 +181,7 @@ export default function BankPanel() {
             ["bonds", PiggyBank],
             ["shares", TrendingUp],
             ["auction", ShieldAlert],
+            ["mine", Building2],
           ] as const
         ).map(([id, Icon]) => (
           <button
@@ -477,6 +479,10 @@ export default function BankPanel() {
         )}
       </div>
       )}
+
+      {/* Свой банк — отдельным компонентом: он про эмиссию, а не про
+          обслуживание в центробанке, и делит с ним только место в меню. */}
+      {section === "mine" && <MyBankPanel />}
     </div>
   );
 }

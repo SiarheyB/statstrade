@@ -1361,6 +1361,7 @@ model GamePlayer {
   ledSubscriptions  GameSubscription[] @relation("SignalLeader")
   subscriptions     GameSubscription[] @relation("SignalFollower")
   signalSettlements GameSignalSettlement[] @relation("SignalSettlement")
+  ownedBank         GameUserBank?
   createdAt       DateTime @default(now())
   lastSyncAt      DateTime @default(now())
 
@@ -1429,16 +1430,45 @@ model GameFund {
 // Отсюда зарезервированные СЛОТЫ: восемь инструментов заранее лежат в
 // справочнике, а при листинге слот закрепляется за фондом и получает его имя
 // и тикер. Генератор про фонды не знает вовсе.
+// Листинг на бирже — общий механизм для фонда (одна запись: акция) и банка
+// пользователя (две записи на банк: акция и облигация — kind различает их).
+// Ровно ОДНО из fundId/bankId заполнено — это не enforced в схеме (Prisma не
+// умеет XOR), а проверяется в коде создания (listing.ts / userBank.ts).
 model GameListing {
-  id          String   @id @default(cuid())
-  fundId      String   @unique
-  fund        GameFund @relation(fields: [fundId], references: [id], onDelete: Cascade)
-  assetId     String   @unique
-  ticker      String   @unique
+  id          String        @id @default(cuid())
+  kind        String        @default("fund_share") // "fund_share" | "bank_share" | "bank_bond"
+  fundId      String?       @unique
+  fund        GameFund?     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  bankId      String?
+  bank        GameUserBank? @relation(fields: [bankId], references: [id], onDelete: Cascade)
+  assetId     String        @unique
+  ticker      String        @unique
   name        String
   totalShares Float
-  sharesSold  Float    @default(0)
-  listedAt    DateTime @default(now())
+  sharesSold  Float         @default(0)
+  listedAt    DateTime      @default(now())
+
+  @@index([bankId])
+}
+
+// Банк, основанный игроком — не клон центробанка (не выдаёт кредиты другим
+// игрокам, это отдельная и намного большая механика на будущее), а эмитент:
+// выпускает акции и облигации, торгуемые на бирже как любой другой
+// инструмент. Учреждение — редкое и стоит реальных денег (см.
+// BANK_CHARTER_DEPOSIT в lib/game/userBank.ts) — иначе банком становился бы
+// любой, кто скопил кругленькую сумму.
+model GameUserBank {
+  id          String    @id @default(cuid())
+  ownerId     String    @unique
+  owner       GamePlayer @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  motto       String?
+  // Капитал банка: выручка от размещения акций и облигаций (IPO), из неё
+  // считается балансовая стоимость акции — та же формула, что у GameBank.
+  capital     Float     @default(0)
+  bondsIssued Float     @default(0)
+  createdAt   DateTime  @default(now())
+  listings    GameListing[]
 }
 
 model GameFundEntry {
