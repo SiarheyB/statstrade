@@ -136,6 +136,8 @@ export interface SyncResult {
   reliability: number;
   nickname: string;
   seizedItems?: string[];
+  /** Выиграно на аукционе изъятого — добавить себе в собственность. */
+  wonItems?: string[];
 }
 
 export function syncSnapshot(snapshot: SyncSnapshot) {

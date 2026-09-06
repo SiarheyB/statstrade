@@ -9,7 +9,7 @@ import { BANK_SHARE_ASSET } from "@/lib/game/bank";
 import {
   bankSummary,
   buyBond,
-  buyRepossessed,
+  placeBid,
   redeemBond,
   repayBankLoan,
   takeBankLoan,
@@ -29,6 +29,8 @@ const MESSAGES: Record<string, string> = {
   not_owner: "Это не ваше",
   sold_out: "Уже продано",
   not_matured: "Срок ещё не вышел — досрочно погасить нельзя",
+  auction_over: "Торги по этому лоту уже закрыты",
+  bid_too_low: "Кто-то уже предложил больше — поднимите ставку",
 };
 
 // equity сюда больше не принимается: раньше клиент присылал что хотел
@@ -80,7 +82,7 @@ const schema = z.discriminatedUnion("action", [
   // Цена акции берётся с БИРЖИ: банк размещает по рыночной, иначе на разнице
   // между балансом и биржей получалась бы бесплатная бесконечная прибыль.
   z.object({ action: z.literal("shares"), quantity: z.number().min(-1e9).max(1e9) }),
-  z.object({ action: z.literal("buyRepossessed"), id: z.string().max(60) }),
+  z.object({ action: z.literal("bid"), id: z.string().max(60), amount: z.number().finite().min(0).max(MAX_MONEY) }),
 ]);
 
 /** Текущая биржевая цена акции банка. */
@@ -119,7 +121,7 @@ export async function POST(req: Request) {
               ? await redeemBond(player.id, body.bondId)
               : body.action === "shares"
                 ? await tradeBankShares(player.id, body.quantity, await bankSharePrice())
-                : await buyRepossessed(player.id, body.id);
+                : await placeBid(player.id, body.id, body.amount);
 
     if (!result.ok) return badRequest(MESSAGES[result.error] ?? "Не получилось");
     return NextResponse.json({ ok: true, ...result.value });

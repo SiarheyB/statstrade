@@ -33,13 +33,14 @@ let lastPurgeAt = 0;
 
 /** Один оборот: завести недостающих ботов и дать всем походить. */
 export async function botLoopTick(now = Date.now()): Promise<void> {
-  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }, { purgeExpiredChats }, { purgeOldMarketData }] =
+  const [{ getFeatureConfig }, { ensureBots, tickBots }, { recordCronRun }, { purgeExpiredChats }, { purgeOldMarketData }, { settleAuctions }] =
     await Promise.all([
       import("@/lib/featureConfig"),
       import("@/lib/game/bots"),
       import("@/lib/cronHeartbeat"),
       import("@/lib/game/social"),
       import("@/lib/game/marketStore"),
+      import("@/lib/game/bank"),
     ]);
 
   // Раздел выключен админом — мир стоит целиком, и боты вместе с ним. Иначе
@@ -48,6 +49,10 @@ export async function botLoopTick(now = Date.now()): Promise<void> {
   if (!game.enabled) return;
 
   await ensureBots();
+  // Аукцион изъятого закрывается лениво при каждом чтении витрины — но если
+  // банк неделю никто не открывает, лоты с истёкшим сроком просто повиснут.
+  // Такт ботов — единственное место, которое идёт и без единого игрока.
+  await settleAuctions(now);
   // Заодно стираем каналы, у которых вышел срок. Это единственное место,
   // которое работает и без игроков: чат, доживший до очистки в ночь, когда
   // никто не заходил, должен очиститься сам.

@@ -25,8 +25,8 @@ describe("деньги не создаются без связи с эквити
   let richId: string;
 
   beforeAll(async () => {
-    const poor = await makePlayer(`Бедный-${Date.now()}`, 1_000);
-    const rich = await makePlayer(`Богатый-${Date.now()}`, 10_000_000);
+    const poor = await makePlayer(`Бедный-${Date.now()}-${Math.random()}`, 1_000);
+    const rich = await makePlayer(`Богатый-${Date.now()}-${Math.random()}`, 10_000_000);
     poorId = poor.id;
     richId = rich.id;
   });

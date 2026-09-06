@@ -53,7 +53,7 @@ export async function POST(req: Request) {
     // Имя из профиля проекта: при первом создании игрового профиля ник
     // берётся из него, а не из почты.
     const profile = await prisma.user.findUnique({ where: { id: user.userId }, select: { name: true } });
-    const { player, claimed, seizedItems } = await syncPlayer(
+    const { player, claimed, seizedItems, wonItems } = await syncPlayer(
       user.userId,
       user.email,
       { ...parsed.data, fundName: parsed.data.fundName ?? null },
@@ -67,9 +67,11 @@ export async function POST(req: Request) {
       ok: true,
       claimed,
       defaulted,
-      // Вещи, изъятые банком за просрочку: клиент уберёт их у себя. Отдаются
-      // ровно один раз — сервер их тут же забывает.
+      // Вещи, изъятые банком за просрочку, и выигранные на аукционе изъятого:
+      // клиент уберёт/добавит их у себя. Отдаются ровно один раз — сервер их
+      // тут же забывает.
       seizedItems,
+      wonItems,
       reliability: player.reliability,
       nickname: player.nickname,
     });

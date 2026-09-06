@@ -74,7 +74,9 @@ export type BankError =
   | "already_repaid"
   | "not_owner"
   | "sold_out"
-  | "not_matured";
+  | "not_matured"
+  | "auction_over"
+  | "bid_too_low";
 
 export type BankResult<T> = { ok: true; value: T } | { ok: false; error: BankError };
 
@@ -333,7 +335,12 @@ export async function collectOverdue(now = Date.now()): Promise<number> {
       ...(item
         ? [
             prisma.gameRepossessed.create({
-              data: { itemId: item.id, fromId: loan.playerId, price: recovery },
+              data: {
+                itemId: item.id,
+                fromId: loan.playerId,
+                price: recovery,
+                auctionEndsAt: new Date(now + AUCTION_DURATION_MS),
+              },
             }),
           ]
         : []),
@@ -491,9 +498,22 @@ export async function tradeBankShares(
   return { ok: true, value: { shares: owned - sell, price, total } };
 }
 
-// ── Витрина изъятого ──────────────────────────────────────────────────────
+// ── Аукцион изъятого ─────────────────────────────────────────────────────
+//
+// Фиксированная цена продавала первому нажавшему — редкую дорогую вещь
+// тогда забирал не тот, кто ценит её больше, а тот, кто быстрее заметил
+// объявление. Аукцион даёт время: ставки идут AUCTION_DURATION_MS, выигрывает
+// наибольшая, остальные не платят ничего — деньги вообще не резервируются
+// (баланс живёт в браузере), спишутся у победителя при синхронизации так же,
+// как любая другая покупка.
 
-export async function repossessedList() {
+/** Сколько идут торги по одному лоту. */
+export const AUCTION_DURATION_MS = 24 * 60 * 60 * 1000;
+/** Минимальный шаг сверх текущей ставки — иначе торг превращается в спам по копейке. */
+export const MIN_BID_STEP_PCT = 5;
+
+export async function repossessedList(now = Date.now()) {
+  await settleAuctions(now);
   const rows = await prisma.gameRepossessed.findMany({
     where: { soldAt: null },
     orderBy: { createdAt: "desc" },
@@ -505,33 +525,104 @@ export async function repossessedList() {
       id: row.id,
       itemId: row.itemId,
       price: row.price,
-      // Полная цена в магазине — чтобы видна была выгода.
+      // Полная цена в магазине — чтобы видна была выгода даже на старте торга.
       shopPrice: item?.price ?? row.price,
       createdAt: row.createdAt.getTime(),
+      auctionEndsAt: row.auctionEndsAt.getTime(),
+      highestBid: row.highestBid,
+      // Минимальная следующая ставка — чтобы клиент не считал шаг сам.
+      minNextBid: nextMinBid(row.price, row.highestBid),
     };
   });
 }
 
-/** Купить изъятую вещь. Деньги списывает клиент, сервер отдаёт предмет. */
-export async function buyRepossessed(playerId: string, id: string): Promise<BankResult<{ itemId: string; price: number }>> {
+/** Минимальная следующая ставка: резерв, если ставок ещё не было, иначе шаг сверх текущей. */
+function nextMinBid(reserve: number, highestBid: number | null): number {
+  if (highestBid == null) return reserve;
+  return Math.ceil(highestBid * (1 + MIN_BID_STEP_PCT / 100));
+}
+
+/**
+ * Сделать ставку.
+ *
+ * Ставка ограничена ЭКВИТИ игрока — тем же якорем, что предложение займа,
+ * покупка облигации и акций банка (playerEquity, lib/game/world.ts). Без
+ * этого выигрышная ставка была бы вкладом в капитал банка из воздуха: она
+ * увеличивает lendingCapacity банка так же, как вклад в фонд увеличивал его
+ * капитал, — то есть общее достояние, а не просто предмет одного игрока.
+ */
+export async function placeBid(playerId: string, id: string, amount: number): Promise<BankResult<{ minNextBid: number }>> {
   const row = await prisma.gameRepossessed.findUnique({ where: { id } });
   if (!row) return { ok: false, error: "not_found" };
-  if (row.soldAt) return { ok: false, error: "sold_out" };
-  const bank = await getBank();
+  if (row.soldAt || row.auctionEndsAt.getTime() <= Date.now()) return { ok: false, error: "auction_over" };
 
-  // Заявка на покупку: вещь одна, покупателей может быть двое. Условие
-  // «ещё не продана» стоит в самом апдейте — второй покупатель получит отказ,
-  // а не ту же яхту и второй раз пополненный капитал банка.
-  const bought = await prisma.gameRepossessed.updateMany({
-    where: { id, soldAt: null },
-    data: { soldToId: playerId, soldAt: new Date() },
+  const minBid = nextMinBid(row.price, row.highestBid);
+  if (amount < minBid) return { ok: false, error: "bid_too_low" };
+  if (amount > (await playerEquity(playerId))) return { ok: false, error: "too_small" };
+
+  // Заявка на ставку: условие «моя ставка всё ещё лучшая» стоит в самом
+  // апдейте — без него две параллельные ставки выше текущей могли пройти
+  // проверку обе, и лидером остался бы тот, чей запрос записался последним,
+  // а не тот, кто предложил больше.
+  const won = await prisma.gameRepossessed.updateMany({
+    where: {
+      id,
+      soldAt: null,
+      OR: [{ highestBid: null }, { highestBid: { lt: amount } }],
+    },
+    data: { highestBid: amount, highestBidderId: playerId },
   });
-  if (bought.count === 0) return { ok: false, error: "sold_out" };
-  // Выручка от продажи залога возвращается в капитал: именно ради неё банк
-  // и берёт обеспечение.
-  await prisma.gameBank.update({ where: { id: bank.id }, data: { capital: { increment: row.price } } });
+  if (won.count === 0) return { ok: false, error: "bid_too_low" };
+  return { ok: true, value: { minNextBid: nextMinBid(row.price, amount) } };
+}
 
-  return { ok: true, value: { itemId: row.itemId, price: row.price } };
+/**
+ * Закрыть просроченные торги: победителю — вещь, банку — деньги.
+ *
+ * Лениво, как и всё в этом мире: вызывается на каждое чтение витрины, а не
+ * отдельным тактом. Лот без единой ставки не пропадает — уходит на новый
+ * круг с тем же резервом: банку нужны деньги, а не пустая витрина.
+ */
+export async function settleAuctions(now = Date.now()): Promise<number> {
+  const due = await prisma.gameRepossessed.findMany({
+    where: { soldAt: null, auctionEndsAt: { lte: new Date(now) } },
+  });
+  if (due.length === 0) return 0;
+
+  let settled = 0;
+  for (const row of due) {
+    if (!row.highestBidderId || row.highestBid == null) {
+      // Никто не поставил — не выбрасываем лот, даём ему ещё круг.
+      await prisma.gameRepossessed.updateMany({
+        where: { id: row.id, soldAt: null, auctionEndsAt: row.auctionEndsAt },
+        data: { auctionEndsAt: new Date(now + AUCTION_DURATION_MS) },
+      });
+      continue;
+    }
+
+    // Заявка на закрытие: два параллельных вызова (лот читают отовсюду —
+    // витрина, синк, бот) не должны закрыть один аукцион дважды.
+    const claimed = await prisma.gameRepossessed.updateMany({
+      where: { id: row.id, soldAt: null },
+      data: { soldToId: row.highestBidderId, soldAt: new Date(now) },
+    });
+    if (claimed.count === 0) continue;
+
+    const bank = await getBank();
+    const winner = await prisma.gamePlayer.findUnique({ where: { id: row.highestBidderId }, select: { wonItems: true } });
+    const already: string[] = winner?.wonItems ? (JSON.parse(winner.wonItems) as string[]) : [];
+    await prisma.$transaction([
+      // Выручка от продажи залога возвращается в капитал: именно ради неё
+      // банк и берёт обеспечение.
+      prisma.gameBank.update({ where: { id: bank.id }, data: { capital: { increment: row.highestBid } } }),
+      prisma.gamePlayer.update({
+        where: { id: row.highestBidderId },
+        data: { wonItems: JSON.stringify([...already, row.itemId]) },
+      }),
+    ]);
+    settled++;
+  }
+  return settled;
 }
 
 /** Сводка по банку для витрины. */

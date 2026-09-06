@@ -12,6 +12,7 @@
 // сейчас нет: кредит, облигация (одолжить банку под купон), акция (доля в
 // банке) и витрина изъятого у неплательщиков.
 import { useCallback, useEffect, useState } from "react";
+import { useMarketClock } from "@/lib/game/useMarketClock";
 import { Landmark, ShieldAlert } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
@@ -46,7 +47,15 @@ interface BankData {
   loans: { id: string; principal: number; ratePct: number; dueAt: number; due: number; collateralItem: string | null }[];
   bonds: { id: string; amount: number; couponPct: number; maturesAt: number; payout: number; matured: boolean }[];
   shares: { owned: number; avgPrice: number };
-  repossessed: { id: string; itemId: string; price: number; shopPrice: number }[];
+  repossessed: {
+    id: string;
+    itemId: string;
+    price: number;
+    shopPrice: number;
+    auctionEndsAt: number;
+    highestBid: number | null;
+    minNextBid: number;
+  }[];
   depositTerms: number[];
   depositRatePct: number;
   tickers: { share: string; bond: string };
@@ -60,7 +69,6 @@ export default function BankPanel() {
   const owned = useGameStore((s) => s.game.lifestyle.ownedItemIds);
   const prices = useGameStore((s) => s.game.prices);
   const applyWorldCash = useGameStore((s) => s.applyWorldCash);
-  const receiveItem = useGameStore((s) => s.receiveItem);
   const moveToWalletFromWorld = useGameStore((s) => s.creditWallet);
 
   const [data, setData] = useState<BankData | null>(null);
@@ -410,7 +418,8 @@ export default function BankPanel() {
         </div>
       </div>
 
-      {/* Изъятое */}
+      {/* Изъятое — аукцион, а не фиксированная цена: редкую вещь получает тот,
+          кто предложил больше, а не тот, кто первым нажал кнопку. */}
       <div className="card p-4 space-y-2">
         <div className="inline-flex items-center gap-2 text-sm font-medium">
           <ShieldAlert size={15} className="text-loss" />
@@ -421,28 +430,77 @@ export default function BankPanel() {
           <div className="text-xs text-faint">{t("game.bank.noRepossessed")}</div>
         ) : (
           data.repossessed.map((row) => (
-            <div key={row.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-1.5 text-xs">
-              <span className="font-medium">{t(`game.shop.item.${row.itemId}.name`)}</span>
-              <span className="text-faint line-through">{fmtUsd(row.shopPrice)}</span>
-              <span className="ml-auto tabular-nums text-profit">{fmtUsd(row.price)}</span>
-              <button
-                type="button"
-                disabled={busy || wallet < row.price}
-                onClick={() =>
-                  void act({ action: "buyRepossessed", id: row.id }, (json) => {
-                    moveToWalletFromWorld(-Number(json.price));
-                    receiveItem(String(json.itemId));
-                  })
-                }
-                className="input-base px-2 py-1 hover:border-border-strong disabled:opacity-40"
-                title={wallet < row.price ? t("game.bank.needCash") : undefined}
-              >
-                {t("game.bank.buy")}
-              </button>
-            </div>
+            <AuctionRow key={row.id} row={row} wallet={wallet} act={act} />
           ))
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Один лот аукциона.
+ *
+ * Своё состояние ставки: сумма по умолчанию — минимально допустимая, чтобы
+ * не заставлять игрока считать шаг самому. Обратный отсчёт тикает от общих
+ * часов игры (useMarketClock) — секундная точность здесь не нужна, торг идёт
+ * сутки.
+ */
+function AuctionRow({
+  row,
+  wallet,
+  act,
+}: {
+  row: BankData["repossessed"][number];
+  wallet: number;
+  act: (body: Record<string, unknown>, onOk: (data: Record<string, number | string>) => void) => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const now = useMarketClock(15_000);
+  const [bid, setBid] = useState<string>(String(row.minNextBid));
+  const [busy, setBusy] = useState(false);
+
+  const msLeft = row.auctionEndsAt - (now || Date.now());
+  const over = msLeft <= 0;
+  const hoursLeft = Math.max(0, Math.ceil(msLeft / (60 * 60 * 1000)));
+  const bidNum = Number(bid);
+  const canBid = !over && !busy && bidNum >= row.minNextBid && bidNum <= wallet;
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-1.5 text-xs">
+      <span className="font-medium">{t(`game.shop.item.${row.itemId}.name`)}</span>
+      <span className="text-faint line-through">{fmtUsd(row.shopPrice)}</span>
+      <span className="ml-auto tabular-nums text-faint">
+        {row.highestBid != null ? t("game.bank.currentBid", { amount: fmtUsd(row.highestBid) }) : t("game.bank.noBids", { amount: fmtUsd(row.price) })}
+      </span>
+      <span className={`tabular-nums ${over ? "text-loss" : "text-muted"}`}>
+        {over ? t("game.bank.auctionOver") : t("game.bank.auctionHoursLeft", { hours: hoursLeft })}
+      </span>
+      <input
+        type="number"
+        value={bid}
+        onChange={(e) => setBid(e.target.value)}
+        min={row.minNextBid}
+        disabled={over || busy}
+        className="input-base w-24 px-2 py-1 text-xs tabular-nums disabled:opacity-40"
+        title={t("game.bank.minBidHint", { amount: fmtUsd(row.minNextBid) })}
+      />
+      <button
+        type="button"
+        disabled={!canBid}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await act({ action: "bid", id: row.id, amount: bidNum }, () => {});
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className="input-base px-2 py-1 hover:border-border-strong disabled:opacity-40"
+        title={bidNum > wallet ? t("game.bank.needCash") : undefined}
+      >
+        {t("game.bank.placeBid")}
+      </button>
     </div>
   );
 }

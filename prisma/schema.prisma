@@ -1350,6 +1350,10 @@ model GamePlayer {
   // Вещи, изъятые банком за просрочку. Клиент забирает список на
   // синхронизации и убирает предметы у себя: сервер имущество не хранит.
   seizedItems       String?
+  // Вещи, выигранные на аукционе изъятого. Та же схема доставки, что у
+  // seizedItems: сервер держит только факт до ближайшей синхронизации,
+  // клиент забирает список и один раз добавляет предметы себе.
+  wonItems          String?
   ledSubscriptions  GameSubscription[] @relation("SignalLeader")
   subscriptions     GameSubscription[] @relation("SignalFollower")
   signalSettlements GameSignalSettlement[] @relation("SignalSettlement")
@@ -1751,15 +1755,24 @@ model GameBankLoan {
 }
 
 model GameRepossessed {
-  id        String   @id @default(cuid())
-  itemId    String
-  fromId    String?
-  price     Float
-  soldToId  String?
-  soldAt    DateTime?
-  createdAt DateTime @default(now())
+  id              String    @id @default(cuid())
+  itemId          String
+  fromId          String?
+  // Стартовая цена — она же резерв: аукцион не закрывается ниже неё, даже
+  // если ставок не было вовсе (тогда лот просто уходит на новый круг).
+  price           Float
+  // Аукцион, а не фиксированная цена: витрина изъятого раньше продавала
+  // первому нажавшему кнопку — редкую дорогую вещь тогда забирал не тот,
+  // кто ценит её больше, а тот, кто быстрее заметил. Торг решает это честно.
+  auctionEndsAt   DateTime
+  highestBid      Float?
+  highestBidderId String?
+  soldToId        String?
+  soldAt          DateTime?
+  createdAt       DateTime  @default(now())
 
   @@index([soldAt])
+  @@index([auctionEndsAt])
 }
 
 model GameBankBond {
