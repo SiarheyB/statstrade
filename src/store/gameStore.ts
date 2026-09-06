@@ -40,7 +40,7 @@ import {
 import { availablePoints, freshPerkState, perkEffects, unlockPerk, type PerkError } from "@/engine/player/perks";
 import { freshDailyState } from "@/engine/player/dailyTasks";
 import { catchUp, type OfflineReport } from "@/engine/offline";
-import { botSlots, defaultBot, type AlgoBot } from "@/engine/player/algoBots";
+import { botSlots, defaultBot, BOT_LICENSE_PRICE, BOT_PACKAGES, type AlgoBot } from "@/engine/player/algoBots";
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, FUND_LICENSE_ITEM_ID, getShopItem, releaseItem, settleUpkeepDebt, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
@@ -450,6 +450,7 @@ interface GameStoreState {
   clearContractResult: () => void;
   clearDailyCompleted: () => void;
   addBot: (assetId: string) => void;
+  buyBotPackage: (packageId: string, assetId: string) => void;
   /** Поставить купленную на рынке стратегию в свободный слот бота. */
   addBotFromStrategy: (config: { strategy: string; assetId: string; riskPct: number; stopPct: number; takePct: number }) => void;
   addDrawing: (assetId: string, drawing: GameDrawing) => void;
@@ -1257,13 +1258,47 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
     void get().persistNow();
   },
 
+  // Слот из перка даёт ПРАВО завести бота, а не самого бота: без покупки
+  // лицензии автомат в игре был бы бесплатным довеском к прокачке — а
+  // «нанять алгоритм» должно стоить ровно так же, как найм трейдера в жизни.
   addBot: (assetId) => {
     const { game } = get();
-    // Больше слотов, чем куплено перками, завести нельзя — иначе перк ветки
-    // «Автоматика» ничего бы не значил.
     if (game.bots.length >= botSlots(game.perks.unlocked)) return;
+    if (game.account.balance < BOT_LICENSE_PRICE) return;
     const bot: AlgoBot = { id: crypto.randomUUID(), ...defaultBot(assetId) };
-    set((s) => ({ game: { ...s.game, bots: [...s.game.bots, bot] } }));
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: { ...s.game.account, balance: s.game.account.balance - BOT_LICENSE_PRICE },
+        bots: [...s.game.bots, bot],
+      },
+    }));
+    void get().persistNow();
+  },
+
+  /** То же самое, но с готовыми параметрами пакета вместо ручной настройки. */
+  buyBotPackage: (packageId, assetId) => {
+    const { game } = get();
+    const pkg = BOT_PACKAGES.find((p) => p.id === packageId);
+    if (!pkg) return;
+    if (game.bots.length >= botSlots(game.perks.unlocked)) return;
+    if (game.account.balance < BOT_LICENSE_PRICE) return;
+    const bot: AlgoBot = {
+      id: crypto.randomUUID(),
+      assetId,
+      strategy: pkg.strategy,
+      riskPct: pkg.riskPct,
+      stopPct: pkg.stopPct,
+      takePct: pkg.takePct,
+      enabled: true,
+    };
+    set((s) => ({
+      game: {
+        ...s.game,
+        account: { ...s.game.account, balance: s.game.account.balance - BOT_LICENSE_PRICE },
+        bots: [...s.game.bots, bot],
+      },
+    }));
     void get().persistNow();
   },
 

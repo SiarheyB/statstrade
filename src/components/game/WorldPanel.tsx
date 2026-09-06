@@ -70,6 +70,7 @@ export default function WorldPanel({
 
   const [world, setWorld] = useState<WorldState | null>(null);
   const [section, setSection] = useState<Section>("ranking");
+  const [rankingTab, setRankingTab] = useState<"players" | "funds">("players");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -232,44 +233,96 @@ export default function WorldPanel({
 
       {section === "ranking" && (
         <div className="card p-4">
-          <div className="text-sm font-medium mb-1">{t("game.world.rankingTitle")}</div>
-          <div className="text-xs text-faint mb-3">{t("game.world.rankingHint")}</div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm min-w-[620px]">
-              <thead>
-                <tr className="text-[11px] uppercase tracking-wide text-muted">
-                  <th className="text-left font-medium py-2">#</th>
-                  <th className="text-left font-medium">{t("game.world.player")}</th>
-                  <th className="text-left font-medium">{t("game.shop.rank")}</th>
-                  <th className="text-right font-medium">{t("game.world.contracts")}</th>
-                  <th className="text-right font-medium">{t("game.shop.prestige")}</th>
-                  <th className="text-right font-medium">{t("game.world.best")}</th>
-                  <th className="text-right font-medium">{t("game.stat.equity")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {world.leaderboard.map((player, i) => (
-                  <tr
-                    key={player.id}
-                    className={`border-t border-border ${player.id === me.id ? "bg-accent/5" : ""}`}
-                  >
-                    <td className="py-2 tabular-nums text-faint">{i + 1}</td>
-                    <td className="py-2">
-                      <span className="font-medium">{player.nickname}</span>
-                      {player.fund && <span className="text-xs text-faint"> · {player.fund.name}</span>}
-                    </td>
-                    <td className="py-2 text-xs text-accent">{t(`game.shop.rank.${player.rankKey}`)}</td>
-                    <td className="py-2 text-right tabular-nums">{player.contractsPassed}</td>
-                    <td className="py-2 text-right tabular-nums">{player.prestige}</td>
-                    <td className="py-2 text-right tabular-nums text-profit">
-                      {player.bestContractPct > 0 ? `+${player.bestContractPct.toFixed(1)}%` : "—"}
-                    </td>
-                    <td className="py-2 text-right tabular-nums text-faint">{fmtUsd(player.equity)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          {/* Игроки и фонды — РАЗНЫЕ рейтинги: капитал фонда складывается из
+              вкладов многих людей и не сравним со счётом одного трейдера,
+              а в одном списке фонд всегда выглядел бы то ли лучше, то ли
+              нечестно — общий заголовок вместо честного «по каким правилам». */}
+          <div className="flex items-center gap-1 w-fit rounded-lg bg-surface-2 p-1 mb-3">
+            {(["players", "funds"] as const).map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setRankingTab(tab)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition ${
+                  rankingTab === tab ? "bg-accent text-white" : "text-muted hover:text-fg"
+                }`}
+              >
+                {t(`game.world.rankingTab.${tab}`)}
+              </button>
+            ))}
           </div>
+
+          {rankingTab === "players" ? (
+            <>
+              <div className="text-xs text-faint mb-3">{t("game.world.rankingHint")}</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[620px]">
+                  <thead>
+                    <tr className="text-[11px] uppercase tracking-wide text-muted">
+                      <th className="text-left font-medium py-2">#</th>
+                      <th className="text-left font-medium">{t("game.world.player")}</th>
+                      <th className="text-left font-medium">{t("game.shop.rank")}</th>
+                      <th className="text-right font-medium">{t("game.world.contracts")}</th>
+                      <th className="text-right font-medium">{t("game.shop.prestige")}</th>
+                      <th className="text-right font-medium">{t("game.world.best")}</th>
+                      <th className="text-right font-medium">{t("game.stat.equity")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {world.leaderboard.map((player, i) => (
+                      <tr
+                        key={player.id}
+                        className={`border-t border-border ${player.id === me.id ? "bg-accent/5" : ""}`}
+                      >
+                        <td className="py-2 tabular-nums text-faint">{i + 1}</td>
+                        <td className="py-2">
+                          <span className="font-medium">{player.nickname}</span>
+                          {player.fund && <span className="text-xs text-faint"> · {player.fund.name}</span>}
+                        </td>
+                        <td className="py-2 text-xs text-accent">{t(`game.shop.rank.${player.rankKey}`)}</td>
+                        <td className="py-2 text-right tabular-nums">{player.contractsPassed}</td>
+                        <td className="py-2 text-right tabular-nums">{player.prestige}</td>
+                        <td className="py-2 text-right tabular-nums text-profit">
+                          {player.bestContractPct > 0 ? `+${player.bestContractPct.toFixed(1)}%` : "—"}
+                        </td>
+                        <td className="py-2 text-right tabular-nums text-faint">{fmtUsd(player.equity)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-xs text-faint mb-3">{t("game.world.fundRankingHint")}</div>
+              <div className="space-y-2">
+                {world.funds.map((fund, i) => (
+                  <div key={fund.id} className="flex flex-wrap items-center gap-3 text-sm border-t border-border pt-2 first:border-t-0 first:pt-0">
+                    <span className="text-faint tabular-nums w-5">{i + 1}</span>
+                    <span className="font-medium">{fund.name}</span>
+                    <span className="text-xs text-faint">
+                      {t("game.world.membersCount", { count: fund.memberCount })} · {fund.owner.nickname}
+                    </span>
+                    <span className="ml-auto text-xs text-muted tabular-nums">
+                      {t("game.world.fundCapital")}: {fmtUsd(fund.capital)}
+                    </span>
+                    <span className="tabular-nums w-28 text-right">{fmtUsd(fund.power)}</span>
+                    {!me.fundId && fund.id !== me.fundId && (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => run(() => joinFund(fund.id), "game.world.joined")}
+                        className="px-3 py-1 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25"
+                      >
+                        {t("game.world.join")}
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {world.funds.length === 0 && <div className="text-xs text-faint">{t("game.world.noFunds")}</div>}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -543,35 +596,6 @@ export default function WorldPanel({
             </div>
           )}
 
-          <div className="card p-4">
-            <div className="text-sm font-medium mb-2">{t("game.world.fundBoard")}</div>
-            <div className="space-y-2">
-              {world.funds.map((fund, i) => (
-                <div key={fund.id} className="flex flex-wrap items-center gap-3 text-sm border-t border-border pt-2">
-                  <span className="text-faint tabular-nums w-5">{i + 1}</span>
-                  <span className="font-medium">{fund.name}</span>
-                  <span className="text-xs text-faint">
-                    {t("game.world.membersCount", { count: fund.memberCount })} · {fund.owner.nickname}
-                  </span>
-                  <span className="ml-auto text-xs text-muted tabular-nums">
-                    {t("game.world.fundCapital")}: {fmtUsd(fund.capital)}
-                  </span>
-                  <span className="tabular-nums w-28 text-right">{fmtUsd(fund.power)}</span>
-                  {!me.fundId && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => run(() => joinFund(fund.id), "game.world.joined")}
-                      className="px-3 py-1 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25"
-                    >
-                      {t("game.world.join")}
-                    </button>
-                  )}
-                </div>
-              ))}
-              {world.funds.length === 0 && <div className="text-xs text-faint">{t("game.world.noFunds")}</div>}
-            </div>
-          </div>
         </div>
       )}
 

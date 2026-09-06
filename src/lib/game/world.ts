@@ -254,7 +254,10 @@ export async function syncPlayer(userId: string, email: string, snapshot: Player
  */
 export async function leaderboard(limit = LEADERBOARD_SIZE) {
   return prisma.gamePlayer.findMany({
-    where: { isPublic: true },
+    // Центробанк, хедж-фонд и маркетмейкер сюда не попадают: их эквити на
+    // порядки больше любого игрока, а рейтинг — про пройденные испытания
+    // трейдера, а не про то, у кого триллион в торговом пуле.
+    where: { isPublic: true, botRole: null },
     orderBy: [{ contractsPassed: "desc" }, { prestige: "desc" }, { bestContractPct: "desc" }],
     take: limit,
     select: {

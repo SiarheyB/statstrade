@@ -162,21 +162,52 @@ export async function leaders(playerId: string, limit = 20) {
     prisma.gameSubscription.findMany({ where: { followerId: playerId }, select: { leaderId: true, auto: true } }),
   ]);
   const subscribed = new Map(mine.map((row) => [row.leaderId, row.auto]));
+
+  // Доля идей, которые заработали ХОТЬ КОМУ-ТО деньги при копировании.
+  // Считаем по GameSignalSettlement (см. copytrading.ts payLeaderFee): запись
+  // появляется только когда скопированная сделка закрыта в плюс и комиссия
+  // реально начислена — то есть это не мнение автора о себе, а факт с рынка.
+  // Не «средняя прибыль» и не «сколько заработал я» — насколько ЧАСТО его
+  // сигналы вообще срабатывали хоть у кого-то.
+  const ids = rows.map((r) => r.id).filter((id) => id !== playerId);
+  const signalsWithOutcome =
+    ids.length === 0
+      ? []
+      : await prisma.gameSignal.findMany({
+          where: { authorId: { in: ids } },
+          select: {
+            authorId: true,
+            settlements: { where: { paidProfit: { gt: 0 } }, select: { id: true }, take: 1 },
+          },
+        });
+  const successByAuthor = new Map<string, { total: number; won: number }>();
+  for (const signal of signalsWithOutcome) {
+    const stat = successByAuthor.get(signal.authorId) ?? { total: 0, won: 0 };
+    stat.total++;
+    if (signal.settlements.length > 0) stat.won++;
+    successByAuthor.set(signal.authorId, stat);
+  }
+
   return rows
     .filter((row) => row.id !== playerId)
-    .map((row) => ({
-      id: row.id,
-      nickname: row.nickname,
-      rankKey: row.rankKey,
-      contractsPassed: row.contractsPassed,
-      prestige: row.prestige,
-      activeStyle: row.activeStyle,
-      feePct: row.signalFeePct,
-      followers: row._count.ledSubscriptions,
-      signals: row._count.signals,
-      subscribed: subscribed.has(row.id),
-      auto: subscribed.get(row.id) ?? false,
-    }));
+    .map((row) => {
+      const stat = successByAuthor.get(row.id);
+      return {
+        id: row.id,
+        nickname: row.nickname,
+        rankKey: row.rankKey,
+        contractsPassed: row.contractsPassed,
+        prestige: row.prestige,
+        activeStyle: row.activeStyle,
+        feePct: row.signalFeePct,
+        followers: row._count.ledSubscriptions,
+        signals: row._count.signals,
+        // null — сигналов ещё не было, и завышать/занижать нечего.
+        successRatePct: stat && stat.total > 0 ? Math.round((stat.won / stat.total) * 100) : null,
+        subscribed: subscribed.has(row.id),
+        auto: subscribed.get(row.id) ?? false,
+      };
+    });
 }
 
 /**

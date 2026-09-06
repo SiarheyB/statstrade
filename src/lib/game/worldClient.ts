@@ -382,6 +382,8 @@ export interface SignalLeader {
   feePct: number;
   followers: number;
   signals: number;
+  /** Доля опубликованных сигналов, заработавших хоть кому-то деньги — null, если сигналов ещё не было. */
+  successRatePct: number | null;
   subscribed: boolean;
   auto: boolean;
 }

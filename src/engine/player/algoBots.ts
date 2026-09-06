@@ -36,6 +36,38 @@ export function defaultBot(assetId: string): Omit<AlgoBot, "id"> {
   return { assetId, strategy: "trend", riskPct: 1, stopPct: 2, takePct: 4, enabled: true };
 }
 
+/**
+ * Готовые пакеты — то, что покупает игрок, а не собирает вручную числами.
+ *
+ * Один и тот же слот можно занять либо покупкой пакета, либо вручную (тогда
+ * это defaultBot + правка полей) — но ОБА пути стоят BOT_LICENSE_PRICE: бот
+ * не должен быть бесплатным довеском к перку. Перк открывает СЛОТ, а не сам
+ * автомат в нём — иначе «купи» ничего не значило бы.
+ */
+export const BOT_LICENSE_PRICE = 5_000;
+
+export interface BotPackage {
+  id: string;
+  strategy: BotStrategy;
+  riskPct: number;
+  stopPct: number;
+  takePct: number;
+}
+
+export const BOT_PACKAGES: BotPackage[] = [
+  // Осторожный: маленький риск, тесный стоп и тейк рядом — берёт частыми
+  // некрупными сделками, а не редкими крупными.
+  { id: "conservative", strategy: "meanReversion", riskPct: 0.5, stopPct: 1.5, takePct: 2.5 },
+  // Сбалансированный: классика — по тренду, риск и цели среднего размера.
+  { id: "balanced", strategy: "trend", riskPct: 1, stopPct: 2, takePct: 4 },
+  // Агрессивный: выше риск на сделку, шире цели — реже прав, но выигрыш
+  // крупнее проигрыша.
+  { id: "aggressive", strategy: "breakout", riskPct: 2, stopPct: 4, takePct: 10 },
+  // Скальпер: тот же тренд, но стоп и тейк в разы теснее — чаще заходит,
+  // держит позицию недолго.
+  { id: "scalper", strategy: "trend", riskPct: 0.5, stopPct: 0.8, takePct: 1.2 },
+];
+
 function sma(candles: Candle[], window: number): number | null {
   if (candles.length < window) return null;
   const slice = candles.slice(-window);

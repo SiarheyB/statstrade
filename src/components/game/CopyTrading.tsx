@@ -150,9 +150,20 @@ export default function CopyTrading() {
         ) : (
           leaders.map((leader) => (
             <div key={leader.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm">
+              {/* Ранг — слева от имени: это первое, по чему выбирают, за кем
+                  идти, а не хвост после ника. */}
+              <span className="text-[11px] text-accent">{t(`game.shop.rank.${leader.rankKey}`)}</span>
               <span className="font-medium">{leader.nickname}</span>
               <span className="text-xs text-faint">
                 {t("game.world.contracts")}: {leader.contractsPassed} · {t("game.copy.followers", { count: leader.followers })}
+                {leader.successRatePct != null && (
+                  <>
+                    {" · "}
+                    <span className={leader.successRatePct >= 50 ? "text-profit" : "text-loss"}>
+                      {t("game.copy.successRate", { pct: leader.successRatePct })}
+                    </span>
+                  </>
+                )}
               </span>
               <span className="text-xs text-muted">{t("game.copy.feeIs", { pct: leader.feePct })}</span>
               <span className="ml-auto flex items-center gap-1.5">

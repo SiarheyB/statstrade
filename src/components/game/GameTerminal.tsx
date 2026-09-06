@@ -39,20 +39,13 @@ import GameCalendar from "./GameCalendar";
 import Screener from "./Screener";
 import DailyTasksPanel from "./DailyTasksPanel";
 import GameHeader from "./GameHeader";
-import CareerPanel from "./CareerPanel";
-import Achievements from "./Achievements";
-import WorkPanel from "./WorkPanel";
+import CareerHub from "./CareerHub";
 import NotifyToggle from "./NotifyToggle";
 import { notifyIfHidden } from "@/lib/game/desktopNotify";
 import WorldPanel from "./WorldPanel";
 import GameToasts from "./GameToasts";
 import PlayerNameGate from "./PlayerNameGate";
 import OfflineReportModal from "./OfflineReportModal";
-import ContractsPanel from "./ContractsPanel";
-import MarketsPanel from "./MarketsPanel";
-import PerkTree from "./PerkTree";
-import BotsPanel from "./BotsPanel";
-import TraderOffice from "./TraderOffice";
 import Shop from "./Shop";
 import PositionsPanel from "./PositionsPanel";
 import Journal from "./Journal";
@@ -519,32 +512,12 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
       )}
 
       {tab === "career" && (
-        <div className="space-y-4">
-          <TraderOffice lifestyle={game.lifestyle} tools={perks.tools} />
-          <ContractsPanel
-            contracts={game.contracts}
-            equity={game.account.equity}
-            balance={game.account.balance}
-            currentDay={game.gameCalendarDay}
-          />
-          <MarketsPanel
-            unlocked={game.unlockedMarkets}
-            assetCounts={ALL_MARKET_COUNTS}
-          />
-          <PerkTree perks={game.perks} skills={game.account.skills} contractPoints={game.contractPoints} />
-          <BotsPanel bots={game.bots} perks={game.perks} assets={game.activeAssets} />
-          <CareerPanel
-            account={game.account}
-            lifestyle={game.lifestyle}
-            startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
-            tax={game.tax}
-            tools={perks.tools}
-          />
-          <Achievements unlocked={game.achievements} streak={game.streak} />
-          {/* Работа и банкротство — в карьере: это про путь игрока, а не про
-              рынок. */}
-          <WorkPanel />
-        </div>
+        <CareerHub
+          game={game}
+          tools={perks.tools}
+          allMarketCounts={ALL_MARKET_COUNTS}
+          startingBalance={game.tuning.startingBalance || STARTING_BALANCE}
+        />
       )}
     </div>
   );
