@@ -103,9 +103,8 @@ describe("OrderTicket", () => {
 
   it("передаёт stopLoss/takeProfit в открытую позицию", () => {
     renderTicket();
-    const [, slInput, tpInput] = screen.getAllByRole("spinbutton");
-    fireEvent.change(slInput, { target: { value: "90" } });
-    fireEvent.change(tpInput, { target: { value: "120" } });
+    fireEvent.change(screen.getByTestId("order-stoploss-input"), { target: { value: "90" } });
+    fireEvent.change(screen.getByTestId("order-takeprofit-input"), { target: { value: "120" } });
     fireEvent.click(screen.getByTestId("buy-button"));
     const p = useGameStore.getState().game.account.positions[0];
     expect(p.stopLoss).toBe(90);
@@ -143,9 +142,28 @@ describe("OrderTicket", () => {
 
   it("показывает рекомендуемый размер позиции после заполнения стоп-лосса", () => {
     renderTicket();
-    const [, slInput] = screen.getAllByRole("spinbutton");
-    fireEvent.change(slInput, { target: { value: "95" } });
+    fireEvent.change(screen.getByTestId("order-stoploss-input"), { target: { value: "95" } });
     expect(screen.getByText("game.order.suggestedSize")).toBeInTheDocument();
+  });
+
+  // Регрессия: стрелки нативного <input type="number"> на пустом поле
+  // шагают от нуля — клик по стрелке вверх при шаге 0.01 давал «0.01»,
+  // цифру без всякой связи с ценой инструмента. Свои стрелки должны на
+  // пустом поле стартовать от РЫНОЧНОЙ цены, а не от нуля.
+  it("стрелка на пустом поле стоп-лосса стартует от текущей цены, а не от нуля", () => {
+    renderTicket(); // цена инструмента — 100, tickSize — 0.01
+    const up = screen.getByTestId("order-stoploss-input").parentElement!.querySelector('button[aria-label="+"]')!;
+    fireEvent.click(up);
+    expect(screen.getByTestId("order-stoploss-input")).toHaveValue("100.01");
+  });
+
+  it("повторный клик по стрелке шагает от уже введённого значения на tickSize", () => {
+    renderTicket();
+    const input = screen.getByTestId("order-takeprofit-input");
+    const down = input.parentElement!.querySelector('button[aria-label="-"]')!;
+    fireEvent.change(input, { target: { value: "110" } });
+    fireEvent.click(down);
+    expect(input).toHaveValue("109.99");
   });
 });
 
@@ -157,9 +175,8 @@ describe("OrderTicket на закрытом рынке", () => {
     expect(screen.getByTestId("buy-button")).toBeDisabled();
 
     fireEvent.click(screen.getByText("game.order.entry.limit"));
-    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
-    fireEvent.change(inputs[0], { target: { value: "95" } }); // уровень лимитки
-    fireEvent.change(inputs[1], { target: { value: "10" } }); // размер
+    fireEvent.change(screen.getByTestId("order-level-input"), { target: { value: "95" } }); // уровень лимитки
+    fireEvent.change(screen.getByTestId("order-ticket").querySelector('input[type="number"]')!, { target: { value: "10" } }); // размер
     fireEvent.click(screen.getByTestId("buy-button"));
 
     const orders = useGameStore.getState().game.account.pendingOrders;
@@ -174,9 +191,8 @@ describe("OrderTicket — отложенные заявки", () => {
   it("лимитка выше рынка отклоняется как опечатка, а не ставится", () => {
     renderTicket();
     fireEvent.click(screen.getByText("game.order.entry.limit"));
-    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
-    fireEvent.change(inputs[0], { target: { value: "105" } });
-    fireEvent.change(inputs[1], { target: { value: "10" } });
+    fireEvent.change(screen.getByTestId("order-level-input"), { target: { value: "105" } });
+    fireEvent.change(screen.getByTestId("order-ticket").querySelector('input[type="number"]')!, { target: { value: "10" } });
     fireEvent.click(screen.getByTestId("buy-button"));
     expect(useGameStore.getState().game.account.pendingOrders).toHaveLength(0);
     expect(screen.getByText("game.order.errorLevelSide")).toBeInTheDocument();
@@ -185,9 +201,8 @@ describe("OrderTicket — отложенные заявки", () => {
   it("стоп на пробой ставится и несёт с собой плечо и стиль", () => {
     renderTicket();
     fireEvent.click(screen.getByText("game.order.entry.stop"));
-    const inputs = screen.getByTestId("order-ticket").querySelectorAll('input[type="number"]');
-    fireEvent.change(inputs[0], { target: { value: "110" } });
-    fireEvent.change(inputs[1], { target: { value: "5" } });
+    fireEvent.change(screen.getByTestId("order-level-input"), { target: { value: "110" } });
+    fireEvent.change(screen.getByTestId("order-ticket").querySelector('input[type="number"]')!, { target: { value: "5" } });
     fireEvent.click(screen.getByTestId("buy-button"));
     const orders = useGameStore.getState().game.account.pendingOrders;
     expect(orders).toHaveLength(1);
