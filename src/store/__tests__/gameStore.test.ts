@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   loadGame: vi.fn(),
@@ -80,6 +80,131 @@ describe("init", () => {
     expect(s.onboardingDone).toBe(true);
     expect(s.disclaimerSeen).toBe(true);
     expect(s.status).toBe("ready");
+  });
+
+  // Регрессия: партия жила только в IndexedDB браузера — вход под тем же
+  // аккаунтом с ДРУГОГО устройства видел стартовое состояние, хотя дома
+  // осталась партия с открытыми позициями и историей сделок. Побеждает
+  // копия с бОльшим gameElapsedMs — тем же способом, каким локальное
+  // сохранение уже защищено от отката между вкладками одного браузера
+  // (см. persistence/gameDb.ts).
+  describe("облачная копия сохранения", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    // Мок должен отвечать ТОЛЬКО на /api/game/cloudsave: init() следом ещё
+    // дёргает fetchQuotes/fetchCandles для догона за офлайн-временем, и им
+    // тут нечего вернуть — as-is они и без мока штатно возвращают null при
+    // сетевой ошибке (см. существующий тест "грузит существующее
+    // сохранение", который проходит вовсе без глобального fetch).
+    function mockFetchWithCloud(body: unknown) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((url: string) => {
+          if (typeof url === "string" && url.includes("/api/game/cloudsave")) {
+            return Promise.resolve({ ok: true, json: async () => body });
+          }
+          return Promise.reject(new Error("not mocked"));
+        }),
+      );
+    }
+
+    function cloudBody(gameElapsedMs: number, overrides: Record<string, unknown> = {}) {
+      const payload = JSON.stringify({
+        version: "1.0.0-phase1",
+        savedAt: Date.now(),
+        account: { ...useGameStore.getState().game.account, balance: 9999, positions: [] },
+        marketRegime: useGameStore.getState().game.marketRegime,
+        prices: { [ASSET_ID]: 77 },
+        activeAssetIds: PHASE1_ASSET_IDS,
+        activeTradingStyle: "day",
+        unlockedStyles: ["day"],
+        unlockedMarkets: ["stock"],
+        gameCalendarDay: 9,
+        gameElapsedMs,
+        onboardingDone: true,
+        disclaimerSeen: true,
+        ...overrides,
+      });
+      return { save: { gameElapsedMs, payload, updatedAt: Date.now() } };
+    }
+
+    it("новое устройство без локального сохранения подхватывает облачную копию", async () => {
+      mocks.loadGame.mockResolvedValue(null);
+      mockFetchWithCloud(cloudBody(500_000));
+      await useGameStore.getState().init();
+      const s = useGameStore.getState();
+      expect(s.game.account.balance).toBe(9999 + streakReward(1));
+      expect(s.game.prices[ASSET_ID]).toBe(77);
+      expect(s.status).toBe("ready");
+    });
+
+    it("облачная копия НОВЕЕ локальной по игровому времени — побеждает облако", async () => {
+      mocks.loadGame.mockResolvedValue({
+        version: "1.0.0-phase1",
+        savedAt: Date.now(),
+        account: { ...useGameStore.getState().game.account, balance: 1111 },
+        marketRegime: useGameStore.getState().game.marketRegime,
+        prices: { [ASSET_ID]: 55 },
+        candleHistory: {},
+        activeAssetIds: PHASE1_ASSET_IDS,
+        activeTradingStyle: "day",
+        unlockedStyles: ["day"],
+        unlockedMarkets: ["stock"],
+        gameCalendarDay: 3,
+        gameElapsedMs: 100,
+        onboardingDone: true,
+        disclaimerSeen: true,
+      });
+      mockFetchWithCloud(cloudBody(999_999));
+      await useGameStore.getState().init();
+      expect(useGameStore.getState().game.account.balance).toBe(9999 + streakReward(1));
+    });
+
+    it("локальное сохранение НОВЕЕ облачного — облако игнорируется", async () => {
+      mocks.loadGame.mockResolvedValue({
+        version: "1.0.0-phase1",
+        savedAt: Date.now(),
+        account: { ...useGameStore.getState().game.account, balance: 1111 },
+        marketRegime: useGameStore.getState().game.marketRegime,
+        prices: { [ASSET_ID]: 55 },
+        candleHistory: {},
+        activeAssetIds: PHASE1_ASSET_IDS,
+        activeTradingStyle: "day",
+        unlockedStyles: ["day"],
+        unlockedMarkets: ["stock"],
+        gameCalendarDay: 3,
+        gameElapsedMs: 999_999,
+        onboardingDone: true,
+        disclaimerSeen: true,
+      });
+      mockFetchWithCloud(cloudBody(100));
+      await useGameStore.getState().init();
+      expect(useGameStore.getState().game.account.balance).toBe(1111 + streakReward(1));
+    });
+
+    it("облако недоступно — грузится локальное сохранение как раньше", async () => {
+      mocks.loadGame.mockResolvedValue({
+        version: "1.0.0-phase1",
+        savedAt: Date.now(),
+        account: { ...useGameStore.getState().game.account, balance: 4242 },
+        marketRegime: useGameStore.getState().game.marketRegime,
+        prices: { [ASSET_ID]: 55 },
+        candleHistory: {},
+        activeAssetIds: PHASE1_ASSET_IDS,
+        activeTradingStyle: "day",
+        unlockedStyles: ["day"],
+        unlockedMarkets: ["stock"],
+        gameCalendarDay: 3,
+        gameElapsedMs: 123_456,
+        onboardingDone: true,
+        disclaimerSeen: true,
+      });
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));  // все запросы (включая cloudsave) падают
+      await useGameStore.getState().init();
+      expect(useGameStore.getState().game.account.balance).toBe(4242 + streakReward(1));
+    });
   });
 
   // Регрессия: гонка двух тикеров на одном источнике (вторая вкладка, либо

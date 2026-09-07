@@ -44,6 +44,7 @@ import { botSlots, defaultBot, BOT_LICENSE_PRICE, BOT_PACKAGES, type AlgoBot } f
 import { applyPurchase, canPurchase, equipTheme, freshLifestyle, FUND_LICENSE_ITEM_ID, getShopItem, releaseItem, settleUpkeepDebt, type PurchaseError } from "@/engine/economy/shop";
 import { calculateRequiredMargin } from "@/engine/economy/marginEngine";
 import { deleteSave, loadGame, saveGame } from "@/persistence/gameDb";
+import { fetchCloudSave, pushCloudSave } from "@/lib/game/cloudSaveClient";
 import {
   fetchCandles,
   fetchQuotes,
@@ -608,7 +609,22 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   init: async () => {
     const tuning = get().game.tuning ?? DEFAULT_TUNING;
-    const save = await loadGame();
+    const localSave = await loadGame();
+    // Облачная копия (см. cloudSave.ts): без неё вход под тем же аккаунтом
+    // с ДРУГОГО устройства видел стартовое состояние — партия оставалась в
+    // IndexedDB того браузера, где играли. Побеждает более "взрослая" по
+    // игровому времени копия — тем же способом, каким локальное сохранение
+    // уже защищено от отката (persistence/gameDb.ts), только теперь между
+    // устройствами, а не между вкладками одного браузера.
+    const cloud = await fetchCloudSave();
+    const localElapsed = localSave?.gameElapsedMs ?? -1;
+    const save: SaveGame | null =
+      cloud && cloud.gameElapsedMs > localElapsed
+        ? // Свечи в облако не уезжают (см. cloudSaveClient.ts) — на этом
+          // устройстве они пусты, пока не подтянутся с общего рынка заново,
+          // ровно как при первом заходе.
+          ({ ...(JSON.parse(cloud.payload) as Omit<SaveGame, "candleHistory">), candleHistory: {} } as SaveGame)
+        : localSave;
     if (save) {
       const loaded = saveToState(save, tuning);
       // Догон за время отсутствия. Рынок общий и живёт на сервере, поэтому
@@ -1611,6 +1627,12 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
 
   persistNow: async () => {
     const { game, onboardingDone, disclaimerSeen } = get();
-    await saveGame(stateToSave(game, onboardingDone, disclaimerSeen));
+    const save = stateToSave(game, onboardingDone, disclaimerSeen);
+    await saveGame(save);
+    // Облачная копия — best-effort и без свечей (см. cloudSaveClient.ts):
+    // она даёт продолжить партию с ДРУГОГО устройства, а не заменяет
+    // локальное сохранение на этом.
+    const { candleHistory: _candleHistory, ...cloudFields } = save;
+    void pushCloudSave(save.gameElapsedMs, JSON.stringify(cloudFields));
   },
 }));

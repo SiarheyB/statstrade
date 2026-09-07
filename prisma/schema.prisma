@@ -47,6 +47,7 @@ model User {
   drawings             UserDrawing[]
   cloudStorageAccounts CloudStorageAccount[]
   gamePlayer           GamePlayer?
+  gameCloudSave        GameCloudSave?
 }
 
 // Audit trail of admin-panel actions (delete user, force-sync, reset 2FA, etc.).
@@ -1508,6 +1509,29 @@ model GameLoan {
   @@index([status, createdAt])
   @@index([borrowerId])
   @@index([lenderId])
+}
+
+// Облачная копия локального сохранения игры (баланс, позиции, история
+// сделок и т.п.) — раньше эти данные жили ТОЛЬКО в IndexedDB браузера
+// (см. persistence/gameDb.ts), и открыв игру на другом устройстве под тем
+// же аккаунтом, игрок видел стартовое состояние: его позиции и история
+// сделок остались в браузере, где он играл. На сервере уже жил только
+// коарс-снапшот (equity/престиж и т.п. — см. syncPlayer), которого для
+// продолжения партии недостаточно.
+//
+// payload хранится JSON-строкой БЕЗ candleHistory: свечи — тяжёлая часть
+// сохранения, а на приёмном устройстве они всё равно перечитываются заново
+// с общего рынка (см. GameCandle/marketStore) — синхронизировать их смысла
+// нет. gameElapsedMs вынесен отдельной колонкой ради дешёвого сравнения
+// «какая копия новее» без разбора всего JSON (тот же приём, что в
+// persistence/gameDb.ts у локального сохранения).
+model GameCloudSave {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gameElapsedMs Float
+  payload       String
+  updatedAt     DateTime @updatedAt
 }
 
 model GameWorldEvent {
