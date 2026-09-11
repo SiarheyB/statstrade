@@ -241,6 +241,25 @@ export const mockPrisma = {
     findUnique: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue({}),
   },
+
+  // Личные уведомления колокольчика (/api/notifications).
+  userNotification: {
+    findMany: vi.fn().mockResolvedValue([]),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    create: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  },
+
+  // Подписки на уровни (/api/recommendations/alerts).
+  levelAlert: {
+    findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn().mockResolvedValue(null),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    update: vi.fn().mockResolvedValue({}),
+    count: vi.fn().mockResolvedValue(0),
+  },
 };
 
 /* --- Core module mocks (auth / admin / db) --- */

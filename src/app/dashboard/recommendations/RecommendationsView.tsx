@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
 import { falseBreakoutBudget, returnMoveBudget, todayProgress, type MoveFeasibility } from "@/lib/recommendations/atrBudget";
 import { fmtDate, fmtPrice, fmtTime, numLocale } from "@/lib/format";
+import LevelAlertBell, { type LevelAlert } from "@/components/LevelAlertBell";
 
 // Компактная запись $-объёма (1 234 567 → "$1.23M") — своя, а не fmtNumSmart:
 // нужна короткая форма, не тысячи с разделителями. Значение уже в долларах
@@ -812,7 +813,16 @@ function AtrPanel({
 // но полдневного хода до уровня — это не «вплотную», и говорить так нельзя.
 const AT_LEVEL_ATR = 0.1;
 
-function SetupCard({ setup }: { setup: LevelSetup }) {
+function SetupCard({
+  setup,
+  alert,
+  onAlertChange,
+}: {
+  setup: LevelSetup;
+  /** Подписка на этот уровень, если она есть (список держит родитель). */
+  alert: LevelAlert | null;
+  onAlertChange: (next: LevelAlert | null) => void;
+}) {
   const [open, setOpen] = useState(false);
   // Требуемый ход показываем и в свёрнутой шапке: по нему список
   // просматривают, не раскрывая каждую карточку. Считается от цены анализа —
@@ -855,12 +865,20 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
   // Скругление перенесено на саму кнопку, чтобы её фон при наведении не
   // выходил за уголки.
   return (
-    <div className="rounded-xl border border-border bg-surface-1">
+    // bg-surface: токена surface-1 в теме нет, и класс тут тоже ничего не
+    // давал — карточка просто показывала фон страницы.
+    <div className="rounded-xl border border-border bg-surface">
+      <div
+        className={clsx(
+          "flex items-start gap-1 pr-3",
+          !open && "rounded-b-xl",
+        )}
+      >
       <button
         onClick={toggle}
         className={clsx(
-          "w-full flex items-center gap-3 p-4 text-left hover:bg-surface-2 transition rounded-t-xl",
-          !open && "rounded-b-xl",
+          "flex-1 min-w-0 flex items-center gap-3 p-4 text-left hover:bg-surface-2 transition rounded-t-xl",
+          !open && "rounded-bl-xl",
         )}
       >
         <div className="flex-1 min-w-0">
@@ -928,6 +946,17 @@ function SetupCard({ setup }: { setup: LevelSetup }) {
         </div>
         {open ? <ChevronUp size={16} className="shrink-0" /> : <ChevronDown size={16} className="shrink-0" />}
       </button>
+        <div className="pt-4">
+          <LevelAlertBell
+            symbol={setup.symbol}
+            levelPrice={setup.levelPrice}
+            direction={setup.direction}
+            atr={setup.atr}
+            alert={alert}
+            onChange={onAlertChange}
+          />
+        </div>
+      </div>
 
       {open && (
         <div className="px-4 pb-4 space-y-3">
@@ -1007,6 +1036,10 @@ export default function RecommendationsView() {
   useI18n();
   const [feature, setFeature] = useState<FeatureValue | null>(null);
   const [setups, setSetups] = useState<LevelSetup[]>([]);
+  // Подписки на уровни — одним запросом на всю страницу, а не по одному из
+  // каждой карточки: их десяток, и десяток одинаковых запросов на загрузке
+  // списка не нужен никому.
+  const [alerts, setAlerts] = useState<LevelAlert[]>([]);
   const [filter, setFilter] = useState<Bias | "all">("all");
   const [directionFilter, setDirectionFilter] = useState<Direction | "all">("all");
   const [loading, setLoading] = useState(true);
@@ -1019,6 +1052,13 @@ export default function RecommendationsView() {
       ]);
       if (featureRes.ok) setFeature((await featureRes.json()).value);
       if (setupsRes.ok) setSetups((await setupsRes.json()).setups ?? []);
+      // Отдельно и без ожидания: список уровней важнее, а колокольчики
+      // дорисуются, когда приедут. Ошибку глотаем — уведомления это
+      // дополнение к странице, а не условие её работы.
+      fetch("/api/recommendations/alerts")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((j) => j && setAlerts(j.alerts ?? []))
+        .catch(() => {});
       setLoading(false);
     }
     load();
@@ -1103,7 +1143,21 @@ export default function RecommendationsView() {
       ) : (
         <div className="space-y-3">
           {filtered.map((s) => (
-            <SetupCard key={s.id} setup={s} />
+            <SetupCard
+              key={s.id}
+              setup={s}
+              alert={
+                alerts.find((a) => a.symbol === s.symbol && a.levelPrice === s.levelPrice) ?? null
+              }
+              onAlertChange={(next) =>
+                setAlerts((prev) => {
+                  const rest = prev.filter(
+                    (a) => !(a.symbol === s.symbol && a.levelPrice === s.levelPrice),
+                  );
+                  return next ? [...rest, next] : rest;
+                })
+              }
+            />
           ))}
         </div>
       )}

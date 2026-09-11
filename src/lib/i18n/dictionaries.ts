@@ -104,6 +104,7 @@ const en: Dict = {
   "econcal.forecast": "Forecast",
   "econcal.previous": "Previous",
   "econcal.empty": "No events for the selected filters.",
+  "econcal.sourceDown": "The calendar source is temporarily unavailable",
   "econcal.nowIs": "Now",
   "econcal.next": "Next",
   "econcal.released": "released",
@@ -140,6 +141,14 @@ const en: Dict = {
   "econcalAlerts.minute.few": "minutes",
   "econcalAlerts.minute.many": "minutes",
   "econcalAlerts.minute.other": "minutes",
+
+  // web push (подписка устройства на уведомления при закрытой вкладке)
+  "push.title": "Push notifications",
+  "push.hint": "Alerts reach this device even when the tab is closed — price approaching a level you're watching, a release about to come out.",
+  "push.onNote": "This device is subscribed. What gets sent is up to you: the bell next to a level on «Recommendations», and the news reminders in the card above — those now reach you with the tab closed too.",
+  "push.offNote": "Off — nothing is sent to this device. Turning it on asks the browser for permission.",
+  "push.blocked": "Notifications are blocked for this site in the browser. Allow them in the site settings (the icon left of the address), then turn this back on.",
+  "push.unsupported": "This browser can't do push notifications. On iPhone it works only for a site added to the home screen.",
 
   // orderbook heatmap
   "of.title": "Order heatmap",
@@ -782,6 +791,10 @@ const en: Dict = {
   // announcements
   "announcements.title": "Announcements",
   "announcements.empty": "No announcements",
+  // Колокольчик в меню: там лежат и объявления, и личные уведомления
+  // (подход цены к уровню, скорый выход новости), поэтому заголовок общий.
+  "notifications.title": "Notifications",
+  "notifications.empty": "Nothing new",
   "announcements.read": "Mark as read",
   "announcements.unread": "{n} new",
   "announcements.justNow": "just now",
@@ -2589,6 +2602,7 @@ const ru: Dict = {
   "econcal.forecast": "Прогноз",
   "econcal.previous": "Пред.",
   "econcal.empty": "Нет событий по выбранным фильтрам.",
+  "econcal.sourceDown": "Источник календаря временно недоступен",
   "econcal.nowIs": "Сейчас",
   "econcal.next": "Ближайшее",
   "econcal.released": "вышло",
@@ -2624,6 +2638,14 @@ const ru: Dict = {
   "econcalAlerts.minute.few": "минуты",
   "econcalAlerts.minute.many": "минут",
   "econcalAlerts.minute.other": "минут",
+
+  // web push (подписка устройства на уведомления при закрытой вкладке)
+  "push.title": "Push-уведомления",
+  "push.hint": "Уведомления приходят на это устройство, даже когда вкладка закрыта: цена подходит к уровню, за которым вы следите, скоро выход новости.",
+  "push.onNote": "Это устройство подписано. Что именно присылать — выбираете вы: колокольчик у уровня на странице «Рекомендации» и напоминания о новостях в карточке выше — они теперь приходят и при закрытой вкладке.",
+  "push.offNote": "Выключено — на это устройство ничего не приходит. При включении браузер спросит разрешение.",
+  "push.blocked": "Уведомления запрещены для сайта в браузере. Разрешите их в настройках сайта (значок слева от адреса) и включите снова.",
+  "push.unsupported": "Этот браузер не умеет push-уведомлений. На iPhone они работают только для сайта, добавленного на главный экран.",
 
   // orderbook heatmap
   "of.title": "Карта ордеров",
@@ -3260,6 +3282,8 @@ const ru: Dict = {
   // announcements
   "announcements.title": "Объявления",
   "announcements.empty": "Нет объявлений",
+  "notifications.title": "Уведомления",
+  "notifications.empty": "Ничего нового",
   "announcements.read": "Отметить как прочитанное",
   "announcements.unread": "{n} новых",
   "announcements.justNow": "только что",

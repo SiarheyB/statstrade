@@ -28,6 +28,7 @@ describe('features - FEATURE_DEFAULTS', () => {
       'tradeRecommendations',
       'tradeRecommendationsPublicAccess',
       'game',
+      'econcal',
       'gamePublicAccess',
     ]);
   });
@@ -47,6 +48,9 @@ describe('features - FEATURE_DEFAULTS', () => {
     // (стартовый капитал, частота новостей, волатильность и прочее), которые
     // админ правит без передеплоя.
     'gamePublicAccess',
+    // 'econcal' — тумблер раздела; его единственная настройка (source) не
+    // число, а выбор из двух значений, поэтому числовых полей у него нет.
+    'econcal',
   ]);
 
   it('each feature has required fields: enabled, numeric params, meta', () => {
@@ -61,7 +65,10 @@ describe('features - FEATURE_DEFAULTS', () => {
       // сценарии для ИИ-решений ботов (lib/game/bots.ts, botMandate), не
       // числовая настройка баланса. Правится отдельным блоком в /admin/game
       // (AiScenarios.tsx), а не универсальной числовой формой.
-      const NON_NUMERIC_EXCEPTIONS = new Set(['aiScenarios']);
+      // 'source' — выбор источника экономического календаря
+      // (forexfactory / investing): тоже не число, правится своим блоком на
+      // /admin/content (EconCalSourceSetting.tsx).
+      const NON_NUMERIC_EXCEPTIONS = new Set(['aiScenarios', 'source']);
       const numericKeys = Object.keys(def).filter(
         (k) => !FEATURE_META_KEYS.includes(k as (typeof FEATURE_META_KEYS)[number]) && !NON_NUMERIC_EXCEPTIONS.has(k)
       );

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import EconCalPage from "../page";
+import EconCalPage from "../EconCalView";
 
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({

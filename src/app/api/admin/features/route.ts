@@ -26,13 +26,13 @@ const schema = z
   .object({
     key: z.string().min(1).max(60),
     enabled: z.boolean().optional(),
-    // Числа — обычные настройки баланса. Вложенный объект строк — сценарии
-    // ИИ для ботов (aiScenarios): единственное текстовое поле среди
-    // конфигов фич, отсюда и расширение схемы сверх «просто чисел».
+    // Числа — обычные настройки баланса. Строка — поле выбора из нескольких
+    // значений (econcal.source). Вложенный объект строк — сценарии ИИ для
+    // ботов (aiScenarios). Отсюда и расширение схемы сверх «просто чисел».
     config: z
       .record(
         z.string(),
-        z.union([z.number(), z.record(z.string(), z.string().max(2000))]),
+        z.union([z.number(), z.string().max(2000), z.record(z.string(), z.string().max(2000))]),
       )
       .optional(),
   })

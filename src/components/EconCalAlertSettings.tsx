@@ -15,6 +15,7 @@ import {
   type AlertImpact,
   type EconAlertSettings,
 } from "@/lib/econcalAlerts";
+import { syncEconcalPrefs } from "@/lib/push/client";
 
 const IMPACT_DOT: Record<AlertImpact, string> = {
   high: "bg-loss",
@@ -33,8 +34,14 @@ export default function EconCalAlertSettings() {
   const { t } = useI18n();
 
   useEffect(() => {
-    setSettings(loadAlertSettings());
+    const loaded = loadAlertSettings();
+    setSettings(loaded);
     setReady(true);
+    // Копию настроек серверу отдаём и на входе, а не только при правках: на
+    // новом устройстве человек подписывается на push из другой карточки и
+    // сюда может вообще не заходить — без этого напоминания при закрытой
+    // вкладке молчали бы до первой правки настроек.
+    syncEconcalPrefs(loaded);
     setPermission(
       typeof Notification === "undefined" ? "unsupported" : (Notification.permission as Permission),
     );
@@ -44,6 +51,10 @@ export default function EconCalAlertSettings() {
     const next = { ...settings, ...patch };
     setSettings(next);
     saveAlertSettings(next);
+    // localStorage остаётся главным хранилищем; серверу уходит копия — иначе
+    // крон, рассылающий push при закрытой вкладке, не знал бы, кому и за
+    // сколько минут напоминать (см. lib/econcalPushRunner.ts).
+    syncEconcalPrefs(next);
   };
 
   // Списки-переключатели: последний выбранный пункт не снимаем — пустой список

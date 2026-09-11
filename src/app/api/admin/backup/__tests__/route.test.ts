@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { join } from "path";
 import {
   asAdmin,
   asNonAdmin,
@@ -111,6 +112,9 @@ describe("белый список команд", () => {
   });
 });
 
+/** Абсолютный путь внутри backup/tmp — ровно так его строит роут. */
+const tmpPath = (name: string) => join(process.cwd(), "backup", "tmp", name);
+
 describe("имя файла", () => {
   it.each(["../../../etc/passwd.sql", "/etc/passwd.sql", "a/b.sql", "..sql", "dump.txt"])(
     "%s отвергается",
@@ -126,7 +130,7 @@ describe("имя файла", () => {
     expect(res.status).toBe(200);
     const args = spawnMock.mock.calls[0][1] as string[];
     expect(args[1]).toBe("import_clean");
-    expect(args[2].endsWith("/backup/tmp/dump.sql")).toBe(true);
+    expect(args[2]).toBe(tmpPath("dump.sql"));
   });
 
   it("несуществующий файл не запускает импорт", async () => {
@@ -160,7 +164,7 @@ describe("удаление", () => {
     const res = await DELETE(new Request(`${base}?file=dump.sql`, { method: "DELETE" }));
     expect(res.status).toBe(200);
     const target = vi.mocked(fs.unlink).mock.calls[0][0] as string;
-    expect(target.endsWith("/backup/tmp/dump.sql")).toBe(true);
+    expect(target).toBe(tmpPath("dump.sql"));
   });
 
   it("не удаляет файл по пути наружу", async () => {
@@ -187,7 +191,7 @@ describe("журнал операций и созданный файл", () => {
     const { operationId } = await res.json();
 
     // скрипт печатает абсолютный путь файла последней строкой
-    ctrl.stdout(`${process.cwd()}/backup/tmp/db-export_20260825_101500.sql`);
+    ctrl.stdout(tmpPath("db-export_20260825_101500.sql"));
     ctrl.close(0);
 
     const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();
@@ -202,7 +206,7 @@ describe("журнал операций и созданный файл", () => {
     const { operationId } = await res.json();
 
     ctrl.stdout("/etc/passwd");
-    ctrl.stdout(`${process.cwd()}/backup/tmp/../../../etc/passwd`);
+    ctrl.stdout(tmpPath(join("..", "..", "..", "etc", "passwd")));
     ctrl.close(0);
 
     const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();
@@ -216,7 +220,7 @@ describe("журнал операций и созданный файл", () => {
     const res = await POST(post({ action: "export_full" }));
     const { operationId } = await res.json();
 
-    ctrl.stdout(`${process.cwd()}/backup/tmp/half-written.sql`);
+    ctrl.stdout(tmpPath("half-written.sql"));
     ctrl.close(1);
 
     const status = await (await GET(new Request(`${base}?operationId=${operationId}`))).json();

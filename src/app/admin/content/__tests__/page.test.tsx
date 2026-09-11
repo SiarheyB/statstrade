@@ -16,7 +16,12 @@ vi.mock("@/lib/db", () => ({
     newsItem: { count: vi.fn(), findFirst: vi.fn() },
     economicEvent: { count: vi.fn(), findFirst: vi.fn() },
     // Нет строки = фича «Новости» включена с дефолтным retentionDays.
-    featureConfig: { findUnique: vi.fn().mockResolvedValue(null) },
+    // findMany — то же самое для реестра фич целиком (см. lib/featureConfig.ts):
+    // пустая таблица значит «календарь включён, источник по умолчанию».
+    featureConfig: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
   },
 }));
 
@@ -26,6 +31,29 @@ vi.mock("@/components/admin/ContentActions", () => ({
 
 vi.mock("@/components/admin/NewsRetentionSetting", () => ({
   default: ({ value }: { value: number }) => <div data-testid="news-retention">{value}</div>,
+}));
+
+// Страница спрашивает у календаря, почему выбранный источник пуст. Сам
+// календарь — предмет своих тестов (lib/__tests__/econcal*.test.ts), здесь он
+// подменён: тесты этой страницы про карточки и счётчики.
+vi.mock("@/lib/econcal", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/econcal")>()),
+  getCalendar: vi.fn(async () => ({
+    events: [],
+    currencies: [],
+    categories: [],
+    refreshed: [],
+    source: "forexfactory" as const,
+    sourceError: null,
+  })),
+}));
+
+vi.mock("@/components/admin/EconCalSourceSetting", () => ({
+  default: ({ enabled, source }: { enabled: boolean; source: string }) => (
+    <div data-testid="econcal-source" data-enabled={String(enabled)}>
+      {source}
+    </div>
+  ),
 }));
 
 describe("AdminContentPage", () => {

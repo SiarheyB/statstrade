@@ -24,6 +24,9 @@ type FeatureRow = {
 // на /admin/recommendations (AdminRecommendations.tsx), рядом со статусом
 // пересчёта и кнопкой «Пересчитать сейчас» — тот же принцип, что у forex выше.
 // game/gamePublicAccess: свой дублирующий UI на /admin/game (AdminGameConfig.tsx).
+// econcal: свой UI на /admin/content (EconCalSourceSetting.tsx), рядом со
+// счётчиком событий и кнопкой обновления. Плюс у него единственное поле —
+// ВЫБОР из двух значений, а эта общая форма умеет только числа.
 const HIDDEN_HERE = new Set([
   "forex",
   "forexPublicAccess",
@@ -31,6 +34,7 @@ const HIDDEN_HERE = new Set([
   "tradeRecommendationsPublicAccess",
   "game",
   "gamePublicAccess",
+  "econcal",
 ]);
 
 export default function AdminFeatures() {

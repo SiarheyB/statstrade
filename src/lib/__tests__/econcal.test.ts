@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
 // Событие пишется одним INSERT … ON CONFLICT пачками, а не upsert'ом в цикле
 // (см. upsertEvents в lib/econcal.ts): в Sql-объект уходит по столько значений
 // на событие. Отсюда же тесты достают, что именно записалось.
-const EVENT_COLUMNS = 10;
+const EVENT_COLUMNS = 11;
 
 vi.mock('@/lib/db', () => ({
   prisma: {
@@ -30,6 +30,13 @@ vi.mock('@/lib/db', () => ({
       updateMany: mocks.updateManyMock,
     },
   },
+}));
+
+// Источник календаря (и общий выключатель) приходит из FeatureConfig — тесты
+// этого модуля про разбор фида, а не про админку, поэтому подменяем настройку
+// целиком. setCalendarSource переключает её там, где это нужно проверить.
+vi.mock('@/lib/featureConfig', () => ({
+  getFeatureConfig: vi.fn(async () => ({ enabled: true, source: mocks.source })),
 }));
 
 // Mock global fetch
@@ -66,6 +73,20 @@ vi.stubGlobal('fetch', vi.fn((url?: string) => {
 
 // Import functions AFTER mocks are set up
 import { countryFor, flagFor, refreshCalendar, getCalendar, pruneOldEvents } from '@/lib/econcal';
+
+
+/**
+ * Основной запрос getCalendar за событиями. Отличается от остальных вызовов
+ * findMany сортировкой по времени: alignStoredImpacts ходит без неё, а запрос
+ * отката идёт следом за основным.
+ */
+function mainEventsQuery() {
+  const call = mocks.findManyMock.mock.calls.find(
+    (c) => (c[0] as { orderBy?: { time?: string } })?.orderBy?.time === 'asc',
+  );
+  if (!call) throw new Error('getCalendar не сделал запрос за событиями');
+  return call[0] as { where: Record<string, unknown> };
+}
 
 describe('econcal module', () => {
   // Значения из всех пачек идут подряд: по EVENT_COLUMNS на событие,
@@ -347,9 +368,12 @@ describe('econcal module', () => {
         impacts: ['high'],
         category: 'Inflation',
       });
-      const { where } = mocks.findManyMock.mock.calls[0][0];
+      const { where } = mainEventsQuery();
       // Важности в запросе нет: она накладывается на чтении, фильтр — уже по ней.
+      // source есть всегда: в таблице лежат события обоих источников, и без
+      // него в выдачу попал бы чужой календарь.
       expect(where).toEqual({
+        source: 'forexfactory',
         time: { gte: from, lte: to },
         currency: { in: ['USD', 'EUR'] },
         category: 'Inflation',
@@ -375,20 +399,20 @@ describe('econcal module', () => {
       expect(events.map((e) => e.title)).toEqual(['Flash Services PMI']);
     });
 
-    it('leaves the where clause empty when no filters are set', async () => {
+    it('оставляет в условии только источник, когда фильтров нет', async () => {
       await getCalendar({});
-      expect(mocks.findManyMock.mock.calls[0][0].where).toEqual({});
+      expect(mainEventsQuery().where).toEqual({ source: 'forexfactory' });
     });
 
     it('accepts a one-sided date window', async () => {
       const from = new Date('2026-01-12T00:00:00Z');
       await getCalendar({ from });
-      expect(mocks.findManyMock.mock.calls[0][0].where.time).toEqual({ gte: from });
+      expect(mainEventsQuery().where.time).toEqual({ gte: from });
     });
 
     it('ignores empty filter arrays', async () => {
       await getCalendar({ currencies: [], impacts: [] });
-      expect(mocks.findManyMock.mock.calls[0][0].where).toEqual({});
+      expect(mainEventsQuery().where).toEqual({ source: 'forexfactory' });
     });
 
     it('builds facets without loading the whole table', async () => {

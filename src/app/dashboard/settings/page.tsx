@@ -9,6 +9,7 @@ import GoogleLinkSettings from "@/components/GoogleLinkSettings";
 import CloudStorageSettings from "@/components/CloudStorageSettings";
 import YandexDiskSettings from "@/components/YandexDiskSettings";
 import EconCalAlertSettings from "@/components/EconCalAlertSettings";
+import PushSettings from "@/components/PushSettings";
 import DeleteAccount from "@/components/DeleteAccount";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -39,6 +40,7 @@ export default function GeneralSettingsPage() {
       </div>
 
       <EconCalAlertSettings />
+      <PushSettings />
 
       <ChangePassword />
       <GoogleLinkSettings />
