@@ -20,7 +20,13 @@ vi.mock('@/lib/db', () => ({
       createMany: mocks.createMany,
       deleteMany: mocks.deleteMany,
     },
-    featureConfig: { findUnique: mocks.featureFindUnique, upsert: mocks.featureUpsert },
+    featureConfig: {
+      findUnique: mocks.featureFindUnique,
+      upsert: mocks.featureUpsert,
+      // getFeatureConfig("news") — общий выключатель раздела; пустая
+      // таблица значит «включено с дефолтами» (см. featureConfig.ts).
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     // getNews подменяет ссылки на сохранённые у нас обложки (lib/newsImages.ts).
     newsImage: { findMany: mocks.imageFindMany, upsert: vi.fn() },
   },

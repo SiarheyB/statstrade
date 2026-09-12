@@ -61,7 +61,13 @@ export type DueAlert = {
   keys: string[];
 };
 
-function normalizeSettings(raw: unknown): EconAlertSettings {
+/**
+ * Приведение настроек к рабочему виду. Экспортируется, потому что те же
+ * настройки читает СЕРВЕР: копия настроек устройства лежит в строке его
+ * push-подписки (PushSubscription.econcalPrefs), и разбирать её нужно теми же
+ * правилами, иначе браузер и крон разошлись бы в том, что считать выбранным.
+ */
+export function normalizeAlertSettings(raw: unknown): EconAlertSettings {
   const d = DEFAULT_ALERT_SETTINGS;
   if (!raw || typeof raw !== "object") return { ...d };
   const o = raw as Record<string, unknown>;
@@ -91,7 +97,7 @@ export function loadAlertSettings(): EconAlertSettings {
   if (typeof window === "undefined") return { ...DEFAULT_ALERT_SETTINGS };
   try {
     const raw = window.localStorage.getItem(ALERT_SETTINGS_KEY);
-    return normalizeSettings(raw ? JSON.parse(raw) : null);
+    return normalizeAlertSettings(raw ? JSON.parse(raw) : null);
   } catch {
     return { ...DEFAULT_ALERT_SETTINGS };
   }

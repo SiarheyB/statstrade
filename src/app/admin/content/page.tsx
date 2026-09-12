@@ -3,6 +3,7 @@ import { getServerT } from "@/lib/i18n/server";
 import { getRetentionDays, MAX_RETENTION_DAYS } from "@/lib/news";
 import ContentActions from "@/components/admin/ContentActions";
 import NewsRetentionSetting from "@/components/admin/NewsRetentionSetting";
+import FeatureAccessToggle from "@/components/admin/FeatureAccessToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,7 @@ export default async function AdminContentPage() {
           feed="news"
         >
           <NewsRetentionSetting value={retentionDays} max={MAX_RETENTION_DAYS} />
+          <FeatureAccessToggle featureKey="news" compact />
         </Card>
         <Card
           title={t("admin.content.econcal")}
@@ -82,7 +84,9 @@ export default async function AdminContentPage() {
           }
           note={t("admin.content.econAutoClean")}
           feed="econcal"
-        />
+        >
+          <FeatureAccessToggle featureKey="econcal" compact />
+        </Card>
       </div>
     </div>
   );

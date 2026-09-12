@@ -23,6 +23,13 @@ function jsonResponse(body: any, ok = true) {
   return { ok, json: () => Promise.resolve(body) };
 }
 
+// Файлы и журнал операций теперь на отдельной вкладке (страница разбита по
+// вкладкам — см. AdminBackupPage). Тесты, которым нужен список файлов,
+// сперва переключаются на неё.
+async function openFilesTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(await screen.findByText('admin.backup.tabFiles'));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -80,7 +87,9 @@ describe('AdminBackupPage', () => {
       return Promise.resolve(jsonResponse({}));
     });
 
+    const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     expect(await screen.findByText('идёт')).toBeInTheDocument();
     await waitFor(() => expect(statusCalls).toBeGreaterThan(0), { timeout: 5000 });
     expect(await screen.findByText('готово', {}, { timeout: 5000 })).toBeInTheDocument();
@@ -103,9 +112,16 @@ describe('AdminBackupPage', () => {
       return Promise.resolve(jsonResponse({}));
     });
     render(<BackupPage />);
+    // На вкладке по умолчанию («Экспорт/Импорт») заголовок виден один раз —
+    // на кнопке.
+    expect(await screen.findByText('admin.backup.exportFull.title')).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await openFilesTab(user);
     expect(await screen.findByText('done')).toBeInTheDocument();
-    // заголовок операции есть и на кнопке экспорта, и в строке журнала
-    expect(screen.getAllByText('admin.backup.exportFull.title')).toHaveLength(2);
+    // На вкладке «Файлы и журнал» тот же заголовок виден в строке журнала —
+    // вкладки взаимоисключающие, кнопки экспорта здесь уже нет.
+    expect(screen.getAllByText('admin.backup.exportFull.title')).toHaveLength(1);
   });
 
   it('после успешного экспорта дамп сразу уезжает в браузер', { timeout: 15000 }, async () => {
@@ -142,7 +158,9 @@ describe('AdminBackupPage', () => {
   });
 
   it('у каждого файла есть ссылка на скачивание', async () => {
+    const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     await screen.findByText('backup1.sql');
     const links = screen.getAllByTitle('admin.backup.download');
     expect(links).toHaveLength(mockFiles.length);
@@ -152,21 +170,26 @@ describe('AdminBackupPage', () => {
   });
 
   it('shows files loading then renders list of files', async () => {
+    const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     expect(await screen.findByText('backup1.sql')).toBeInTheDocument();
     expect(screen.getByText('backup2.jsonl')).toBeInTheDocument();
   });
 
   it('renders empty state when there are no files', async () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ files: [] }));
+    const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     expect(await screen.findByText('admin.backup.noFiles')).toBeInTheDocument();
   });
 
   it('renders export/import operation cards with titles', async () => {
     render(<BackupPage />);
-    await screen.findByText('backup1.sql');
-    expect(screen.getByText('admin.backup.exportFull.title')).toBeInTheDocument();
+    // Вкладка по умолчанию — «Экспорт/Импорт»: карточки видны сразу, без
+    // переключения (список файлов — на другой вкладке, здесь не нужен).
+    expect(await screen.findByText('admin.backup.exportFull.title')).toBeInTheDocument();
     expect(screen.getByText('admin.backup.exportData.title')).toBeInTheDocument();
     expect(screen.getByText('admin.backup.exportAnalytics.title')).toBeInTheDocument();
     expect(screen.getByText('admin.backup.importDedup.title')).toBeInTheDocument();
@@ -177,6 +200,7 @@ describe('AdminBackupPage', () => {
   it('selects a file on click, showing chosen indicator', async () => {
     const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     const fileRow = await screen.findByText('backup1.sql');
     await user.click(fileRow);
     expect(await screen.findByText('backup1.sql', { selector: 'span.font-medium' })).toBeInTheDocument();
@@ -226,10 +250,10 @@ describe('AdminBackupPage', () => {
     });
     const user = userEvent.setup();
     render(<BackupPage />);
-    await screen.findByText('backup1.sql');
     // Re-query right before clicking — the earlier list-load re-render can
     // replace this subtree, so a reference captured before that await would
     // be stale/detached from the document.
+    await screen.findByText('admin.backup.exportFull.title');
     await user.click(screen.getByText('admin.backup.exportFull.title').closest('button')!);
     expect(await screen.findByText(/admin\.backup\.error/)).toBeInTheDocument();
   });
@@ -238,8 +262,7 @@ describe('AdminBackupPage', () => {
     global.fetch = vi.fn().mockResolvedValue(jsonResponse({ files: [] }));
     const user = userEvent.setup();
     render(<BackupPage />);
-    await screen.findByText('admin.backup.noFiles');
-    const importCard = screen.getByText('admin.backup.importDedup.title');
+    const importCard = await screen.findByText('admin.backup.importDedup.title');
     await user.click(importCard.closest('button')!);
     expect(window.alert).toHaveBeenCalledWith('admin.backup.pickFirst');
   });
@@ -253,6 +276,7 @@ describe('AdminBackupPage', () => {
       return Promise.resolve(jsonResponse({ files: mockFiles }));
     });
     render(<BackupPage />);
+    await openFilesTab(user);
     await screen.findByText('backup1.sql');
     const deleteButtons = screen.getAllByTitle('admin.backup.deleteFile');
     await user.click(deleteButtons[0]);
@@ -262,6 +286,7 @@ describe('AdminBackupPage', () => {
   it('clears all files after confirm', async () => {
     const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     await screen.findByText('backup1.sql');
     await user.click(screen.getByText('admin.backup.clearAll'));
     expect(window.confirm).toHaveBeenCalledWith('admin.backup.clearAllConfirm');
@@ -270,6 +295,7 @@ describe('AdminBackupPage', () => {
   it('refreshes files when refresh button clicked', async () => {
     const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     await screen.findByText('backup1.sql');
     const initialCalls = (global.fetch as any).mock.calls.length;
     await user.click(screen.getByText('admin.backup.refresh'));
@@ -279,13 +305,17 @@ describe('AdminBackupPage', () => {
   });
 
   it('shows no operations message initially', async () => {
+    const user = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(user);
     await screen.findByText('backup1.sql');
     expect(screen.getByText('admin.backup.noOperations')).toBeInTheDocument();
   });
 
   it('selecting an upload file shows file info and upload button', async () => {
+    const userSetup = userEvent.setup();
     render(<BackupPage />);
+    await openFilesTab(userSetup);
     await screen.findByText('backup1.sql');
     const file = new File(['dummy'], 'restore.sql', { type: 'application/sql' });
     const input = document.querySelector('input[type="file"]') as HTMLInputElement;

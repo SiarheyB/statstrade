@@ -28,6 +28,9 @@ vi.mock('next/link', () => ({
 
 vi.mock('next/navigation', () => ({
   usePathname: () => '/admin',
+  // Нужен колокольчику (NotificationBell): у личного уведомления есть адрес, и
+  // по клику он уводит туда через router.push.
+  useRouter: () => ({ push: vi.fn(), refresh: vi.fn() }),
 }));
 
 describe('AdminNav', () => {
@@ -81,12 +84,23 @@ describe('AdminNav', () => {
   });
 
   it('shows unread badge when count > 0', async () => {
-    const mockFetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ announcements: [] }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ count: 7 }) })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve({ count: 0 }) });
+    // Мок разбирает АДРЕС, а не полагается на порядок вызовов: колокольчик
+    // рядом спрашивает свои эндпоинты, и цепочка mockResolvedValueOnce
+    // разъезжалась от любого нового запроса — тест падал не потому, что бейдж
+    // сломан, а потому что ответы доставались не тем.
+    const mockFetch = vi.fn((url: string) => {
+      const body =
+        url === '/api/admin/support/unread'
+          ? { count: 7 }
+          : url === '/api/admin/errors/unread'
+            ? { count: 0 }
+            : url === '/api/announcements'
+              ? { announcements: [] }
+              : { notifications: [] };
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(body) });
+    });
 
-    global.fetch = mockFetch;
+    global.fetch = mockFetch as unknown as typeof fetch;
 
     render(<AdminNav email="admin@test.com" />);
 

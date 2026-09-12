@@ -177,7 +177,17 @@ describe("MentorShareSettings", () => {
     expect(await screen.findByText(/Основной · BYBIT · mentor\.periodAll/)).toBeInTheDocument();
     expect(screen.getByText(/mentor\.accountGone/)).toBeInTheDocument();
     // Конец хранится как начало следующих суток — в подписи показываем 30 июня.
-    expect(screen.getByText(/mentor\.allAccounts · 6\/1\/2026 — 6\/30\/2026/)).toBeInTheDocument();
+    //
+    // Даты собираем тем же toLocaleDateString(), что и компонент, а не пишем
+    // строкой: без явной локали он берёт СИСТЕМНУЮ, и «6/1/2026» — это вид
+    // только на машине с en-US. На русской Windows выходит «01.06.2026», и
+    // тест падал, хотя компонент работал правильно.
+    const day = (iso: string) => new Date(iso).toLocaleDateString();
+    const from = day("2026-06-01T00:00:00.000Z");
+    const to = day(new Date(Date.parse("2026-07-01T00:00:00.000Z") - 86_400_000).toISOString());
+    expect(
+      screen.getByText(`mentor.allAccounts · ${from} — ${to}`, { exact: false }),
+    ).toBeInTheDocument();
   });
 
   it("отправляет выбранные даты периода", async () => {

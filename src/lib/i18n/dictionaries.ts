@@ -141,6 +141,14 @@ const en: Dict = {
   "econcalAlerts.minute.many": "minutes",
   "econcalAlerts.minute.other": "minutes",
 
+  // web push (подписка устройства на уведомления при закрытой вкладке)
+  "push.title": "Push notifications",
+  "push.hint": "Alerts reach this device even when the tab is closed — price approaching a level you're watching, a release about to come out.",
+  "push.onNote": "This device is subscribed. What gets sent is up to you: the bell next to a level on «Recommendations», and the news reminders in the card above — those now reach you with the tab closed too.",
+  "push.offNote": "Off — nothing is sent to this device. Turning it on asks the browser for permission.",
+  "push.blocked": "Notifications are blocked for this site in the browser. Allow them in the site settings (the icon left of the address), then turn this back on.",
+  "push.unsupported": "This browser can't do push notifications. On iPhone it works only for a site added to the home screen.",
+
   // orderbook heatmap
   "of.title": "Order heatmap",
   "of.subtitle": "Live limit-order walls from the order book over time. The brighter the band, the more resting liquidity at that price.",
@@ -782,6 +790,10 @@ const en: Dict = {
   // announcements
   "announcements.title": "Announcements",
   "announcements.empty": "No announcements",
+  // Колокольчик в меню: там лежат и объявления, и личные уведомления
+  // (подход цены к уровню, скорый выход новости), поэтому заголовок общий.
+  "notifications.title": "Notifications",
+  "notifications.empty": "Nothing new",
   "announcements.read": "Mark as read",
   "announcements.unread": "{n} new",
   "announcements.justNow": "just now",
@@ -1060,12 +1072,13 @@ const en: Dict = {
   "admin.backToApp": "Back to app",
   "admin.nav.overview": "Overview",
   "admin.nav.collector": "Order map",
+  "admin.nav.liqmap": "Liquidation map",
   "admin.nav.forex": "Forex",
   "admin.nav.recommendations": "Recommendations",
   "admin.nav.users": "Users",
   "admin.nav.accounts": "Exchange accounts",
   "admin.nav.exchanges": "Exchanges",
-  "admin.nav.features": "Features",
+  "admin.nav.features": "Other features",
   "admin.support.title": "Support messages",
   "admin.support.subtitle": "Messages sent by users via the support form.",
   "admin.nav.errors": "Error logs",
@@ -1184,6 +1197,8 @@ const en: Dict = {
   "admin.nav.announcements": "Announcements",
   "admin.backup.title": "Database backup",
   "admin.backup.subtitle": "Export and import the TradeStats database",
+  "admin.backup.tabOperations": "Export / Import",
+  "admin.backup.tabFiles": "Files & log",
   "admin.backup.exportSection": "Export",
   "admin.backup.importSection": "Import",
   "admin.backup.exportFull.title": "Full backup",
@@ -1261,6 +1276,8 @@ const en: Dict = {
 
   "admin.collector.title": "Order map",
   "admin.collector.subtitle": "Limit-order heatmap filling: collector service status and writes into Postgres.",
+  "admin.liqmap.title": "Liquidation map",
+  "admin.liqmap.subtitle": "Section access. Computed on the fly from public exchange candles — no config to manage.",
 
   "admin.forex.title": "Forex",
   "admin.forex.subtitle": "forex-collector status (Finnhub WS, Twelve Data, Dukascopy), pairs, and FxCandle write stats.",
@@ -2625,6 +2642,14 @@ const ru: Dict = {
   "econcalAlerts.minute.many": "минут",
   "econcalAlerts.minute.other": "минут",
 
+  // web push (подписка устройства на уведомления при закрытой вкладке)
+  "push.title": "Push-уведомления",
+  "push.hint": "Уведомления приходят на это устройство, даже когда вкладка закрыта: цена подходит к уровню, за которым вы следите, скоро выход новости.",
+  "push.onNote": "Это устройство подписано. Что именно присылать — выбираете вы: колокольчик у уровня на странице «Рекомендации» и напоминания о новостях в карточке выше — они теперь приходят и при закрытой вкладке.",
+  "push.offNote": "Выключено — на это устройство ничего не приходит. При включении браузер спросит разрешение.",
+  "push.blocked": "Уведомления запрещены для сайта в браузере. Разрешите их в настройках сайта (значок слева от адреса) и включите снова.",
+  "push.unsupported": "Этот браузер не умеет push-уведомлений. На iPhone они работают только для сайта, добавленного на главный экран.",
+
   // orderbook heatmap
   "of.title": "Карта ордеров",
   "of.subtitle": "Живые «стены» лимитных ордеров из стакана во времени. Чем ярче полоса — тем больше лимитной ликвидности на этой цене.",
@@ -3260,6 +3285,8 @@ const ru: Dict = {
   // announcements
   "announcements.title": "Объявления",
   "announcements.empty": "Нет объявлений",
+  "notifications.title": "Уведомления",
+  "notifications.empty": "Ничего нового",
   "announcements.read": "Отметить как прочитанное",
   "announcements.unread": "{n} новых",
   "announcements.justNow": "только что",
@@ -3532,12 +3559,13 @@ const ru: Dict = {
   "admin.backToApp": "К приложению",
   "admin.nav.overview": "Обзор",
   "admin.nav.collector": "Карта ордеров",
+  "admin.nav.liqmap": "Карта ликвидаций",
   "admin.nav.forex": "Форекс",
   "admin.nav.recommendations": "Рекомендации",
   "admin.nav.users": "Пользователи",
   "admin.nav.accounts": "Аккаунты бирж",
   "admin.nav.exchanges": "Биржи",
-  "admin.nav.features": "Функции",
+  "admin.nav.features": "Прочие функции",
   "admin.support.title": "Сообщения поддержки",
   "admin.support.subtitle": "Сообщения, отправленные пользователями через форму обратной связи.",
   "admin.nav.errors": "Логи ошибок",
@@ -3657,6 +3685,8 @@ const ru: Dict = {
   "admin.nav.announcements": "Объявления",
   "admin.backup.title": "Резервные копии БД",
   "admin.backup.subtitle": "Экспорт и импорт базы данных TradingStats",
+  "admin.backup.tabOperations": "Экспорт / Импорт",
+  "admin.backup.tabFiles": "Файлы и журнал",
   "admin.backup.exportSection": "Экспорт",
   "admin.backup.importSection": "Импорт",
   "admin.backup.exportFull.title": "Полный бэкап",
@@ -3736,6 +3766,8 @@ const ru: Dict = {
 
   "admin.collector.title": "Карта ордеров",
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",
+  "admin.liqmap.title": "Карта ликвидаций",
+  "admin.liqmap.subtitle": "Доступ к разделу. Считается на лету из публичных свечей биржи — настраивать нечего.",
 
   "admin.forex.title": "Форекс",
   "admin.forex.subtitle": "Статус forex-collector (Finnhub WS, Twelve Data, Dukascopy), пары и факт записи в FxCandle.",

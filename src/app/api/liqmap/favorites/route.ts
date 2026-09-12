@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { liqmapAccessError } from "@/lib/liqmapAccess";
 import { prisma } from "@/lib/db";
 
 // symbol здесь и так очищается регуляркой, а вот exchange принимался любой
@@ -18,6 +19,8 @@ function normalizeExchange(raw: string | null | undefined): string | null {
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await liqmapAccessError();
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const exchange = normalizeExchange(url.searchParams.get("exchange"));
@@ -39,6 +42,8 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await liqmapAccessError();
+  if (denied) return denied;
 
   try {
     const { exchange, symbol } = (await req.json()) as {
@@ -79,6 +84,8 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await liqmapAccessError();
+  if (denied) return denied;
 
   try {
     const { exchange, symbol } = (await req.json()) as {

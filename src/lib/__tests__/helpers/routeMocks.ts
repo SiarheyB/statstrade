@@ -241,6 +241,25 @@ export const mockPrisma = {
     findUnique: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue({}),
   },
+
+  // Личные уведомления колокольчика (/api/notifications).
+  userNotification: {
+    findMany: vi.fn().mockResolvedValue([]),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    create: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+  },
+
+  // Подписки на уровни (/api/recommendations/alerts).
+  levelAlert: {
+    findMany: vi.fn().mockResolvedValue([]),
+    findUnique: vi.fn().mockResolvedValue(null),
+    upsert: vi.fn().mockResolvedValue({}),
+    deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    update: vi.fn().mockResolvedValue({}),
+    count: vi.fn().mockResolvedValue(0),
+  },
 };
 
 /* --- Core module mocks (auth / admin / db) --- */
@@ -264,9 +283,15 @@ vi.mock('@/lib/db', () => ({ prisma: mockPrisma }));
  * risk route test (src/app/api/risk/__tests__/route.test.ts) provides its own
  * detailed vi.mock with mockImplementation for those two modules. */
 
-/* featureConfig: routes call getFeatureConfig / setFeatureConfig / getAllFeatureConfigs */
+/* featureConfig: routes call getFeatureConfig / setFeatureConfig / getAllFeatureConfigs.
+ * Дефолт — enabled:true (как в проде для фичи без строки в БД): тесты про
+ * forex/game и т.п. подменяют свой accessError-хелпер отдельным vi.mock и
+ * этот дефолт не видят, а более новые общие выключатели (orderflow, liqmap,
+ * econcal, news) читают getFeatureConfig напрямую — без дефолта здесь
+ * getFeatureConfig() возвращал бы undefined и роут падал бы ещё до проверки
+ * того, что тест вообще хочет проверить. */
 vi.mock('@/lib/featureConfig', () => ({
-  getFeatureConfig: vi.fn(),
+  getFeatureConfig: vi.fn().mockResolvedValue({ enabled: true }),
   setFeatureConfig: vi.fn(),
   getAllFeatureConfigs: vi.fn(),
 }));

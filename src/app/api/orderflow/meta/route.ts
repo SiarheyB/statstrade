@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, serverError } from "@/lib/api";
+import { orderflowAccessError } from "@/lib/orderflowAccess";
 
 export const maxDuration = 15;
 
@@ -9,6 +10,8 @@ export const maxDuration = 15;
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await orderflowAccessError();
+  if (denied) return denied;
   try {
     // ВАЖНО: distinct берём из маленькой rollup-таблицы (одна строка на
     // symbol×exchange×минута), а НЕ из сырого ObSnapshot (~десятки млн строк) —

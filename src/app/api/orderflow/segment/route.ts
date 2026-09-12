@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
+import { orderflowAccessError } from "@/lib/orderflowAccess";
 import { computeOrderflow, computeFootprint, rollupLevelFor, TF_MS } from "@/lib/orderflow";
 import { createRouteCache } from "@/lib/routeCache";
 
@@ -33,6 +34,8 @@ const GRID_MS = { minute: 60_000, hour: 3600_000, day: 86_400_000 } as const;
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await orderflowAccessError();
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const symbol = (url.searchParams.get("symbol") ?? "BTCUSDT").toUpperCase().replace(/[^A-Z0-9]/g, "");

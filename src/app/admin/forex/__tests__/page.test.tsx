@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import AdminForexPage from "../page";
 
 vi.mock("@/components/AdminForex", () => ({
@@ -15,12 +15,20 @@ vi.mock("@/lib/i18n/server", () => ({
   }),
 }));
 
+// Страница разбита на вкладки (AdminForexTabs) — статус и настройки больше
+// не видны одновременно, переключаются кнопками в шапке.
 describe("AdminForexPage", () => {
-  it("renders heading and both forex admin components", async () => {
+  it("shows the overview tab by default, settings after a click", async () => {
     const ui = await AdminForexPage();
     render(ui as React.ReactElement);
+
     expect(screen.getByText("admin.forex.title")).toBeInTheDocument();
     expect(screen.getByTestId("admin-forex")).toBeInTheDocument();
+    expect(screen.queryByTestId("admin-forex-config")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Настройки"));
+
     expect(screen.getByTestId("admin-forex-config")).toBeInTheDocument();
+    expect(screen.queryByTestId("admin-forex")).not.toBeInTheDocument();
   });
 });

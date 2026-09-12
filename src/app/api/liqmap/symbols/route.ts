@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, sharedCacheHeaders } from "@/lib/api";
+import { liqmapAccessError } from "@/lib/liqmapAccess";
 
 export const maxDuration = 20;
 
@@ -14,6 +15,8 @@ const UA = "Mozilla/5.0 (compatible; TradeStatsBot/1.0; +https://tradingstat.ru)
 export async function GET() {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await liqmapAccessError();
+  if (denied) return denied;
 
   if (cache && Date.now() - cache.at < TTL_MS) {
     return NextResponse.json({ symbols: cache.symbols }, { headers: CACHE });

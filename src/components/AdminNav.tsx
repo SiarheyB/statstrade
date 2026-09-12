@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3, Gamepad2 } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3, Gamepad2, Flame } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
@@ -18,22 +18,39 @@ type NavLink = { href: string; key: string; icon: LucideIcon; exact?: boolean };
 type NavGroup = { key: string; icon: LucideIcon; children: NavLink[] };
 type NavItem = NavLink | NavGroup;
 
+// Порядок — по смыслу, не по дате добавления: сначала обзор, затем разделы
+// приложения в том же порядке, что и в пользовательском меню (контент → карты
+// → форекс → рекомендации → игра), затем общие переключатели прочих фич,
+// затем управление людьми/биржами, затем коммуникация с пользователями,
+// затем эксплуатация/мониторинг — от самого частого к самому редкому.
 const LINKS: NavItem[] = [
   { href: "/admin", key: "admin.nav.overview", icon: LayoutDashboard, exact: true },
+
+  // Разделы приложения — у каждого свой переключатель включения/выключения
+  // прямо на его странице (FeatureAccessToggle), а не в общих «Функциях».
+  { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
   { href: "/admin/collector", key: "admin.nav.collector", icon: Layers },
+  { href: "/admin/liqmap", key: "admin.nav.liqmap", icon: Flame },
   { href: "/admin/forex", key: "admin.nav.forex", icon: TrendingUp },
   { href: "/admin/recommendations", key: "admin.nav.recommendations", icon: Sparkles },
   { href: "/admin/game", key: "admin.nav.game", icon: Gamepad2 },
+
+  // Переключатели и лимиты фич БЕЗ своей отдельной страницы.
+  { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
+
+  // Люди и биржевые интеграции.
   { href: "/admin/users", key: "admin.nav.users", icon: Users },
   { href: "/admin/accounts", key: "admin.nav.accounts", icon: Plug },
   { href: "/admin/exchanges", key: "admin.nav.exchanges", icon: Coins },
-    { href: "/admin/features", key: "admin.nav.features", icon: SlidersHorizontal },
+
+  // Коммуникация с пользователями.
   { href: "/admin/announcements", key: "admin.nav.announcements", icon: Megaphone },
   { href: "/admin/support", key: "admin.nav.support", icon: Headset },
+  { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
+
+  // Эксплуатация и мониторинг — смотрят реже остального.
   { href: "/admin/traffic", key: "admin.nav.traffic", icon: BarChart3 },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
-  { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
-  { href: "/admin/content", key: "admin.nav.content", icon: Newspaper },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },
   {
     key: "admin.nav.database",

@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { BellDot } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { BellDot, Megaphone, TrendingUp, CalendarClock } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -11,6 +12,39 @@ type Announcement = {
   body: string;
   createdAt: string;
   readAt: string | null;
+};
+
+// Личное уведомление пользователя: подход цены к уровню, скорый выход новости
+// (см. lib/notifications.ts). В колокольчик попадает наравне с объявлениями.
+type UserNotification = {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
+// Колокольчик показывает ДВА разных источника одним списком: объявления
+// администратора (общие для всех, своя отметка о прочтении) и личные
+// уведомления. Приводим их к одному виду, чтобы список сортировался по
+// времени, а не по тому, откуда строка пришла.
+type Item = {
+  id: string;
+  source: "announcement" | "notification";
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  createdAt: string;
+  readAt: string | null;
+};
+
+const KIND_ICON: Record<string, typeof Megaphone> = {
+  announcement: Megaphone,
+  level_alert: TrendingUp,
+  econcal: CalendarClock,
 };
 
 const POLL_MS = 60_000;
@@ -28,16 +62,41 @@ function fmtAge(iso: string, t: (k: string) => string): string {
 
 export default function NotificationBell({ collapsed: _collapsed }: { collapsed?: boolean }) {
   const { t } = useI18n();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
+  const [notifications, setNotifications] = useState<UserNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const ref = useRef<HTMLDivElement>(null);
 
-  const unread = announcements.filter((a) => !a.readAt).length;
-  const unreadAnnouncements = announcements.filter((a) => !a.readAt);
+  const items: Item[] = [
+    ...announcements.map((a) => ({
+      id: a.id,
+      source: "announcement" as const,
+      kind: "announcement",
+      title: a.title,
+      body: a.body,
+      url: null,
+      createdAt: a.createdAt,
+      readAt: a.readAt,
+    })),
+    ...notifications.map((n) => ({
+      id: n.id,
+      source: "notification" as const,
+      kind: n.kind,
+      title: n.title,
+      body: n.body,
+      url: n.url,
+      createdAt: n.createdAt,
+      readAt: n.readAt,
+    })),
+  ].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+
+  const unreadItems = items.filter((i) => !i.readAt);
+  const unread = unreadItems.length;
 
   // Close on click-outside
   useEffect(() => {
@@ -63,14 +122,23 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
 
   const fetchAnnouncements = useCallback(async () => {
     try {
-      const res = await fetch("/api/announcements");
-      if (res.ok) {
-        const data = await res.json();
-        setAnnouncements(data.announcements ?? []);
-        setError(false);
-      } else {
-        setError(true);
+      // Оба источника одним заходом. allSettled, а не Promise.all: недоступность
+      // одного не должна прятать второй — в колокольчике это выглядело бы как
+      // «уведомлений нет», хотя они есть.
+      const [annRes, notifRes] = await Promise.allSettled([
+        fetch("/api/announcements"),
+        fetch("/api/notifications"),
+      ]);
+      let ok = false;
+      if (annRes.status === "fulfilled" && annRes.value.ok) {
+        setAnnouncements((await annRes.value.json()).announcements ?? []);
+        ok = true;
       }
+      if (notifRes.status === "fulfilled" && notifRes.value.ok) {
+        setNotifications((await notifRes.value.json()).notifications ?? []);
+        ok = true;
+      }
+      setError(!ok);
     } catch {
       setError(true);
     } finally {
@@ -85,37 +153,61 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
     return () => clearInterval(iv);
   }, [fetchAnnouncements]);
 
-  const markRead = useCallback(async (id: string) => {
-    // Optimistic update
-    setAnnouncements((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, readAt: new Date().toISOString() } : a)),
-    );
-    setExpandedId((prev) => (prev === id ? id : prev));
+  // Отметка о прочтении у двух источников своя: у объявлений отдельная таблица
+  // на пару «объявление + пользователь», у личных уведомлений — поле в самой
+  // строке. Наружу это одна операция.
+  const markRead = useCallback(async (item: Item) => {
+    const now = new Date().toISOString();
+    if (item.source === "announcement") {
+      setAnnouncements((prev) => prev.map((a) => (a.id === item.id ? { ...a, readAt: now } : a)));
+    } else {
+      setNotifications((prev) => prev.map((n) => (n.id === item.id ? { ...n, readAt: now } : n)));
+    }
 
     try {
-      await fetch("/api/announcements/read", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ announcementId: id }),
-      });
+      const res =
+        item.source === "announcement"
+          ? await fetch("/api/announcements/read", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ announcementId: item.id }),
+            })
+          : await fetch("/api/notifications", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ id: item.id }),
+            });
+      if (!res.ok) throw new Error(String(res.status));
     } catch {
-      // Revert on failure
-      setAnnouncements((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, readAt: null } : a)),
-      );
+      // Не сохранилось — возвращаем как было, иначе счётчик врал бы до
+      // перезагрузки страницы.
+      if (item.source === "announcement") {
+        setAnnouncements((prev) => prev.map((a) => (a.id === item.id ? { ...a, readAt: null } : a)));
+      } else {
+        setNotifications((prev) => prev.map((n) => (n.id === item.id ? { ...n, readAt: null } : n)));
+      }
     }
   }, []);
 
   const handleClick = useCallback(
-    (a: Announcement) => {
-      if (expandedId === a.id) {
+    (item: Item) => {
+      // У личного уведомления есть адрес — по клику ведём туда, ради этого
+      // оно и пришло («цена у уровня» без перехода к уровню бесполезна).
+      if (item.url) {
+        if (!item.readAt) markRead(item);
+        setOpen(false);
+        router.push(item.url);
+        return;
+      }
+      // У объявления адреса нет — по клику разворачиваем текст на месте.
+      if (expandedId === item.id) {
         setExpandedId(null);
       } else {
-        setExpandedId(a.id);
-        if (!a.readAt) markRead(a.id);
+        setExpandedId(item.id);
+        if (!item.readAt) markRead(item);
       }
     },
-    [expandedId, markRead],
+    [expandedId, markRead, router],
   );
 
   const toggleOpen = useCallback(() => {
@@ -134,7 +226,7 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
           "relative p-1.5 text-muted hover:text-fg transition rounded-lg hover:bg-surface-2",
           open && "text-fg bg-surface-2",
         )}
-        aria-label={t("announcements.title")}
+        aria-label={t("notifications.title")}
         aria-haspopup="true"
         aria-expanded={open}
       >
@@ -152,7 +244,7 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
           style={{ top: pos.top, left: pos.left }}
         >
           <div className="px-4 py-3 border-b border-border">
-            <h3 className="text-sm font-semibold">{t("announcements.title")}</h3>
+            <h3 className="text-sm font-semibold">{t("notifications.title")}</h3>
           </div>
 
           <div className="divide-y divide-border">
@@ -163,16 +255,20 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
               </div>
             ) : error ? (
               <div className="py-8 text-xs text-muted text-center">{t("common.error")}</div>
-            ) : unreadAnnouncements.length === 0 ? (
-              <div className="py-8 text-xs text-muted text-center">{t("announcements.empty")}</div>
+            ) : unreadItems.length === 0 ? (
+              <div className="py-8 text-xs text-muted text-center">{t("notifications.empty")}</div>
             ) : (
-              unreadAnnouncements.map((a) => {
-                const isUnread = !a.readAt;
-                const isExpanded = expandedId === a.id;
+              unreadItems.map((item) => {
+                const isUnread = !item.readAt;
+                const isExpanded = expandedId === item.id;
+                // Значок сразу говорит, что это: объявление, подход цены к
+                // уровню или скорая новость. В смешанном списке без него
+                // приходится вчитываться в каждую строку.
+                const Icon = KIND_ICON[item.kind] ?? Megaphone;
                 return (
                   <button
-                    key={a.id}
-                    onClick={() => handleClick(a)}
+                    key={`${item.source}:${item.id}`}
+                    onClick={() => handleClick(item)}
                     className={clsx(
                       "w-full min-w-0 text-left px-4 py-2.5 transition border-l-2 hover:bg-surface-2",
                       isUnread
@@ -181,25 +277,38 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
                     )}
                   >
                     <div className="flex items-start justify-between gap-2 min-w-0">
-                      <span
-                        className={clsx(
-                          "text-sm leading-tight break-words",
-                          isUnread ? "text-fg" : "text-faint",
-                        )}
-                      >
-                        {a.title}
+                      <span className="flex items-start gap-2 min-w-0">
+                        <Icon
+                          size={14}
+                          className={clsx(
+                            "shrink-0 mt-0.5",
+                            item.kind === "level_alert"
+                              ? "text-accent"
+                              : item.kind === "econcal"
+                                ? "text-warn"
+                                : "text-muted",
+                          )}
+                        />
+                        <span
+                          className={clsx(
+                            "text-sm leading-tight break-words",
+                            isUnread ? "text-fg" : "text-faint",
+                          )}
+                        >
+                          {item.title}
+                        </span>
                       </span>
                       <span className="text-[10px] text-faint whitespace-nowrap shrink-0 mt-0.5">
-                        {fmtAge(a.createdAt, t)}
+                        {fmtAge(item.createdAt, t)}
                       </span>
                     </div>
                     <p
                       className={clsx(
-                        "text-xs text-muted mt-1 leading-relaxed whitespace-pre-wrap break-words",
+                        "text-xs text-muted mt-1 leading-relaxed whitespace-pre-wrap break-words pl-[22px]",
                         isExpanded ? "" : "line-clamp-2",
                       )}
                     >
-                      {a.body}
+                      {item.body}
                     </p>
                   </button>
                 );

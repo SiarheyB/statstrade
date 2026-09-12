@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError, sharedCacheHeaders } from "@/lib/api";
+import { liqmapAccessError } from "@/lib/liqmapAccess";
 import { computeLiqMap, type Exchange, type Timeframe } from "@/lib/liqmap";
 import { createRouteCache } from "@/lib/routeCache";
 
@@ -18,6 +19,8 @@ const cache = createRouteCache(TTL_MS);
 export async function GET(req: Request) {
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await liqmapAccessError();
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const exchange = (url.searchParams.get("exchange") ?? "all").toLowerCase();

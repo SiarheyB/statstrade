@@ -25,11 +25,22 @@ export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
       if (!res.ok) {
         setMsg(json.error ?? t("admin.content.error"));
       } else {
-        const added = (json.results ?? []).reduce(
-          (s: number, r: { added?: number; upserted?: number }) => s + (r.added ?? r.upserted ?? 0),
-          0,
+        type FeedResult = { added?: number; upserted?: number; error?: string };
+        const results: FeedResult[] = json.results ?? [];
+        const added = results.reduce((s, r) => s + (r.added ?? r.upserted ?? 0), 0);
+        // Сам запрос успешен (200), но КАЖДЫЙ фид отвечает за себя, и его
+        // ошибка лежит внутри results. Раньше она терялась: при недоступном
+        // источнике кнопка показывала бодрое «+0», и почему счётчик не растёт,
+        // было решительно непонятно. Теперь причина видна сразу — именно за
+        // ней сюда и приходят.
+        const failed = results.filter((r) => r.error);
+        setMsg(
+          failed.length && added === 0
+            ? failed[0].error!.slice(0, 120)
+            : failed.length
+              ? `+${added}, ошибок: ${failed.length}`
+              : `+${added}`,
         );
-        setMsg(`+${added}`);
         router.refresh();
       }
     } catch (e) {
@@ -41,7 +52,16 @@ export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
 
   return (
     <span className="flex items-center gap-2">
-      {msg && <span className="text-xs text-faint">{msg}</span>}
+      {/* Ошибку показываем тревожным цветом и не режем в одну строку: длинный
+          текст причины должен читаться целиком, иначе он бесполезен. */}
+      {msg && (
+        <span
+          className={clsx("text-xs max-w-xs text-right", msg.startsWith("+") ? "text-faint" : "text-loss")}
+          title={msg}
+        >
+          {msg}
+        </span>
+      )}
       <button
         onClick={refresh}
         disabled={busy}

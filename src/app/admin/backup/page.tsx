@@ -124,8 +124,14 @@ function BackupCard(props: {
   );
 }
 
+// Экспорт/импорт и файлы/журнал отвечают на разные вопросы («что сделать» и
+// «что уже случилось») — разведены по вкладкам, чтобы не листать одно ради
+// другого. Состояние и загрузка данных общие: разделение чисто визуальное.
+type BackupTab = 'operations' | 'files';
+
 export default function AdminBackupPage() {
   const { t } = useI18n();
+  const [tab, setTab] = useState<BackupTab>('operations');
   const [files, setFiles] = useState<BackupFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [operations, setOperations] = useState<BackupOperation[]>([]);
@@ -434,6 +440,28 @@ export default function AdminBackupPage() {
         </div>
       )}
 
+      <div className='mt-6 flex flex-wrap items-center gap-1 card p-1 w-fit'>
+        {([
+          { id: 'operations' as const, label: t('admin.backup.tabOperations'), Icon: Download },
+          { id: 'files' as const, label: t('admin.backup.tabFiles'), Icon: Folder },
+        ]).map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type='button'
+            onClick={() => setTab(id)}
+            className={clsx(
+              'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition',
+              tab === id ? 'bg-accent text-white' : 'text-muted hover:text-fg',
+            )}
+          >
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'operations' && (
+      <>
       <h2 className='mt-8 text-lg font-semibold'>{t('admin.backup.exportSection')}</h2>
       <div className='mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <BackupCard
@@ -492,7 +520,10 @@ export default function AdminBackupPage() {
           disabled={busy}
         />
       </div>
+      </>
+      )}
 
+      {tab === 'files' && (
       <div className='mt-8 grid gap-6 lg:grid-cols-2'>
         <div>
           <h2 className='text-lg font-semibold flex items-center gap-2'>
@@ -670,6 +701,7 @@ export default function AdminBackupPage() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

@@ -22,6 +22,10 @@ describe('features - FEATURE_DEFAULTS', () => {
       'mentorMode',
       'volumeProfile',
       'divergenceScanner',
+      'econcal',
+      'news',
+      'orderflow',
+      'liqmap',
       'forex',
       'forexPublicAccess',
       'imbalanceIndicator',
@@ -40,6 +44,10 @@ describe('features - FEATURE_DEFAULTS', () => {
   // least one numeric field" проверяем не для всех фич подряд, а с явным
   // исключением.
   const PURE_TOGGLE_KEYS = new Set<FeatureKey>([
+    'econcal',
+    'news',
+    'orderflow',
+    'liqmap',
     'forex',
     'forexPublicAccess',
     'tradeRecommendationsPublicAccess',

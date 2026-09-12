@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-// Вкл/выкл + числовые лимиты для опциональных фич (генерируется из
-// src/lib/features.ts — новая фича появляется здесь без правок компонента,
-// включая описание и подсказки по полям — их пишет разработчик один раз
-// в реестре, а не в этом компоненте).
+// Карточка-редактор ОДНОЙ фичи (вкл/выкл + числовые поля) — рендерит список
+// ключей из FeatureConfig (тот же /api/admin/features, что и раньше в
+// AdminFeatures.tsx). Переиспользуется для каждой вкладки на /admin/features
+// (AdminFeaturesTabs.tsx) — набор ключей передаётся пропом, сама карточка
+// от вкладки не зависит.
 
 type FeatureRow = {
   key: string;
@@ -15,25 +16,7 @@ type FeatureRow = {
   value: { enabled: boolean } & Record<string, unknown>;
 };
 
-// forex/forexPublicAccess живут в этой же таблице FeatureConfig (данные и
-// сам переключатель работают через общий /api/admin/features), но на этой
-// общей странице их не показываем — у них теперь свой дублирующий UI на
-// /admin/forex (AdminForexConfig.tsx), рядом с остальными настройками
-// форекса, чтобы не искать их среди несвязанных фич.
-// tradeRecommendations/tradeRecommendationsPublicAccess: свой дублирующий UI
-// на /admin/recommendations (AdminRecommendations.tsx), рядом со статусом
-// пересчёта и кнопкой «Пересчитать сейчас» — тот же принцип, что у forex выше.
-// game/gamePublicAccess: свой дублирующий UI на /admin/game (AdminGameConfig.tsx).
-const HIDDEN_HERE = new Set([
-  "forex",
-  "forexPublicAccess",
-  "tradeRecommendations",
-  "tradeRecommendationsPublicAccess",
-  "game",
-  "gamePublicAccess",
-]);
-
-export default function AdminFeatures() {
+export default function FeatureConfigGroup({ keys }: { keys: string[] }) {
   const [rows, setRows] = useState<FeatureRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
@@ -44,8 +27,8 @@ export default function AdminFeatures() {
     (async () => {
       const res = await fetch("/api/admin/features");
       if (res.ok && alive) {
-        const rows: FeatureRow[] = ((await res.json()).features ?? []).filter(
-          (r: FeatureRow) => !HIDDEN_HERE.has(r.key),
+        const rows: FeatureRow[] = ((await res.json()).features ?? []).filter((r: FeatureRow) =>
+          keys.includes(r.key),
         );
         setRows(rows);
         setDrafts(
@@ -63,7 +46,10 @@ export default function AdminFeatures() {
     return () => {
       alive = false;
     };
-  }, []);
+    // keys — статический литерал на вызывающей стороне (не state), незачем
+    // гонять эффект заново при каждом рендере родителя.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys.join(",")]);
 
   async function patch(key: string, body: { enabled?: boolean; config?: Record<string, number> }) {
     setBusy(key);
@@ -74,7 +60,8 @@ export default function AdminFeatures() {
         body: JSON.stringify({ key, ...body }),
       });
       if (res.ok) {
-        setRows((await res.json()).features ?? []);
+        const all: FeatureRow[] = (await res.json()).features ?? [];
+        setRows(all.filter((r) => keys.includes(r.key)));
         if (body.config) {
           setSaved(key);
           setTimeout(() => setSaved(null), 1500);
@@ -96,7 +83,7 @@ export default function AdminFeatures() {
   }
 
   return (
-    <div className="mt-6 max-w-2xl space-y-3">
+    <div className="max-w-2xl space-y-3">
       {rows.map((r) => {
         const numericFields = Object.entries(r.value).filter(([k]) => k !== "enabled");
         return (
@@ -107,9 +94,6 @@ export default function AdminFeatures() {
                 {r.description && (
                   <p className="text-xs text-muted mt-1 leading-relaxed max-w-lg">{r.description}</p>
                 )}
-                <div className="text-[11px] text-faint mt-1">
-                  Ключ фичи (для справки, вводить нигде не нужно): <code>{r.key}</code>
-                </div>
               </div>
               <Switch
                 on={r.value.enabled}
