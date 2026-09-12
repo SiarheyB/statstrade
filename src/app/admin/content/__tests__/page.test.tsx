@@ -28,6 +28,13 @@ vi.mock("@/components/admin/NewsRetentionSetting", () => ({
   default: ({ value }: { value: number }) => <div data-testid="news-retention">{value}</div>,
 }));
 
+// Тянет /api/admin/features сам по себе (общий переключатель раздела, см.
+// FeatureAccessToggle.tsx) — здесь это не предмет теста, страница про
+// карточки и счётчики.
+vi.mock("@/components/admin/FeatureAccessToggle", () => ({
+  default: ({ featureKey }: { featureKey: string }) => <div data-testid={`feature-toggle-${featureKey}`} />,
+}));
+
 describe("AdminContentPage", () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -1072,6 +1072,7 @@ const en: Dict = {
   "admin.backToApp": "Back to app",
   "admin.nav.overview": "Overview",
   "admin.nav.collector": "Order map",
+  "admin.nav.liqmap": "Liquidation map",
   "admin.nav.forex": "Forex",
   "admin.nav.recommendations": "Recommendations",
   "admin.nav.users": "Users",
@@ -1273,6 +1274,8 @@ const en: Dict = {
 
   "admin.collector.title": "Order map",
   "admin.collector.subtitle": "Limit-order heatmap filling: collector service status and writes into Postgres.",
+  "admin.liqmap.title": "Liquidation map",
+  "admin.liqmap.subtitle": "Section access. Computed on the fly from public exchange candles — no config to manage.",
 
   "admin.forex.title": "Forex",
   "admin.forex.subtitle": "forex-collector status (Finnhub WS, Twelve Data, Dukascopy), pairs, and FxCandle write stats.",
@@ -3554,6 +3557,7 @@ const ru: Dict = {
   "admin.backToApp": "К приложению",
   "admin.nav.overview": "Обзор",
   "admin.nav.collector": "Карта ордеров",
+  "admin.nav.liqmap": "Карта ликвидаций",
   "admin.nav.forex": "Форекс",
   "admin.nav.recommendations": "Рекомендации",
   "admin.nav.users": "Пользователи",
@@ -3758,6 +3762,8 @@ const ru: Dict = {
 
   "admin.collector.title": "Карта ордеров",
   "admin.collector.subtitle": "Наполнение heatmap лимитных ордеров: статус collector-сервиса и факт записи в Postgres.",
+  "admin.liqmap.title": "Карта ликвидаций",
+  "admin.liqmap.subtitle": "Доступ к разделу. Считается на лету из публичных свечей биржи — настраивать нечего.",
 
   "admin.forex.title": "Форекс",
   "admin.forex.subtitle": "Статус forex-collector (Finnhub WS, Twelve Data, Dukascopy), пары и факт записи в FxCandle.",

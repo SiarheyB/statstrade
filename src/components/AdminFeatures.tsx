@@ -24,6 +24,10 @@ type FeatureRow = {
 // на /admin/recommendations (AdminRecommendations.tsx), рядом со статусом
 // пересчёта и кнопкой «Пересчитать сейчас» — тот же принцип, что у forex выше.
 // game/gamePublicAccess: свой дублирующий UI на /admin/game (AdminGameConfig.tsx).
+// econcal/news: свой UI на /admin/content (карточки «Календарь»/«Новости»,
+// FeatureAccessToggle compact). orderflow: /admin/collector, рядом с
+// остальными настройками карты ордеров. liqmap: своя страница /admin/liqmap
+// (своей конфигурации у него нет — карта считается на лету).
 const HIDDEN_HERE = new Set([
   "forex",
   "forexPublicAccess",
@@ -31,6 +35,10 @@ const HIDDEN_HERE = new Set([
   "tradeRecommendationsPublicAccess",
   "game",
   "gamePublicAccess",
+  "econcal",
+  "news",
+  "orderflow",
+  "liqmap",
 ]);
 
 export default function AdminFeatures() {
