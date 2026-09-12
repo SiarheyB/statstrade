@@ -1,42 +1,35 @@
 "use client";
 
-// /admin/features валил в одну кучу три ОРДЕРФЛОУ-индикатора и четыре
-// несвязанных фичи — разбито по вкладкам, тем же приёмом, что уже есть у
-// /admin/game (AdminGameTabs.tsx) и /admin/collector (AdminCollectorTabs.tsx):
-// кнопки в шапке переключают, что показано, а не «листай, пока не найдёшь».
+// /admin/features валил в одну кучу шесть разных индикаторов/фич — разбито
+// по вкладкам, тем же приёмом, что уже есть у /admin/game (AdminGameTabs.tsx)
+// и /admin/collector (AdminCollectorTabs.tsx): кнопки в шапке переключают,
+// что показано, а не «листай, пока не найдёшь».
+//
+// Каждый индикатор — своя кнопка, а не одна общая «Индикаторы» на все
+// сразу: иначе внутри неё снова была бы та же куча, от которой уходили.
+// Playbooks и Mentor Mode — не индикаторы, а целые разделы кабинета
+// (страница «Playbooks», ссылки на статистику) — общая кнопка для них
+// уместна, у обоих просто «включено/выключено» и один-два параметра.
 //
 // forex/game/tradeRecommendations/econcal/news/orderflow/liqmap сюда не
-// попадают вовсе — у них СВОИ страницы в админке (см. AdminFeatures-подобные
-// компоненты там же), а не вкладка здесь.
+// попадают вовсе — у них СВОИ страницы в админке, а не вкладка здесь.
 import { useState } from "react";
-import { BarChart3, LineChart, NotebookPen } from "lucide-react";
+import { BarChart3, Waves, Gauge, LineChart, Dices, NotebookPen } from "lucide-react";
 import FeatureConfigGroup from "@/components/admin/FeatureConfigGroup";
 
 const TABS = [
-  {
-    id: "indicators",
-    label: "Индикаторы",
-    Icon: BarChart3,
-    keys: ["volumeProfile", "divergenceScanner", "imbalanceIndicator"],
-  },
-  {
-    id: "analytics",
-    label: "Аналитика",
-    Icon: LineChart,
-    keys: ["exitEfficiency", "monteCarlo"],
-  },
-  {
-    id: "sections",
-    label: "Разделы кабинета",
-    Icon: NotebookPen,
-    keys: ["playbooks", "mentorMode"],
-  },
+  { id: "volumeProfile", label: "Volume Profile", Icon: BarChart3, keys: ["volumeProfile"] },
+  { id: "divergenceScanner", label: "Divergence Scanner", Icon: Waves, keys: ["divergenceScanner"] },
+  { id: "imbalanceIndicator", label: "Bid/Ask Imbalance", Icon: Gauge, keys: ["imbalanceIndicator"] },
+  { id: "exitEfficiency", label: "Exit Efficiency", Icon: LineChart, keys: ["exitEfficiency"] },
+  { id: "monteCarlo", label: "Monte Carlo", Icon: Dices, keys: ["monteCarlo"] },
+  { id: "sections", label: "Разделы кабинета", Icon: NotebookPen, keys: ["playbooks", "mentorMode"] },
 ] as const;
 
 type Tab = (typeof TABS)[number]["id"];
 
 export default function AdminFeaturesTabs() {
-  const [tab, setTab] = useState<Tab>("indicators");
+  const [tab, setTab] = useState<Tab>("volumeProfile");
   const active = TABS.find((t) => t.id === tab)!;
 
   return (
