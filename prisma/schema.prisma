@@ -1000,17 +1000,8 @@ model EconomicEvent {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Источник события: "forexfactory" (бесплатный фид faireconomy) или
-  // "investing" (парсинг ru.investing.com). Переключается в /admin/content;
-  // показывается всегда ровно один выбранный источник, но данные обоих лежат
-  // рядом — переключение туда-обратно не требует нового обхода.
-  source    String   @default("forexfactory")
-
-  // Ключ включает source: одно и то же событие есть в обоих источниках, с
-  // разным написанием и важностью, и без source они затирали бы друг друга.
-  @@unique([source, time, currency, title])
+  @@unique([time, currency, title])
   @@index([time])
-  @@index([source, time])
 }
 
 // Generic on/off + tunable settings for optional features, editable from

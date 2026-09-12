@@ -52,9 +52,8 @@ export default function ContentActions({ feed }: { feed: "news" | "econcal" }) {
 
   return (
     <span className="flex items-center gap-2">
-      {/* Ошибку показываем тревожным цветом и не режем в одну строку: текст
-          вроде «investing ответил не JSON — похоже на проверку Cloudflare»
-          должен читаться целиком, иначе он бесполезен. */}
+      {/* Ошибку показываем тревожным цветом и не режем в одну строку: длинный
+          текст причины должен читаться целиком, иначе он бесполезен. */}
       {msg && (
         <span
           className={clsx("text-xs max-w-xs text-right", msg.startsWith("+") ? "text-faint" : "text-loss")}

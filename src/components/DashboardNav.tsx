@@ -54,9 +54,7 @@ const LINKS = [
 
 const NEWS_CHILDREN = [
   { href: "/dashboard/news", key: "nav.news", icon: Newspaper },
-  // featureKey без userOnlyFeatureKey: выключенный календарь пропадает у ВСЕХ,
-  // включая админа — это общий рубильник раздела, а не обкатка перед релизом.
-  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock, featureKey: "econcal" },
+  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock },
 ];
 
 function isNewsRoute(pathname: string): boolean {
@@ -148,9 +146,7 @@ export default function DashboardNav({
   const [hiddenForUsersOnly, setHiddenForUsersOnly] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    // NEWS_CHILDREN тоже: у «Календаря» есть featureKey, и без этой группы
-    // ключ не попал бы в опрос — пункт остался бы виден при выключенной фиче.
-    const allItems = [...LINKS, ...SERVICE_CHILDREN, ...NEWS_CHILDREN];
+    const allItems = [...LINKS, ...SERVICE_CHILDREN];
     const keys = Array.from(new Set(
       allItems.map((l) => ("featureKey" in l ? l.featureKey : null)).filter((k): k is string => !!k),
     ));
@@ -207,9 +203,6 @@ export default function DashboardNav({
   // осталось, прячем и её заголовок — пустой раскрывающийся «Сервис» выглядит
   // как поломка.
   const visibleService = SERVICE_CHILDREN.filter(
-    (c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(c.href)),
-  );
-  const visibleNews = NEWS_CHILDREN.filter(
     (c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(c.href)),
   );
   const visibleSettings = SETTINGS_CHILDREN.filter((c) => !(demo && isDemoBlocked(c.href)));
@@ -269,7 +262,7 @@ export default function DashboardNav({
 
         {newsOpen && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {visibleNews.map((c) => (
+            {NEWS_CHILDREN.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}

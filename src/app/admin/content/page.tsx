@@ -3,8 +3,6 @@ import { getServerT } from "@/lib/i18n/server";
 import { getRetentionDays, MAX_RETENTION_DAYS } from "@/lib/news";
 import ContentActions from "@/components/admin/ContentActions";
 import NewsRetentionSetting from "@/components/admin/NewsRetentionSetting";
-import EconCalSourceSetting from "@/components/admin/EconCalSourceSetting";
-import { calendarSettings, getCalendar } from "@/lib/econcal";
 
 export const dynamic = "force-dynamic";
 
@@ -44,24 +42,15 @@ export default async function AdminContentPage() {
   const { t, locale } = await getServerT();
   const nf = locale === "ru" ? "ru-RU" : "en-US";
 
-  // Числа по календарю считаем ТОЛЬКО по активному источнику: в таблице лежат
-  // события обоих, и общий счётчик после переключения показывал бы сумму двух
-  // календарей — то есть примерно вдвое больше, чем видит пользователь.
-  const econcal = await calendarSettings();
-  const bySource = { source: econcal.source };
-  // Почему выбранный источник пуст — берём у самого календаря, чтобы админка
-  // и страница пользователя объясняли это одинаково.
-  const { sourceError } = await getCalendar();
-
   const [retentionDays, newsTotal, newsEn, newsRu, lastNews, econTotal, lastEcon, nextEvent] = await Promise.all([
     getRetentionDays(),
     prisma.newsItem.count(),
     prisma.newsItem.count({ where: { lang: "en" } }),
     prisma.newsItem.count({ where: { lang: "ru" } }),
     prisma.newsItem.findFirst({ orderBy: { createdAt: "desc" }, select: { createdAt: true } }),
-    prisma.economicEvent.count({ where: bySource }),
-    prisma.economicEvent.findFirst({ where: bySource, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
-    prisma.economicEvent.findFirst({ where: { ...bySource, time: { gte: new Date() } }, orderBy: { time: "asc" }, select: { title: true, time: true } }),
+    prisma.economicEvent.count(),
+    prisma.economicEvent.findFirst({ orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    prisma.economicEvent.findFirst({ where: { time: { gte: new Date() } }, orderBy: { time: "asc" }, select: { title: true, time: true } }),
   ]);
 
   const lastUpdate = (d: Date | null) =>
@@ -93,13 +82,7 @@ export default async function AdminContentPage() {
           }
           note={t("admin.content.econAutoClean")}
           feed="econcal"
-        >
-          <EconCalSourceSetting
-            enabled={econcal.enabled}
-            source={econcal.source}
-            sourceError={sourceError}
-          />
-        </Card>
+        />
       </div>
     </div>
   );

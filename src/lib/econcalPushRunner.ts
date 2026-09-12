@@ -1,6 +1,5 @@
 import webpush from "web-push";
 import { prisma } from "./db";
-import { calendarSettings } from "./econcal";
 import { pushConfigured } from "./push/server";
 import {
   dueAlerts,
@@ -72,18 +71,13 @@ export async function runEconcalPush(now: number = Date.now()): Promise<EconPush
   const result: EconPushResult = { devices: 0, sent: 0, removed: 0 };
   if (!pushConfigured()) return result;
 
-  // Календарь выключен в админке — напоминать не о чем. Проверяем до всего
-  // остального: это общий рубильник раздела.
-  const { enabled, source } = await calendarSettings();
-  if (!enabled) return result;
-
   // Подписки с настройками: устройство, которое ни разу не сохраняло
   // напоминания, в выборку не попадает вовсе.
   const subs = await prisma.pushSubscription.findMany({ where: { econcalPrefs: { not: null } } });
   if (subs.length === 0) return result;
 
   const rows = await prisma.economicEvent.findMany({
-    where: { source, time: { gte: new Date(now - 60_000), lte: new Date(now + LOOKAHEAD_MS) } },
+    where: { time: { gte: new Date(now - 60_000), lte: new Date(now + LOOKAHEAD_MS) } },
     orderBy: { time: "asc" },
   });
   if (rows.length === 0) return result;

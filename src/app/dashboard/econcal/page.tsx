@@ -1,39 +1,378 @@
-import { redirect } from "next/navigation";
-import { CalendarOff } from "lucide-react";
-import { getSession } from "@/lib/auth";
-import { calendarSettings } from "@/lib/econcal";
-import EconCalView from "./EconCalView";
+"use client";
 
-export const dynamic = "force-dynamic";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import clsx from "clsx";
+import { CalendarClock, RefreshCw, HelpCircle, Clock } from "lucide-react";
+import { useI18n } from "@/lib/i18n/provider";
+import type { Locale } from "@/lib/i18n/core";
+import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
+import { zonedParts, zonedDateToUtcMs, ianaFor } from "@/lib/timezone";
+import { flagFor } from "@/lib/econcalFlags";
 
-// Серверная проверка общего выключателя календаря (фича `econcal`,
-// переключается в /admin/content). Пункт меню при выключенной фиче и так
-// пропадает (см. DashboardNav), но это защита от прямого захода по адресу —
-// тот же приём, что у «Рекомендаций» и форекса.
-//
-// Выключатель один и действует на ВСЕХ, включая админа: это рубильник раздела,
-// а не обкатка перед публичным релизом, поэтому пары
-// «общий + доступ для пользователей» здесь нет.
-export default async function EconCalPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
+type Ev = {
+  id: string;
+  time: string;
+  currency: string;
+  country: string;
+  title: string;
+  impact: string;
+  category: string | null;
+  forecast: string | null;
+  previous: string | null;
+  actual: string | null;
+};
 
-  const { enabled } = await calendarSettings();
-  if (!enabled) {
+const flag = flagFor;
+
+const IMPACTS = ["high", "medium", "low"] as const;
+const IMPACT_DOT: Record<string, string> = {
+  high: "bg-loss", medium: "bg-warn", low: "bg-faint", holiday: "bg-accent",
+};
+
+// Categories are derived in code (lib/econcal.ts categoryFor) and stored in
+// English. The stored value stays the filter value; here we only localize the
+// label shown in the dropdown.
+const CATEGORY_RU: Record<string, string> = {
+  Employment: "Занятость",
+  Inflation: "Инфляция",
+  "Interest Rate": "Ставки",
+  GDP: "ВВП",
+  "PMI / Industry": "PMI / Промышленность",
+  Consumer: "Потребление",
+  Trade: "Торговля",
+  Housing: "Недвижимость",
+  Sentiment: "Настроения",
+  Other: "Прочее",
+};
+
+// Monday 00:00 (in the given display timezone) of the week containing `base`,
+// shifted by `offsetWeeks`.
+function weekStart(offsetWeeks: number, tz: import("@/lib/timezone").TimezoneId): Date {
+  const zp = zonedParts(Date.now(), tz);
+  const dow = (zp.day + 6) % 7; // 0 = Monday
+  return new Date(zonedDateToUtcMs(zp.y, zp.mo, zp.d - dow + offsetWeeks * 7, tz));
+}
+
+export default function EconCalPage() {
+  const { t, locale, timezone } = useI18n();
+  const [events, setEvents] = useState<Ev[]>([]);
+  const [currencies, setCurrencies] = useState<string[]>([]);
+  const [categories, setCategories] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [curFilter, setCurFilter] = useState<Set<string>>(new Set());
+  const [impFilter, setImpFilter] = useState<Set<string>>(new Set());
+  const [category, setCategory] = useState("all");
+  // Day scope: today (default), tomorrow, or the whole fetched week.
+  const [scope, setScope] = useState<"today" | "tomorrow" | "week">("today");
+
+  // Current week only (the free feed serves just this week).
+  const range = useMemo(() => {
+    const from = weekStart(0, timezone);
+    const to = new Date(from.getTime() + 7 * 86400000);
+    return { from, to };
+  }, [timezone]);
+
+  const load = useCallback(
+    async (force = false) => {
+      if (force) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const p = new URLSearchParams({
+          from: range.from.toISOString(),
+          to: range.to.toISOString(),
+        });
+        if (force) p.set("refresh", "1");
+        const res = await fetch(`/api/econcal?${p}`);
+        if (res.ok) {
+          const d = await res.json();
+          setEvents(d.events ?? []);
+          setCurrencies(d.currencies ?? []);
+          setCategories(d.categories ?? []);
+        }
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [range],
+  );
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const toggle = (set: Set<string>, v: string, setter: (s: Set<string>) => void) => {
+    const next = new Set(set);
+    if (next.has(v)) next.delete(v);
+    else next.add(v);
+    setter(next);
+  };
+
+  // Y-M-D id in the user's selected display timezone, so "today"/"tomorrow"
+  // match what they'd expect to see there rather than the browser's own zone.
+  const localDayId = useMemo(() => (d: Date) => {
+    const zp = zonedParts(d.getTime(), timezone);
+    return `${zp.y}-${zp.mo}-${zp.d}`;
+  }, [timezone]);
+  const { todayId, tomorrowId } = useMemo(() => {
+    // День «сегодня» зависит от пояса пользователя, поэтому считается на
+    // клиенте. Значение уходит только в фильтр списка, в разметку не
+    // попадает — на гидратацию не влияет.
+    // eslint-disable-next-line react-hooks/purity -- client-only day filter
+    const now = Date.now();
+    return { todayId: localDayId(new Date(now)), tomorrowId: localDayId(new Date(now + 86400000)) };
+  }, [localDayId]);
+
+  // Текущее время тикает на клиенте: до первого эффекта now === 0, и часы с
+  // обратным отсчётом просто не рисуются — иначе серверный HTML разошёлся бы
+  // с клиентским на гидратации.
+  const [now, setNow] = useState(0);
+  useEffect(() => {
+    const tick = () => setNow(Date.now());
+    const first = setTimeout(tick, 0); // не синхронно — иначе лишний каскад рендеров
+    const id = setInterval(tick, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(id);
+    };
+  }, []);
+
+  const shown = events.filter(
+    (e) =>
+      (curFilter.size === 0 || curFilter.has(e.currency)) &&
+      (impFilter.size === 0 || impFilter.has(e.impact)) &&
+      (category === "all" || e.category === category) &&
+      (scope === "week" ||
+        localDayId(new Date(e.time)) === (scope === "today" ? todayId : tomorrowId)),
+  );
+
+  const tzName = ianaFor(timezone);
+
+  // Ближайшее ещё не наступившее событие из показанных — его строку
+  // подсвечиваем и показываем, сколько до него осталось (как на главной).
+  const next = useMemo(() => {
+    if (!now) return null;
     return (
-      <div className="p-6 md:p-8 max-w-2xl">
-        <div className="card p-6 flex items-start gap-3">
-          <CalendarOff size={24} className="text-muted shrink-0 mt-0.5" />
-          <div>
-            <div className="font-medium text-fg">Календарь отключён</div>
-            <p className="mt-1 text-sm text-muted">
-              Раздел «Экономический календарь» временно отключён администратором.
-            </p>
-          </div>
+      [...shown]
+        .sort((a, b) => Date.parse(a.time) - Date.parse(b.time))
+        .find((e) => Date.parse(e.time) >= now) ?? null
+    );
+    // shown пересобирается на каждый рендер, поэтому в зависимостях — сырьё.
+  }, [events, curFilter, impFilter, category, scope, now]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const countdown = (ts: number): string => {
+    const mins = Math.max(0, Math.round((ts - now) / 60_000));
+    if (mins === 0) return t("landing.calendar.now");
+    if (mins < 60) return t("landing.calendar.inMinutes", { m: mins });
+    return t("landing.calendar.inHours", { h: Math.floor(mins / 60), m: mins % 60 });
+  };
+
+  // Group by calendar day (in the selected display timezone).
+  const days = useMemo(() => {
+    const map = new Map<string, Ev[]>();
+    for (const e of shown) {
+      const key = new Date(e.time).toLocaleDateString(locale === "ru" ? "ru-RU" : "en-US", {
+        weekday: "long", day: "numeric", month: "long",
+        ...(tzName ? { timeZone: tzName } : {}),
+      });
+      (map.get(key) ?? map.set(key, []).get(key)!).push(e);
+    }
+    return Array.from(map.entries());
+  }, [shown, locale, tzName]);
+
+  const fmtTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString(locale === "ru" ? "ru-RU" : "en-US", {
+      hour: "2-digit", minute: "2-digit",
+      ...(tzName ? { timeZone: tzName } : {}),
+    });
+
+  const loc = locale === "ru" ? "ru-RU" : "en-US";
+  const weekLabel = `${range.from.toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })} – ${new Date(range.to.getTime() - 1).toLocaleDateString(loc, { day: "numeric", month: "long", ...(tzName ? { timeZone: tzName } : {}) })}`;
+
+  return (
+    <div className="px-6 py-5 max-w-4xl mx-auto">
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold flex items-center gap-2">
+          <CalendarClock size={20} className="text-accent" />
+          {t("econcal.title")}
+        </h1>
+        <button
+          onClick={() => load(true)}
+          disabled={refreshing}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+        >
+          <RefreshCw size={14} className={refreshing ? "animate-spin" : ""} />
+          {t("econcal.refresh")}
+        </button>
+      </div>
+      <p className="text-sm text-muted mt-1">{t("econcal.subtitle")}</p>
+      <div className="inline-flex items-center gap-2 mt-2 mb-4 text-sm">
+        <span className="text-faint">{t("econcal.thisWeek")}:</span>
+        <span className="font-medium tabular-nums">{weekLabel}</span>
+      </div>
+
+      {/* Часы и обратный отсчёт: главный вопрос у календаря — «сколько
+          осталось до ближайшей публикации», а не «который час вообще». */}
+      {now > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-sm" data-testid="econcal-clock">
+          <span className="inline-flex items-center gap-1.5 text-muted">
+            <Clock size={14} className="text-faint" />
+            {t("econcal.nowIs")}{" "}
+            <span className="font-medium text-fg tabular-nums">{fmtTime(new Date(now).toISOString())}</span>
+          </span>
+          {next && (
+            <span className="inline-flex items-center gap-1.5 min-w-0">
+              <span className="text-faint">·</span>
+              <span className="text-faint">{t("econcal.next")}:</span>
+              <span className="truncate max-w-[22rem]">{translateEventTitle(next.title, locale)}</span>
+              <span className="text-accent font-medium tabular-nums shrink-0">
+                {countdown(Date.parse(next.time))}
+              </span>
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Day scope: today (default) / tomorrow / whole week */}
+      <div className="flex items-center gap-1 mb-3">
+        {(["today", "tomorrow", "week"] as const).map((s) => (
+          <button
+            key={s}
+            onClick={() => setScope(s)}
+            className={clsx(
+              "px-3 py-1.5 rounded-lg text-sm transition",
+              scope === s ? "bg-accent/15 text-accent" : "input-base text-muted hover:text-fg",
+            )}
+          >
+            {t(s === "week" ? "econcal.thisWeek" : `econcal.${s}`)}
+          </button>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className="space-y-2 mb-5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {currencies.map((c) => (
+            <button
+              key={c}
+              onClick={() => toggle(curFilter, c, setCurFilter)}
+              className={clsx(
+                "px-2 py-1 rounded-full text-xs border transition inline-flex items-center gap-1",
+                curFilter.has(c) ? "bg-accent/15 text-accent border-accent/30" : "text-muted border-border hover:text-fg",
+              )}
+            >
+              <span>{flag(c)}</span> {c}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {IMPACTS.map((im) => (
+            <button
+              key={im}
+              onClick={() => toggle(impFilter, im, setImpFilter)}
+              className={clsx(
+                "px-2.5 py-1 rounded-full text-xs border transition inline-flex items-center gap-1.5",
+                impFilter.has(im) ? "bg-accent/15 text-accent border-accent/30" : "text-muted border-border hover:text-fg",
+              )}
+            >
+              <span className={clsx("h-2 w-2 rounded-full", IMPACT_DOT[im])} /> {t(`econcal.impact.${im}`)}
+            </button>
+          ))}
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="input-base text-xs py-1 cursor-pointer ml-1"
+          >
+            <option value="all">{t("econcal.allTypes")}</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>{locale === "ru" ? CATEGORY_RU[c] ?? c : c}</option>
+            ))}
+          </select>
         </div>
       </div>
-    );
-  }
 
-  return <EconCalView />;
+      {loading ? (
+        <div className="text-sm text-faint">{t("common.loading")}</div>
+      ) : days.length === 0 ? (
+        <div className="card p-10 text-center text-muted">{t("econcal.empty")}</div>
+      ) : (
+        <div className="space-y-5" data-testid="econcal-list">
+          {days.map(([day, evs]) => (
+            <div key={day}>
+              <div className="text-xs uppercase tracking-wide text-faint mb-2">{day}</div>
+              <div className="card divide-y divide-border overflow-hidden">
+                {evs.map((e) => {
+                  // Прошедшие приглушаем, ближайшее — подсвечиваем и вместо
+                  // прогноза показываем, через сколько оно выйдет.
+                  const ts = Date.parse(e.time);
+                  const isPast = now > 0 && ts < now;
+                  const isNext = next?.id === e.id;
+                  return (
+                  <div
+                    key={e.id}
+                    className={clsx(
+                      "flex items-center gap-3 px-3 py-2 text-sm",
+                      isPast && "opacity-50",
+                      isNext && "bg-accent/10 shadow-[inset_2px_0_0_var(--color-accent)]",
+                    )}
+                  >
+                    <span className="text-faint tabular-nums w-12 shrink-0">{fmtTime(e.time)}</span>
+                    <span className="shrink-0" title={e.country}>{flag(e.currency)}</span>
+                    <span className="text-xs text-faint w-9 shrink-0">{e.currency}</span>
+                    <span className={clsx("h-2 w-2 rounded-full shrink-0", IMPACT_DOT[e.impact])} title={e.impact} />
+                    <EventTitle title={e.title} locale={locale} />
+
+                    {isNext ? (
+                      <span className="text-xs text-accent font-medium tabular-nums shrink-0">
+                        {countdown(ts)}
+                      </span>
+                    ) : (
+                      <div className="hidden sm:flex items-center gap-3 text-xs tabular-nums shrink-0">
+                        <Val label={t("econcal.forecast")} v={e.forecast} />
+                        <Val label={isPast && e.actual ? t("econcal.actual") : t("econcal.previous")}
+                             v={isPast && e.actual ? e.actual : e.previous}
+                             highlight={Boolean(isPast && e.actual)} />
+                      </div>
+                    )}
+                  </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Название события: фид отдаёт его только по-английски и в виде шаблона
+// («Core CPI m/m»), поэтому переводим словарём терминов, а к знакомым
+// показателям показываем подсказку — что это и как читать (см. econcalTerms).
+function EventTitle({ title, locale }: { title: string; locale: Locale }) {
+  const translated = translateEventTitle(title, locale);
+  const explain = explainEvent(title, locale);
+  return (
+    <span className="flex-1 min-w-0 flex items-center gap-1">
+      {/* Оригинал в title: по нему событие ищется в других источниках. */}
+      <span className="truncate" title={title}>
+        {translated}
+      </span>
+      {explain && (
+        <span title={explain} className="inline-flex cursor-help shrink-0">
+          <HelpCircle size={12} className="text-faint" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function Val({ label, v, highlight }: { label: string; v: string | null; highlight?: boolean }) {
+  return (
+    <div className="w-16 text-right">
+      <div className="text-[10px] text-faint">{label}</div>
+      <div className={highlight && v ? "text-fg font-medium" : "text-muted"}>{v ?? "—"}</div>
+    </div>
+  );
 }

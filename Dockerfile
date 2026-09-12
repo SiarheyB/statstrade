@@ -59,15 +59,9 @@ RUN apt-get update \
        > /etc/apt/sources.list.d/pgdg.list \
   && apt-get update \
   && apt-get install -y --no-install-recommends postgresql-client-16 \
-  && apt-get purge -y gnupg \
+  && apt-get purge -y curl gnupg \
   && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
-# curl из purge выше УБРАН намеренно: он нужен не только для ключа PGDG выше,
-# но и в рантайме — через него ходит источник «investing» экономического
-# календаря (см. src/lib/econcalInvesting.ts). Календарь стоит за Cloudflare,
-# который отбирает клиентов по отпечатку TLS: запрос из Node получает 403 с
-# заглушкой «Just a moment…», тот же запрос curl — 200. Без curl в образе
-# переключатель источника в /admin/content работал бы только на ForexFactory.
 
 # Только прод-зависимости. prisma CLI лежит в dependencies осознанно: контейнер
 # выполняет `prisma migrate deploy` при каждом старте (см. docker-entrypoint.sh),
