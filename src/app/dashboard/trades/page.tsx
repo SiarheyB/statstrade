@@ -895,7 +895,7 @@ function Th({
   return (
     <th
       onClick={onClick}
-      className={`px-3 py-2.5 font-medium ${right ? "text-right" : "text-left"} ${sortable ? "cursor-pointer select-none hover:text-fg" : ""} ${active ? "text-accent" : ""}`}
+      className={`px-3 py-2.5 font-medium whitespace-nowrap ${right ? "text-right" : "text-left"} ${sortable ? "cursor-pointer select-none hover:text-fg" : ""} ${active ? "text-accent" : ""}`}
     >
       <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
         {children}
