@@ -13,8 +13,10 @@ import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
 import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
-import { zonedParts } from "@/lib/timezone";
+import { zonedParts, zonedDateToUtcMs } from "@/lib/timezone";
 import { useSync } from "@/components/SyncProvider";
+
+const DAY_MS = 24 * 3600 * 1000;
 
 type SortKey = "entryTime" | "exitTime" | "netPnl" | "returnPct" | "durationMs" | "fees";
 type Ann = {
@@ -79,6 +81,9 @@ export default function TradesPage() {
   const [etFilter, setEtFilter] = useState("all");
   const [mtFilter, setMtFilter] = useState("all");
   const [ptFilter, setPtFilter] = useState("all");
+  // Даты в формате "YYYY-MM-DD" из <input type="date">, пустая строка — не задано.
+  const [dateFromFilter, setDateFromFilter] = useState("");
+  const [dateToFilter, setDateToFilter] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("exitTime");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
@@ -119,8 +124,19 @@ export default function TradesPage() {
   // есть ВСЮ историю сделок (плюс ~60 метрик, ни одна из которых тут не нужна),
   // и фильтровала/резала её в браузере ради 25 строк.
   const queryParams = useCallback(
-    (over: Record<string, string> = {}) =>
-      new URLSearchParams({
+    (over: Record<string, string> = {}) => {
+      // "по" включает выбранный день целиком — граница на сервере строгая
+      // (exitTime < to), поэтому берём начало СЛЕДУЮЩЕГО дня.
+      const dateRange: Record<string, string> = {};
+      if (dateFromFilter) {
+        const [y, mo, d] = dateFromFilter.split("-").map(Number);
+        dateRange.from = new Date(zonedDateToUtcMs(y, mo - 1, d, timezone)).toISOString();
+      }
+      if (dateToFilter) {
+        const [y, mo, d] = dateToFilter.split("-").map(Number);
+        dateRange.to = new Date(zonedDateToUtcMs(y, mo - 1, d, timezone) + DAY_MS).toISOString();
+      }
+      return new URLSearchParams({
         accountId: accountFilter,
         symbol: symbolFilter,
         market: marketFilter,
@@ -134,10 +150,13 @@ export default function TradesPage() {
         dir: sortDir,
         page: String(page),
         pageSize: String(PAGE_SIZE),
+        ...dateRange,
         ...over,
-      }),
+      });
+    },
     [accountFilter, symbolFilter, marketFilter, sideFilter, resultFilter,
-     epFilter, etFilter, mtFilter, ptFilter, sortKey, sortDir, page],
+     epFilter, etFilter, mtFilter, ptFilter, sortKey, sortDir, page,
+     dateFromFilter, dateToFilter, timezone],
   );
 
   const load = useCallback(async () => {
@@ -454,6 +473,33 @@ export default function TradesPage() {
           {mtOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
         </select>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-faint">{t("trades.dateFrom")}</span>
+          <input
+            type="date"
+            className={SELECT}
+            value={dateFromFilter}
+            max={dateToFilter || undefined}
+            onChange={(e) => { setDateFromFilter(e.target.value); setPage(0); }}
+          />
+          <span className="text-xs text-faint">{t("trades.dateTo")}</span>
+          <input
+            type="date"
+            className={SELECT}
+            value={dateToFilter}
+            min={dateFromFilter || undefined}
+            onChange={(e) => { setDateToFilter(e.target.value); setPage(0); }}
+          />
+          {(dateFromFilter || dateToFilter) && (
+            <button
+              type="button"
+              className="text-xs text-faint hover:text-fg underline underline-offset-2"
+              onClick={() => { setDateFromFilter(""); setDateToFilter(""); setPage(0); }}
+            >
+              {t("trades.dateClear")}
+            </button>
+          )}
+        </div>
       </div>
 
       {loading ? (
