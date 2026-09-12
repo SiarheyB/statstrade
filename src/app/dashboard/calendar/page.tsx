@@ -104,6 +104,11 @@ export default function CalendarPage() {
       const start = zonedDateToUtcMs(y, mo - 1, d, timezone);
       const params = new URLSearchParams({
         accountId,
+        // Агрегат календаря (/api/calendar) считает П&Л по дню без фильтра по
+        // рынку — сюда нужно то же самое, иначе детальный список для дня со
+        // счётом форекс покажет «сделок нет», хотя в ячейке есть П&Л
+        // (market=all по умолчанию — это «только крипта», см. tradeList.ts).
+        market: "everything",
         from: new Date(start).toISOString(),
         to: new Date(start + DAY_MS).toISOString(),
         sort: "exitTime",
