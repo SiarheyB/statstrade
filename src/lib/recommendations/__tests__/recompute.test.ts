@@ -141,6 +141,18 @@ describe("recomputeRecommendations", () => {
     expect((data[0] as { symbol: string }).symbol).toBe("BTCUSDT");
   });
 
+  // Рекомендация живёт один день и назавтра пропадёт из выдачи независимо от
+  // того, сработала подписка на её уровень или нет — держать LevelAlert
+  // дальше нет смысла, он будет указывать на уже неактуальный уровень.
+  it("clears every level-alert subscription on each recompute, fired or not", async () => {
+    mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "BTCUSDT" }]);
+    mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(seriesWithPivot()));
+
+    await recomputeRecommendations();
+
+    expect(mockPrisma.levelAlert.deleteMany).toHaveBeenCalledWith({});
+  });
+
   it("drops levels the quality gate rejects — a chopped level never reaches the DB", async () => {
     mockPrisma.obCandle.groupBy.mockResolvedValueOnce([{ symbol: "CHOPUSDT" }]);
     mockPrisma.obCandle.findMany.mockResolvedValueOnce(asDbRows(choppedSeries()));

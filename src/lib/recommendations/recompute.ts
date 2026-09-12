@@ -346,8 +346,15 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
   // показываем, отбор делает фильтр качества, а не лимит выдачи.
   const selected = [...pickStrongestPerSymbol(rows).values()].sort((a, b) => b.score - a.score);
 
+  // Подписки на уровень (колокольчик у сетапа) очищаем ВМЕСТЕ с самими
+  // сетапами: рекомендация живёт один день и назавтра пропадёт из выдачи
+  // независимо от того, сработала подписка или нет, — держать её висящей
+  // дальше нет смысла, только путает человека колокольчиком на давно
+  // неактуальный уровень. (Раньше подписка НАРОЧНО переживала пересчёт —
+  // решение изменено по прямому указанию.)
   await prisma.$transaction([
     prisma.levelSetup.deleteMany({}),
+    prisma.levelAlert.deleteMany({}),
     ...(selected.length > 0
       ? [
           prisma.levelSetup.createMany({
