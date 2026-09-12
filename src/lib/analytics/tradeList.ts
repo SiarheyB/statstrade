@@ -23,7 +23,7 @@ export type TradeSort = (typeof TRADE_SORTS)[number];
 export type TradeFilters = {
   accountId: string; // "all" | id счёта
   symbol: string; // "all" | канонический тикер (BTCUSDT)
-  market: string; // all | spot | futures | forex
+  market: string; // everything | all (spot+futures, крипта) | spot | futures | forex
   side: string; // all | long | short
   result: string; // all | win | loss | breakeven
   entryPoint: string; // all | __unset__ | значение
@@ -182,7 +182,14 @@ export async function queryTrades(
     where.push(Prisma.sql`t."market" IN ('swap', 'future')`);
   } else if (filters.market === "forex") {
     where.push(Prisma.sql`t."market" IN ('forex', 'metal', 'cfd')`);
+  } else if (filters.market === "all") {
+    // "Спот + Фьючерсы" — только крипта. Раньше это значение не давало
+    // никакого условия (совпадало с «показать вообще всё»), и форекс-сделки
+    // протекали в выдачу вместе с криптой. Настоящее «всё без разбора»
+    // теперь отдельное значение — filters.market === "everything".
+    where.push(Prisma.sql`t."market" IN ('spot', 'swap', 'future')`);
   }
+  // filters.market === "everything" — условия нет, идут все рынки разом.
   if (filters.side === "long" || filters.side === "short") {
     where.push(Prisma.sql`t."side" = ${filters.side}`);
   }

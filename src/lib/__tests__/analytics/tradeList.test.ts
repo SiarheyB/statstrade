@@ -83,6 +83,24 @@ function valuesOf(callIndex: number): unknown[] {
   return flatten(mocks.queryRaw.mock.calls.at(callIndex)!.slice(1));
 }
 
+// Условия вроде `market IN ('spot', 'swap', 'future')` пишутся литералом, а
+// не параметром (см. tradeList.ts) — их не видно через values(), только
+// через собранный текст вложенных Sql-фрагментов.
+function sqlTextOf(callIndex: number): string {
+  const parts: string[] = [];
+  function walk(v: unknown) {
+    const nested = v as { values?: unknown[]; strings?: string[] };
+    if (v && typeof v === "object" && Array.isArray(nested.strings)) {
+      parts.push(nested.strings.join(""));
+      (nested.values ?? []).forEach(walk);
+    }
+  }
+  const call = mocks.queryRaw.mock.calls.at(callIndex)!;
+  parts.push((call[0] as string[]).join(""));
+  call.slice(1).forEach(walk);
+  return parts.join(" ");
+}
+
 describe("queryTrades", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -132,6 +150,24 @@ describe("queryTrades", () => {
     expect(values).toContain("BTCUSDT");
     expect(values).toContain("short");
     expect(values).toContain("loss");
+  });
+
+  // «Спот + Фьючерсы» раньше не давало НИКАКОГО условия (совпадало с «показать
+  // всё») — форекс-сделки протекали в выдачу вместе с криптой. Теперь у него
+  // своё условие, а буквальное «всё без разбора» — отдельное значение.
+  it("«all» (Спот + Фьючерсы) filters out forex — only crypto markets", async () => {
+    await queryTrades("u1", { ...ALL, market: "all" }, "exitTime", "desc", { page: 0, pageSize: 50 });
+    const sql = sqlTextOf(-1);
+    // 'forex' как строковый литерал в тексте — это тег источника у ветки
+    // ImportedTrade самого UNION ALL (см. sourceRows), он есть ВСЕГДА и не
+    // говорит о фильтрации; здесь важно именно условие WHERE по market.
+    expect(sql).toContain(`WHERE t."market" IN ('spot', 'swap', 'future')`);
+  });
+
+  it("«everything» applies no market condition at all", async () => {
+    await queryTrades("u1", { ...ALL, market: "everything" }, "exitTime", "desc", { page: 0, pageSize: 50 });
+    const sql = sqlTextOf(-1);
+    expect(sql).not.toContain(`t."market"`);
   });
 
   it("passes a valid date window and drops an unparsable one", async () => {

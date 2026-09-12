@@ -169,6 +169,20 @@ describe("TradesPage", () => {
     expect(await screen.findByText("BTCUSDT")).toBeInTheDocument();
   });
 
+  // Колонка «Рынок» показывает то, как пользователь назвал счёт при
+  // подключении, а не тип рынка сделки (spot/perp/forex) — тип рынка сам по
+  // себе не говорит, у какого брокера/биржи была сделка.
+  it("shows the user's account label in the market column, not the raw market type", async () => {
+    installFetch(() => [makeTrade({ accountId: "acc1", market: "spot" })]);
+    render(<TradesPage />);
+    // "My Account" встречается дважды: в фильтре счетов и в ячейке таблицы —
+    // ищем именно ячейку (td), а не полагаемся на единственность в документе.
+    const cell = await screen.findByTitle("My Account");
+    expect(cell.tagName).toBe("TD");
+    expect(screen.queryByText("spot")).not.toBeInTheDocument();
+    expect(screen.queryByText("SPOT")).not.toBeInTheDocument();
+  });
+
   it("asks the server for the ticker list only on the first load", async () => {
     const fn = installFetch(() => [makeTrade()]);
     render(<TradesPage />);

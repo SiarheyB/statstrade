@@ -259,6 +259,14 @@ export default function TradesPage() {
   const balanceOf = (accountId: string): number | null =>
     accounts.find((a) => a.id === accountId)?.balance ?? null;
 
+  // Колонка «Рынок» показывает то, как ПОЛЬЗОВАТЕЛЬ назвал счёт при
+  // подключении (например «Bybit» или «MT5 FTMO»), а не тип рынка сделки —
+  // "spot"/"perp"/"forex" ничего не говорит о том, у какого брокера/биржи
+  // сделка. Тип рынка при этом виден по бирже: crypto-биржа = spot/perp,
+  // форекс-счёт = forex/metal/cfd.
+  const accountLabel = (accountId: string): string =>
+    accounts.find((a) => a.id === accountId)?.label ?? "—";
+
   // R-multiple for a trade — shared with /dashboard/calendar (src/lib/risk.ts)
   // so both pages agree on the same number for the same trade.
   function rrFor(tr: SerializedTrade, stopLoss: number | null): number | null {
@@ -409,6 +417,7 @@ export default function TradesPage() {
           onChange={(v) => { setSymbolFilter(v); setPage(0); }}
         />
         <select className={SELECT} value={marketFilter} onChange={(e) => { setMarketFilter(e.target.value); setPage(0); }}>
+          <option value="everything">{t("dash.allMarketsEverything")}</option>
           <option value="all">{t("dash.allMarkets")}</option>
           <option value="spot">{t("dash.spot")}</option>
           <option value="futures">{t("dash.futures")}</option>
@@ -454,7 +463,30 @@ export default function TradesPage() {
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* table-layout: fixed + ширины столбцов из <colgroup> — без этого
+                браузер на широком экране (свободного места в overflow-x-auto
+                хватает) пересчитывал ширины КАЖДОГО столбца заново при
+                разворачивании строки: у детальной панели своя раскладка
+                (grid), и её ширина попадала в тот же auto-layout, что и
+                обычные ячейки. На узком экране (ноутбук) свободного места
+                нет, перераспределять нечего — поэтому там бага не было видно. */}
+            <table className="w-full text-sm table-fixed">
+              <colgroup>
+                <col className="w-[2%]" />
+                <col className="w-[11%]" />
+                <col className="w-[6%]" />
+                <col className="w-[9%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[6%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[8%]" />
+                <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                <col className="w-[6%]" />
+                <col className="w-[6%]" />
+              </colgroup>
               <thead>
                 <tr className="text-xs text-muted border-b border-border">
                   <Th />
@@ -508,10 +540,8 @@ export default function TradesPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2"><SideBadge side={tr.side} /></td>
-                      <td className="px-3 py-2 text-xs text-faint uppercase">
-                        <Term name={marketShort(tr.market)}>
-                          {marketShort(tr.market)}
-                        </Term>
+                      <td className="px-3 py-2 text-xs text-faint truncate" title={accountLabel(tr.accountId)}>
+                        {accountLabel(tr.accountId)}
                       </td>
                       <td className="px-3 py-2 text-muted whitespace-nowrap text-center leading-tight">
                         <div>{fmtDate(tr.entryTime)}</div>
@@ -532,7 +562,7 @@ export default function TradesPage() {
                     </tr>
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
-                        <td colSpan={13} className="px-4 py-4">
+                        <td colSpan={14} className="px-4 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             {tr.lots != null && (
                               <>
