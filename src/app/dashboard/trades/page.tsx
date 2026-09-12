@@ -473,9 +473,9 @@ export default function TradesPage() {
             <table className="w-full text-sm table-fixed">
               <colgroup>
                 <col className="w-[2%]" />
-                <col className="w-[9%]" />
-                <col className="w-[6%]" />
-                <col className="w-[9%]" />
+                <col className="w-[10%]" />
+                <col className="w-[3%]" />
+                <col className="w-[11%]" />
                 <col className="w-[8%]" />
                 <col className="w-[8%]" />
                 <col className="w-[5%]" />
@@ -862,9 +862,9 @@ function Th({
 function SideBadge({ side }: { side: string }) {
   const long = side === "long";
   return (
-    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${long ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"}`}>
+    <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${long ? "bg-profit/15 text-profit" : "bg-loss/15 text-loss"}`}>
       {long ? <ArrowUp size={12} /> : <ArrowDown size={12} />}
-      <Term name={long ? "Long" : "Short"}>{long ? "Long" : "Short"}</Term>
+      <Term name={long ? "Long" : "Short"}>{long ? "L" : "S"}</Term>
     </span>
   );
 }
