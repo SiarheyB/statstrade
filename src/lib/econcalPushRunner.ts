@@ -1,5 +1,6 @@
 import webpush from "web-push";
 import { prisma } from "./db";
+import { getFeatureConfig } from "./featureConfig";
 import { pushConfigured } from "./push/server";
 import {
   dueAlerts,
@@ -70,6 +71,11 @@ function textFor(events: AlertEvent[], minutesLeft: number): { title: string; bo
 export async function runEconcalPush(now: number = Date.now()): Promise<EconPushResult> {
   const result: EconPushResult = { devices: 0, sent: 0, removed: 0 };
   if (!pushConfigured()) return result;
+
+  // Календарь выключен в админке — напоминать не о чем. Проверяем до всего
+  // остального: это общий рубильник раздела (см. econcal.ts).
+  const { enabled } = await getFeatureConfig("econcal");
+  if (!enabled) return result;
 
   // Подписки с настройками: устройство, которое ни разу не сохраняло
   // напоминания, в выборку не попадает вовсе.

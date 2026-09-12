@@ -1,10 +1,15 @@
 import { prisma } from "./db";
 import { Prisma } from "@prisma/client";
 import { investingImpact, resolveImpact } from "./econcalImpact";
+import { getFeatureConfig } from "./featureConfig";
 
 // Economic calendar from the free ForexFactory / faireconomy weekly JSON feeds
 // (no API key). We pull last/this/next week, normalize, and upsert so the
 // "actual" value is filled in once a release happens.
+//
+// Общий выключатель раздела — фича `econcal` в /admin/features (тот же
+// механизм, что у forex/game/…): выключенный календарь пропадает у ВСЕХ,
+// включая админа, и приложение перестаёт ходить за событиями наружу.
 
 // The free ForexFactory/faireconomy feed reliably serves only the current week.
 // The DB accumulates events across refreshes, so past weeks fill in over time.
@@ -231,6 +236,8 @@ async function upsertEvents(events: NormalizedEvent[]): Promise<number> {
 }
 
 export async function refreshCalendar(): Promise<RefreshResult[]> {
+  const { enabled } = await getFeatureConfig("econcal");
+  if (!enabled) return [];
   const results = await Promise.all(
     FEEDS.map(async (url) => {
       const feed = url.split("/").pop() ?? url;
@@ -276,6 +283,14 @@ export type CalendarFilters = {
 };
 
 export async function getCalendar(filters: CalendarFilters = {}) {
+  const { enabled } = await getFeatureConfig("econcal");
+  // Раздел выключен в админке — отдаём пустую выдачу и НЕ ходим в сеть. Тихо,
+  // а не ошибкой: этот же вызов обслуживает лендинг и публичную страницу
+  // /calendar, где отсутствие блока лучше красного экрана.
+  if (!enabled) {
+    return { events: [], currencies: [], categories: [], refreshed: [] as RefreshResult[] };
+  }
+
   const newest = await prisma.economicEvent.findFirst({
     orderBy: { updatedAt: "desc" },
     select: { updatedAt: true },

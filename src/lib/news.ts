@@ -1,5 +1,6 @@
 import { prisma } from "./db";
 import { cacheMissingCovers, withLocalCovers } from "./newsImages";
+import { getFeatureConfig } from "./featureConfig";
 
 export type Lang = "en" | "ru";
 export type NewsSource = { id: string; name: string; url: string };
@@ -209,6 +210,8 @@ async function writeLastRefresh(lang: Lang, ts: number): Promise<void> {
 }
 
 export async function refreshNews(lang: Lang, retentionDays?: number): Promise<RefreshResult[]> {
+  const { enabled } = await getFeatureConfig("news");
+  if (!enabled) return [];
   const results = await Promise.all(
     NEWS_SOURCES[lang].map(async (src) => {
       try {
@@ -248,6 +251,13 @@ function refreshInBackground(lang: Lang, retentionDays: number): void {
 export async function getNews(opts: { lang?: Lang; force?: boolean; limit?: number } = {}) {
   const lang = asLang(opts.lang);
   const limit = opts.limit ?? 60;
+
+  // Раздел выключен в админке — отдаём пустую ленту и НЕ ходим в сеть. Тихо,
+  // а не ошибкой: та же логика, что у экономического календаря (econcal.ts).
+  const { enabled } = await getFeatureConfig("news");
+  if (!enabled) {
+    return { items: [], lang, sources: NEWS_SOURCES[lang], refreshed: [] as RefreshResult[], refreshing: false };
+  }
 
   const readItems = () =>
     prisma.newsItem.findMany({

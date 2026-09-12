@@ -32,6 +32,13 @@ vi.mock('@/lib/db', () => ({
   },
 }));
 
+// Общий выключатель раздела (econcal) из /admin/features — тесты этого
+// модуля про разбор фида, а не про админку, поэтому считаем фичу всегда
+// включённой.
+vi.mock('@/lib/featureConfig', () => ({
+  getFeatureConfig: vi.fn(async () => ({ enabled: true, config: {} })),
+}));
+
 // Mock global fetch
 const fakeFeedData = [
   {

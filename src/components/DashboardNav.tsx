@@ -53,8 +53,10 @@ const LINKS = [
 ];
 
 const NEWS_CHILDREN = [
-  { href: "/dashboard/news", key: "nav.news", icon: Newspaper },
-  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock },
+  // featureKey без userOnlyFeatureKey: выключенный раздел пропадает у ВСЕХ,
+  // включая админа — это общий рубильник раздела, а не обкатка перед релизом.
+  { href: "/dashboard/news", key: "nav.news", icon: Newspaper, featureKey: "news" },
+  { href: "/dashboard/econcal", key: "nav.econcal", icon: CalendarClock, featureKey: "econcal" },
 ];
 
 function isNewsRoute(pathname: string): boolean {
@@ -146,7 +148,10 @@ export default function DashboardNav({
   const [hiddenForUsersOnly, setHiddenForUsersOnly] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    const allItems = [...LINKS, ...SERVICE_CHILDREN];
+    // NEWS_CHILDREN тоже: у «Новостей» и «Календаря» есть featureKey, и без
+    // этой группы ключ не попал бы в опрос — пункт остался бы виден при
+    // выключенной фиче.
+    const allItems = [...LINKS, ...SERVICE_CHILDREN, ...NEWS_CHILDREN];
     const keys = Array.from(new Set(
       allItems.map((l) => ("featureKey" in l ? l.featureKey : null)).filter((k): k is string => !!k),
     ));
@@ -205,6 +210,9 @@ export default function DashboardNav({
   const visibleService = SERVICE_CHILDREN.filter(
     (c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(c.href)),
   );
+  const visibleNews = NEWS_CHILDREN.filter(
+    (c) => isNavItemVisible(c, hiddenFeatures, hiddenForUsersOnly, isAdmin) && !(demo && isDemoBlocked(c.href)),
+  );
   const visibleSettings = SETTINGS_CHILDREN.filter((c) => !(demo && isDemoBlocked(c.href)));
 
   const childActive = (href: string) =>
@@ -244,6 +252,7 @@ export default function DashboardNav({
       </div>
 
       <nav className={clsx("flex-1 space-y-1 overflow-y-auto", collapsed ? "p-2" : "p-3")}>
+        {visibleNews.length > 0 && (
         <button
           onClick={() => setNewsOpen((o) => !o)}
           className={clsx(
@@ -259,10 +268,11 @@ export default function DashboardNav({
           <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "flex-1 text-left")}>{t("nav.news")}</span>
           <ChevronDown size={15} className={clsx("transition shrink-0", collapsed && "opacity-0", newsOpen && "rotate-180")} />
         </button>
+        )}
 
-        {newsOpen && (
+        {newsOpen && visibleNews.length > 0 && (
           <div className={clsx("space-y-1", collapsed ? "ml-0 pl-0" : "ml-4 pl-3 border-l border-border")}>
-            {NEWS_CHILDREN.map((c) => (
+            {visibleNews.map((c) => (
               <Link
                 key={c.href}
                 href={c.href}
