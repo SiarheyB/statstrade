@@ -12,6 +12,7 @@
 
 import { NextResponse } from 'next/server';
 import { getAuthUser, unauthorized, badRequest, serverError } from '@/lib/api';
+import { orderflowAccessError } from '@/lib/orderflowAccess';
 import { computeAbsorption } from '@/lib/orderflow';
 import { createRouteCache } from '@/lib/routeCache';
 
@@ -40,6 +41,8 @@ export async function GET(req: Request) {
   // 1. Auth
   const user = await getAuthUser();
   if (!user) return unauthorized();
+  const denied = await orderflowAccessError();
+  if (denied) return denied;
 
   const url = new URL(req.url);
 

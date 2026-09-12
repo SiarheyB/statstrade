@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import { Flame, RefreshCw, Maximize2 } from "lucide-react";
+import { Flame, RefreshCw, Maximize2, ShieldAlert } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
 import TimeframeRail from "@/components/TimeframeRail";
@@ -104,6 +104,21 @@ function buildOffscreen(hm: Heatmap): HTMLCanvasElement {
 
 export default function LiqMapPage() {
   const { t, timezone, locale } = useI18n();
+  // Общий выключатель раздела из /admin/features (liqmap) — см. пояснение у
+  // такой же проверки в dashboard/orderflow/page.tsx.
+  const [featureBlocked, setFeatureBlocked] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/features?key=liqmap")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && j.value?.enabled === false) setFeatureBlocked(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [exchange, setExchange] = useState<string>("binance");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [symbols, setSymbols] = useState<string[]>(FALLBACK_SYMBOLS);
@@ -580,6 +595,22 @@ export default function LiqMapPage() {
     if (!data) return;
     viewRef.current = { x0: DEFAULT_X0, x1: 1, y0: data.heatmap.priceMin, y1: data.heatmap.priceMax };
     requestDraw();
+  }
+
+  if (featureBlocked) {
+    return (
+      <div className="p-6 md:p-8 max-w-2xl">
+        <div className="card p-6 flex items-start gap-3 border-loss/30">
+          <ShieldAlert size={24} className="text-loss shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium text-fg">Доступ запрещён</div>
+            <p className="mt-1 text-sm text-muted">
+              Раздел «Карта ликвидаций» временно отключён администратором.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

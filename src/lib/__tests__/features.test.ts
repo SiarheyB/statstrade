@@ -24,6 +24,8 @@ describe('features - FEATURE_DEFAULTS', () => {
       'divergenceScanner',
       'econcal',
       'news',
+      'orderflow',
+      'liqmap',
       'forex',
       'forexPublicAccess',
       'imbalanceIndicator',
@@ -44,6 +46,8 @@ describe('features - FEATURE_DEFAULTS', () => {
   const PURE_TOGGLE_KEYS = new Set<FeatureKey>([
     'econcal',
     'news',
+    'orderflow',
+    'liqmap',
     'forex',
     'forexPublicAccess',
     'tradeRecommendationsPublicAccess',

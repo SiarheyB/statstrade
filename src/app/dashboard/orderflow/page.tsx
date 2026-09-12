@@ -7,6 +7,7 @@ import {
   RefreshCw,
   HelpCircle,
   Filter,
+  ShieldAlert,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import VolumeProfile from "@/components/VolumeProfile";
@@ -185,6 +186,25 @@ function BtcSpinner({ label }: { label: string }) {
 
 export default function OrderflowPage() {
   const { t, timezone, locale } = useI18n();
+  // Общий выключатель раздела из /admin/features (orderflow) — тот же приём,
+  // что у форекса/игры: страница клиентская, поэтому проверка идёт через тот
+  // же /api/features, что уже спрашивает пункт меню (DashboardNav), а не
+  // серверным редиректом. API-роуты (/api/orderflow/*) блокируются отдельно
+  // и независимо (см. lib/orderflowAccess.ts) — этот экран лишь избавляет от
+  // бесполезных «Error» на графике, если раздел выключен.
+  const [featureBlocked, setFeatureBlocked] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/features?key=orderflow")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (alive && j && j.value?.enabled === false) setFeatureBlocked(true);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [range, setRange] = useState<string>("1d");
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [exchange, setExchange] = useState("binance-futures");
@@ -1342,6 +1362,22 @@ export default function OrderflowPage() {
 
   const hm = data?.heatmap ?? null;
   const SELECT = "input-base text-sm py-1.5 cursor-pointer";
+
+  if (featureBlocked) {
+    return (
+      <div className="p-6 md:p-8 max-w-2xl">
+        <div className="card p-6 flex items-start gap-3 border-loss/30">
+          <ShieldAlert size={24} className="text-loss shrink-0 mt-0.5" />
+          <div>
+            <div className="font-medium text-fg">Доступ запрещён</div>
+            <p className="mt-1 text-sm text-muted">
+              Раздел «Карта ордеров» временно отключён администратором.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="px-6 py-5 w-full">

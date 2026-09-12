@@ -283,9 +283,15 @@ vi.mock('@/lib/db', () => ({ prisma: mockPrisma }));
  * risk route test (src/app/api/risk/__tests__/route.test.ts) provides its own
  * detailed vi.mock with mockImplementation for those two modules. */
 
-/* featureConfig: routes call getFeatureConfig / setFeatureConfig / getAllFeatureConfigs */
+/* featureConfig: routes call getFeatureConfig / setFeatureConfig / getAllFeatureConfigs.
+ * Дефолт — enabled:true (как в проде для фичи без строки в БД): тесты про
+ * forex/game и т.п. подменяют свой accessError-хелпер отдельным vi.mock и
+ * этот дефолт не видят, а более новые общие выключатели (orderflow, liqmap,
+ * econcal, news) читают getFeatureConfig напрямую — без дефолта здесь
+ * getFeatureConfig() возвращал бы undefined и роут падал бы ещё до проверки
+ * того, что тест вообще хочет проверить. */
 vi.mock('@/lib/featureConfig', () => ({
-  getFeatureConfig: vi.fn(),
+  getFeatureConfig: vi.fn().mockResolvedValue({ enabled: true }),
   setFeatureConfig: vi.fn(),
   getAllFeatureConfigs: vi.fn(),
 }));

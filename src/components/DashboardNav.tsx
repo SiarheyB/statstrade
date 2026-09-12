@@ -64,8 +64,8 @@ function isNewsRoute(pathname: string): boolean {
 }
 
 const SERVICE_CHILDREN = [
-  { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame },
-  { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers },
+  { href: "/dashboard/liqmap", key: "nav.liqmap", icon: Flame, featureKey: "liqmap" },
+  { href: "/dashboard/orderflow", key: "nav.orderflow", icon: Layers, featureKey: "orderflow" },
   {
     href: "/dashboard/recommendations",
     key: "nav.recommendations",
