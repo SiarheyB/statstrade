@@ -1,7 +1,5 @@
 import { getServerT } from "@/lib/i18n/server";
-import AdminCollector from "@/components/AdminCollector";
-import AdminCollectorConfig from "@/components/AdminCollectorConfig";
-import FeatureAccessToggle from "@/components/admin/FeatureAccessToggle";
+import AdminCollectorTabs from "@/components/admin/AdminCollectorTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +10,8 @@ export default async function AdminCollectorPage() {
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.collector.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("admin.collector.subtitle")}</p>
       <div className="mt-4">
-        <FeatureAccessToggle featureKey="orderflow" />
+        <AdminCollectorTabs />
       </div>
-      <AdminCollector />
-      <AdminCollectorConfig />
     </div>
   );
 }
