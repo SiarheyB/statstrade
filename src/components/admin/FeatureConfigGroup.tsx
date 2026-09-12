@@ -2,11 +2,11 @@
 
 import { useEffect, useState } from "react";
 
-// Настройки индикаторов карты ордеров (Volume Profile, Divergence Scanner,
-// Bid/Ask Imbalance) — раньше жили вперемешку с несвязанными фичами в общем
-// списке /admin/features; вынесены на вкладку «Индикаторы» страницы «Карта
-// ордеров», где их и ищут. Хранилище то же самое (FeatureConfig, тот же
-// /api/admin/features) — просто список сужен до трёх ключей.
+// Карточка-редактор ОДНОЙ фичи (вкл/выкл + числовые поля) — рендерит список
+// ключей из FeatureConfig (тот же /api/admin/features, что и раньше в
+// AdminFeatures.tsx). Переиспользуется для каждой вкладки на /admin/features
+// (AdminFeaturesTabs.tsx) — набор ключей передаётся пропом, сама карточка
+// от вкладки не зависит.
 
 type FeatureRow = {
   key: string;
@@ -16,9 +16,7 @@ type FeatureRow = {
   value: { enabled: boolean } & Record<string, unknown>;
 };
 
-const KEYS = ["volumeProfile", "divergenceScanner", "imbalanceIndicator"];
-
-export default function AdminIndicators() {
+export default function FeatureConfigGroup({ keys }: { keys: string[] }) {
   const [rows, setRows] = useState<FeatureRow[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Record<string, string>>>({});
@@ -30,7 +28,7 @@ export default function AdminIndicators() {
       const res = await fetch("/api/admin/features");
       if (res.ok && alive) {
         const rows: FeatureRow[] = ((await res.json()).features ?? []).filter((r: FeatureRow) =>
-          KEYS.includes(r.key),
+          keys.includes(r.key),
         );
         setRows(rows);
         setDrafts(
@@ -48,7 +46,10 @@ export default function AdminIndicators() {
     return () => {
       alive = false;
     };
-  }, []);
+    // keys — статический литерал на вызывающей стороне (не state), незачем
+    // гонять эффект заново при каждом рендере родителя.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keys.join(",")]);
 
   async function patch(key: string, body: { enabled?: boolean; config?: Record<string, number> }) {
     setBusy(key);
@@ -60,7 +61,7 @@ export default function AdminIndicators() {
       });
       if (res.ok) {
         const all: FeatureRow[] = (await res.json()).features ?? [];
-        setRows(all.filter((r) => KEYS.includes(r.key)));
+        setRows(all.filter((r) => keys.includes(r.key)));
         if (body.config) {
           setSaved(key);
           setTimeout(() => setSaved(null), 1500);

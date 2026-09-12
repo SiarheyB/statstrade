@@ -6,16 +6,14 @@
 // настройки, приходилось прокручивать статус целиком. Разделены по вкладкам,
 // как /admin/game (AdminGameTabs.tsx).
 import { useState } from "react";
-import { Activity, SlidersHorizontal, ShieldCheck, BarChart3 } from "lucide-react";
+import { Activity, SlidersHorizontal, ShieldCheck } from "lucide-react";
 import AdminCollector from "@/components/AdminCollector";
 import AdminCollectorConfig from "@/components/AdminCollectorConfig";
-import AdminIndicators from "@/components/admin/AdminIndicators";
 import FeatureAccessToggle from "@/components/admin/FeatureAccessToggle";
 
 const TABS = [
   { id: "overview", label: "Обзор", Icon: Activity },
   { id: "settings", label: "Настройки", Icon: SlidersHorizontal },
-  { id: "indicators", label: "Индикаторы", Icon: BarChart3 },
   { id: "access", label: "Доступ", Icon: ShieldCheck },
 ] as const;
 
@@ -44,7 +42,6 @@ export default function AdminCollectorTabs() {
 
       {tab === "overview" && <AdminCollector />}
       {tab === "settings" && <AdminCollectorConfig />}
-      {tab === "indicators" && <AdminIndicators />}
       {tab === "access" && <FeatureAccessToggle featureKey="orderflow" />}
     </div>
   );

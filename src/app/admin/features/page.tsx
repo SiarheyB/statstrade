@@ -1,4 +1,4 @@
-import AdminFeatures from "@/components/AdminFeatures";
+import AdminFeaturesTabs from "@/components/admin/AdminFeaturesTabs";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,7 @@ export default function AdminFeaturesPage() {
         API бирж) — тех, у которых нет своей страницы в админке. Отключённая фича скрывается у
         всех пользователей.
       </p>
-      <AdminFeatures />
+      <AdminFeaturesTabs />
     </div>
   );
 }

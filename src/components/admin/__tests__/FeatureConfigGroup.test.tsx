@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
-import AdminFeatures from '@/components/AdminFeatures';
+import FeatureConfigGroup from '@/components/admin/FeatureConfigGroup';
 
 function makeRows() {
   return [
@@ -22,7 +22,7 @@ function makeRows() {
   ];
 }
 
-describe('AdminFeatures', () => {
+describe('FeatureConfigGroup', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -30,14 +30,14 @@ describe('AdminFeatures', () => {
 
   it('shows loading state before rows arrive', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
-    render(<AdminFeatures />);
+    render(<FeatureConfigGroup keys={['exitEfficiency']} />);
     expect(screen.getByText('Загрузка…')).toBeInTheDocument();
   });
 
-  it('renders visible feature rows and hides forex', async () => {
+  it('renders only the keys asked for', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ features: makeRows() }) }));
 
-    render(<AdminFeatures />);
+    render(<FeatureConfigGroup keys={['exitEfficiency']} />);
 
     await waitFor(() => {
       expect(screen.getByText('Exit efficiency')).toBeInTheDocument();
@@ -57,7 +57,7 @@ describe('AdminFeatures', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AdminFeatures />);
+    render(<FeatureConfigGroup keys={['exitEfficiency']} />);
     await waitFor(() => expect(screen.getByText('Exit efficiency')).toBeInTheDocument());
 
     fireEvent.click(screen.getAllByRole('switch')[0]);
@@ -82,7 +82,7 @@ describe('AdminFeatures', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    render(<AdminFeatures />);
+    render(<FeatureConfigGroup keys={['exitEfficiency']} />);
     await waitFor(() => expect(screen.getByText('Exit efficiency')).toBeInTheDocument());
 
     const input = screen.getByDisplayValue('50');
