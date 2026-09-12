@@ -9,7 +9,7 @@ vi.mock("@/components/AdminFeatures", () => ({
 describe("AdminFeaturesPage", () => {
   it("renders heading and AdminFeatures component", () => {
     render(<AdminFeaturesPage />);
-    expect(screen.getByText("Функции")).toBeInTheDocument();
+    expect(screen.getByText("Прочие функции")).toBeInTheDocument();
     expect(screen.getByTestId("admin-features")).toBeInTheDocument();
   });
 });
