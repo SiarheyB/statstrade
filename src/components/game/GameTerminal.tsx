@@ -477,6 +477,7 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               prices={game.prices}
               assets={game.activeAssets}
               orders={game.account.pendingOrders}
+              onSelectAsset={setSelectedAssetId}
             />
           </div>
         </div>
@@ -498,6 +499,13 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
             prices={game.prices}
             assets={game.activeAssets}
             orders={game.account.pendingOrders}
+            onSelectAsset={(id) => {
+              // Из портфеля тикер ведёт на график — переключаем и вкладку,
+              // иначе выбор актива обновится в состоянии, а сам график
+              // останется не виден на вкладке «Портфель».
+              setSelectedAssetId(id);
+              setTab("terminal");
+            }}
           />
           <Journal
             journal={game.account.journal}

@@ -4,23 +4,47 @@
 // unrealized PnL) + история закрытых. PnL всегда через calculateUnrealizedPnl
 // движка (раздел 17: «UI никогда не вызывает формулы напрямую» — здесь речь
 // про то же самое: одна формула, а не пересчёт вручную в компоненте).
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { calculateUnrealizedPnl } from "@/engine/economy/pnlCalculator";
 import { useGameStore } from "@/store/gameStore";
 import { HintLabel } from "./Hint";
 import { triggerLevel } from "@/engine/player/pendingOrders";
+import { PriceStepInput, decimalsOf } from "./PriceStepInput";
 import type { Asset, Order, Position } from "@/engine/entities/types";
 
 function symbolFor(assets: Asset[], assetId: string): string {
   return assets.find((a) => a.id === assetId)?.symbol ?? assetId;
 }
 
-// Инлайн-редактор SL/TP на УЖЕ открытой позиции (не на новом ордере — тем
-// занимается OrderTicket). Локальное состояние стора, апдейт синхронный и
-// бесплатный (в отличие от debounce-полей на /dashboard/trades, которые
-// пишут на сервер) — коммитим сразу по blur/Enter, без задержки.
+/** Тикер в таблице — кликабельный переход на график, если он подключён. */
+function TickerCell({
+  assets,
+  assetId,
+  onSelectAsset,
+}: {
+  assets: Asset[];
+  assetId: string;
+  onSelectAsset?: (assetId: string) => void;
+}) {
+  const label = symbolFor(assets, assetId);
+  if (!onSelectAsset) return <>{label}</>;
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectAsset(assetId)}
+      className="hover:text-accent hover:underline underline-offset-2 transition"
+    >
+      {label}
+    </button>
+  );
+}
+
+// Инлайн-редактор трейлинг-стопа (%) на УЖЕ открытой позиции. Локальное
+// состояние стора, апдейт синхронный и бесплатный (в отличие от
+// debounce-полей на /dashboard/trades, которые пишут на сервер) — коммитим
+// сразу по blur/Enter, без задержки.
 function StopField({ value, onSave }: { value: number | undefined; onSave: (v: number | undefined) => void }) {
   const [draft, setDraft] = useState(value != null ? String(value) : "");
   function commit() {
@@ -31,7 +55,7 @@ function StopField({ value, onSave }: { value: number | undefined; onSave: (v: n
   return (
     <input
       type="number"
-      step="0.01"
+      step="0.1"
       value={draft}
       placeholder="—"
       onChange={(e) => setDraft(e.target.value)}
@@ -44,16 +68,64 @@ function StopField({ value, onSave }: { value: number | undefined; onSave: (v: n
   );
 }
 
+// То же самое, но для стоп-лосса/тейк-профита — цена, а не процент, поэтому
+// свои стрелки (см. PriceStepInput): нативный спиннер на пустом поле шагает
+// от нуля («0,01»), что не имеет отношения ни к инструменту, ни к его цене.
+//
+// draft пересинхронизируется с value, когда его двигают СНАРУЖИ (перетаскиванием
+// на графике) — раньше это поле хранило черновик один раз при монтировании и
+// не замечало внешних изменений, так что после драга на графике тут
+// оставалось старое число.
+function PriceField({
+  value,
+  onSave,
+  price,
+  tickSize,
+}: {
+  value: number | undefined;
+  onSave: (v: number | undefined) => void;
+  price: number | undefined;
+  tickSize: number;
+}) {
+  const [draft, setDraft] = useState(value != null ? value.toFixed(decimalsOf(tickSize)) : "");
+  useEffect(() => {
+    setDraft(value != null ? value.toFixed(decimalsOf(tickSize)) : "");
+  }, [value, tickSize]);
+  function commit(next: string) {
+    const trimmed = next.trim();
+    const n = trimmed === "" ? undefined : Number(trimmed);
+    onSave(n != null && Number.isFinite(n) ? n : undefined);
+  }
+  return (
+    <PriceStepInput
+      value={draft}
+      onChange={(v) => {
+        setDraft(v);
+        commit(v);
+      }}
+      price={price}
+      tickSize={tickSize}
+      placeholder="—"
+      className="w-24 text-right"
+    />
+  );
+}
+
 export default function PositionsPanel({
   positions,
   prices,
   assets,
   orders = [],
+  onSelectAsset,
 }: {
   positions: Position[];
   prices: Record<string, number>;
   assets: Asset[];
   orders?: Order[];
+  // Клик по тикеру в любой из трёх таблиц — переход на график этого актива:
+  // раньше единственный способ был искать его заново в AssetPicker, хотя он
+  // уже указан прямо в строке.
+  onSelectAsset?: (assetId: string) => void;
 }) {
   const { t } = useI18n();
   const closePosition = useGameStore((s) => s.closePosition);
@@ -126,9 +198,12 @@ export default function PositionsPanel({
                 {open.map((p) => {
                   const price = prices[p.assetId];
                   const pnl = price != null ? calculateUnrealizedPnl(p, price) : 0;
+                  const tickSize = assets.find((a) => a.id === p.assetId)?.tickSize ?? 0.01;
                   return (
                     <tr key={p.id}>
-                      <td className="py-2 pr-3 font-medium">{symbolFor(assets, p.assetId)}</td>
+                      <td className="py-2 pr-3 font-medium">
+                        <TickerCell assets={assets} assetId={p.assetId} onSelectAsset={onSelectAsset} />
+                      </td>
                       <td className="py-2 pr-3">
                         <span className={p.side === "long" ? "text-profit" : "text-loss"}>
                           {p.side === "long" ? t("game.side.long") : t("game.side.short")}
@@ -139,10 +214,10 @@ export default function PositionsPanel({
                       <td className="py-2 pr-3 text-right tabular-nums">{fmtUsd(p.entryPrice)}</td>
                       <td className="py-2 pr-3 text-right tabular-nums">{price != null ? fmtUsd(price) : "—"}</td>
                       <td className="py-2 pr-3 text-right">
-                        <StopField value={p.stopLoss} onSave={(v) => setStopLoss(p.id, v)} />
+                        <PriceField value={p.stopLoss} onSave={(v) => setStopLoss(p.id, v)} price={price} tickSize={tickSize} />
                       </td>
                       <td className="py-2 pr-3 text-right">
-                        <StopField value={p.takeProfit} onSave={(v) => setTakeProfit(p.id, v)} />
+                        <PriceField value={p.takeProfit} onSave={(v) => setTakeProfit(p.id, v)} price={price} tickSize={tickSize} />
                       </td>
                       <td className="py-2 pr-3 text-right">
                         <StopField value={p.trailingPct} onSave={(v) => setTrailing(p.id, v)} />
@@ -200,7 +275,9 @@ export default function PositionsPanel({
                   const level = triggerLevel(o);
                   return (
                     <tr key={o.id}>
-                      <td className="py-2 pr-3 font-medium">{symbolFor(assets, o.assetId)}</td>
+                      <td className="py-2 pr-3 font-medium">
+                        <TickerCell assets={assets} assetId={o.assetId} onSelectAsset={onSelectAsset} />
+                      </td>
                       <td className="py-2 pr-3 text-muted">{t(`game.order.entry.${o.type}`)}</td>
                       <td className="py-2 pr-3">
                         <span className={o.side === "long" ? "text-profit" : "text-loss"}>
@@ -244,7 +321,9 @@ export default function PositionsPanel({
             <tbody className="divide-y divide-border">
               {history.map((p) => (
                 <tr key={p.id}>
-                  <td className="py-2 pr-3 font-medium">{symbolFor(assets, p.assetId)}</td>
+                  <td className="py-2 pr-3 font-medium">
+                    <TickerCell assets={assets} assetId={p.assetId} onSelectAsset={onSelectAsset} />
+                  </td>
                   <td className="py-2 pr-3">
                     <span className={p.side === "long" ? "text-profit" : "text-loss"}>
                       {p.side === "long" ? t("game.side.long") : t("game.side.short")}

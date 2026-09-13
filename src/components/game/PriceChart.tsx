@@ -80,6 +80,34 @@ function sortBars(bars: Bar[]): Bar[] {
   return [...bars].sort((a, b) => a.t - b.t);
 }
 
+/**
+ * Маркер сделки — кружок со стрелкой внутри (вход/частичное закрытие/выход),
+ * как в MT5: не сливается со свечой на любом фоне, и по одной картинке видно
+ * направление (вверх — long/покупка, вниз — short/продажа), а не только по
+ * цвету, который на светлой и тёмной теме читается по-разному.
+ */
+function drawTradeMarker(ctx: CanvasRenderingContext2D, x: number, y: number, up: boolean, color: string): void {
+  const r = 8;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#fff";
+  const s = 4;
+  ctx.beginPath();
+  if (up) {
+    ctx.moveTo(x, y - s);
+    ctx.lineTo(x - s, y + s);
+    ctx.lineTo(x + s, y + s);
+  } else {
+    ctx.moveTo(x, y + s);
+    ctx.lineTo(x - s, y - s);
+    ctx.lineTo(x + s, y - s);
+  }
+  ctx.closePath();
+  ctx.fill();
+}
+
 // Окно просмотра задаётся НОМЕРАМИ СВЕЧЕЙ, а не временем.
 //
 // Ось по календарному времени выглядела сломанной: с расписанием торгов
@@ -803,7 +831,28 @@ export default function PriceChart({
         ctx.lineTo(layout.plotX + layout.plotW, yEntry);
         ctx.stroke();
         ctx.setLineDash([]);
+
+        // Сама точка входа — не только уровень цены (он тянется через весь
+        // график и не говорит, КОГДА был вход), а стрелка ровно там, где
+        // сделка была открыта: по времени и по цене. Вверх для long, вниз
+        // для short — так же читается, как вход на настоящих терминалах.
+        const xEntry = sx(pos.openedAt);
+        if (xEntry >= layout.plotX - 10 && xEntry <= layout.plotX + layout.plotW + 10) {
+          const long = pos.side === "long";
+          // Кружок со стрелкой внутри — как маркер входа в MT5/большинстве
+          // терминалов: чтобы был виден издалека на любом фоне свечи, а не
+          // сливался с ней, как голая стрелка.
+          drawTradeMarker(ctx, xEntry, long ? yEntry + 14 : yEntry - 14, long, CHART_COLORS.accent);
+        }
       }
+      // Подпись СЛЕВА прямо на линии («SL»/«TP») — как в MT5: бирка справа
+      // на шкале говорит цену, а эта — что вообще за уровень, не отрывая
+      // взгляд от графика.
+      const drawLineLabel = (y: number, color: string, text: string) => {
+        ctx.font = "600 10px ui-sans-serif, system-ui";
+        ctx.fillStyle = color;
+        ctx.fillText(text, layout.plotX + 4, y - 4);
+      };
       if (slPrice != null) {
         const y = sy(slPrice);
         ctx.strokeStyle = CHART_COLORS.down;
@@ -813,6 +862,7 @@ export default function PriceChart({
         ctx.lineTo(layout.plotX + layout.plotW, y);
         ctx.stroke();
         ctx.setLineDash([]);
+        drawLineLabel(y, CHART_COLORS.down, tRef.current("game.chart.slShort"));
       }
       if (tpPrice != null) {
         const y = sy(tpPrice);
@@ -823,6 +873,7 @@ export default function PriceChart({
         ctx.lineTo(layout.plotX + layout.plotW, y);
         ctx.stroke();
         ctx.setLineDash([]);
+        drawLineLabel(y, CHART_COLORS.up, tRef.current("game.chart.tpShort"));
       }
       ctx.lineWidth = 1;
       ctx.restore();
@@ -918,8 +969,8 @@ export default function PriceChart({
           drawTooltipBox(
             ctx,
             [
-              tRef.current(nearSl ? "game.order.stopLoss" : "game.order.takeProfit"),
-              fmtPriceLabel(levelPrice),
+              tRef.current("game.chart.dragHint"),
+              `${tRef.current(nearSl ? "game.order.stopLoss" : "game.order.takeProfit")}: ${fmtPriceLabel(levelPrice)}`,
               `${nearSl ? "-" : "+"}${fmtUsd(amount)}`,
             ],
             hov.mx,

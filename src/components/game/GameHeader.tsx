@@ -141,6 +141,16 @@ export default function GameHeader({
           hint={marginUsed > 0 ? t("game.header.marginUsed", { amount: fmtUsd(marginUsed) }) : undefined}
           tip={t("game.tip.balance")}
         />
+        {/* Наличные (game.wallet) — деньги вне брокерского счёта (зарплата,
+            аванс, займы), отдельно от «Счёта» (game.account.balance): в
+            «Карьера → Работа» это две карточки с разными суммами, и без
+            третьей цифры здесь непонятно, что вообще значит «Счёт» и почему
+            он не совпадает с наличными на руках. */}
+        <Metric
+          label={t("game.work.wallet")}
+          value={fmtUsd(game.wallet)}
+          tip={t("game.tip.wallet")}
+        />
         {/* День карьеры и часы. Номер дня сам по себе ничего не объяснял:
             «день 281» человек читает как ошибку, пока ему не скажут, что это
             281-е сутки С НАЧАЛА ЕГО ПАРТИИ. Время рядом — потому что от него

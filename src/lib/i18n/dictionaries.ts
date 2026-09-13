@@ -1581,7 +1581,10 @@ const en: Dict = {
 
   "game.loading": "Loading…",
   "game.chart.loading": "Collecting price data…",
-  "game.stat.balance": "Cash",
+  "game.chart.slShort": "SL",
+  "game.chart.tpShort": "TP",
+  "game.chart.dragHint": "Drag to change",
+  "game.stat.balance": "Account",
   "game.stat.equity": "Equity",
   "game.stat.style": "Style",
   "game.stat.day": "Day",
@@ -4082,7 +4085,10 @@ const ru: Dict = {
 
   "game.loading": "Загрузка…",
   "game.chart.loading": "Копим данные по цене…",
-  "game.stat.balance": "Наличные",
+  "game.chart.slShort": "SL",
+  "game.chart.tpShort": "TP",
+  "game.chart.dragHint": "Перетащите для изменения",
+  "game.stat.balance": "Счёт",
   "game.stat.equity": "Эквити",
   "game.stat.style": "Стиль",
   "game.stat.day": "День",
