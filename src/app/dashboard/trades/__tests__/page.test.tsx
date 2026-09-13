@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import TradesPage from "../page";
-import { pickOption, pickOptionAt } from "@/test/selectHelpers";
+import { pickOption } from "@/test/selectHelpers";
 import type { SerializedTrade } from "@/lib/types";
 
 vi.mock("@/lib/i18n/provider", () => ({
@@ -195,7 +195,7 @@ describe("TradesPage", () => {
     expect(first.get("withMeta")).toBe("1");
 
     // Смена фильтра → новый запрос, но словарь тикеров уже есть.
-    await pickOptionAt(1, "dash.allMarketsEverything", "Long");
+    await pickOption("trades.allSides", "Long");
     await waitFor(() => expect(lastTradesParams(fn).get("side")).toBe("long"));
     expect(lastTradesParams(fn).get("withMeta")).toBeNull();
   });
@@ -223,7 +223,7 @@ describe("TradesPage", () => {
     await screen.findByText("LONGCOIN");
     expect(screen.getByText("SHORTCOIN")).toBeInTheDocument();
 
-    await pickOptionAt(1, "dash.allMarketsEverything", "Long");
+    await pickOption("trades.allSides", "Long");
 
     await waitFor(() => expect(screen.queryByText("SHORTCOIN")).not.toBeInTheDocument());
     expect(screen.getByText("LONGCOIN")).toBeInTheDocument();
@@ -247,7 +247,7 @@ describe("TradesPage", () => {
     const fn = installFetch(() => [makeTrade()]);
     render(<TradesPage />);
     await screen.findByText("BTCUSDT");
-    await pickOptionAt(1, "dash.allMarketsEverything", "Short");
+    await pickOption("trades.allSides", "Short");
     await waitFor(() => expect(lastTradesParams(fn).get("side")).toBe("short"));
     expect(lastTradesParams(fn).get("page")).toBe("0");
   });

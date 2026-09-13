@@ -444,7 +444,7 @@ export default function TradesPage() {
           <option value="forex">{t("dash.forex")}</option>
         </Select>
         <Select className={SELECT} value={sideFilter} onChange={(e) => { setSideFilter(e.target.value); setPage(0); }}>
-          <option value="all">{t("dash.allMarketsEverything")}</option>
+          <option value="all">{t("trades.allSides")}</option>
           <option value="long">Long</option>
           <option value="short">Short</option>
         </Select>
