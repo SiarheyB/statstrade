@@ -1413,13 +1413,13 @@ export default function PriceChart({
         </div>
       </div>
 
+      {/* «Копим данные…» рисует сам канвас (см. draw(), ветка allCandles.length
+          < 2) — своим шрифтом и в теме графика. Раньше та же надпись ЕЩЁ РАЗ
+          рисовалась поверх HTML-оверлеем по состоянию loading, и оба условия
+          пересекались (loading уже false, а свечей всё ещё меньше двух) —
+          два одинаковых текста наезжали друг на друга. */}
       <div ref={containerRef} className="relative min-h-[240px] flex-1">
         <canvas ref={canvasRef} className="absolute inset-0" />
-        {loading && (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-faint">
-            {t("game.chart.loading")}
-          </div>
-        )}
       </div>
 
       <div className="px-1 pt-1 text-[11px] text-faint">{t("game.chart.hint")}</div>

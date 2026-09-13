@@ -5,6 +5,7 @@
 // движка (раздел 17: «UI никогда не вызывает формулы напрямую» — здесь речь
 // про то же самое: одна формула, а не пересчёт вручную в компоненте).
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { calculateUnrealizedPnl } from "@/engine/economy/pnlCalculator";
@@ -41,30 +42,57 @@ function TickerCell({
   );
 }
 
-// Инлайн-редактор трейлинг-стопа (%) на УЖЕ открытой позиции. Локальное
-// состояние стора, апдейт синхронный и бесплатный (в отличие от
-// debounce-полей на /dashboard/trades, которые пишут на сервер) — коммитим
-// сразу по blur/Enter, без задержки.
+/**
+ * Кнопка «Сохранить» — общая для трейлинга и цены. Раньше оба поля писали в
+ * стор на каждое изменение (по blur/сразу): на живой позиции это опасно —
+ * стоп/тейк проверяется КАЖДЫЙ тик, и промежуточное состояние ввода
+ * («9» при наборе «9200», или пустая строка на миг между цифрами) успевало
+ * закрыть позицию раньше, чем человек дописал число. Теперь любое изменение
+ * этих полей — черновик до явного сохранения.
+ */
+function SaveButton({ dirty, onClick }: { dirty: boolean; onClick: () => void }) {
+  const { t } = useI18n();
+  if (!dirty) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={t("game.positions.save")}
+      className="shrink-0 rounded-md bg-accent px-1.5 py-1 text-white hover:bg-accent/90"
+    >
+      <Check size={12} />
+    </button>
+  );
+}
+
+// Инлайн-редактор трейлинг-стопа (%) на УЖЕ открытой позиции. Пишет в стор
+// только по кнопке «Сохранить» — см. SaveButton.
 function StopField({ value, onSave }: { value: number | undefined; onSave: (v: number | undefined) => void }) {
   const [draft, setDraft] = useState(value != null ? String(value) : "");
+  useEffect(() => {
+    setDraft(value != null ? String(value) : "");
+  }, [value]);
   function commit() {
     const trimmed = draft.trim();
     const n = trimmed === "" ? undefined : Number(trimmed);
     onSave(n != null && Number.isFinite(n) ? n : undefined);
   }
+  const dirty = draft.trim() !== (value != null ? String(value) : "");
   return (
-    <input
-      type="number"
-      step="0.1"
-      value={draft}
-      placeholder="—"
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-      }}
-      className="input-base w-20 px-1.5 py-1 text-xs tabular-nums text-right"
-    />
+    <div className="flex items-center justify-end gap-1">
+      <input
+        type="number"
+        step="0.1"
+        value={draft}
+        placeholder="—"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+        }}
+        className="input-base w-20 px-1.5 py-1 text-xs tabular-nums text-right"
+      />
+      <SaveButton dirty={dirty} onClick={commit} />
+    </div>
   );
 }
 
@@ -72,10 +100,9 @@ function StopField({ value, onSave }: { value: number | undefined; onSave: (v: n
 // свои стрелки (см. PriceStepInput): нативный спиннер на пустом поле шагает
 // от нуля («0,01»), что не имеет отношения ни к инструменту, ни к его цене.
 //
-// draft пересинхронизируется с value, когда его двигают СНАРУЖИ (перетаскиванием
-// на графике) — раньше это поле хранило черновик один раз при монтировании и
-// не замечало внешних изменений, так что после драга на графике тут
-// оставалось старое число.
+// draft пересинхронизируется с value, когда его двигают СНАРУЖИ
+// (перетаскиванием на графике или сохранением из этого же поля) — иначе
+// после внешнего изменения поле держало бы устаревший черновик.
 function PriceField({
   value,
   onSave,
@@ -87,27 +114,31 @@ function PriceField({
   price: number | undefined;
   tickSize: number;
 }) {
-  const [draft, setDraft] = useState(value != null ? value.toFixed(decimalsOf(tickSize)) : "");
+  const formatted = value != null ? value.toFixed(decimalsOf(tickSize)) : "";
+  const [draft, setDraft] = useState(formatted);
   useEffect(() => {
-    setDraft(value != null ? value.toFixed(decimalsOf(tickSize)) : "");
+    setDraft(formatted);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, tickSize]);
-  function commit(next: string) {
-    const trimmed = next.trim();
+  function commit() {
+    const trimmed = draft.trim();
     const n = trimmed === "" ? undefined : Number(trimmed);
     onSave(n != null && Number.isFinite(n) ? n : undefined);
   }
+  const dirty = draft.trim() !== formatted;
   return (
-    <PriceStepInput
-      value={draft}
-      onChange={(v) => {
-        setDraft(v);
-        commit(v);
-      }}
-      price={price}
-      tickSize={tickSize}
-      placeholder="—"
-      className="w-24 text-right"
-    />
+    <div className="flex items-center justify-end gap-1">
+      <PriceStepInput
+        value={draft}
+        onChange={setDraft}
+        onEnter={commit}
+        price={price}
+        tickSize={tickSize}
+        placeholder="—"
+        className="w-24 text-right"
+      />
+      <SaveButton dirty={dirty} onClick={commit} />
+    </div>
   );
 }
 

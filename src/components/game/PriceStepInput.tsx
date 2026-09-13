@@ -27,6 +27,7 @@ export function PriceStepInput({
   value,
   onChange,
   onBlur,
+  onEnter,
   price,
   tickSize,
   placeholder,
@@ -36,6 +37,8 @@ export function PriceStepInput({
   value: string;
   onChange: (v: string) => void;
   onBlur?: () => void;
+  /** Enter — явное подтверждение (сохранить), а не просто «убрать фокус». */
+  onEnter?: () => void;
   price: number | undefined;
   tickSize: number;
   placeholder?: string;
@@ -59,7 +62,10 @@ export function PriceStepInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         onKeyDown={(e) => {
-          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+          if (e.key === "Enter") {
+            if (onEnter) onEnter();
+            else (e.target as HTMLInputElement).blur();
+          }
         }}
         data-testid={testId}
         className="w-full min-w-0 flex-1 bg-transparent px-2 py-1.5 text-sm tabular-nums outline-none"

@@ -1931,6 +1931,7 @@ const en: Dict = {
   "game.positions.exit": "Exit",
   "game.positions.pnl": "PnL",
   "game.positions.close": "Close",
+  "game.positions.save": "Save",
 
   "game.side.long": "Long",
   "game.side.short": "Short",
@@ -4435,6 +4436,7 @@ const ru: Dict = {
   "game.positions.exit": "Выход",
   "game.positions.pnl": "PnL",
   "game.positions.close": "Закрыть",
+  "game.positions.save": "Сохранить",
 
   "game.side.long": "Long",
   "game.side.short": "Short",

@@ -87,15 +87,23 @@ describe("PositionsPanel", () => {
     expect(s.game.account.positions[0].closedAt).toBeDefined();
   });
 
-  it("позволяет выставить стоп-лосс/тейк-профит на уже открытой позиции (SL/TP — редактируемые поля прямо в таблице)", () => {
+  it("позволяет выставить стоп-лосс/тейк-профит на уже открытой позиции по кнопке «Сохранить» (SL/TP — редактируемые поля прямо в таблице)", () => {
+    // Сохранение только по явной кнопке, а не по blur/на каждый ввод: на
+    // живой позиции стоп/тейк проверяется каждый тик, и промежуточное
+    // состояние ввода могло закрыть позицию раньше, чем человек дописал
+    // число (см. коммит с SaveButton).
     const positions = [openPosition()];
     resetStore(positions);
     render(<PositionsPanel positions={positions} prices={{ [asset.id]: 110 }} assets={[asset]} />);
     const [slInput, tpInput] = screen.getAllByPlaceholderText("—");
     fireEvent.change(slInput, { target: { value: "90" } });
-    fireEvent.blur(slInput);
     fireEvent.change(tpInput, { target: { value: "130" } });
-    fireEvent.blur(tpInput);
+    // Ещё не сохранено.
+    expect(useGameStore.getState().game.account.positions[0].stopLoss).toBeUndefined();
+
+    const saveButtons = screen.getAllByTitle("game.positions.save");
+    fireEvent.click(saveButtons[0]);
+    fireEvent.click(saveButtons[1]);
     const p = useGameStore.getState().game.account.positions[0];
     expect(p.stopLoss).toBe(90);
     expect(p.takeProfit).toBe(130);
