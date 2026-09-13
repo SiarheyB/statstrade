@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 import { Manrope, Geist_Mono } from "next/font/google";
 import { getLocale, getTimezone } from "@/lib/i18n/server";
+import { getTheme } from "@/lib/theme.server";
 import { pageMetadata, siteJsonLd, SEO_PAGES } from "@/lib/seo";
 import { I18nProvider } from "@/lib/i18n/provider";
+import { ThemeProvider } from "@/components/ThemeProvider";
 import TrafficBeacon from "@/components/TrafficBeacon";
 import "./globals.css";
 
@@ -35,17 +37,21 @@ export default async function RootLayout({
 }>) {
   const locale = await getLocale();
   const timezone = await getTimezone();
+  const theme = await getTheme();
   const jsonLd = await siteJsonLd(locale);
 
   return (
     <html
       lang={locale}
+      data-theme={theme}
       className={`${manrope.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         {/* Машиночитаемое описание сайта для поисковиков (schema.org). */}
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd }} />
-        <I18nProvider locale={locale} timezone={timezone}>{children}</I18nProvider>
+        <ThemeProvider theme={theme}>
+          <I18nProvider locale={locale} timezone={timezone}>{children}</I18nProvider>
+        </ThemeProvider>
         {/* Счётчик посещаемости, см. components/TrafficBeacon.tsx */}
         <TrafficBeacon />
       </body>

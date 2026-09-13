@@ -6,7 +6,7 @@
  */
 
 import type { DrawingRow, DrawingPoint, DrawingToolType } from "@/lib/drawings";
-import { drawAxisPriceTag, fmtPriceLabel, type Candle, type PlotLayout } from "@/lib/candlestickChart";
+import { drawAxisPriceTag, fmtPriceLabel, CHART_COLORS, type Candle, type PlotLayout } from "@/lib/candlestickChart";
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
@@ -270,7 +270,7 @@ function drawPriceChip(
   // Не даём подписи уехать за правый край области графика.
   const bx = Math.min(x, plotX + plotW - w - 2);
   const by = side === "above" ? y - 6 - h : y + 6;
-  ctx.fillStyle = "rgba(8, 8, 13, 0.82)";
+  ctx.fillStyle = CHART_COLORS.tooltipBg;
   ctx.fillRect(bx, by, w, h);
   ctx.fillStyle = color;
   ctx.fillText(text, bx + 4, by + h / 2);
@@ -284,7 +284,7 @@ function drawHandle(ctx: CanvasRenderingContext2D, x: number, y: number, color: 
   ctx.arc(x, y, selected ? 4 : 3, 0, Math.PI * 2);
   ctx.fill();
   if (selected) {
-    ctx.strokeStyle = "#fff";
+    ctx.strokeStyle = CHART_COLORS.bg;
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(x, y, 5, 0, Math.PI * 2);

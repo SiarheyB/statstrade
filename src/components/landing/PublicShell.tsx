@@ -3,6 +3,7 @@ import { BarChart3 } from "lucide-react";
 import { getServerT } from "@/lib/i18n/server";
 import { getSession } from "@/lib/auth";
 import LocaleMenu from "@/components/LocaleMenu";
+import ThemeToggle from "@/components/ThemeToggle";
 
 /**
  * Обёртка публичных страниц (/news, /calendar): та же шапка и футер, что на
@@ -42,6 +43,7 @@ export default async function PublicShell({
           <Link href="/pricing" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("pricing.nav")}
           </Link>
+          <ThemeToggle compact />
           <LocaleMenu />
           {session ? (
             <Link href="/dashboard" className="px-3 sm:px-4 py-1.5 rounded-lg bg-accent text-white hover:bg-accent/90 transition">

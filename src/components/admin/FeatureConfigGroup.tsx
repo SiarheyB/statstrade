@@ -155,7 +155,7 @@ function Switch({ on, disabled, onClick }: { on: boolean; disabled?: boolean; on
       disabled={disabled}
       onClick={onClick}
       className={`relative inline-flex h-6 w-11 items-center rounded-full transition disabled:opacity-50 shrink-0 ${
-        on ? "bg-accent" : "bg-surface-2 border border-border"
+        on ? "bg-accent" : "bg-border"
       }`}
     >
       <span className={`inline-block h-4 w-4 rounded-full bg-white transition ${on ? "translate-x-6" : "translate-x-1"}`} />

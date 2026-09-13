@@ -253,7 +253,7 @@ function Switch({ on, onClick }: { on: boolean; onClick: () => void }) {
       onClick={onClick}
       className={clsx(
         "relative inline-flex h-6 w-11 items-center rounded-full transition shrink-0",
-        on ? "bg-accent" : "bg-surface-2 border border-border",
+        on ? "bg-accent" : "bg-border",
       )}
     >
       <span

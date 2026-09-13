@@ -19,6 +19,11 @@ vi.mock("@/lib/sidebar/provider", () => ({
   SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/components/ThemeProvider", () => ({
+  useTheme: () => ({ theme: "dark", setTheme: vi.fn() }),
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 describe("DashboardNav", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -188,6 +193,10 @@ describe("DashboardNav", () => {
     vi.doMock("@/lib/sidebar/provider", () => ({
       useSidebar: () => ({ collapsed: false, toggle: vi.fn() }),
       SidebarProvider: ({ children }: { children: React.ReactNode }) => children,
+    }));
+    vi.doMock("@/components/ThemeProvider", () => ({
+      useTheme: () => ({ theme: "dark", setTheme: vi.fn() }),
+      ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
     }));
     vi.stubGlobal(
       "fetch",

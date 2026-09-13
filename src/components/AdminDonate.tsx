@@ -136,7 +136,7 @@ export default function AdminDonate() {
                   disabled={busy === w.id}
                   onClick={() => toggle(w.id, !w.enabled)}
                   className={`relative inline-flex h-5 w-9 items-center rounded-full transition disabled:opacity-50 ${
-                    w.enabled ? "bg-accent" : "bg-surface-2 border border-border"
+                    w.enabled ? "bg-accent" : "bg-border"
                   }`}
                 >
                   <span

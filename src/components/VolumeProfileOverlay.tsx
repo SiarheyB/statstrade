@@ -11,6 +11,7 @@
  * перевода взгляда на соседний график с собственной шкалой.
  */
 import type { VolumeProfile } from "@/components/VolumeProfile";
+import { CHART_COLORS } from "@/lib/candlestickChart";
 
 // Полупрозрачные: профиль — фон для свечей, а не самостоятельная картинка.
 const VA_FILL = "rgba(22,199,132,0.22)"; // внутри Value Area
@@ -22,7 +23,6 @@ const OUT_FILL = "rgba(120,132,156,0.16)"; // за пределами Value Area
 const POC_FILL = "rgba(62,242,163,0.45)";
 const POC_LINE = "rgba(62,242,163,0.9)";
 const VA_LINE = "rgba(22,199,132,0.35)";
-const LABEL = "rgba(230,234,242,0.75)";
 
 /** Доля ширины графика под самый длинный столбик профиля. */
 const DEFAULT_WIDTH_RATIO = 0.2;
@@ -79,7 +79,7 @@ export function drawVolumeProfileOverlay(
 
   const pocY = sy(vp.poc);
   if (pocY >= 8 && pocY <= plotH) {
-    ctx.fillStyle = LABEL;
+    ctx.fillStyle = CHART_COLORS.axisTextStrong;
     ctx.font = "10px ui-sans-serif, system-ui";
     ctx.textAlign = "left";
     ctx.fillText("POC", plotX + 4, pocY - 3);

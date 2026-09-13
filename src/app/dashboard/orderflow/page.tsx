@@ -10,6 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { useTheme } from "@/components/ThemeProvider";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
 import { drawVolumeProfileOverlay } from "@/components/VolumeProfileOverlay";
@@ -36,6 +37,7 @@ import type {
 } from "@/lib/drawings";
 import {
   CHART_COLORS,
+  setChartTheme,
   computePlotLayout,
   computeInitialView,
   drawPriceGrid,
@@ -186,6 +188,11 @@ function BtcSpinner({ label }: { label: string }) {
 
 export default function OrderflowPage() {
   const { t, timezone, locale } = useI18n();
+  const { theme } = useTheme();
+  // CHART_COLORS — общий мутируемый объект (см. lib/candlestickChart.ts):
+  // синхронизируем прямо в рендере, ДО того как эффекты ниже перерисуют
+  // канвас, точно так же, как I18nProvider синхронизирует lib/format.ts.
+  setChartTheme(theme);
   // Общий выключатель раздела из /admin/features (orderflow) — тот же приём,
   // что у форекса/игры: страница клиентская, поэтому проверка идёт через тот
   // же /api/features, что уже спрашивает пункт меню (DashboardNav), а не
@@ -872,7 +879,7 @@ export default function OrderflowPage() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#0a0b10";
+    ctx.fillStyle = CHART_COLORS.bg;
     ctx.fillRect(0, 0, W, H);
 
     const PP = PRICE_AXIS_W;
@@ -1235,7 +1242,7 @@ export default function OrderflowPage() {
         ctx.beginPath();
         ctx.arc(cx, cy, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#fff";
+        ctx.strokeStyle = CHART_COLORS.bg;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(cx, cy, 7, 0, Math.PI * 2);
@@ -1527,7 +1534,7 @@ export default function OrderflowPage() {
               "card p-2",
               fsActive ? "fixed inset-0 z-50 flex flex-col rounded-none" : "relative",
             )}
-            style={{ background: "#0a0b10" }}
+            style={{ background: "var(--color-bg)" }}
           >
             {showDrawingEditor && selectedDrawingId && (() => {
               const d = drawings.find(dd => dd.id === selectedDrawingId);

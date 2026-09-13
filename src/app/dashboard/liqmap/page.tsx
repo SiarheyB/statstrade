@@ -6,8 +6,9 @@ import { Flame, RefreshCw, Maximize2, ShieldAlert } from "lucide-react";
 import SearchSelect from "@/components/SearchSelect";
 import FullscreenButton from "@/components/FullscreenButton";
 import TimeframeRail from "@/components/TimeframeRail";
-import { drawTimeCrosshairTag, fmtCrosshairLabel, drawChartWatermarks } from "@/lib/candlestickChart";
+import { drawTimeCrosshairTag, fmtCrosshairLabel, drawChartWatermarks, CHART_COLORS, setChartTheme } from "@/lib/candlestickChart";
 import { useI18n } from "@/lib/i18n/provider";
+import { useTheme } from "@/components/ThemeProvider";
 import { zonedParts } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
 import { useWakeLock } from "@/lib/useWakeLock";
@@ -104,6 +105,8 @@ function buildOffscreen(hm: Heatmap): HTMLCanvasElement {
 
 export default function LiqMapPage() {
   const { t, timezone, locale } = useI18n();
+  const { theme } = useTheme();
+  setChartTheme(theme);
   // Общий выключатель раздела из /admin/features (liqmap) — см. пояснение у
   // такой же проверки в dashboard/orderflow/page.tsx.
   const [featureBlocked, setFeatureBlocked] = useState(false);
@@ -265,7 +268,7 @@ export default function LiqMapPage() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#08080d";
+    ctx.fillStyle = CHART_COLORS.bg;
     ctx.fillRect(0, 0, W, H);
 
     const plotX = PADL;
@@ -306,18 +309,18 @@ export default function LiqMapPage() {
     for (let i = 0; i <= 6; i++) {
       const price = v.y0 + (i / 6) * yspan;
       const y = plotH - (i / 6) * plotH;
-      ctx.strokeStyle = "rgba(255,255,255,0.06)";
+      ctx.strokeStyle = CHART_COLORS.gridWeak;
       ctx.beginPath();
       ctx.moveTo(plotX, y);
       ctx.lineTo(plotX + plotW, y);
       ctx.stroke();
-      ctx.fillStyle = "#9aa3b5";
+      ctx.fillStyle = CHART_COLORS.axisText;
       ctx.fillText(fmtP(price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, y + 3)));
     }
 
     // X-axis time labels.
     ctx.textAlign = "center";
-    ctx.fillStyle = "#7b8499";
+    ctx.fillStyle = CHART_COLORS.axisTextWeak;
     const n = hm.candles.length;
     for (let i = 0; i <= 6; i++) {
       const tfrac = v.x0 + (i / 6) * xspan;
@@ -343,8 +346,8 @@ export default function LiqMapPage() {
       const cd = hm.candles[i];
       const x = sx(tfc);
       const up = cd.c >= cd.o;
-      ctx.strokeStyle = up ? "#16c784" : "#ea3943";
-      ctx.fillStyle = up ? "#16c784" : "#ea3943";
+      ctx.strokeStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
+      ctx.fillStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
       ctx.beginPath();
       ctx.moveTo(x, sy(cd.h));
       ctx.lineTo(x, sy(cd.l));
@@ -358,14 +361,14 @@ export default function LiqMapPage() {
     // Current price line.
     const yp = sy(hm.price);
     if (yp >= 0 && yp <= plotH) {
-      ctx.strokeStyle = "#e6b800";
+      ctx.strokeStyle = CHART_COLORS.accent;
       ctx.setLineDash([4, 3]);
       ctx.beginPath();
       ctx.moveTo(plotX, yp);
       ctx.lineTo(plotX + plotW, yp);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = "#e6b800";
+      ctx.fillStyle = CHART_COLORS.accent;
       ctx.fillText(fmtP(hm.price), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, yp + 3)));
     }
 
@@ -378,7 +381,7 @@ export default function LiqMapPage() {
       ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.fillRect(barX, yy, barW, 1);
     }
-    ctx.fillStyle = "#9aa3b5";
+    ctx.fillStyle = CHART_COLORS.axisText;
     ctx.textAlign = "left";
     ctx.fillText(fmtVal(hm.maxVal), barX + barW + 3, 9);
     ctx.fillText("0", barX + barW + 3, plotH - 2);
@@ -392,7 +395,7 @@ export default function LiqMapPage() {
     if (hov && hov.mx >= plotX && hov.mx <= plotX + plotW && hov.my <= plotH) {
       const tfh = v.x0 + ((hov.mx - plotX) / plotW) * xspan;
       const priceH = v.y0 + (1 - hov.my / plotH) * yspan;
-      ctx.strokeStyle = "rgba(255,255,255,0.4)";
+      ctx.strokeStyle = CHART_COLORS.crosshair;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
       ctx.moveTo(hov.mx, 0);
@@ -401,7 +404,7 @@ export default function LiqMapPage() {
       ctx.lineTo(plotX + plotW, hov.my);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.fillStyle = "#cdd3df";
+      ctx.fillStyle = CHART_COLORS.tooltipText;
       ctx.fillText(fmtP(priceH), plotX + plotW + 5, Math.min(plotH - 2, Math.max(9, hov.my + 3)));
 
       const ci = Math.max(0, Math.min(n - 1, Math.floor(tfh * n)));
@@ -432,8 +435,8 @@ export default function LiqMapPage() {
       if (by + boxH > plotH) by = plotH - boxH - 4;
       if (bx < plotX) bx = plotX + 4;
       if (by < 0) by = 4;
-      ctx.fillStyle = "rgba(10,12,18,0.94)";
-      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.fillStyle = CHART_COLORS.tooltipBg;
+      ctx.strokeStyle = CHART_COLORS.tooltipBorder;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.roundRect(bx, by, boxW, boxH, 7);
@@ -442,10 +445,10 @@ export default function LiqMapPage() {
       ctx.font = "11px ui-sans-serif, system-ui";
       for (let r = 0; r < rows.length; r++) {
         const yrow = by + 18 + r * 15;
-        ctx.fillStyle = "#9aa3b5";
+        ctx.fillStyle = CHART_COLORS.axisText;
         ctx.textAlign = "left";
         ctx.fillText(rows[r][0], bx + 10, yrow);
-        ctx.fillStyle = "#e6e9f0";
+        ctx.fillStyle = CHART_COLORS.tooltipText;
         ctx.textAlign = "right";
         ctx.fillText(rows[r][1], bx + boxW - 10, yrow);
         ctx.textAlign = "left";
@@ -687,7 +690,7 @@ export default function LiqMapPage() {
             "relative flex-1 min-h-0 overflow-hidden border border-border",
             fsActive ? "fixed inset-0 z-50 rounded-none" : "rounded-xl",
           )}
-          style={{ background: "#08080d" }}
+          style={{ background: CHART_COLORS.bg }}
         >
           <FullscreenButton
             active={fsActive}

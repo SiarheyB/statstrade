@@ -401,6 +401,11 @@ const en: Dict = {
 
   // locale / theme
   "locale.label": "Language",
+  "theme.label": "Appearance",
+  "theme.dark": "Dark",
+  "theme.light": "Light",
+  "theme.switchToLight": "Switch to light theme",
+  "theme.switchToDark": "Switch to dark theme",
 
   // landing
   // pricing — публичная страница /pricing
@@ -939,6 +944,7 @@ const en: Dict = {
   "settings.ydisk.disconnect": "Disconnect",
   "settings.language": "Language",
   "settings.languageHint": "Interface language",
+  "settings.themeHint": "Light or dark app appearance",
   "settings.timezone": "Timezone",
   "settings.timezoneHint": "Applied to all dates and times across the app: trades, calendar, charts, news",
   "settings.timezoneAuto": "Auto (device)",
@@ -2905,6 +2911,11 @@ const ru: Dict = {
 
 
   "locale.label": "Язык",
+  "theme.label": "Оформление",
+  "theme.dark": "Тёмная",
+  "theme.light": "Светлая",
+  "theme.switchToLight": "Переключить на светлую тему",
+  "theme.switchToDark": "Переключить на тёмную тему",
 
   // pricing
   "pricing.nav": "Тарифы",
@@ -3434,6 +3445,7 @@ const ru: Dict = {
   "settings.ydisk.disconnect": "Отключить",
   "settings.language": "Язык",
   "settings.languageHint": "Язык интерфейса",
+  "settings.themeHint": "Светлое или тёмное оформление приложения",
   "settings.timezone": "Часовой пояс",
   "settings.timezoneHint": "Применяется ко всем датам и времени в приложении: сделки, календарь, графики, новости",
   "settings.timezoneAuto": "Авто (устройство)",

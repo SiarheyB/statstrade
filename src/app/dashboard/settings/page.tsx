@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 import LocaleMenu from "@/components/LocaleMenu";
 import TimezoneMenu from "@/components/TimezoneMenu";
+import ThemeToggle from "@/components/ThemeToggle";
 import TwoFactorSettings from "@/components/TwoFactorSettings";
 import ChangePassword from "@/components/ChangePassword";
 import GoogleLinkSettings from "@/components/GoogleLinkSettings";
@@ -21,6 +22,14 @@ export default function GeneralSettingsPage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold">{t("nav.general")}</h1>
         <p className="text-sm text-muted">{t("settings.subtitle")}</p>
+      </div>
+
+      <div className="card p-5 mb-5 flex items-center justify-between gap-4">
+        <div>
+          <h3 className="font-medium text-sm">{t("theme.label")}</h3>
+          <p className="text-xs text-faint mt-0.5">{t("settings.themeHint")}</p>
+        </div>
+        <ThemeToggle />
       </div>
 
       <div className="card p-5 mb-5 flex items-center justify-between gap-4">

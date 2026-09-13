@@ -10,6 +10,7 @@
  * своего текста, иначе пропускался целиком).
  */
 import type { AbsorptionSignal } from "@/lib/orderflow";
+import { CHART_COLORS } from "@/lib/candlestickChart";
 
 // Цвет: фиолетовый/сиреневый — аккумуляция (не бычий/медвежий, а нейтральный).
 const COLOR = "rgba(147, 112, 219, 0.9)"; // medium purple
@@ -91,7 +92,7 @@ export function drawAbsorptionMarkers(
     if (labelX + labelW + padX * 2 > plotX + plotW) labelX = x0 - labelW - padX * 2 - 4;
     labelX = Math.max(plotX, labelX);
 
-    ctx.fillStyle = "rgba(10,11,16,0.85)";
+    ctx.fillStyle = CHART_COLORS.tooltipBg;
     ctx.fillRect(labelX - padX, y - 8, labelW + padX * 2, 16);
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;

@@ -342,7 +342,7 @@ export default function AccountsPage() {
                     onClick={() => updateAuto(a.id, { autoSync: !a.autoSync })}
                     aria-pressed={a.autoSync}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition ${
-                      a.autoSync ? "bg-accent" : "bg-surface-2 border border-border"
+                      a.autoSync ? "bg-accent" : "bg-border"
                     }`}
                   >
                     <span

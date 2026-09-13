@@ -7,6 +7,7 @@ import { TOTAL_METRICS } from "@/lib/analytics/metric-defs";
 import { getServerT, getLocale, getTimezone } from "@/lib/i18n/server";
 import { getLandingData } from "@/lib/landing";
 import LocaleMenu from "@/components/LocaleMenu";
+import ThemeToggle from "@/components/ThemeToggle";
 import LandingCalendar from "@/components/landing/LandingCalendar";
 import LandingSignal from "@/components/landing/LandingSignal";
 import LandingNews from "@/components/landing/LandingNews";
@@ -76,6 +77,7 @@ export default async function Home() {
           <Link href="/pricing" className="hidden sm:block px-2 py-1.5 text-muted hover:text-fg transition">
             {t("pricing.nav")}
           </Link>
+          <ThemeToggle compact />
           <LocaleMenu />
           <form action="/api/demo" method="post" className="hidden sm:block">
             <button

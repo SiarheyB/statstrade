@@ -31,9 +31,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Gamepad2,
+  Sun,
+  Moon,
 } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
+import { useTheme } from "@/components/ThemeProvider";
 import { useSidebar } from "@/lib/sidebar/provider";
 import { isDemoBlocked } from "@/lib/demoAccess";
 import SupportButton from "@/components/SupportButton";
@@ -133,6 +136,7 @@ export default function DashboardNav({
   const pathname = usePathname();
   const router = useRouter();
   const { t } = useI18n();
+  const { theme, setTheme } = useTheme();
   const [open, setOpen] = useState(() => isSettingsRoute(pathname));
   const [newsOpen, setNewsOpen] = useState(() => isNewsRoute(pathname));
   const [serviceOpen, setServiceOpen] = useState(() => isServiceRoute(pathname));
@@ -400,6 +404,16 @@ export default function DashboardNav({
       </nav>
 
       <div className={clsx("border-t border-border shrink-0", collapsed ? "p-2" : "p-3")}>
+        <button
+          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+          className={clsx("flex w-full items-center py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2 transition", collapsed ? "px-1.5 gap-0" : "px-3 gap-3")}
+          title={collapsed ? t("theme.label") : undefined}
+        >
+          {theme === "dark" ? <Moon size={18} /> : <Sun size={18} />}
+          <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>
+            {theme === "dark" ? t("theme.dark") : t("theme.light")}
+          </span>
+        </button>
         <div className={clsx("text-xs text-faint truncate", collapsed ? "px-1.5 py-1" : "px-3 py-2")}>
           <span className={clsx("transition-opacity duration-300", collapsed ? "opacity-0 w-0 overflow-hidden" : "")}>{email}</span>
         </div>

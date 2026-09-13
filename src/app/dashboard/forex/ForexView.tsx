@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { TrendingUp, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { useTheme } from "@/components/ThemeProvider";
 import VolumeProfile from "@/components/VolumeProfile";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
 import DivergenceHistory from "@/components/DivergenceHistory";
@@ -35,6 +36,7 @@ import {
   fmtPriceLabel,
   fmtCrosshairLabel,
   CHART_COLORS,
+  setChartTheme,
   buildTimeAxis,
   makeTimeProjection,
   type TimeAxis,
@@ -85,6 +87,8 @@ function parseTime(iso: string): number {
 
 export default function ForexView() {
   const { t, timezone, locale } = useI18n();
+  const { theme } = useTheme();
+  setChartTheme(theme);
   const [symbol, setSymbol] = useState("EUR/USD");
   const [range, setRange] = useState("1h");
   const [data, setData] = useState<FxResp | null>(null);
@@ -767,7 +771,7 @@ function inferBinSize(levels: { price: number }[]): number {
         ctx.beginPath();
         ctx.arc(cx, cy, 5, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#fff";
+        ctx.strokeStyle = CHART_COLORS.bg;
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(cx, cy, 7, 0, Math.PI * 2);

@@ -12,6 +12,7 @@ vi.mock("@/lib/i18n/provider", () => ({
   }),
 }));
 
+vi.mock("@/components/ThemeToggle", () => ({ default: () => <div data-testid="theme-toggle" /> }));
 vi.mock("@/components/LocaleMenu", () => ({ default: () => <div data-testid="locale-menu" /> }));
 vi.mock("@/components/TimezoneMenu", () => ({ default: () => <div data-testid="timezone-menu" /> }));
 vi.mock("@/components/TwoFactorSettings", () => ({ default: () => <div data-testid="two-factor" /> }));

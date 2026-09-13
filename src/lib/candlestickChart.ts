@@ -6,7 +6,7 @@ import { zonedParts, shiftedMs, type TimezoneId } from "@/lib/timezone";
 
 export type Candle = { t: number; o: number; h: number; l: number; c: number };
 
-export const CHART_COLORS = {
+const DARK_CHART_COLORS = {
   bg: "#0a0b10",
   up: "#13af74",
   down: "#ce323b",
@@ -28,6 +28,36 @@ export const CHART_COLORS = {
   tooltipBorder: "rgba(255,255,255,0.18)",
   tooltipText: "#e6eaf2",
 };
+
+const LIGHT_CHART_COLORS: typeof DARK_CHART_COLORS = {
+  bg: "#ffffff",
+  up: "#0e9f6e",
+  down: "#dc2626",
+  grid: "rgba(15,23,42,0.09)",
+  gridWeak: "rgba(15,23,42,0.06)",
+  axisText: "#5b6472",
+  axisTextStrong: "#334155",
+  axisTextWeak: "#94a3b8",
+  accent: "#b45309",
+  drawing: "#0284c7",
+  crosshair: "rgba(15,23,42,0.35)",
+  tooltipBg: "rgba(255,255,255,0.98)",
+  tooltipBorder: "rgba(15,23,42,0.15)",
+  tooltipText: "#131826",
+};
+
+// Мутируемый объект (не пересоздаём ссылку) — во ВСЁМ файле и во всех
+// компонентах-потребителях (orderflow, forex, оверлеи) цвета читаются как
+// CHART_COLORS.xxx в момент рисования, а не один раз при импорте. Поэтому
+// смена темы — это просто перезаписать поля прямо в этом объекте:
+// setChartTheme() ниже, вызывается из рендера страницы с графиком (как
+// I18nProvider синхронизирует lib/format.ts) — весь код рисования при этом
+// не меняется ни на строчку.
+export const CHART_COLORS = { ...DARK_CHART_COLORS };
+
+export function setChartTheme(theme: "dark" | "light"): void {
+  Object.assign(CHART_COLORS, theme === "light" ? LIGHT_CHART_COLORS : DARK_CHART_COLORS);
+}
 
 // Standard chart padding — kept identical across pages so charts line up visually.
 export const PADL = 8;

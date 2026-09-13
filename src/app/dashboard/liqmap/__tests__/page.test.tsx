@@ -7,6 +7,10 @@ vi.mock('@/lib/i18n/provider', () => ({
   useI18n: () => ({ t: (k: string) => k, timezone: 'auto', locale: 'ru' }),
 }));
 
+vi.mock('@/components/ThemeProvider', () => ({
+  useTheme: () => ({ theme: 'dark', setTheme: vi.fn() }),
+}));
+
 function makeCandles(n: number, base = 100) {
   const out = [];
   let price = base;

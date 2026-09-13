@@ -2,7 +2,11 @@
 
 @theme {
   /* Modern Dark (fintech / trading) — slate neutrals, deep navy base (no pure
-     black), blue accent; green/red kept for P&L semantics. */
+     black), blue accent; green/red kept for P&L semantics. Значения ниже —
+     дефолт (тёмная тема); светлая переопределяет их через
+     :root[data-theme="light"] дальше в файле — @theme только объявляет сами
+     переменные и генерирует утилиты (bg-bg, text-fg, ...), а какое значение
+     видит конкретный элемент, решает обычный каскад CSS. */
   --color-bg: #0a0e17;
   --color-surface: #131a27;
   --color-surface-2: #1b2435;
@@ -24,8 +28,48 @@
   --ease-premium: cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+/* Тени .card/.glass-panel и фоновая подложка body::before тоже разные для
+   тёмной/светлой темы — держим их токенами, а не хардкодом в утилитах, по
+   той же причине, что и цвета выше. */
+:root {
+  --shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 30px -16px rgba(0, 0, 0, 0.6);
+  --shadow-card-hover: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 44px -22px rgba(0, 0, 0, 0.72);
+  --bg-art-opacity: 1;
+}
+
+/* Modern Light — тот же фунтамент (нейтральные слейты + синий акцент), но на
+   светлой подложке. Profit/loss/warn затемнены относительно тёмной версии:
+   на белом фоне исходные яркие тона не проходят по контрасту как текст
+   (см. аудит перед внедрением — #16c784/#ea3943/#f0b90b мерялись против
+   белого и давали <3:1). */
+:root[data-theme="light"] {
+  --color-bg: #f4f6fa;
+  --color-surface: #ffffff;
+  --color-surface-2: #eef1f7;
+  --color-border: #e1e6ef;
+  --color-border-strong: #c7cedd;
+  --color-fg: #131826;
+  --color-muted: #5b6472;
+  --color-faint: #8994a6;
+  --color-accent: #2563eb;
+  --color-accent-soft: #dbeafe;
+  --color-profit: #158f63;
+  --color-loss: #d92d3d;
+  --color-warn: #a3690a;
+
+  --shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 10px 28px -18px rgba(15, 23, 42, 0.18);
+  --shadow-card-hover: 0 1px 2px rgba(15, 23, 42, 0.05), 0 16px 40px -20px rgba(15, 23, 42, 0.24);
+  /* Фоновый узор из свечей (bg-midnight.svg) нарисован полупрозрачным
+     slate/синим — на тёмном фоне это едва заметный «шум», на белом от него
+     остаётся ещё меньше, поэтому усиливаем видимость, а не гасим. */
+  --bg-art-opacity: 1.6;
+}
+
 html {
   color-scheme: dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
 }
 
 /* Accessible focus + reduced motion (per design-system checklist) */
@@ -59,6 +103,7 @@ body::before {
   background-image: url("/bg-midnight.svg");
   background-size: cover;
   background-position: center;
+  opacity: var(--bg-art-opacity);
   pointer-events: none;
 }
 
@@ -83,9 +128,7 @@ body::before {
   -webkit-backdrop-filter: blur(14px) saturate(1.1);
   border: 1px solid var(--color-border);
   border-radius: 0.85rem;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.05),
-    0 10px 30px -16px rgba(0, 0, 0, 0.6);
+  box-shadow: var(--shadow-card);
   transition:
     border-color 0.3s var(--ease-premium),
     box-shadow 0.3s var(--ease-premium);
@@ -95,9 +138,7 @@ body::before {
    No transform (keeps dense dashboard grids from jittering). */
 .card:hover {
   border-color: var(--color-border-strong);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.07),
-    0 18px 44px -22px rgba(0, 0, 0, 0.72);
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* Tactile press feedback on buttons. */

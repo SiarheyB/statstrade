@@ -57,6 +57,10 @@ vi.mock("@/components/LocaleMenu", () => ({
   default: () => <div data-testid="locale-menu" />,
 }));
 
+vi.mock("@/components/ThemeToggle", () => ({
+  default: () => <div data-testid="theme-toggle" />,
+}));
+
 describe("Home (landing page)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

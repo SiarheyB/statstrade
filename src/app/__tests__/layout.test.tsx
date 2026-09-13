@@ -17,6 +17,14 @@ vi.mock("@/lib/i18n/provider", () => ({
   I18nProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
+vi.mock("@/lib/theme.server", () => ({
+  getTheme: vi.fn().mockResolvedValue("dark"),
+}));
+
+vi.mock("@/components/ThemeProvider", () => ({
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 // siteUrl() читает заголовки запроса (для canonical и Open Graph) — вне
 // запроса их нет, поэтому подставляем прод-хост.
 vi.mock("next/headers", () => ({
