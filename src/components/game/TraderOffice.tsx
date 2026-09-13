@@ -62,8 +62,8 @@ export default function TraderOffice({
               <stop offset="100%" stopColor={skyBottom} />
             </linearGradient>
             <linearGradient id="office-desk" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#2b3546" />
-              <stop offset="100%" stopColor="#1a2130" />
+              <stop offset="0%" stopColor="var(--color-border-strong)" />
+              <stop offset="100%" stopColor="var(--color-surface-2)" />
             </linearGradient>
             <linearGradient id="office-screen" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor="var(--color-accent)" stopOpacity="0.35" />
@@ -74,7 +74,7 @@ export default function TraderOffice({
           {/* Стена, пол и окно. Пол отделён по тону: без него сцена читалась
               как плоская наклейка, а не как комната. */}
           <rect x="0" y="0" width="640" height="280" fill="var(--color-surface)" />
-          <rect x="0" y="212" width="640" height="68" fill="#12161f" />
+          <rect x="0" y="212" width="640" height="68" fill="var(--color-surface-2)" />
           <rect x="40" y="20" width="560" height="150" rx="6" fill="url(#office-sky)" />
 
           {view === "sea" && (
@@ -117,7 +117,7 @@ export default function TraderOffice({
           {view === "wall" && (
             <g opacity="0.5">
               {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                <line key={i} x1={40} y1={40 + i * 20} x2={600} y2={40 + i * 20} stroke="#232a36" strokeWidth="2" />
+                <line key={i} x1={40} y1={40 + i * 20} x2={600} y2={40 + i * 20} stroke="var(--color-border-strong)" strokeWidth="2" />
               ))}
             </g>
           )}
@@ -130,9 +130,9 @@ export default function TraderOffice({
           {/* Стол */}
           <rect x="20" y="196" width="600" height="16" rx="4" fill="url(#office-desk)" />
           {/* Тень под столом — глубина сцены. */}
-          <rect x="20" y="212" width="600" height="6" fill="#0b0e14" opacity="0.5" />
-          <rect x="60" y="212" width="10" height="56" fill="#1a2130" />
-          <rect x="570" y="212" width="10" height="56" fill="#1a2130" />
+          <rect x="20" y="212" width="600" height="6" fill="#0b0e14" opacity="0.35" />
+          <rect x="60" y="212" width="10" height="56" fill="var(--color-border-strong)" />
+          <rect x="570" y="212" width="10" height="56" fill="var(--color-border-strong)" />
 
           {/* Мониторы: их число зависит от купленного сетапа */}
           {Array.from({ length: monitors }).map((_, i) => {
@@ -161,7 +161,7 @@ export default function TraderOffice({
                   strokeWidth="1.5"
                   opacity="0.9"
                 />
-                <rect x={x + width / 2 - 12} y={y + height} width="24" height="6" fill="#1a2130" />
+                <rect x={x + width / 2 - 12} y={y + height} width="24" height="6" fill="var(--color-border-strong)" />
               </g>
             );
           })}
@@ -213,7 +213,7 @@ export default function TraderOffice({
               <path d="M39 182 C 48 170, 52 156, 47 146" stroke="#4a8f60" strokeWidth="3" fill="none" strokeLinecap="round" />
               <path d="M39 184 C 34 172, 40 160, 39 150" stroke="#356b47" strokeWidth="3" fill="none" strokeLinecap="round" />
               {/* Торшер */}
-              <line x1="606" y1="212" x2="606" y2="150" stroke="#2b3546" strokeWidth="3" />
+              <line x1="606" y1="212" x2="606" y2="150" stroke="var(--color-border-strong)" strokeWidth="3" />
               <path d="M594 150 h24 l-6 -16 h-12 z" fill="#e8c67a" opacity="0.85" />
               <ellipse cx="606" cy="176" rx="26" ry="26" fill="#e8c67a" opacity="0.07" />
             </g>
@@ -247,23 +247,23 @@ export default function TraderOffice({
           {owned.includes("gear_chair") ? (
             <g>
               {/* спинка */}
-              <rect x="292" y="196" width="56" height="46" rx="10" fill="#2f3a4d" />
-              <rect x="300" y="204" width="40" height="30" rx="7" fill="#3b4860" />
+              <rect x="292" y="196" width="56" height="46" rx="10" fill="var(--color-border-strong)" />
+              <rect x="300" y="204" width="40" height="30" rx="7" fill="var(--color-faint)" />
               {/* подлокотники */}
-              <rect x="282" y="234" width="10" height="18" rx="4" fill="#28313f" />
-              <rect x="348" y="234" width="10" height="18" rx="4" fill="#28313f" />
+              <rect x="282" y="234" width="10" height="18" rx="4" fill="var(--color-border-strong)" />
+              <rect x="348" y="234" width="10" height="18" rx="4" fill="var(--color-border-strong)" />
               {/* сиденье */}
-              <rect x="286" y="238" width="68" height="14" rx="7" fill="#38445a" />
+              <rect x="286" y="238" width="68" height="14" rx="7" fill="var(--color-faint)" />
               {/* газлифт и крестовина */}
-              <rect x="316" y="252" width="8" height="12" fill="#1f2634" />
-              <path d="M300 270 L320 262 L340 270" fill="none" stroke="#1f2634" strokeWidth="4" strokeLinecap="round" />
-              <path d="M320 262 L320 272" stroke="#1f2634" strokeWidth="4" strokeLinecap="round" />
+              <rect x="316" y="252" width="8" height="12" fill="var(--color-border-strong)" />
+              <path d="M300 270 L320 262 L340 270" fill="none" stroke="var(--color-border-strong)" strokeWidth="4" strokeLinecap="round" />
+              <path d="M320 262 L320 272" stroke="var(--color-border-strong)" strokeWidth="4" strokeLinecap="round" />
             </g>
           ) : (
             <g>
-              <rect x="294" y="238" width="52" height="10" rx="3" fill="#232a36" />
-              <line x1="302" y1="248" x2="298" y2="272" stroke="#1c2330" strokeWidth="4" strokeLinecap="round" />
-              <line x1="338" y1="248" x2="342" y2="272" stroke="#1c2330" strokeWidth="4" strokeLinecap="round" />
+              <rect x="294" y="238" width="52" height="10" rx="3" fill="var(--color-border-strong)" />
+              <line x1="302" y1="248" x2="298" y2="272" stroke="var(--color-border-strong)" strokeWidth="4" strokeLinecap="round" />
+              <line x1="338" y1="248" x2="342" y2="272" stroke="var(--color-border-strong)" strokeWidth="4" strokeLinecap="round" />
             </g>
           )}
         </svg>

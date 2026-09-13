@@ -97,6 +97,33 @@ export function jobAvailable(job: Job, stats: { prestige: number; level: number;
   return stats.prestige >= prestige && stats.level >= level && stats.contractsPassed >= contractsPassed;
 }
 
+/**
+ * Каких именно требований не хватает — с текущими и нужными числами.
+ *
+ * hireError() отдаёт только код «locked», а по нему непонятно, чего не
+ * хватает: репутации, уровня или числа контрактов, и на сколько. Раньше
+ * подсказка ограничивалась общей фразой «пока не хватает репутации или
+ * уровня» — приходилось гадать, какое из трёх и насколько.
+ */
+export interface MissingRequirement {
+  kind: "prestige" | "level" | "contractsPassed";
+  need: number;
+  have: number;
+}
+export function missingRequirements(
+  job: Job,
+  stats: { prestige: number; level: number; contractsPassed: number },
+): MissingRequirement[] {
+  const { prestige = 0, level = 0, contractsPassed = 0 } = job.requires;
+  const gaps: MissingRequirement[] = [];
+  if (stats.prestige < prestige) gaps.push({ kind: "prestige", need: prestige, have: stats.prestige });
+  if (stats.level < level) gaps.push({ kind: "level", need: level, have: stats.level });
+  if (stats.contractsPassed < contractsPassed) {
+    gaps.push({ kind: "contractsPassed", need: contractsPassed, have: stats.contractsPassed });
+  }
+  return gaps;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export interface SalaryResult {

@@ -14,7 +14,7 @@ import { useState } from "react";
 import { Briefcase, HandCoins, Wallet } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
-import { advanceAvailable, getJob, hireError, JOBS, type Job } from "@/engine/player/jobs";
+import { advanceAvailable, getJob, hireError, missingRequirements, JOBS, type Job } from "@/engine/player/jobs";
 import { FUND_LICENSE_ITEM_ID } from "@/engine/economy/shop";
 import type { JobState } from "@/engine/entities/types";
 import { useGameStore } from "@/store/gameStore";
@@ -177,24 +177,44 @@ export default function WorkPanel() {
             const held = item.id === jobState?.jobId || item.id === sideState?.jobId;
             if (held) return null;
             const error = hireError(item, game.career, ownsFund, stats);
+            // «locked» — единственная причина, которую можно исправить игрой
+            // (остальные — «уже занят», «у вас свой фонд» — просто факт,
+            // уточнять нечего). Раньше подсказка ограничивалась общей фразой
+            // «не хватает репутации или уровня» ТОЛЬКО по наведению —
+            // приходилось наводить на каждую вакансию по очереди, чтобы
+            // понять, какая вообще ближе к открытию. Теперь недостающее
+            // видно сразу под вакансией, без наведения.
+            const gaps = error === "locked" ? missingRequirements(item, stats) : [];
+            const gapsText = gaps
+              .map((g) =>
+                t(`game.work.need.${g.kind}`, { need: g.need, have: g.have }),
+              )
+              .join(" · ");
             return (
-              <div key={item.id} className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm">
-                <span className={`font-medium ${error ? "text-faint" : ""}`}>{t(`game.job.${item.id}.name`)}</span>
-                {item.side && (
-                  <span className="text-[10px] uppercase tracking-[0.12em] text-accent">{t("game.work.sideJob")}</span>
+              <div key={item.id} className="border-t border-border pt-2 space-y-1">
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className={`font-medium ${error ? "text-faint" : ""}`}>{t(`game.job.${item.id}.name`)}</span>
+                  {item.side && (
+                    <span className="text-[10px] uppercase tracking-[0.12em] text-accent">{t("game.work.sideJob")}</span>
+                  )}
+                  <span className="text-xs text-faint flex-1 min-w-[160px]">{t(`game.job.${item.id}.desc`)}</span>
+                  <span className="tabular-nums text-profit">{fmtUsd(item.dailySalary)}</span>
+                  <Hint text={error ? t(`game.work.hire.${error}`) : t("game.work.takeHint")} side="top" align="end">
+                    <button
+                      type="button"
+                      disabled={error !== null}
+                      onClick={() => takeJob(item.id)}
+                      className="px-3 py-1 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-30"
+                    >
+                      {t("game.work.take")}
+                    </button>
+                  </Hint>
+                </div>
+                {error && (
+                  <p className="text-[11px] text-loss/80">
+                    {error === "locked" ? gapsText : t(`game.work.hire.${error}`)}
+                  </p>
                 )}
-                <span className="text-xs text-faint flex-1 min-w-[160px]">{t(`game.job.${item.id}.desc`)}</span>
-                <span className="tabular-nums text-profit">{fmtUsd(item.dailySalary)}</span>
-                <Hint text={error ? t(`game.work.hire.${error}`) : t("game.work.takeHint")} side="top" align="end">
-                  <button
-                    type="button"
-                    disabled={error !== null}
-                    onClick={() => takeJob(item.id)}
-                    className="px-3 py-1 rounded-lg text-xs font-medium bg-accent/15 text-accent hover:bg-accent/25 disabled:opacity-30"
-                  >
-                    {t("game.work.take")}
-                  </button>
-                </Hint>
               </div>
             );
           })}

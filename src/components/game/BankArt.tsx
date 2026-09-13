@@ -20,28 +20,29 @@ export default function BankArt({ capital }: { capital: number }) {
     <svg viewBox="0 0 640 200" className="block w-full" role="img" aria-hidden>
       <defs>
         <linearGradient id="bank-sky" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#111a2e" />
-          <stop offset="100%" stopColor="#1b2231" />
+          <stop offset="0%" stopColor="var(--color-bg)" />
+          <stop offset="100%" stopColor="var(--color-surface)" />
         </linearGradient>
       </defs>
       <rect x="0" y="0" width="640" height="200" fill="url(#bank-sky)" />
 
-      {/* Ступени */}
-      <rect x="120" y="170" width="400" height="6" fill="#2a3243" />
-      <rect x="132" y="164" width="376" height="6" fill="#323c50" />
-      <rect x="144" y="158" width="352" height="6" fill="#3a465c" />
+      {/* Ступени — светлый камень: тёмный на ночном небе тёмной темы,
+          светлый мрамор на дневном небе светлой. */}
+      <rect x="120" y="170" width="400" height="6" fill="var(--color-border-strong)" />
+      <rect x="132" y="164" width="376" height="6" fill="var(--color-border)" />
+      <rect x="144" y="158" width="352" height="6" fill="var(--color-surface-2)" />
 
       {/* Колонны — шесть штук, но фронтон (150–490) шире, чем 6×62: со старым
           шагом последняя колонна и её подсветка вылезали за портик на 17–48px.
           Шаг 57 с началом в 172 держит все шесть строго под антаблементом
           (150–490): правый край последней колонны — 483, её капитель — 487. */}
       {COLUMN_X.map((x, i) => (
-        <rect key={`col-${i}`} x={x} y="86" width="26" height="72" fill="#46536b" />
+        <rect key={`col-${i}`} x={x} y="86" width="26" height="72" fill="var(--color-border-strong)" />
       ))}
       {COLUMN_X.map((x, i) => (
         <g key={`cap-${i}`}>
-          <rect x={x - 4} y="80" width="34" height="8" rx="2" fill="#55637d" />
-          <rect x={x - 4} y="156" width="34" height="6" rx="2" fill="#55637d" />
+          <rect x={x - 4} y="80" width="34" height="8" rx="2" fill="var(--color-faint)" />
+          <rect x={x - 4} y="156" width="34" height="6" rx="2" fill="var(--color-faint)" />
         </g>
       ))}
       {/* Свет МЕЖДУ колоннами — пять промежутков на шесть колонн, а не один
@@ -60,9 +61,9 @@ export default function BankArt({ capital }: { capital: number }) {
       ))}
 
       {/* Антаблемент и фронтон */}
-      <rect x="150" y="66" width="340" height="16" rx="2" fill="#55637d" />
-      <path d="M150 66 L320 26 L490 66 Z" fill="#46536b" />
-      <path d="M172 62 L320 38 L468 62 Z" fill="#3a465c" />
+      <rect x="150" y="66" width="340" height="16" rx="2" fill="var(--color-faint)" />
+      <path d="M150 66 L320 26 L490 66 Z" fill="var(--color-border-strong)" />
+      <path d="M172 62 L320 38 L468 62 Z" fill="var(--color-surface-2)" />
       {/* Циферблат на фронтоне */}
       <circle cx="320" cy="54" r="9" fill="none" stroke="var(--color-accent)" strokeWidth="2" opacity="0.8" />
       <line x1="320" y1="54" x2="320" y2="48" stroke="var(--color-accent)" strokeWidth="1.5" opacity="0.8" />
