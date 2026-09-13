@@ -40,7 +40,7 @@ const LIGHT_CHART_COLORS: typeof DARK_CHART_COLORS = {
   axisTextWeak: "#94a3b8",
   accent: "#b45309",
   drawing: "#0284c7",
-  crosshair: "rgba(15,23,42,0.35)",
+  crosshair: "rgba(15,23,42,0.55)",
   tooltipBg: "rgba(255,255,255,0.98)",
   tooltipBorder: "rgba(15,23,42,0.15)",
   tooltipText: "#131826",

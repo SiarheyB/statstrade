@@ -117,6 +117,8 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   const clearSeizedItems = useGameStore((s) => s.clearSeizedItems);
   const addDrawing = useGameStore((s) => s.addDrawing);
   const removeDrawing = useGameStore((s) => s.removeDrawing);
+  const setStopLoss = useGameStore((s) => s.setStopLoss);
+  const setTakeProfit = useGameStore((s) => s.setTakeProfit);
   // Длина журнала на прошлом кадре — по её приросту понимаем, что сделка
   // закрылась (движок не рассылает событий, состояние иммутабельно).
   const lastJournalLength = useRef(0);
@@ -289,6 +291,10 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
   const perks = perkEffects(game.perks);
   const showOrderBook = currentStyle === "scalping" || perks.tools.orderBookAnywhere;
   const openPositionAssetIds = game.account.positions.filter((p) => !p.closedAt).map((p) => p.assetId);
+  // Открытая позиция по активу на графике — точка входа/стоп/тейк рисуются
+  // только по ней; несколько позиций на один актив теоретически возможны
+  // (доливки), но линии тянуть логично к последней открытой.
+  const chartPosition = [...game.account.positions].reverse().find((p) => p.assetId === assetId && !p.closedAt) ?? null;
 
   return (
     // --color-accent подменяется купленной темой ТОЛЬКО внутри терминала:
@@ -413,6 +419,9 @@ export default function GameTerminal({ tuning, playerName }: { tuning: GameTunin
               onRemoveDrawing={(id) => {
                 if (assetId) removeDrawing(assetId, id);
               }}
+              position={chartPosition}
+              onSetStopLoss={(positionId, price) => setStopLoss(positionId, price)}
+              onSetTakeProfit={(positionId, price) => setTakeProfit(positionId, price)}
             />
           </div>
 

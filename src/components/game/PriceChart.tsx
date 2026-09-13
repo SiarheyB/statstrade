@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import {
   CHART_COLORS,
+  setChartTheme,
   drawCandlesticks,
   drawCrosshair,
   drawLastPriceTag,
@@ -57,8 +58,11 @@ import {
   type Candle as ChartCandle,
   type PlotLayout,
 } from "@/lib/candlestickChart";
+import { useTheme } from "@/components/ThemeProvider";
 import { ema, rsi, sma } from "@/engine/market/indicators";
-import type { AssetClass, GameDrawing, GameDrawingKind } from "@/engine/entities/types";
+import type { AssetClass, GameDrawing, GameDrawingKind, Position } from "@/engine/entities/types";
+import { levelAmount } from "@/engine/economy/pnlCalculator";
+import { fmtUsd } from "@/lib/format";
 import { isMarketOpen, nextOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
 import { useLiveTick } from "@/lib/game/useLiveTick";
@@ -152,7 +156,7 @@ export function snapToBar(
 }
 
 type Tool = "cursor" | "trend" | "level" | "ray" | "rect" | "vline" | "erase";
-type DragMode = "pan" | "scaleY" | "scaleX" | "draw";
+type DragMode = "pan" | "scaleY" | "scaleX" | "draw" | "sl" | "tp";
 
 // Набор таймфреймов зависит от стиля: скальперу дневной график не нужен, а
 // инвестору минутный бесполезен. Раньше список был один на всех, и в
@@ -257,6 +261,9 @@ export default function PriceChart({
   drawings,
   onAddDrawing,
   onRemoveDrawing,
+  position,
+  onSetStopLoss,
+  onSetTakeProfit,
 }: {
   assetId: string | undefined;
   currentPrice: number | undefined;
@@ -269,8 +276,21 @@ export default function PriceChart({
   drawings: GameDrawing[];
   onAddDrawing: (drawing: GameDrawing) => void;
   onRemoveDrawing: (id: string) => void;
+  // Открытая позиция по текущему активу — точка входа рисуется всегда,
+  // стоп-лосс/тейк-профит можно перетаскивать прямо на графике (иначе их
+  // видно только числом в тикете, и непонятно, где они относительно цены).
+  position?: Position | null;
+  onSetStopLoss?: (positionId: string, price: number | undefined) => void;
+  onSetTakeProfit?: (positionId: string, price: number | undefined) => void;
 }) {
   const { t } = useI18n();
+  const { theme } = useTheme();
+  // CHART_COLORS — общий мутируемый объект на весь проект (см.
+  // lib/candlestickChart.ts) — без этого вызова здесь график игры оставался
+  // на дефолтной тёмной палитре (белый крестик и т.п.), даже когда фон
+  // страницы уже светлый: этот компонент раньше её вообще не трогал, в
+  // отличие от карты ордеров/ликвидаций/форекса.
+  setChartTheme(theme);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   // Расписание торгов: пока рынок закрыт, свечи не строятся, и об этом надо
@@ -376,6 +396,14 @@ export default function PriceChart({
   const removeRef = useRef(onRemoveDrawing);
   const optionsRef = useRef({ showMa, showVolume, showRsi });
   const magnetRef = useRef(magnet);
+  const positionRef = useRef(position);
+  const setSlRef = useRef(onSetStopLoss);
+  const setTpRef = useRef(onSetTakeProfit);
+  // Черновик цены во время перетаскивания стоп-лосса/тейк-профита: без него
+  // линия дёргалась бы обратно на старое место на каждый кадр, пока стор ещё
+  // не обновился (обновление приходит из React, а мышь двигается быстрее).
+  const slDraftRef = useRef<number | null>(null);
+  const tpDraftRef = useRef<number | null>(null);
 
   const viewRef = useRef<View | null>(null);
   const layoutRef = useRef<PlotLayout | null>(null);
@@ -561,6 +589,19 @@ export default function PriceChart({
     removeRef.current = onRemoveDrawing;
     optionsRef.current = { showMa, showVolume, showRsi };
     magnetRef.current = magnet;
+    positionRef.current = position;
+    setSlRef.current = onSetStopLoss;
+    setTpRef.current = onSetTakeProfit;
+    // Черновик сбрасывается, когда реальное значение из стора догнало то,
+    // что мы временно рисовали во время перетаскивания (или позиция вовсе
+    // сменилась/закрылась) — иначе после отпускания мыши линия навсегда
+    // осталась бы там, где её бросили, даже если сервер её подвинул иначе.
+    if (slDraftRef.current != null && position?.stopLoss === slDraftRef.current) slDraftRef.current = null;
+    if (tpDraftRef.current != null && position?.takeProfit === tpDraftRef.current) tpDraftRef.current = null;
+    if (!position) {
+      slDraftRef.current = null;
+      tpDraftRef.current = null;
+    }
 
     const draw = () => {
       const canvas = canvasRef.current;
@@ -745,14 +786,74 @@ export default function PriceChart({
           ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0));
         }
       }
+
+      // Открытая позиция: точка входа — всегда, стоп-лосс/тейк-профит — тоже
+      // всегда, и их можно потянуть мышью (см. onDown/onMove/onUp ниже).
+      // Раньше эти уровни были видны только числом в тикете позиций — на
+      // графике непонятно было, далеко ли цена от стопа.
+      const pos = positionRef.current;
+      const slPrice = slDraftRef.current ?? pos?.stopLoss;
+      const tpPrice = tpDraftRef.current ?? pos?.takeProfit;
+      if (pos) {
+        const yEntry = sy(pos.entryPrice);
+        ctx.strokeStyle = CHART_COLORS.axisTextStrong;
+        ctx.setLineDash([2, 3]);
+        ctx.beginPath();
+        ctx.moveTo(layout.plotX, yEntry);
+        ctx.lineTo(layout.plotX + layout.plotW, yEntry);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (slPrice != null) {
+        const y = sy(slPrice);
+        ctx.strokeStyle = CHART_COLORS.down;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(layout.plotX, y);
+        ctx.lineTo(layout.plotX + layout.plotW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (tpPrice != null) {
+        const y = sy(tpPrice);
+        ctx.strokeStyle = CHART_COLORS.up;
+        ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        ctx.moveTo(layout.plotX, y);
+        ctx.lineTo(layout.plotX + layout.plotW, y);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.lineWidth = 1;
       ctx.restore();
+
+      // Бирки на правой шкале — тот же приём, что и drawLastPriceTag, но со
+      // своим цветом на каждый уровень и подписью суммы, которая на кону.
+      const drawLevelTag = (levelPrice: number, bg: string, tag: string, amount: number | null, sign: "-" | "+") => {
+        const y = sy(levelPrice);
+        if (y < -8 || y > layout.plotH + 8) return;
+        const amountText = amount != null ? ` ${sign}${fmtUsd(amount)}` : "";
+        ctx.font = "600 11px ui-sans-serif, system-ui";
+        const label = `${tag} ${fmtPriceLabel(levelPrice)}${amountText}`;
+        const w = Math.ceil(ctx.measureText(label).width) + 10;
+        ctx.fillStyle = bg;
+        ctx.fillRect(layout.plotX + layout.plotW, Math.max(0, Math.min(layout.plotH - 14, y - 7)), Math.max(PADR, w), 14);
+        ctx.fillStyle = "#08080d";
+        ctx.fillText(label, layout.plotX + layout.plotW + 5, Math.max(10, Math.min(layout.plotH - 4, y + 3)));
+      };
+      if (pos) drawLevelTag(pos.entryPrice, "rgba(230,233,240,0.85)", tRef.current("game.positions.entry"), null, "+");
+      if (slPrice != null && pos) {
+        drawLevelTag(slPrice, CHART_COLORS.down, tRef.current("game.order.stopLoss"), levelAmount(pos.entryPrice, slPrice, pos.size, pos.leverage), "-");
+      }
+      if (tpPrice != null && pos) {
+        drawLevelTag(tpPrice, CHART_COLORS.up, tRef.current("game.order.takeProfit"), levelAmount(pos.entryPrice, tpPrice, pos.size, pos.leverage), "+");
+      }
 
       const price = priceRef.current;
       if (price != null) drawLastPriceTag(ctx, price, sy(price), layout);
 
       ctx.font = "600 14px ui-sans-serif, system-ui";
-      ctx.fillStyle = "rgba(230,233,240,0.72)";
+      ctx.fillStyle = CHART_COLORS.axisTextStrong;
       ctx.textAlign = "left";
       ctx.fillText(symbolRef.current, layout.plotX + 10, 20);
 
@@ -805,7 +906,27 @@ export default function PriceChart({
         const ms = invX(hov.mx);
         const candle = allCandles.find((k) => ms >= k.t && ms < k.t + stepMs);
         drawTimeCrosshairTag(ctx, fmtChartTime(candle ? candle.t : ms, stepMs), hov.mx, layout);
-        if (candle) {
+
+        // Курсор у стоп-лосса/тейк-профита открытой позиции — вместо
+        // O/H/L/C показываем, что именно на кону: цену уровня и сумму,
+        // которая будет потеряна/получена при её достижении.
+        const nearSl = pos && slPrice != null && Math.abs(sy(slPrice) - hov.my) <= HIT_TOLERANCE;
+        const nearTp = pos && tpPrice != null && Math.abs(sy(tpPrice) - hov.my) <= HIT_TOLERANCE;
+        if (pos && (nearSl || nearTp)) {
+          const levelPrice = nearSl ? (slPrice as number) : (tpPrice as number);
+          const amount = levelAmount(pos.entryPrice, levelPrice, pos.size, pos.leverage);
+          drawTooltipBox(
+            ctx,
+            [
+              tRef.current(nearSl ? "game.order.stopLoss" : "game.order.takeProfit"),
+              fmtPriceLabel(levelPrice),
+              `${nearSl ? "-" : "+"}${fmtUsd(amount)}`,
+            ],
+            hov.mx,
+            hov.my,
+            layout,
+          );
+        } else if (candle) {
           drawTooltipBox(
             ctx,
             [
@@ -838,6 +959,9 @@ export default function PriceChart({
     showMa,
     showVolume,
     showRsi,
+    position,
+    onSetStopLoss,
+    onSetTakeProfit,
   ]);
 
   // ── Взаимодействие ──────────────────────────────────────────────────────
@@ -856,6 +980,23 @@ export default function PriceChart({
       if (mx > lay.plotX + lay.plotW) return "scaleY";
       if (my > lay.plotH && my <= lay.plotH + PAD_BOTTOM) return "scaleX";
       return "pan";
+    };
+
+    /** Курсор рядом со стоп-лоссом/тейк-профитом открытой позиции — потянуть
+     *  можно только эти два уровня, точка входа неподвижна. */
+    const hitLevel = (mx: number, my: number): "sl" | "tp" | null => {
+      const lay = layoutRef.current;
+      const view = viewRef.current;
+      const pos = positionRef.current;
+      if (!lay || !view || !pos) return null;
+      if (mx < lay.plotX || mx > lay.plotX + lay.plotW) return null;
+      const yspan = view.y1 - view.y0 || 1;
+      const sy = (p: number) => lay.plotH - ((p - view.y0) / yspan) * lay.plotH;
+      const slPrice = slDraftRef.current ?? pos.stopLoss;
+      const tpPrice = tpDraftRef.current ?? pos.takeProfit;
+      if (slPrice != null && Math.abs(sy(slPrice) - my) <= HIT_TOLERANCE) return "sl";
+      if (tpPrice != null && Math.abs(sy(tpPrice) - my) <= HIT_TOLERANCE) return "tp";
+      return null;
     };
 
     /**
@@ -930,8 +1071,17 @@ export default function PriceChart({
       if (!drag && lay) {
         // Курсор подсказывает, что произойдёт при нажатии.
         const zone = zoneOf(mx, my);
+        const level = toolRef.current === "cursor" ? hitLevel(mx, my) : null;
         canvas.style.cursor =
-          toolRef.current !== "cursor" ? "crosshair" : zone === "scaleY" ? "ns-resize" : zone === "scaleX" ? "ew-resize" : "crosshair";
+          toolRef.current !== "cursor"
+            ? "crosshair"
+            : level
+              ? "ns-resize"
+              : zone === "scaleY"
+                ? "ns-resize"
+                : zone === "scaleX"
+                  ? "ew-resize"
+                  : "crosshair";
       }
 
       if (drag && lay) {
@@ -971,6 +1121,14 @@ export default function PriceChart({
                 ? [point]
                 : [draft.points[0], point];
           }
+        } else if (drag.mode === "sl" || drag.mode === "tp") {
+          // Без магнита к барам: стоп и тейк ставят по своей логике, а не по
+          // хаям/лоям свечей, как разметку.
+          const point = dataAt(mx, my, false);
+          if (point) {
+            if (drag.mode === "sl") slDraftRef.current = point.price;
+            else tpDraftRef.current = point.price;
+          }
         }
       }
       redrawRef.current();
@@ -1004,11 +1162,30 @@ export default function PriceChart({
         return;
       }
 
+      const level = hitLevel(mx, my);
+      if (level) {
+        dragRef.current = { mode: level, mx, my, startView: { ...view } };
+        return;
+      }
+
       dragRef.current = { mode: zoneOf(mx, my), mx, my, startView: { ...view } };
       if (dragRef.current.mode === "pan") canvas.style.cursor = "grabbing";
     };
 
     const onUp = () => {
+      const dragMode = dragRef.current?.mode;
+      const pos = positionRef.current;
+      if (pos && (dragMode === "sl" || dragMode === "tp")) {
+        const finalPrice = dragMode === "sl" ? slDraftRef.current : tpDraftRef.current;
+        if (finalPrice != null) {
+          if (dragMode === "sl") setSlRef.current?.(pos.id, finalPrice);
+          else setTpRef.current?.(pos.id, finalPrice);
+        }
+        dragRef.current = null;
+        canvas.style.cursor = "crosshair";
+        redrawRef.current();
+        return;
+      }
       const draft = draftRef.current;
       if (draft) {
         // Случайный клик тем же инструментом не должен оставлять точку

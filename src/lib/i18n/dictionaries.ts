@@ -1581,7 +1581,7 @@ const en: Dict = {
 
   "game.loading": "Loading…",
   "game.chart.loading": "Collecting price data…",
-  "game.stat.balance": "Balance",
+  "game.stat.balance": "Cash",
   "game.stat.equity": "Equity",
   "game.stat.style": "Style",
   "game.stat.day": "Day",
@@ -4082,7 +4082,7 @@ const ru: Dict = {
 
   "game.loading": "Загрузка…",
   "game.chart.loading": "Копим данные по цене…",
-  "game.stat.balance": "Баланс",
+  "game.stat.balance": "Наличные",
   "game.stat.equity": "Эквити",
   "game.stat.style": "Стиль",
   "game.stat.day": "День",
