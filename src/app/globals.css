@@ -65,11 +65,22 @@
   --bg-art-opacity: 1.6;
 }
 
-html {
-  color-scheme: dark;
+:root {
+  --scheme: dark;
 }
-html[data-theme="light"] {
-  color-scheme: light;
+:root[data-theme="light"] {
+  --scheme: light;
+}
+html {
+  color-scheme: var(--scheme);
+}
+/* color-scheme — наследуемое свойство, но нативная выпадашка <select> в
+   Safari иногда всё равно рисуется в системной тёмной теме, даже когда у
+   <html> явно указан light: помогает только color-scheme, заданный
+   НЕПОСРЕДСТВЕННО на самом select (через ту же переменную), а не
+   унаследованный от предка. */
+select {
+  color-scheme: var(--scheme);
 }
 
 /* Accessible focus + reduced motion (per design-system checklist) */
