@@ -903,10 +903,41 @@ export default function PriceChart({
       const price = priceRef.current;
       if (price != null) drawLastPriceTag(ctx, price, sy(price), layout);
 
+      // OHLCV — строкой у тикера сверху, как на настоящих платформах
+      // (TradingView и т.п.), а не всплывающей подсказкой под курсором:
+      // подсказка перекрывала свечи и пропадала, стоило убрать мышь с
+      // графика — а именно эти цифры чаще всего смотрят не отрываясь.
+      // Под курсором — свеча под курсором, иначе — последняя (текущая).
+      const hoverNow = hoverRef.current;
+      const hoverInPlot =
+        hoverNow != null &&
+        hoverNow.mx >= layout.plotX &&
+        hoverNow.mx <= layout.plotX + layout.plotW &&
+        hoverNow.my >= 0 &&
+        hoverNow.my <= layout.plotH;
+      const hoverMs = hoverInPlot ? invX(hoverNow.mx) : null;
+      const headerCandle = hoverInPlot
+        ? (allCandles.find((k) => hoverMs! >= k.t && hoverMs! < k.t + stepMs) ?? allCandles[allCandles.length - 1])
+        : allCandles[allCandles.length - 1];
+
       ctx.font = "600 14px ui-sans-serif, system-ui";
       ctx.fillStyle = CHART_COLORS.axisTextStrong;
       ctx.textAlign = "left";
       ctx.fillText(symbolRef.current, layout.plotX + 10, 20);
+      if (headerCandle) {
+        const symbolW = ctx.measureText(symbolRef.current).width;
+        const up = headerCandle.c >= headerCandle.o;
+        ctx.font = "600 11px ui-sans-serif, system-ui";
+        ctx.fillStyle = up ? CHART_COLORS.up : CHART_COLORS.down;
+        const ohlcv = [
+          `O ${fmtPriceLabel(headerCandle.o)}`,
+          `H ${fmtPriceLabel(headerCandle.h)}`,
+          `L ${fmtPriceLabel(headerCandle.l)}`,
+          `C ${fmtPriceLabel(headerCandle.c)}`,
+          `V ${Math.round(headerCandle.v).toLocaleString("ru-RU")}`,
+        ].join("   ");
+        ctx.fillText(ohlcv, layout.plotX + 10 + symbolW + 14, 20);
+      }
 
       // RSI отдельной полосой снизу: накладывать осциллятор на цену нельзя,
       // у него своя шкала 0-100.
@@ -949,18 +980,19 @@ export default function PriceChart({
         ctx.fillText("RSI 14", layout.plotX + 6, top + 12);
       }
 
-      // Crosshair + OHLC-подсказка.
+      // Crosshair. OHLCV уже нарисован строкой у тикера сверху (см. выше) —
+      // здесь только линии прицела и всплывающая подсказка для стоп-лосса/
+      // тейк-профита (её одной мало на всю ширину графика, ей место у
+      // курсора).
       const hov = hoverRef.current;
-      if (hov && hov.mx >= layout.plotX && hov.mx <= layout.plotX + layout.plotW && hov.my >= 0 && hov.my <= layout.plotH) {
+      if (hoverInPlot && hov) {
         drawCrosshair(ctx, hov.mx, hov.my, layout);
         drawPriceCrosshairTag(ctx, invY(hov.my), hov.my, layout);
-        const ms = invX(hov.mx);
-        const candle = allCandles.find((k) => ms >= k.t && ms < k.t + stepMs);
-        drawTimeCrosshairTag(ctx, fmtChartTime(candle ? candle.t : ms, stepMs), hov.mx, layout);
+        drawTimeCrosshairTag(ctx, fmtChartTime(headerCandle ? headerCandle.t : hoverMs!, stepMs), hov.mx, layout);
 
-        // Курсор у стоп-лосса/тейк-профита открытой позиции — вместо
-        // O/H/L/C показываем, что именно на кону: цену уровня и сумму,
-        // которая будет потеряна/получена при её достижении.
+        // Курсор у стоп-лосса/тейк-профита открытой позиции — подсказка с
+        // тем, что именно на кону: цену уровня и сумму, которая будет
+        // потеряна/получена при её достижении.
         const nearSl = pos && slPrice != null && Math.abs(sy(slPrice) - hov.my) <= HIT_TOLERANCE;
         const nearTp = pos && tpPrice != null && Math.abs(sy(tpPrice) - hov.my) <= HIT_TOLERANCE;
         if (pos && (nearSl || nearTp)) {
@@ -972,18 +1004,6 @@ export default function PriceChart({
               tRef.current("game.chart.dragHint"),
               `${tRef.current(nearSl ? "game.order.stopLoss" : "game.order.takeProfit")}: ${fmtPriceLabel(levelPrice)}`,
               `${nearSl ? "-" : "+"}${fmtUsd(amount)}`,
-            ],
-            hov.mx,
-            hov.my,
-            layout,
-          );
-        } else if (candle) {
-          drawTooltipBox(
-            ctx,
-            [
-              `O ${fmtPriceLabel(candle.o)}  H ${fmtPriceLabel(candle.h)}`,
-              `L ${fmtPriceLabel(candle.l)}  C ${fmtPriceLabel(candle.c)}`,
-              `V ${Math.round(candle.v).toLocaleString("ru-RU")}`,
             ],
             hov.mx,
             hov.my,
