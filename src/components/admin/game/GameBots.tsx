@@ -18,6 +18,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Bot, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { fmtUsd } from "@/lib/format";
 import Hint from "@/components/game/Hint";
+import { Select } from "@/components/Select";
 
 interface BotPosition {
   id: string;
@@ -313,7 +314,7 @@ export default function GameBots() {
             </label>
             <label className="block">
               <span className="text-xs text-muted">Стиль торговли</span>
-              <select
+              <Select
                 value={draft.style}
                 onChange={(e) => setDraft({ ...draft, style: e.target.value })}
                 className="input-base mt-1 w-full px-2 py-1.5 text-sm"
@@ -323,7 +324,7 @@ export default function GameBots() {
                     {style.label}
                   </option>
                 ))}
-              </select>
+              </Select>
             </label>
             <Slider
               label="Интеллект"

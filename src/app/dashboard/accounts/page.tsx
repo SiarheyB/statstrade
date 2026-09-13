@@ -15,6 +15,7 @@ import {
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { useSync, type ImportProg } from "@/components/SyncProvider";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchangeIds";
 
@@ -355,8 +356,8 @@ export default function AccountsPage() {
                     {t("acc.autoSync")}
                   </span>
                   <span className="text-faint">{t("acc.every")}</span>
-                  <select
-                    value={a.syncIntervalMinutes}
+                  <Select
+                    value={String(a.syncIntervalMinutes)}
                     disabled={!a.autoSync}
                     onChange={(e) =>
                       updateAuto(a.id, { syncIntervalMinutes: Number(e.target.value) })
@@ -368,7 +369,7 @@ export default function AccountsPage() {
                         {t(`acc.interval.${v}`)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               )}
             </div>
@@ -555,7 +556,7 @@ function AccountForm({
         <form onSubmit={submit} className="space-y-3">
           <div>
             <label className="block text-xs text-muted mb-1">{t("acc.form.exchange")}</label>
-            <select
+            <Select
               className="input-base w-full cursor-pointer"
               value={exchange}
               onChange={(e) => setExchange(e.target.value)}
@@ -565,7 +566,7 @@ function AccountForm({
                   {e.name}
                 </option>
               ))}
-            </select>
+            </Select>
             {/* Показываем гайд подключения, если выбран CCXT-обменник */}
             {!isMt && guideMap?.[exchange] && (
               <div className="mt-2 rounded-lg bg-surface-2/40 border border-border px-3 py-2.5 text-xs text-muted whitespace-pre-wrap leading-relaxed">
@@ -589,7 +590,7 @@ function AccountForm({
             <>
               <div>
                 <label className="block text-xs text-muted mb-1">{t("acc.form.currency")}</label>
-                <select
+                <Select
                   className="input-base w-full cursor-pointer"
                   value={accountCurrency}
                   onChange={(e) => {
@@ -600,7 +601,7 @@ function AccountForm({
                   {ACCOUNT_CURRENCIES.map((c) => (
                     <option key={c} value={c}>{c}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div className="rounded-lg bg-surface-2/40 border border-border px-3 py-2.5 text-xs text-muted">
                 <div className="font-medium text-fg mb-1">
@@ -651,7 +652,7 @@ function AccountForm({
             <>
               <div>
                 <label className="block text-xs text-muted mb-1">{t("acc.form.markets")}</label>
-                <select
+                <Select
                   className="input-base w-full cursor-pointer"
                   value={marketType}
                   onChange={(e) => setMarketType(e.target.value)}
@@ -659,7 +660,7 @@ function AccountForm({
                   <option value="both">{t("acc.market.both")}</option>
                   <option value="spot">{t("acc.market.spot")}</option>
                   <option value="futures">{t("acc.market.futures")}</option>
-                </select>
+                </Select>
               </div>
               {supportsDemo && (
                 <label className="flex items-center gap-2 text-sm text-muted cursor-pointer select-none">

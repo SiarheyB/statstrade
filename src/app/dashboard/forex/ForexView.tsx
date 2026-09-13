@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
 import { TrendingUp, RefreshCw, HelpCircle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { useTheme } from "@/components/ThemeProvider";
 import VolumeProfile from "@/components/VolumeProfile";
 import ImbalanceHeatmap from "@/components/ImbalanceHeatmap";
@@ -918,7 +919,7 @@ function inferBinSize(levels: { price: number }[]): number {
           {t("fx.title")}
         </h1>
         <div className="flex items-center gap-2">
-          <select
+          <Select
             value={symbol}
             onChange={(e) => setSymbol(e.target.value)}
             className="input-base text-xs py-1.5 px-2 cursor-pointer"
@@ -928,15 +929,15 @@ function inferBinSize(levels: { price: number }[]): number {
               ? pairs.map((p) => <option key={p} value={p}>{p}</option>)
               : <option value="EUR/USD">EUR/USD</option>
             }
-          </select>
-          <select
+          </Select>
+          <Select
             value={range}
             onChange={(e) => setRange(e.target.value)}
             className="input-base text-xs py-1.5 px-2 cursor-pointer"
             title={t("fx.hintTimeframe")}
           >
             {RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+          </Select>
           <SessionPicker value={sessionIds} onToggle={toggleSession} timezone={timezone} />
           <button
             onClick={toggleVpOverlay}

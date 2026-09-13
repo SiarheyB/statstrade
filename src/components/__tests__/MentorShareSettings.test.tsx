@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import MentorShareSettings from "@/components/MentorShareSettings";
+import { pickOption } from "@/test/selectHelpers";
 
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({
@@ -131,15 +132,13 @@ describe("MentorShareSettings", () => {
     await screen.findByText("mentor.whatIsShown");
 
     // Первый выпадающий список — счета, второй — период.
-    const accountSelect = screen.getAllByRole("combobox")[0];
-    const options = [...accountSelect.querySelectorAll("option")];
+    fireEvent.click(screen.getByRole("button", { name: "mentor.allAccounts" }));
+    const options = screen.getAllByRole("option");
     expect(options.map((o) => o.textContent)).toEqual([
       "mentor.allAccounts",
       "Основной · BYBIT",
       "Форекс · MT5",
     ]);
-    // По умолчанию — все биржи: ссылка без выбора счёта ведёт себя как раньше.
-    expect((accountSelect as HTMLSelectElement).value).toBe("");
   });
 
   it("создаёт ссылку на выбранный счёт", async () => {
@@ -149,7 +148,7 @@ describe("MentorShareSettings", () => {
     });
     await screen.findByText("mentor.whatIsShown");
 
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "a2" } });
+    await pickOption("mentor.allAccounts", "Форекс · MT5");
     await act(async () => {
       fireEvent.click(screen.getByText("mentor.create"));
     });

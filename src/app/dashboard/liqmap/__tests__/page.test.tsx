@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import LiqMapPage from '@/app/dashboard/liqmap/page';
+import { pickOption } from '@/test/selectHelpers';
 
 vi.mock('@/lib/i18n/provider', () => ({
   useI18n: () => ({ t: (k: string) => k, timezone: 'auto', locale: 'ru' }),
@@ -78,8 +79,7 @@ describe('LiqMapPage', () => {
   it('remembers the timeframe after a change', async () => {
     await act(async () => { render(<LiqMapPage />); });
     await waitFor(() => expect(document.querySelectorAll('canvas').length).toBeGreaterThan(0));
-    const selects = screen.getAllByRole('combobox');
-    await act(async () => { fireEvent.change(selects[selects.length - 1], { target: { value: '1d' } }); });
+    await pickOption('liq.tf.7d', 'liq.tf.1d');
     await waitFor(() => {
       expect(JSON.parse(localStorage.getItem('liqmap.settings') || '{}').tf).toBe('1d');
     });
@@ -119,11 +119,7 @@ describe('LiqMapPage', () => {
     await waitFor(() => expect(document.querySelector('canvas')).toBeInTheDocument());
     const callsBefore = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/liqmap?')).length;
 
-    const selects = screen.getAllByRole('combobox');
-    // first select = exchange, others via SearchSelect / tf select
-    await act(async () => {
-      fireEvent.change(selects[0], { target: { value: 'bybit' } });
-    });
+    await pickOption('Binance', 'Bybit');
     await waitFor(() => {
       const callsAfter = fetchMock.mock.calls.filter((c) => String(c[0]).includes('/api/liqmap?')).length;
       expect(callsAfter).toBeGreaterThan(callsBefore);

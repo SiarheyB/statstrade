@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StatsResponse } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { EquityChart, DrawdownChart, Histogram } from "@/components/charts.lazy";
 import { Term } from "@/components/Term";
 import { ExitEfficiencyCard } from "@/components/ExitEfficiencyCard";
@@ -72,7 +73,7 @@ export default function AnalyticsPage() {
           <h1 className="text-xl font-semibold">{t("an.title")}</h1>
           <p className="text-sm text-muted">{t("an.subtitle")}</p>
         </div>
-        <select
+        <Select
           className="input-base text-sm py-1.5 cursor-pointer"
           value={accountId}
           onChange={(e) => setAccountId(e.target.value)}
@@ -83,7 +84,7 @@ export default function AnalyticsPage() {
               {a.label} ({a.exchange})
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {loading ? (

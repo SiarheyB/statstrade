@@ -7,6 +7,7 @@ import type { StatsResponse } from "@/lib/types";
 import { StatCard, StatRow } from "@/components/StatCard";
 import { EquityChart, DailyPnlChart, BreakdownChart, PnlHeatmap } from "@/components/charts.lazy";
 import SearchSelect from "@/components/SearchSelect";
+import { Select } from "@/components/Select";
 import RiskBanner from "@/components/RiskBanner";
 import {
   METRIC_GROUPS,
@@ -63,7 +64,7 @@ export default function DashboardPage() {
   const [capitalDraft, setCapitalDraft] = useState("");
   const [filters, setFilters] = useState<Filters>({
     accountId: "all",
-    market: "all",
+    market: "everything",
     symbol: "all",
     entryPoint: "all",
     entryType: "all",
@@ -191,7 +192,7 @@ export default function DashboardPage() {
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-surface-2 pl-2.5 pr-1 py-0.5">
             <CalendarRange size={14} className="text-accent" />
-            <select
+            <Select
               className="bg-transparent text-sm py-1 pr-1 outline-none cursor-pointer"
               value={filters.range}
               onChange={(e) => setFilters((f) => ({ ...f, range: e.target.value }))}
@@ -201,9 +202,9 @@ export default function DashboardPage() {
                   {t(`dash.range.${r}`)}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
-          <select
+          <Select
             className={SELECT_CLS}
             value={filters.accountId}
             onChange={(e) => setFilters((f) => ({ ...f, accountId: e.target.value }))}
@@ -214,17 +215,18 @@ export default function DashboardPage() {
                 {a.label} ({a.exchange})
               </option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             className={SELECT_CLS}
             value={filters.market}
             onChange={(e) => setFilters((f) => ({ ...f, market: e.target.value }))}
           >
+            <option value="everything">{t("dash.allMarketsEverything")}</option>
             <option value="all">{t("dash.allMarkets")}</option>
             <option value="spot">{t("dash.spot")}</option>
             <option value="futures">{t("dash.futures")}</option>
             <option value="forex">{t("dash.forex")}</option>
-          </select>
+          </Select>
           <SearchSelect
             value={filters.symbol}
             options={data?.symbols ?? []}
@@ -233,7 +235,7 @@ export default function DashboardPage() {
             renderLabel={fmtSymbol}
             onChange={(v) => setFilters((f) => ({ ...f, symbol: v }))}
           />
-          <select
+          <Select
             className={SELECT_CLS}
             value={filters.entryPoint}
             onChange={(e) => setFilters((f) => ({ ...f, entryPoint: e.target.value }))}
@@ -243,8 +245,8 @@ export default function DashboardPage() {
               <option key={s} value={s}>{s}</option>
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
-          </select>
-          <select
+          </Select>
+          <Select
             className={SELECT_CLS}
             value={filters.entryType}
             onChange={(e) => setFilters((f) => ({ ...f, entryType: e.target.value }))}
@@ -254,8 +256,8 @@ export default function DashboardPage() {
               <option key={s} value={s}>{s}</option>
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
-          </select>
-          <select
+          </Select>
+          <Select
             className={SELECT_CLS}
             value={filters.pattern}
             onChange={(e) => setFilters((f) => ({ ...f, pattern: e.target.value }))}
@@ -265,8 +267,8 @@ export default function DashboardPage() {
               <option key={s} value={s}>{s}</option>
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
-          </select>
-          <select
+          </Select>
+          <Select
             className={SELECT_CLS}
             value={filters.mistake}
             onChange={(e) => setFilters((f) => ({ ...f, mistake: e.target.value }))}
@@ -276,7 +278,7 @@ export default function DashboardPage() {
               <option key={s} value={s}>{s}</option>
             ))}
             <option value={UNSET}>{t("common.unset")}</option>
-          </select>
+          </Select>
           <div className="flex items-center gap-1.5 input-base py-1.5" title={t("dash.capitalHint")}>
             <span className="text-xs text-faint">{t("dash.capital")}</span>
             {capEditable ? (

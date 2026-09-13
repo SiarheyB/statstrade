@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import ForexView from '@/app/dashboard/forex/ForexView';
+import { pickOption } from '@/test/selectHelpers';
 
 // Stable references: ForexView feeds `t` into several useCallback/useEffect
 // dependency arrays (loadVolumeProfile/loadImbalance/loadDivergence) — a
@@ -142,10 +143,7 @@ describe('ForexView', () => {
     vi.stubGlobal('fetch', fetchMock);
     await renderPage();
     const before = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/forex?')).length;
-    const selects = screen.getAllByRole('combobox');
-    await act(async () => {
-      fireEvent.change(selects[1], { target: { value: '4h' } });
-    });
+    await pickOption('1h', '4h');
     await waitFor(() => {
       const after = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/forex?')).length;
       expect(after).toBeGreaterThan(before);
@@ -210,9 +208,8 @@ describe('ForexView', () => {
     // Ни одного запроса за дефолтным EUR/USD 1h: график не должен успеть
     // показать чужой инструмент, пока читаются настройки.
     expect(mainCalls.every((u) => u.includes('symbol=GBP%2FUSD') && u.includes('range=4h'))).toBe(true);
-    const selects = screen.getAllByRole('combobox');
-    expect((selects[0] as HTMLSelectElement).value).toBe('GBP/USD');
-    expect((selects[1] as HTMLSelectElement).value).toBe('4h');
+    expect(screen.getByRole('button', { name: 'GBP/USD' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '4h' })).toBeInTheDocument();
     // Кнопка сессий подписана числом включённых.
     expect(screen.getByTitle('fx.hintSessions').textContent).toContain('2');
   });
@@ -228,8 +225,7 @@ describe('ForexView', () => {
 
   it('remembers a timeframe change and a session toggle', async () => {
     await renderPage();
-    const selects = screen.getAllByRole('combobox');
-    await act(async () => { fireEvent.change(selects[1], { target: { value: '15m' } }); });
+    await pickOption('1h', '15m');
     await act(async () => { fireEvent.click(screen.getByTitle('fx.hintSessions')); });
     await act(async () => { fireEvent.click(screen.getByText('fx.sessionLondon')); });
     await waitFor(() => {

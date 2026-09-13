@@ -5,6 +5,7 @@ import { Save, Check, ShieldAlert } from "lucide-react";
 import { fmtUsd } from "@/lib/format";
 import { useI18n } from "@/lib/i18n/provider";
 import { defaultRiskProfile, PERIODS, type RiskProfileData, type PeriodKey } from "@/lib/risk";
+import { Select } from "@/components/Select";
 
 type Account = { id: string; label: string; exchange: string; source: string; balance: number | null };
 
@@ -218,7 +219,7 @@ function ProfileEditor({
             onChange={(n) => set({ riskPerTrade: { ...value.riskPerTrade, value: n } })}
             className="input-base w-28 text-right text-sm py-1 disabled:opacity-40"
           />
-          <select
+          <Select
             value={value.riskPerTrade.unit}
             disabled={!value.riskPerTrade.on}
             onChange={(e) =>
@@ -233,7 +234,7 @@ function ProfileEditor({
           >
             <option value="pct">% {t("risk.ofDeposit")}</option>
             <option value="amount">$</option>
-          </select>
+          </Select>
           {moneyHint(value.riskPerTrade)}
         </div>
         <p className="text-xs text-faint -mt-1">{t("risk.riskPerTradeHint")}</p>
@@ -256,7 +257,7 @@ function ProfileEditor({
                 onChange={(n) => setLimit(p, { value: n })}
                 className="input-base w-28 text-right text-sm py-1 disabled:opacity-40"
               />
-              <select
+              <Select
                 value={l.unit}
                 disabled={!l.on}
                 onChange={(e) => setLimit(p, { unit: e.target.value as "pct" | "amount" })}
@@ -264,7 +265,7 @@ function ProfileEditor({
               >
                 <option value="pct">% {t("risk.ofDeposit")}</option>
                 <option value="amount">$</option>
-              </select>
+              </Select>
               {moneyHint(l)}
             </div>
           );

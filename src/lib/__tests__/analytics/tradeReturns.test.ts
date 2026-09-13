@@ -47,11 +47,19 @@ describe("tradeNetPnls", () => {
     expect(await tradeNetPnls("u1", "all", "all")).toEqual([10, -5]);
   });
 
-  it("reads both tables for market=all", async () => {
-    await tradeNetPnls("u1", "all", "all");
+  it("reads both tables for market=everything", async () => {
+    await tradeNetPnls("u1", "all", "everything");
     const sql = sqlText();
     expect(sql).toContain('"Trade"');
     expect(sql).toContain('"ImportedTrade"');
+  });
+
+  it("market=all (Спот + Фьючерсы) reads only crypto — no forex leak", async () => {
+    await tradeNetPnls("u1", "all", "all");
+    const sql = sqlText();
+    expect(sql).toContain('"Trade"');
+    expect(sql).not.toContain('"ImportedTrade"');
+    expect(sql).toContain("IN ('spot', 'swap', 'future')");
   });
 
   it("reads only crypto trades for spot and futures", async () => {

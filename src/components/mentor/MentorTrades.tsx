@@ -18,6 +18,7 @@ import { fmtPct, fmtDuration, fmtPrice, fmtSymbol } from "@/lib/format";
 import { ianaFor, type TimezoneId } from "@/lib/timezone";
 import ImagePreviewModal from "@/components/ImagePreviewModal";
 import type { PublicAccountTrades, PublicTrade } from "@/lib/mentorShare";
+import { Select } from "@/components/Select";
 
 type FilterKey = "pattern" | "entryPoint" | "entryType" | "mistake";
 type Filters = Record<FilterKey, string>;
@@ -107,7 +108,7 @@ export default function MentorTrades({ accounts }: { accounts: PublicAccountTrad
           {FILTER_KEYS.map((key) => (
             <label key={key} className="block">
               <span className="mb-1 block text-xs text-faint">{t(`mentorPage.col.${key}`)}</span>
-              <select
+              <Select
                 value={filters[key]}
                 onChange={(e) => setFilters((prev) => ({ ...prev, [key]: e.target.value }))}
                 disabled={options[key].length === 0}
@@ -117,7 +118,7 @@ export default function MentorTrades({ accounts }: { accounts: PublicAccountTrad
                 {options[key].map((v) => (
                   <option key={v} value={v}>{v}</option>
                 ))}
-              </select>
+              </Select>
             </label>
           ))}
         </div>

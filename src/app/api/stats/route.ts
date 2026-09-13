@@ -61,6 +61,9 @@ async function buildBase(
   }
   if (market === "spot") where.market = "spot";
   else if (market === "futures") where.market = { in: ["swap", "future"] };
+  // "all" (Спот + Фьючерсы) — только крипта; "everything" (Всё) — вообще без
+  // фильтра, см. тот же выбор в lib/analytics/tradeList.ts.
+  else if (market === "all") where.market = { in: ["spot", "swap", "future"] };
   if (fromMs != null || toMs != null) {
     const exitTime: Prisma.DateTimeFilter = {};
     if (fromMs != null) exitTime.gte = new Date(fromMs);
@@ -74,7 +77,7 @@ async function buildBase(
   // as-is). The market filter routes between them: spot/futures = crypto only,
   // forex = imported only, all = both.
   const includeCrypto = market !== "forex";
-  const includeImported = market === "all" || market === "forex";
+  const includeImported = market === "everything" || market === "forex";
 
   const tradeRows = includeCrypto
     ? await prisma.trade.findMany({
@@ -123,6 +126,7 @@ async function buildBase(
   if (accountId !== "all" && ownedIds.has(accountId)) fillWhere.accountId = accountId;
   if (market === "spot") fillWhere.market = "spot";
   else if (market === "futures") fillWhere.market = { in: ["swap", "future"] };
+  else if (market === "all") fillWhere.market = { in: ["spot", "swap", "future"] };
   const fillCount = includeCrypto ? await prisma.fill.count({ where: fillWhere }) : 0;
 
   // Imported (forex / MetaTrader) closed round-trips — money taken as-is.

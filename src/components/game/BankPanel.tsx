@@ -23,6 +23,7 @@ import { HintLabel } from "./Hint";
 import BankArt from "./BankArt";
 import MyBankPanel from "./MyBankPanel";
 import { symbolOf } from "@/lib/game/assetNames";
+import { Select } from "@/components/Select";
 
 interface BankData {
   bank: {
@@ -240,8 +241,8 @@ export default function BankPanel() {
           </label>
           <label className="text-xs text-muted">
             {t("game.bank.term")}
-            <select
-              value={term}
+            <Select
+              value={String(term)}
               onChange={(e) => setTerm(Number(e.target.value))}
               className="input-base mt-1 block px-2 py-1.5 text-sm"
             >
@@ -250,11 +251,11 @@ export default function BankPanel() {
                   {days}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <label className="text-xs text-muted">
             {t("game.bank.collateral")}
-            <select
+            <Select
               value={collateral}
               onChange={(e) => setCollateral(e.target.value)}
               className="input-base mt-1 block px-2 py-1.5 text-sm max-w-[220px]"
@@ -265,7 +266,7 @@ export default function BankPanel() {
                   {t(`game.shop.item.${item.id}.name`)} — {fmtUsd(collateralLoan(item))}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <button
             type="button"
@@ -358,8 +359,8 @@ export default function BankPanel() {
           </label>
           <label className="text-xs text-muted">
             {t("game.bank.term")}
-            <select
-              value={bondTerm}
+            <Select
+              value={String(bondTerm)}
               onChange={(e) => setBondTerm(Number(e.target.value))}
               className="input-base mt-1 block px-2 py-1.5 text-sm"
             >
@@ -368,7 +369,7 @@ export default function BankPanel() {
                   {days}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <button
             type="button"

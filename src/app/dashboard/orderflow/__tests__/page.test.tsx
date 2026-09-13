@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import OrderflowPage from '@/app/dashboard/orderflow/page';
+import { pickOption } from '@/test/selectHelpers';
 
 vi.mock('@/lib/i18n/provider', () => ({
   useI18n: () => ({ t: (k: string) => k, timezone: 'auto', locale: 'ru' }),
@@ -197,10 +198,7 @@ describe('OrderflowPage', () => {
     vi.stubGlobal('fetch', fetchMock);
     await renderPage();
     const before = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/orderflow?')).length;
-    const selects = screen.getAllByRole('combobox');
-    await act(async () => {
-      fireEvent.change(selects[0], { target: { value: 'ETHUSDT' } });
-    });
+    await pickOption('BTCUSDT', 'ETHUSDT');
     await waitFor(() => {
       const after = fetchMock.mock.calls.filter((c) => String(c[0]).startsWith('/api/orderflow?')).length;
       expect(after).toBeGreaterThan(before);

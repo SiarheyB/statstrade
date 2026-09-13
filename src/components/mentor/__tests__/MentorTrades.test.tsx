@@ -1,7 +1,18 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 import MentorTrades from "@/components/mentor/MentorTrades";
 import type { PublicAccountTrades, PublicTrade } from "@/lib/mentorShare";
+
+// Все 4 фильтра по умолчанию показывают один и тот же лейбл ("mentorPage.any"),
+// поэтому находим нужный select не по значению кнопки (оно совпадает у всех),
+// а по подписи над ним — она у каждого фильтра своя и не меняется от выбора.
+function pickFilter(colKey: string, optionLabel: string) {
+  // Тот же перевод mentorPage.col.<key> подписывает и фильтр, и колонку в
+  // таблице сделок — фильтр в разметке идёт первым.
+  const label = screen.getAllByText(`mentorPage.col.${colKey}`)[0].closest("label")!;
+  fireEvent.click(within(label).getByRole("button"));
+  fireEvent.click(screen.getByRole("option", { name: optionLabel }));
+}
 
 // Просмотрщик подменяем заглушкой: нас интересует, ЧТО ему передали и как
 // работает листание, а не зум с панорамированием (они проверены отдельно).
@@ -83,8 +94,7 @@ describe("MentorTrades", () => {
     render(<MentorTrades accounts={ACCOUNTS} />);
     expect(screen.getAllByText(/BTCUSDT|EURUSD/)).toHaveLength(3);
 
-    // Первый селект — паттерн (порядок как в шапке фильтров).
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Отбой" } });
+    pickFilter("pattern", "Отбой");
 
     expect(screen.getAllByText("BTCUSDT")).toHaveLength(1);
     expect(screen.queryByText("EURUSD")).not.toBeInTheDocument();
@@ -94,10 +104,8 @@ describe("MentorTrades", () => {
 
   it("складывает фильтры друг с другом и сбрасывается одной кнопкой", () => {
     render(<MentorTrades accounts={ACCOUNTS} />);
-    const [pattern, entryPoint] = screen.getAllByRole("combobox");
-
-    fireEvent.change(pattern, { target: { value: "Пробой" } });
-    fireEvent.change(entryPoint, { target: { value: "Ретест" } });
+    pickFilter("pattern", "Пробой");
+    pickFilter("entryPoint", "Ретест");
     expect(screen.getAllByText(/BTCUSDT|EURUSD/)).toHaveLength(1);
 
     fireEvent.click(screen.getByText(/mentorPage\.reset/));
@@ -106,8 +114,9 @@ describe("MentorTrades", () => {
 
   it("в списке фильтра только те значения, что есть в сделках", () => {
     render(<MentorTrades accounts={ACCOUNTS} />);
-    const mistake = screen.getAllByRole("combobox")[3];
-    expect([...mistake.querySelectorAll("option")].map((o) => o.textContent)).toEqual([
+    const mistakeLabel = screen.getAllByText("mentorPage.col.mistake")[0].closest("label")!;
+    fireEvent.click(within(mistakeLabel).getByRole("button"));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual([
       "mentorPage.any",
       "Ранний вход",
     ]);
@@ -115,13 +124,13 @@ describe("MentorTrades", () => {
 
   it("говорит, когда под фильтры не подошла ни одна сделка", () => {
     render(<MentorTrades accounts={[{ ...ACCOUNTS[0], trades: [ACCOUNTS[0].trades[0]] }]} />);
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "Ретест" } });
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Пробой" } });
+    pickFilter("entryPoint", "Ретест");
+    pickFilter("pattern", "Пробой");
     expect(screen.getAllByText("BTCUSDT")).toHaveLength(1);
 
     // Такой пары в данных нет.
-    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "Ретест" } });
-    fireEvent.change(screen.getAllByRole("combobox")[3], { target: { value: "Ранний вход" } });
+    pickFilter("entryPoint", "Ретест");
+    pickFilter("mistake", "Ранний вход");
     expect(screen.getAllByText("BTCUSDT")).toHaveLength(1);
   });
 
@@ -196,7 +205,7 @@ describe("MentorTrades", () => {
       },
     ];
     render(<MentorTrades accounts={withShots} />);
-    fireEvent.change(screen.getAllByRole("combobox")[0], { target: { value: "Отбой" } });
+    pickFilter("pattern", "Отбой");
 
     fireEvent.click(screen.getByRole("button", { name: /mentorPage\.open/ }));
     expect(screen.getByTestId("preview-url")).toHaveTextContent("https://img/2");

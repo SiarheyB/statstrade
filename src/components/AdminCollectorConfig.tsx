@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Save, Trash2, Plus, AlertTriangle } from "lucide-react";
+import { Select } from "@/components/Select";
 
 // Внутренняя админ-панель (RU) — пороги «только крупные лимитки» и ручная
 // очистка истории карты ордеров. Пишет в /api/admin/collector/config и /purge.
@@ -101,14 +102,14 @@ export default function AdminCollectorConfig() {
                 placeholder="BTCUSDT"
                 onChange={(e) => setRow(i, { symbol: e.target.value })}
               />
-              <select
+              <Select
                 className="input-base text-sm py-1.5"
                 value={it.market}
                 onChange={(e) => setRow(i, { market: e.target.value as Market })}
               >
                 <option value="spot">Спот</option>
                 <option value="futures">Фьючерсы</option>
-              </select>
+              </Select>
               <div className="flex items-center gap-1.5">
                 <input
                   type="number"

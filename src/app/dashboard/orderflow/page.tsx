@@ -10,6 +10,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { useTheme } from "@/components/ThemeProvider";
 import VolumeProfile from "@/components/VolumeProfile";
 import type { VolumeProfile as VPData } from "@/components/VolumeProfile";
@@ -1397,20 +1398,20 @@ export default function OrderflowPage() {
           <p className="text-sm text-muted">{t("of.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select className={SELECT} value={symbol} onChange={(e) => setSymbol(e.target.value)} title={t("of.hintSymbol")}>
+          <Select className={SELECT} value={symbol} onChange={(e) => setSymbol(e.target.value)} title={t("of.hintSymbol")}>
             {metaSymbols.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)} title={t("of.hintExchange")}>
+          </Select>
+          <Select className={SELECT} value={exchange} onChange={(e) => setExchange(e.target.value)} title={t("of.hintExchange")}>
             {metaExchanges.map((x) => <option key={x} value={x}>{x}</option>)}
-          </select>
-          <select
+          </Select>
+          <Select
             className={SELECT}
             value={range}
             onChange={(e) => setRange(e.target.value)}
             title={t("of.hintTimeframe")}
           >
             {RANGES.map((r) => <option key={r} value={r}>{r}</option>)}
-          </select>
+          </Select>
           <button
             onClick={() => setShowLiq((v) => !v)}
             className={`inline-flex items-center gap-1.5 input-base py-1.5 text-sm transition ${showLiq ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}

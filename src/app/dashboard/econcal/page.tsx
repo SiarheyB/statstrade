@@ -8,6 +8,7 @@ import type { Locale } from "@/lib/i18n/core";
 import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
 import { zonedParts, zonedDateToUtcMs, ianaFor } from "@/lib/timezone";
 import { flagFor } from "@/lib/econcalFlags";
+import { Select } from "@/components/Select";
 
 type Ev = {
   id: string;
@@ -279,7 +280,7 @@ export default function EconCalPage() {
               <span className={clsx("h-2 w-2 rounded-full", IMPACT_DOT[im])} /> {t(`econcal.impact.${im}`)}
             </button>
           ))}
-          <select
+          <Select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
             className="input-base text-xs py-1 cursor-pointer ml-1"
@@ -288,7 +289,7 @@ export default function EconCalPage() {
             {categories.map((c) => (
               <option key={c} value={c}>{locale === "ru" ? CATEGORY_RU[c] ?? c : c}</option>
             ))}
-          </select>
+          </Select>
         </div>
       </div>
 

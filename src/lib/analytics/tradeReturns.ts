@@ -26,13 +26,17 @@ export async function tradeNetPnls(
   const inIds = Prisma.join(ids);
 
   const includeCrypto = market !== "forex";
-  const includeImported = market === "all" || market === "forex";
+  // "all" (Спот + Фьючерсы) — только крипта; "everything" (Всё) — вообще без
+  // фильтра, см. тот же выбор в lib/analytics/tradeList.ts.
+  const includeImported = market === "everything" || market === "forex";
   const marketFilter =
     market === "spot"
       ? Prisma.sql`AND "market" = 'spot'`
       : market === "futures"
         ? Prisma.sql`AND "market" IN ('swap', 'future')`
-        : Prisma.empty;
+        : market === "all"
+          ? Prisma.sql`AND "market" IN ('spot', 'swap', 'future')`
+          : Prisma.empty;
 
   const crypto = includeCrypto
     ? Prisma.sql`SELECT "netPnl" FROM "Trade" WHERE "accountId" IN (${inIds}) ${marketFilter}`

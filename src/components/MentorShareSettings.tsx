@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Copy, Trash2, Check, AlertTriangle } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 
 type Link = {
   id: string;
@@ -173,7 +174,7 @@ export default function MentorShareSettings() {
       </div>
 
       <label className="text-xs text-faint block mb-1">{t("mentor.accountFieldLabel")}</label>
-      <select
+      <Select
         value={accountId}
         onChange={(e) => setAccountId(e.target.value)}
         className="input-base w-full px-3 py-1.5 text-sm mb-1"
@@ -184,7 +185,7 @@ export default function MentorShareSettings() {
             {a.label} · {a.exchange.toUpperCase()}
           </option>
         ))}
-      </select>
+      </Select>
       <p className="text-xs text-faint mb-3">{t("mentor.accountFieldHint")}</p>
 
       <label className="text-xs text-faint block mb-1">{t("mentor.periodFieldLabel")}</label>

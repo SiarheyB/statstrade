@@ -8,6 +8,7 @@ import FullscreenButton from "@/components/FullscreenButton";
 import TimeframeRail from "@/components/TimeframeRail";
 import { drawTimeCrosshairTag, fmtCrosshairLabel, drawChartWatermarks, CHART_COLORS, setChartTheme } from "@/lib/candlestickChart";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { useTheme } from "@/components/ThemeProvider";
 import { zonedParts } from "@/lib/timezone";
 import { useFullscreen } from "@/lib/useFullscreen";
@@ -644,7 +645,7 @@ export default function LiqMapPage() {
       <p className="text-sm text-muted mt-1 mb-4">{t("liq.subtitle")}</p>
 
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <select
+        <Select
           value={exchange}
           onChange={(e) => setExchange(e.target.value)}
           className="input-base text-sm rounded-lg px-3 py-1.5 cursor-pointer hover:border-border-strong"
@@ -654,7 +655,7 @@ export default function LiqMapPage() {
               {e.charAt(0).toUpperCase() + e.slice(1)}
             </option>
           ))}
-        </select>
+        </Select>
         <SearchSelect
           value={symbol}
           options={symbols}
@@ -668,7 +669,7 @@ export default function LiqMapPage() {
           favAddLabel={t("liq.favAdd")}
           favRemoveLabel={t("liq.favRemove")}
         />
-        <select
+        <Select
           value={tf}
           onChange={(e) => setTf(e.target.value)}
           className="input-base text-sm rounded-lg px-3 py-1.5 cursor-pointer hover:border-border-strong"
@@ -678,7 +679,7 @@ export default function LiqMapPage() {
               {t(`liq.tf.${f}`)}
             </option>
           ))}
-        </select>
+        </Select>
       </div>
 
       {error ? (

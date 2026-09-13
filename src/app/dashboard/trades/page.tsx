@@ -11,6 +11,7 @@ import ImagePreviewModal from "@/components/ImagePreviewModal";
 import { fmtUsd, fmtPct, fmtDuration, fmtDate, fmtPrice, fmtNumSmart, fmtSymbol } from "@/lib/format";
 import { downloadCsv, dateStamp } from "@/lib/export";
 import SearchSelect from "@/components/SearchSelect";
+import { Select } from "@/components/Select";
 import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, zonedDateToUtcMs } from "@/lib/timezone";
@@ -74,7 +75,7 @@ export default function TradesPage() {
   const [riskProfiles, setRiskProfiles] = useState<Record<string, RiskProfileData>>({});
   const [accountFilter, setAccountFilter] = useState("all");
   const [symbolFilter, setSymbolFilter] = useState("all");
-  const [marketFilter, setMarketFilter] = useState("all");
+  const [marketFilter, setMarketFilter] = useState("everything");
   const [sideFilter, setSideFilter] = useState("all");
   const [resultFilter, setResultFilter] = useState("all");
   const [epFilter, setEpFilter] = useState("all");
@@ -423,10 +424,10 @@ export default function TradesPage() {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
-        <select className={SELECT} value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(0); }}>
+        <Select className={SELECT} value={accountFilter} onChange={(e) => { setAccountFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("trades.allAccounts")}</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-        </select>
+        </Select>
         <SearchSelect
           value={symbolFilter}
           options={symbols}
@@ -435,44 +436,44 @@ export default function TradesPage() {
           renderLabel={fmtSymbol}
           onChange={(v) => { setSymbolFilter(v); setPage(0); }}
         />
-        <select className={SELECT} value={marketFilter} onChange={(e) => { setMarketFilter(e.target.value); setPage(0); }}>
+        <Select className={SELECT} value={marketFilter} onChange={(e) => { setMarketFilter(e.target.value); setPage(0); }}>
           <option value="everything">{t("dash.allMarketsEverything")}</option>
           <option value="all">{t("dash.allMarkets")}</option>
           <option value="spot">{t("dash.spot")}</option>
           <option value="futures">{t("dash.futures")}</option>
           <option value="forex">{t("dash.forex")}</option>
-        </select>
-        <select className={SELECT} value={sideFilter} onChange={(e) => { setSideFilter(e.target.value); setPage(0); }}>
-          <option value="all">Long + Short</option>
+        </Select>
+        <Select className={SELECT} value={sideFilter} onChange={(e) => { setSideFilter(e.target.value); setPage(0); }}>
+          <option value="all">{t("dash.allMarketsEverything")}</option>
           <option value="long">Long</option>
           <option value="short">Short</option>
-        </select>
-        <select className={SELECT} value={resultFilter} onChange={(e) => { setResultFilter(e.target.value); setPage(0); }}>
+        </Select>
+        <Select className={SELECT} value={resultFilter} onChange={(e) => { setResultFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("trades.allResults")}</option>
           <option value="win">{t("trades.win")}</option>
           <option value="loss">{t("trades.loss")}</option>
           <option value="breakeven">{t("trades.breakeven")}</option>
-        </select>
-        <select className={SELECT} value={epFilter} onChange={(e) => { setEpFilter(e.target.value); setPage(0); }}>
+        </Select>
+        <Select className={SELECT} value={epFilter} onChange={(e) => { setEpFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allEntryPoints")}</option>
           {epOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
-        </select>
-        <select className={SELECT} value={etFilter} onChange={(e) => { setEtFilter(e.target.value); setPage(0); }}>
+        </Select>
+        <Select className={SELECT} value={etFilter} onChange={(e) => { setEtFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allEntryTypes")}</option>
           {etOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
-        </select>
-        <select className={SELECT} value={ptFilter} onChange={(e) => { setPtFilter(e.target.value); setPage(0); }}>
+        </Select>
+        <Select className={SELECT} value={ptFilter} onChange={(e) => { setPtFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allPatterns")}</option>
           {ptOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
-        </select>
-        <select className={SELECT} value={mtFilter} onChange={(e) => { setMtFilter(e.target.value); setPage(0); }}>
+        </Select>
+        <Select className={SELECT} value={mtFilter} onChange={(e) => { setMtFilter(e.target.value); setPage(0); }}>
           <option value="all">{t("dash.allMistakes")}</option>
           {mtOptions.map((s) => <option key={s} value={s}>{s}</option>)}
           <option value={UNSET}>{t("common.unset")}</option>
-        </select>
+        </Select>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-faint">{t("trades.dateFrom")}</span>
           <input
@@ -736,7 +737,7 @@ function AnnSelect({
 }) {
   const opts = value && !options.includes(value) ? [value, ...options] : options;
   return (
-    <select
+    <Select
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value || null)}
       className="input-base text-xs py-1 cursor-pointer w-full"
@@ -745,7 +746,7 @@ function AnnSelect({
       {opts.map((o) => (
         <option key={o} value={o}>{o}</option>
       ))}
-    </select>
+    </Select>
   );
 }
 

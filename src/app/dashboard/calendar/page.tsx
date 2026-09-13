@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { SerializedTrade } from "@/lib/types";
 import { useI18n } from "@/lib/i18n/provider";
+import { Select } from "@/components/Select";
 import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
 import { zonedParts, zonedDateToUtcMs, tzOffsetForServer, type TimezoneId } from "@/lib/timezone";
 
@@ -210,7 +211,7 @@ export default function CalendarPage() {
           <p className="text-sm text-muted">{t("cal.subtitle")}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <select
+          <Select
             className="input-base text-sm py-1.5 cursor-pointer"
             value={accountId}
             onChange={(e) => setAccountId(e.target.value)}
@@ -221,7 +222,7 @@ export default function CalendarPage() {
                 {a.label} ({a.exchange})
               </option>
             ))}
-          </select>
+          </Select>
           <button onClick={goToday} className="input-base py-1.5 text-sm hover:border-border-strong">
             {t("cal.today")}
           </button>

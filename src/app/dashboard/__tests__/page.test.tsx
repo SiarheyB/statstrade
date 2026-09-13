@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import DashboardPage from "../page";
 import type { StatsResponse, SerializedTrade } from "@/lib/types";
 import type { Metrics } from "@/lib/analytics/metrics";
+import { pickOption } from "@/test/selectHelpers";
 
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({
@@ -239,8 +240,7 @@ describe("DashboardPage", () => {
   it("changes market filter and triggers a reload", async () => {
     render(<DashboardPage />);
     await screen.findByText("mocked-equity-chart");
-    const marketSelect = screen.getByDisplayValue("dash.allMarkets");
-    fireEvent.change(marketSelect, { target: { value: "spot" } });
+    await pickOption("dash.allMarketsEverything", "dash.spot");
     await waitFor(() => {
       const calls = (global.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls.map((c) => (c[0] as string).toString());
       expect(calls.some((u) => u.includes("market=spot"))).toBe(true);

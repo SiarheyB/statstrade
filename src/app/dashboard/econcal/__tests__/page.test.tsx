@@ -131,6 +131,7 @@ describe("EconCalPage", () => {
   it("localizes category names in the filter dropdown", async () => {
     render(<EconCalPage />);
     await (await waitList()).findByText("Базовый ИПЦ (м/м)");
+    fireEvent.click(screen.getByRole("button", { name: "econcal.allTypes" }));
     expect(screen.getByRole("option", { name: "Инфляция" })).toBeInTheDocument();
   });
 

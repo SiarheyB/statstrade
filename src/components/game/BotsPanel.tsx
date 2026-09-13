@@ -17,6 +17,7 @@ import { useGameStore } from "@/store/gameStore";
 import { botSlots, botRecord, BOT_LICENSE_PRICE, BOT_PACKAGES, type AlgoBot, type BotStrategy } from "@/engine/player/algoBots";
 import type { Asset, PerkState, Position } from "@/engine/entities/types";
 import { HintLabel } from "./Hint";
+import { Select } from "@/components/Select";
 
 const STRATEGIES: BotStrategy[] = ["trend", "meanReversion", "breakout"];
 
@@ -111,7 +112,7 @@ export default function BotsPanel({
               <div className="flex flex-wrap items-end gap-3">
                 <label className="text-[11px] text-muted">
                   {t("game.order.asset")}
-                  <select
+                  <Select
                     value={bot.assetId}
                     onChange={(e) => updateBot(bot.id, { assetId: e.target.value })}
                     className="input-base mt-0.5 block w-40 px-2 py-1 text-sm"
@@ -121,12 +122,12 @@ export default function BotsPanel({
                         {asset.symbol}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 <label className="text-[11px] text-muted">
                   {t("game.bots.strategy")}
-                  <select
+                  <Select
                     value={bot.strategy}
                     onChange={(e) => updateBot(bot.id, { strategy: e.target.value as BotStrategy })}
                     className="input-base mt-0.5 block w-44 px-2 py-1 text-sm"
@@ -136,7 +137,7 @@ export default function BotsPanel({
                         {t(`game.bots.strategy.${strategy}`)}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 <NumberField
@@ -213,7 +214,7 @@ export default function BotsPanel({
               </div>
               <label className="flex items-center gap-2 text-[11px] text-faint pt-1">
                 {t("game.order.asset")}
-                <select
+                <Select
                   value={pickAssetFor ?? assets[0]?.id}
                   onChange={(e) => setPickAssetFor(e.target.value)}
                   className="input-base px-2 py-1 text-xs"
@@ -223,7 +224,7 @@ export default function BotsPanel({
                       {asset.symbol}
                     </option>
                   ))}
-                </select>
+                </Select>
               </label>
               <button
                 type="button"

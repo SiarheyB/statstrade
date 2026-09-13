@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AnalyticsPage from "../page";
+import { pickOption } from "@/test/selectHelpers";
 
 vi.mock("@/lib/i18n/provider", () => ({
   useI18n: () => ({
@@ -148,7 +149,8 @@ describe("AnalyticsPage", () => {
     expect(screen.getByTestId("exit-efficiency-card")).toBeInTheDocument();
     expect(screen.getByTestId("monte-carlo-card")).toBeInTheDocument();
     expect(screen.getByText("1.90")).toBeInTheDocument(); // profitFactor via fmtRatio
-    expect(screen.getByText("Main (binance)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "dash.allAccounts" }));
+    expect(screen.getByRole("option", { name: "Main (binance)" })).toBeInTheDocument();
   });
 
   it("рисует корзины R из ответа сервера, ничего не пересчитывая", async () => {
@@ -211,8 +213,7 @@ describe("AnalyticsPage", () => {
     render(<AnalyticsPage />);
     await waitFor(() => expect(screen.getByTestId("equity-chart")).toBeInTheDocument());
 
-    const select = screen.getByRole("combobox") as HTMLSelectElement;
-    fireEvent.change(select, { target: { value: "acc-1" } });
+    await pickOption("dash.allAccounts", "Main (binance)");
 
     await waitFor(() => {
       const calls = (global.fetch as any).mock.calls.map((c: any[]) => c[0] as string);
