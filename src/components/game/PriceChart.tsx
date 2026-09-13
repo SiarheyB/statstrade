@@ -519,18 +519,22 @@ export default function PriceChart({
     return view;
   }, [followView, visibleCandles]);
 
+  // Кнопки «Приблизить/Отдалить» меняют только время (число видимых свечей).
+  // Цену раньше растягивали тем же коэффициентом — из-за этого вход,
+  // стоп-лосс и тейк-профит (это фиксированные ЦЕНЫ) при каждом клике
+  // визуально «прыгали» по вертикали, хотя пользователь просил лишь
+  // приблизить время. Вертикаль остаётся под отдельным жестом — тянуть
+  // правую шкалу цены (см. подсказку под графиком).
   const zoomBy = useCallback(
     (factor: number) => {
       const v = materializeView();
       const iCenter = (v.i0 + v.i1) / 2;
       const iSpan = (v.i1 - v.i0) * factor;
-      const pCenter = (v.y0 + v.y1) / 2;
-      const pSpan = (v.y1 - v.y0) * factor;
       viewRef.current = clampView({
         i0: iCenter - iSpan / 2,
         i1: iCenter + iSpan / 2,
-        y0: pCenter - pSpan / 2,
-        y1: pCenter + pSpan / 2,
+        y0: v.y0,
+        y1: v.y1,
       });
       redrawRef.current();
     },
