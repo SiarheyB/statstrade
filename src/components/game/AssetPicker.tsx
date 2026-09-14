@@ -222,6 +222,27 @@ export default function AssetPicker({
     }
   }, [assets, activeMarket, query, sort, colors, prices, dayChange]);
 
+  // Стрелки вверх/вниз переключают инструмент — как в TradingView: выбрал
+  // строку мышью и дальше листаешь список, не хватаясь за мышь снова. Работает,
+  // пока фокус остаётся на списке (клик по строке его туда и ставит) — уйти
+  // фокусом в поле поиска или на кнопку рынка достаточно, чтобы стрелки
+  // вернулись к своей обычной роли.
+  const itemRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const handleListKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      const idx = items.findIndex((a) => a.id === selectedAssetId);
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      const nextIdx = idx === -1 ? 0 : Math.min(items.length - 1, Math.max(0, idx + delta));
+      const next = items[nextIdx];
+      if (!next) return;
+      onSelect(next.id);
+      itemRefs.current.get(next.id)?.focus();
+    },
+    [items, selectedAssetId, onSelect],
+  );
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-1">
@@ -283,7 +304,10 @@ export default function AssetPicker({
         />
       </div>
 
-      <div className="max-h-[240px] overflow-y-auto rounded-lg border border-border">
+      <div
+        className="max-h-[240px] overflow-y-auto rounded-lg border border-border"
+        onKeyDown={handleListKeyDown}
+      >
         {items.length === 0 ? (
           <div className="px-2.5 py-3 text-xs text-faint">{t("game.market.nothingFound")}</div>
         ) : (
@@ -292,12 +316,27 @@ export default function AssetPicker({
             const price = prices[asset.id];
             const change = dayChange[asset.id] ?? 0;
             return (
-              <button
+              // div, а не button: внутри строки уже есть кликабельный
+              // ColorDot (свой <button>), а вложенные button/button — невалидный
+              // HTML, из-за которого React ругался на гидратацию и путался
+              // фокус для стрелок клавиатуры.
+              <div
                 key={asset.id}
-                type="button"
+                ref={(el) => {
+                  if (el) itemRefs.current.set(asset.id, el);
+                  else itemRefs.current.delete(asset.id);
+                }}
+                role="button"
+                tabIndex={0}
                 onClick={() => onSelect(asset.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect(asset.id);
+                  }
+                }}
                 title={asset.name}
-                className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition ${
+                className={`flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left text-xs transition ${
                   active ? "bg-accent/15" : "hover:bg-surface-2"
                 }`}
               >
@@ -309,7 +348,7 @@ export default function AssetPicker({
                   {change >= 0 ? "+" : ""}
                   {change.toFixed(2)}%
                 </span>
-              </button>
+              </div>
             );
           })
         )}
