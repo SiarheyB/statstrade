@@ -247,7 +247,7 @@ export const NEUTRAL_REGIME: MarketRegime = {
 // (account.reputation) и ежемесячные расходы на содержание. Ни один предмет
 // не даёт торгового преимущества, поэтому «магазин» нельзя превратить в
 // pay-to-win, даже если когда-нибудь появится реальная монетизация.
-export type ShopCategory = "theme" | "gear" | "lifestyle" | "status";
+export type ShopCategory = "theme" | "gear" | "tags" | "lifestyle" | "status";
 
 export interface ShopItemTheme {
   accent: string; // подменяет --color-accent внутри терминала игры

@@ -10,13 +10,83 @@
 // Теперь рынок выбирается кнопкой, а инструменты внутри рынка лежат
 // списком с ценой и дневным изменением: выбор идёт по цифрам, а не по
 // названию, которое игроку ничего не говорит.
-import { useMemo, useState } from "react";
-import { Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Lock, Search } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { isMarketOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
+import { readTerminalPrefs, writeAssetColor } from "@/lib/game/terminalPrefs";
+import { ASSET_COLOR_SWATCHES, unlockedColorCount } from "@/lib/game/assetColors";
+import { useGameStore } from "@/store/gameStore";
 import type { Asset, AssetClass } from "@/engine/entities/types";
+
+// Метка цветом — как в TradingView: кружок слева от инструмента, свой
+// маленький палитр по клику. Один цвет бесплатно, остальные шесть — по два
+// за тариф в магазине (раздел «Цветные метки», engine/economy/shop.ts),
+// см. lib/game/assetColors.ts.
+function ColorDot({
+  assetId,
+  color,
+  onChange,
+}: {
+  assetId: string;
+  color: string | undefined;
+  onChange: (assetId: string, color: string | null) => void;
+}) {
+  const { t } = useI18n();
+  const ownedItemIds = useGameStore((s) => s.game.lifestyle.ownedItemIds);
+  const unlocked = unlockedColorCount(ownedItemIds);
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!boxRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  const active = ASSET_COLOR_SWATCHES.find((s) => s.id === color);
+
+  return (
+    <div ref={boxRef} className="relative shrink-0" onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        title={t("game.market.colorTag")}
+        onClick={() => setOpen((v) => !v)}
+        className="flex h-4 w-4 items-center justify-center rounded-full border border-border hover:border-border-strong"
+        style={active ? { backgroundColor: active.hex, borderColor: active.hex } : undefined}
+      />
+      {open && (
+        <div className="absolute left-0 top-5 z-30 flex items-center gap-1 rounded-lg border border-border-strong bg-surface p-1.5 shadow-2xl">
+          {ASSET_COLOR_SWATCHES.map((swatch, i) => {
+            const locked = i >= unlocked;
+            const isActive = swatch.id === color;
+            return (
+              <button
+                key={swatch.id}
+                type="button"
+                disabled={locked}
+                title={locked ? t("game.market.colorLocked") : undefined}
+                onClick={() => {
+                  onChange(assetId, isActive ? null : swatch.id);
+                  setOpen(false);
+                }}
+                className="relative flex h-5 w-5 items-center justify-center rounded-full disabled:opacity-30"
+                style={{ backgroundColor: swatch.hex, outline: isActive ? "2px solid var(--color-fg)" : undefined, outlineOffset: 1 }}
+              >
+                {locked && <Lock size={9} className="text-white/90" />}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Порядок рынков — от простого к сложному, тот же, что в наградах за
 // испытания: игрок открывает их примерно в этом порядке.
@@ -44,6 +114,23 @@ export default function AssetPicker({
   const selected = assets.find((a) => a.id === selectedAssetId);
   const [market, setMarket] = useState<AssetClass | null>(null);
   const [query, setQuery] = useState("");
+
+  // Цвета меток — в localStorage, как весь остальной вид терминала (см.
+  // lib/game/terminalPrefs.ts). Читаем только в эффекте: страница рендерится
+  // и на сервере, там localStorage нет.
+  const [colors, setColors] = useState<Record<string, string>>({});
+  useEffect(() => {
+    setColors(readTerminalPrefs().assetColors ?? {});
+  }, []);
+  const setAssetColor = useCallback((assetId: string, color: string | null) => {
+    writeAssetColor(assetId, color);
+    setColors((prev) => {
+      const next = { ...prev };
+      if (color == null) delete next[assetId];
+      else next[assetId] = color;
+      return next;
+    });
+  }, []);
 
   const markets = useMemo(() => {
     const present = new Set(assets.map((a) => a.assetClass));
@@ -124,6 +211,7 @@ export default function AssetPicker({
                   active ? "bg-accent/15" : "hover:bg-surface-2"
                 }`}
               >
+                <ColorDot assetId={asset.id} color={colors[asset.id]} onChange={setAssetColor} />
                 <span className={`w-[72px] shrink-0 font-medium ${active ? "text-accent" : ""}`}>{asset.symbol}</span>
                 <span className="min-w-0 flex-1 truncate text-faint">{asset.name}</span>
                 <span className="shrink-0 tabular-nums">{price != null ? fmtUsd(price) : "—"}</span>

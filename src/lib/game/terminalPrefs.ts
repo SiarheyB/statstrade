@@ -35,6 +35,14 @@ export interface TerminalPrefs {
   magnet?: boolean;
   /** Масштаб и положение окна — по ключу «инструмент|таймфрейм». */
   views?: Record<string, StoredView>;
+  /**
+   * Цветная метка инструмента в списке выбора — как в TradingView: списки
+   * растут (акции, крипта, форекс), и через месяц-два непонятно, зачем
+   * когда-то поставил именно эту пару. Цвет — быстрая заметка себе самому
+   * («это лонговый портфель», «это на пересиживание»), без текста и полей
+   * ввода. Ключ — id инструмента, значение — код цвета из ASSET_COLOR_SWATCHES.
+   */
+  assetColors?: Record<string, string>;
 }
 
 // Сколько окон помним. Больше трёх десятков — это уже не «вернуться туда,
@@ -48,6 +56,20 @@ export function readTerminalPrefs(): TerminalPrefs {
 export function writeTerminalPrefs(patch: TerminalPrefs): void {
   const current = readTerminalPrefs();
   writeChartPrefs(KEY, { ...current, ...patch });
+}
+
+/** Цвет метки инструмента, если игрок её поставил. */
+export function readAssetColor(assetId: string): string | undefined {
+  return readTerminalPrefs().assetColors?.[assetId];
+}
+
+/** `colorId: null` — снять метку. */
+export function writeAssetColor(assetId: string, colorId: string | null): void {
+  const current = readTerminalPrefs();
+  const assetColors = { ...(current.assetColors ?? {}) };
+  if (colorId == null) delete assetColors[assetId];
+  else assetColors[assetId] = colorId;
+  writeChartPrefs(KEY, { ...current, assetColors });
 }
 
 export function viewKey(assetId: string, tf: string): string {

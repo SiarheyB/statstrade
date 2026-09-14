@@ -25,7 +25,7 @@ export const SHOP_ITEMS = shopItemsData as ShopItem[];
 // же терминал, что и раньше, а не «урезанную» версию.
 export const DEFAULT_THEME_ID = "theme_classic";
 
-export const SHOP_CATEGORIES: ShopCategory[] = ["theme", "gear", "lifestyle", "status"];
+export const SHOP_CATEGORIES: ShopCategory[] = ["theme", "gear", "tags", "lifestyle", "status"];
 
 // Предмет, который открывает переименование фонда (раздел 13 — «переименование
 // фонда»). Отдельная константа, а не строка по месту: на неё смотрит и UI, и

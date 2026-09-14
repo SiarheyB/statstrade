@@ -117,6 +117,33 @@
     "icon": "📟"
   },
   {
+    "id": "gear_tags_tier1",
+    "category": "tags",
+    "price": 300,
+    "upkeepPerMonth": 0,
+    "prestige": 2,
+    "requiresPrestige": 0,
+    "icon": "🏷️"
+  },
+  {
+    "id": "gear_tags_tier2",
+    "category": "tags",
+    "price": 1200,
+    "upkeepPerMonth": 0,
+    "prestige": 4,
+    "requiresPrestige": 8,
+    "icon": "🏷️"
+  },
+  {
+    "id": "gear_tags_tier3",
+    "category": "tags",
+    "price": 3000,
+    "upkeepPerMonth": 0,
+    "prestige": 6,
+    "requiresPrestige": 18,
+    "icon": "🏷️"
+  },
+  {
     "id": "life_studio",
     "category": "lifestyle",
     "price": 20000,
