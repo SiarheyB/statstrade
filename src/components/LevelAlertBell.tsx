@@ -52,6 +52,12 @@ export default function LevelAlertBell({
   const [busy, setBusy] = useState(false);
   const [push, setPush] = useState<PushState | null>(null);
   const [threshold, setThreshold] = useState(alert?.thresholdAtr ?? DEFAULT_THRESHOLD_ATR);
+  // Раньше при неудачной подписке (браузер отказал в subscribe(), сервер не
+  // сохранил её) save() молча выходил: кнопка переставала крутиться, и
+  // человек считал себя подписанным, хотя LevelAlert так и не создался — ровно
+  // так пользователь и не дождался уведомления о цене, уже дошедшей до
+  // уровня. Теперь неудача видна прямо в панели.
+  const [saveError, setSaveError] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
   // Состояние push спрашиваем только когда панель открыли: на странице десяток
@@ -78,6 +84,7 @@ export default function LevelAlertBell({
   const save = useCallback(
     async (thresholdAtr: number) => {
       setBusy(true);
+      setSaveError(false);
       try {
         // Подписка без разрешения браузера — это тумблер, который ничего не
         // включает. Спрашиваем разрешение здесь же, в момент осознанного
@@ -85,7 +92,14 @@ export default function LevelAlertBell({
         let state = push ?? (await pushState());
         if (state === "off") state = await subscribePush();
         setPush(state);
-        if (state !== "on") return;
+        if (state !== "on") {
+          // "off" здесь — это ПОПЫТКА подписаться, которая не удалась (браузер
+          // отказал в subscribe(), сервер не принял её и т.п.), а не просто
+          // «ещё не подписан». denied/unsupported/unconfigured уже показывают
+          // свою причину ниже, а "off" молчал — отсюда и потерянные подписки.
+          if (state === "off") setSaveError(true);
+          return;
+        }
 
         const res = await fetch("/api/recommendations/alerts", {
           method: "POST",
@@ -95,6 +109,8 @@ export default function LevelAlertBell({
         if (res.ok) {
           onChange(((await res.json()) as { alert: LevelAlert }).alert);
           setOpen(false);
+        } else {
+          setSaveError(true);
         }
       } finally {
         setBusy(false);
@@ -134,6 +150,7 @@ export default function LevelAlertBell({
           // колокольчику заодно разворачивал бы карточку.
           e.stopPropagation();
           setThreshold(alert?.thresholdAtr ?? DEFAULT_THRESHOLD_ATR);
+          setSaveError(false);
           setOpen((v) => !v);
         }}
         className={clsx(
@@ -197,6 +214,11 @@ export default function LevelAlertBell({
           {push === "unconfigured" && (
             <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
               Push-уведомления не настроены на сервере — обратитесь к администратору.
+            </p>
+          )}
+          {saveError && (
+            <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
+              Не получилось подписать на уведомления — попробуйте ещё раз.
             </p>
           )}
 
