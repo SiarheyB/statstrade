@@ -52,11 +52,10 @@ export default function LevelAlertBell({
   const [busy, setBusy] = useState(false);
   const [push, setPush] = useState<PushState | null>(null);
   const [threshold, setThreshold] = useState(alert?.thresholdAtr ?? DEFAULT_THRESHOLD_ATR);
-  // Раньше при неудачной подписке (браузер отказал в subscribe(), сервер не
-  // сохранил её) save() молча выходил: кнопка переставала крутиться, и
-  // человек считал себя подписанным, хотя LevelAlert так и не создался — ровно
-  // так пользователь и не дождался уведомления о цене, уже дошедшей до
-  // уровня. Теперь неудача видна прямо в панели.
+  // Ошибка именно сохранения самой подписки (POST /api/recommendations/alerts
+  // не ответил ok) — раньше это тоже проходило молча: кнопка переставала
+  // крутиться, а LevelAlert так и не создавался, и человек считал себя
+  // подписанным. Push тут ни при чём — он лишь дополнительный канал, см. save().
   const [saveError, setSaveError] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
@@ -86,20 +85,17 @@ export default function LevelAlertBell({
       setBusy(true);
       setSaveError(false);
       try {
-        // Подписка без разрешения браузера — это тумблер, который ничего не
-        // включает. Спрашиваем разрешение здесь же, в момент осознанного
-        // действия, а не заранее при заходе на страницу.
+        // Push — ДОПОЛНИТЕЛЬНЫЙ канал, а не условие подписки: срабатывание
+        // всё равно попадёт в колокольчик уведомлений (см. notify() —
+        // строка туда пишется независимо от push, как и у напоминаний
+        // календаря). Раньше при отказе браузера в push сама подписка
+        // (LevelAlert) вообще не создавалась — уведомление некуда было
+        // положить даже в колокольчик, и человек ждал вход, который никогда
+        // не сработал бы. Поэтому пробуем push здесь же, но неудача его
+        // подписки саму запись об уровне больше не блокирует.
         let state = push ?? (await pushState());
         if (state === "off") state = await subscribePush();
         setPush(state);
-        if (state !== "on") {
-          // "off" здесь — это ПОПЫТКА подписаться, которая не удалась (браузер
-          // отказал в subscribe(), сервер не принял её и т.п.), а не просто
-          // «ещё не подписан». denied/unsupported/unconfigured уже показывают
-          // свою причину ниже, а "off" молчал — отсюда и потерянные подписки.
-          if (state === "off") setSaveError(true);
-          return;
-        }
 
         const res = await fetch("/api/recommendations/alerts", {
           method: "POST",
@@ -199,33 +195,40 @@ export default function LevelAlertBell({
             ))}
           </div>
 
+          {/* Ниже — не запреты сохранить подписку, а статус ДОПОЛНИТЕЛЬНОГО
+              push-канала: без него сработавший уровень всё равно ляжет в
+              колокольчик уведомлений вверху страницы, просто без всплывашки
+              на телефон/при закрытой вкладке. */}
           {push === "denied" && (
-            <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
-              Уведомления запрещены для сайта в браузере — разрешите их в настройках сайта
-              (значок слева от адреса).
+            <p className="mt-2.5 text-[11px] leading-relaxed text-faint">
+              Push запрещён в браузере — разрешите его в настройках сайта (значок слева от
+              адреса), чтобы уведомление приходило и при закрытой вкладке. Без него сработавший
+              уровень всё равно появится в колокольчике вверху страницы.
             </p>
           )}
           {push === "unsupported" && (
-            <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
-              Этот браузер не умеет push-уведомлений. На iPhone они работают только для сайта,
-              добавленного на главный экран.
+            <p className="mt-2.5 text-[11px] leading-relaxed text-faint">
+              Этот браузер не умеет push-уведомлений (на iPhone — только для сайта, добавленного
+              на главный экран). Сработавший уровень всё равно появится в колокольчике вверху
+              страницы.
             </p>
           )}
           {push === "unconfigured" && (
-            <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
-              Push-уведомления не настроены на сервере — обратитесь к администратору.
+            <p className="mt-2.5 text-[11px] leading-relaxed text-faint">
+              Push не настроен на сервере. Сработавший уровень всё равно появится в колокольчике
+              вверху страницы.
             </p>
           )}
           {saveError && (
             <p className="mt-2.5 text-[11px] leading-relaxed text-loss">
-              Не получилось подписать на уведомления — попробуйте ещё раз.
+              Не получилось сохранить подписку — попробуйте ещё раз.
             </p>
           )}
 
           <div className="mt-3 flex items-center gap-2">
             <button
               type="button"
-              disabled={busy || push === "denied" || push === "unsupported" || push === "unconfigured"}
+              disabled={busy}
               onClick={() => save(threshold)}
               className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-90 disabled:opacity-40"
             >
