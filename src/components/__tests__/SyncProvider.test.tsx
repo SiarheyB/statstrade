@@ -257,7 +257,47 @@ describe('SyncProvider — импорт отчёта', () => {
 
     act(() => FakeXhr.last!.onload!());
     await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('idle'));
-    expect(screen.getByTestId('notice')).toHaveTextContent('acc.mt.imported');
+    // Итог собирается из ненулевых кусков; «обновлено сделок: 0» в сообщение
+    // не попадает — это шум, а не информация.
+    const notice = screen.getByTestId('notice');
+    expect(notice).toHaveTextContent('acc.mt.importAdded');
+    expect(notice).toHaveTextContent('acc.mt.importUnchanged');
+    expect(notice).not.toHaveTextContent('acc.mt.importUpdated');
+  });
+
+  it('дозакрытые позиции показываются как обновлённые, а не как «ноль сделок»', async () => {
+    // MT5 при частичном закрытии отдаёт ТУ ЖЕ позицию с пересчитанным итогом,
+    // поэтому в повторной загрузке новых сделок нет вовсе — есть обновлённые.
+    // Раньше в этом месте писалось «импортировано 0», и это читалось как сбой.
+    render(
+      <SyncProvider>
+        <ImportConsumer />
+      </SyncProvider>,
+    );
+    fireEvent.click(screen.getByText('import'));
+    await waitFor(() => expect(FakeXhr.last?.send).toHaveBeenCalled());
+    FakeXhr.last!.responseText = '{"imported":0,"updated":2,"skipped":7}';
+    act(() => FakeXhr.last!.onload!());
+
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('idle'));
+    const notice = screen.getByTestId('notice');
+    expect(notice).toHaveTextContent('acc.mt.importUpdated');
+    expect(notice).not.toHaveTextContent('acc.mt.importAdded');
+  });
+
+  it('отчёт без единого изменения говорит об этом прямо', async () => {
+    render(
+      <SyncProvider>
+        <ImportConsumer />
+      </SyncProvider>,
+    );
+    fireEvent.click(screen.getByText('import'));
+    await waitFor(() => expect(FakeXhr.last?.send).toHaveBeenCalled());
+    FakeXhr.last!.responseText = '{"imported":0,"updated":0,"skipped":12}';
+    act(() => FakeXhr.last!.onload!());
+
+    await waitFor(() => expect(screen.getByTestId('phase')).toHaveTextContent('idle'));
+    expect(screen.getByTestId('notice')).toHaveTextContent('acc.mt.importNothing');
   });
 
   it('surfaces the server error and clears the progress', async () => {

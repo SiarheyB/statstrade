@@ -153,6 +153,22 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
           }));
         };
 
+        // Сообщение собираем из ненулевых кусков: «обновлено сделок: 0» —
+        // это шум. И отдельная фраза на случай, когда отчёт не принёс ничего
+        // нового: раньше в этой ситуации писалось «0 сделок», и выглядело это
+        // как сбой импорта, а не как «всё уже загружено».
+        const importSummary = (d: { imported?: number; updated?: number; skipped?: number }) => {
+          const added = d.imported ?? 0;
+          const updated = d.updated ?? 0;
+          const unchanged = d.skipped ?? 0;
+          const parts: string[] = [];
+          if (added > 0) parts.push(t("acc.mt.importAdded", { n: added }));
+          if (updated > 0) parts.push(t("acc.mt.importUpdated", { n: updated }));
+          if (parts.length === 0) return t("acc.mt.importNothing");
+          if (unchanged > 0) parts.push(t("acc.mt.importUnchanged", { n: unchanged }));
+          return parts.join(" · ");
+        };
+
         const finish = (message: string | null) => {
           setImporting((s) => {
             const next = { ...s };
@@ -165,7 +181,7 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
         };
 
         xhr.onload = () => {
-          let data: { error?: string; imported?: number; skipped?: number } = {};
+          let data: { error?: string; imported?: number; updated?: number; skipped?: number } = {};
           try {
             data = JSON.parse(xhr.responseText);
           } catch {
@@ -173,7 +189,7 @@ export default function SyncProvider({ children }: { children: React.ReactNode }
           }
           finish(
             xhr.status >= 200 && xhr.status < 300
-              ? t("acc.mt.imported", { n: data.imported ?? 0, skipped: data.skipped ?? 0 })
+              ? importSummary(data)
               : (data.error ?? t("settings.saveError")),
           );
         };

@@ -130,7 +130,19 @@ export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): numbe
   if (oneR <= 0) return null;
   const priceMove = tr.side === "long" ? tr.exitPrice - tr.entryPrice : tr.entryPrice - tr.exitPrice;
   const grossR = priceMove / oneR;
-  const feeR = tr.fees / (oneR * tr.qty);
+  // Комиссия переводится в R через объём, и при нулевом объёме это деление на
+  // ноль: feeR = Infinity, а R сделки — −Infinity. Такое значение не просто
+  // бессмысленно само по себе, оно отравляет любую агрегатную статистику
+  // (средний R, ожидание, кривая R) — одна строка делает весь столбец
+  // бесконечным.
+  //
+  // Объём может оказаться нулевым по вполне земной причине: у частично
+  // закрытой позиции MT5 в отчёте пишет 0, и такая сделка попадала в журнал
+  // с −InfinityR (замечено на живом счёте, GBPCAD). Считаем, что комиссию в
+  // R выразить нечем, и отдаём чистое движение цены — это честнее, чем
+  // бесконечность, и не мешает сделке обновиться при следующем импорте.
+  const feeBase = oneR * tr.qty;
+  const feeR = feeBase > 0 ? tr.fees / feeBase : 0;
   return grossR - feeR;
 }
 
