@@ -43,6 +43,8 @@ export interface TerminalPrefs {
    * ввода. Ключ — id инструмента, значение — код цвета из ASSET_COLOR_SWATCHES.
    */
   assetColors?: Record<string, string>;
+  /** Сортировка списка выбора инструмента — по ключу «рынок». */
+  assetSort?: Record<string, { key: string; dir: "asc" | "desc" }>;
 }
 
 // Сколько окон помним. Больше трёх десятков — это уже не «вернуться туда,

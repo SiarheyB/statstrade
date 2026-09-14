@@ -11,15 +11,26 @@
 // списком с ценой и дневным изменением: выбор идёт по цифрам, а не по
 // названию, которое игроку ничего не говорит.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Lock, Search } from "lucide-react";
+import { ArrowDown, ArrowUp, Lock, Search } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { isMarketOpen } from "@/lib/game/schedule";
 import { useMarketClock } from "@/lib/game/useMarketClock";
-import { readTerminalPrefs, writeAssetColor } from "@/lib/game/terminalPrefs";
+import { readTerminalPrefs, writeAssetColor, writeTerminalPrefs } from "@/lib/game/terminalPrefs";
 import { ASSET_COLOR_SWATCHES, unlockedColorCount } from "@/lib/game/assetColors";
 import { useGameStore } from "@/store/gameStore";
 import type { Asset, AssetClass } from "@/engine/entities/types";
+
+type SortKey = "color" | "symbol" | "price" | "change";
+type SortDir = "asc" | "desc";
+
+/** Индекс цвета в палитре — «без метки» всегда в хвосте, а не путается с
+ * первым цветом (индекс 0 иначе выглядел бы как «меньше всех»). */
+function colorRank(colorId: string | undefined): number {
+  if (colorId == null) return ASSET_COLOR_SWATCHES.length;
+  const i = ASSET_COLOR_SWATCHES.findIndex((s) => s.id === colorId);
+  return i < 0 ? ASSET_COLOR_SWATCHES.length : i;
+}
 
 // Метка цветом — как в TradingView: кружок слева от инструмента, свой
 // маленький палитр по клику. Один цвет бесплатно, остальные шесть — по два
@@ -88,6 +99,33 @@ function ColorDot({
   );
 }
 
+function SortHeader({
+  sortKey,
+  sort,
+  onClick,
+  label,
+  className = "",
+}: {
+  sortKey: SortKey;
+  sort: { key: SortKey; dir: SortDir } | null;
+  onClick: (key: SortKey) => void;
+  label: string;
+  className?: string;
+}) {
+  const active = sort?.key === sortKey;
+  const Icon = sort?.dir === "desc" ? ArrowDown : ArrowUp;
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(sortKey)}
+      className={`inline-flex items-center gap-0.5 hover:text-fg ${active ? "text-fg" : ""} ${className}`}
+    >
+      {label}
+      {active && <Icon size={9} />}
+    </button>
+  );
+}
+
 // Порядок рынков — от простого к сложному, тот же, что в наградах за
 // испытания: игрок открывает их примерно в этом порядке.
 const MARKET_ORDER: AssetClass[] = ["stock", "bond", "index", "crypto", "forex", "commodity"];
@@ -141,13 +179,48 @@ export default function AssetPicker({
   // инструмент: иначе, вернувшись на вкладку, он видит чужой список.
   const activeMarket = market ?? selected?.assetClass ?? markets[0];
 
+  // Сортировка — своя на каждый рынок: порядок, удобный для акций (по
+  // изменению за день), редко нужен такой же для форекса. Хранится там же,
+  // где остальной вид терминала.
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir } | null>(null);
+  useEffect(() => {
+    setSort((readTerminalPrefs().assetSort?.[activeMarket] as { key: SortKey; dir: SortDir } | undefined) ?? null);
+  }, [activeMarket]);
+  const setSortBy = useCallback(
+    (key: SortKey) => {
+      setSort((prev) => {
+        const next: { key: SortKey; dir: SortDir } =
+          prev?.key === key ? { key, dir: prev.dir === "asc" ? "desc" : "asc" } : { key, dir: "asc" };
+        const current = readTerminalPrefs();
+        writeTerminalPrefs({ assetSort: { ...(current.assetSort ?? {}), [activeMarket]: next } });
+        return next;
+      });
+    },
+    [activeMarket],
+  );
+
   const items = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return assets
+    const filtered = assets
       .filter((a) => a.assetClass === activeMarket)
-      .filter((a) => q === "" || a.symbol.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
-      .sort((a, b) => a.symbol.localeCompare(b.symbol));
-  }, [assets, activeMarket, query]);
+      .filter((a) => q === "" || a.symbol.toLowerCase().includes(q) || a.name.toLowerCase().includes(q));
+
+    const dirMul = sort?.dir === "desc" ? -1 : 1;
+    switch (sort?.key) {
+      case "color":
+        return filtered.sort(
+          (a, b) => dirMul * (colorRank(colors[a.id]) - colorRank(colors[b.id]) || a.symbol.localeCompare(b.symbol)),
+        );
+      case "price":
+        return filtered.sort((a, b) => dirMul * ((prices[a.id] ?? 0) - (prices[b.id] ?? 0)));
+      case "change":
+        return filtered.sort((a, b) => dirMul * ((dayChange[a.id] ?? 0) - (dayChange[b.id] ?? 0)));
+      case "symbol":
+        return filtered.sort((a, b) => dirMul * a.symbol.localeCompare(b.symbol));
+      default:
+        return filtered.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    }
+  }, [assets, activeMarket, query, sort, colors, prices, dayChange]);
 
   return (
     <div className="space-y-2">
@@ -192,6 +265,23 @@ export default function AssetPicker({
           />
         </div>
       )}
+
+      {/* Заголовки колонок — они же кнопки сортировки. Порядок и ширины
+          зеркалят строки ниже, иначе непонятно, какая стрелка к какой
+          колонке относится. */}
+      <div className="flex items-center gap-2 px-2.5 text-[10px] uppercase tracking-wide text-faint">
+        <SortHeader sortKey="color" sort={sort} onClick={setSortBy} className="shrink-0" label={t("game.market.sort.color")} />
+        <SortHeader sortKey="symbol" sort={sort} onClick={setSortBy} className="w-[72px] shrink-0" label={t("game.market.sort.symbol")} />
+        <span className="min-w-0 flex-1" />
+        <SortHeader sortKey="price" sort={sort} onClick={setSortBy} className="shrink-0" label={t("game.market.sort.price")} />
+        <SortHeader
+          sortKey="change"
+          sort={sort}
+          onClick={setSortBy}
+          className="w-[58px] shrink-0 justify-end"
+          label={t("game.market.sort.change")}
+        />
+      </div>
 
       <div className="max-h-[240px] overflow-y-auto rounded-lg border border-border">
         {items.length === 0 ? (
