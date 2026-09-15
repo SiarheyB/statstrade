@@ -1588,6 +1588,8 @@ const en: Dict = {
 
   "game.loading": "Loading…",
   "game.chart.loading": "Collecting price data…",
+  "game.chart.error.rateLimited": "Too many requests — retrying in a few seconds…",
+  "game.chart.error.failed": "Couldn't load the chart — retrying…",
   "game.chart.slShort": "SL",
   "game.chart.tpShort": "TP",
   "game.chart.dragHint": "Drag to change",
@@ -4114,6 +4116,8 @@ const ru: Dict = {
 
   "game.loading": "Загрузка…",
   "game.chart.loading": "Копим данные по цене…",
+  "game.chart.error.rateLimited": "Слишком много запросов — повторим через пару секунд…",
+  "game.chart.error.failed": "Не удалось загрузить график — повторяем…",
   "game.chart.slShort": "SL",
   "game.chart.tpShort": "TP",
   "game.chart.dragHint": "Перетащите для изменения",

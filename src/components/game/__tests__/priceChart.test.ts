@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_TF_BY_STYLE, fmtChartTime, TF_BY_STYLE, TF_MS } from "@/components/game/PriceChart";
+import {
+  barsAfterLoad,
+  DEFAULT_TF_BY_STYLE,
+  fmtChartTime,
+  loadErrorOf,
+  TF_BY_STYLE,
+  TF_MS,
+} from "@/components/game/PriceChart";
 
 // Склейка свечей переехала на сервер (src/lib/game/marketGen.ts): график
 // теперь получает готовый ряд нужного таймфрейма, а не собирает его сам.
@@ -75,5 +82,35 @@ describe("подписи на оси времени", () => {
     const label = fmtChartTime(ts, TF_MS["1M"]);
     expect(label).toMatch(/26$/);
     expect(label).not.toMatch(/05\./);
+  });
+});
+
+// Регрессия: любой сбой запроса свечей (429 от лимита, 500, обрыв сети)
+// превращался в пустой массив, и один неудачный опрос стирал уже нарисованный
+// график — игрок видел «Копим данные по цене…» на форексе с месяцами истории.
+describe("опрос свечей", () => {
+  const drawn = [
+    { t: 1, o: 1, h: 2, l: 0.5, c: 1.5, v: 10 },
+    { t: 2, o: 1.5, h: 2.5, l: 1, c: 2, v: 12 },
+  ];
+  const fresh = { t: 3, o: 2, h: 3, l: 1.8, c: 2.7, v: 9 };
+
+  it("успешный ответ заменяет ряд", () => {
+    expect(barsAfterLoad(drawn, { ok: true, candles: [fresh] })).toEqual([fresh]);
+  });
+
+  it("неудачный запрос оставляет нарисованные свечи на месте", () => {
+    expect(barsAfterLoad(drawn, { ok: false, status: 500 })).toBe(drawn);
+    expect(barsAfterLoad(drawn, { ok: false, status: null })).toBe(drawn);
+  });
+
+  it("лимит частоты и прочие сбои называются по-разному", () => {
+    expect(loadErrorOf({ ok: false, status: 429 })).toBe("rateLimited");
+    expect(loadErrorOf({ ok: false, status: 500 })).toBe("failed");
+    expect(loadErrorOf({ ok: false, status: null })).toBe("failed");
+  });
+
+  it("пустой, но успешный ответ — не ошибка: это честное «копим данные»", () => {
+    expect(loadErrorOf({ ok: true, candles: [] })).toBeNull();
   });
 });

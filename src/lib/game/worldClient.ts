@@ -217,15 +217,33 @@ export interface ServerCandle {
   v: number;
 }
 
-export async function fetchCandles(assetId: string, tf: string, limit: number): Promise<ServerCandle[]> {
+/**
+ * Результат загрузки свечей с различением «пусто» и «не получилось».
+ *
+ * Раньше любой сбой (429 от лимита, 500, обрыв сети) превращался в пустой
+ * массив — и график рисовал «Копим данные по цене…», как у бумаги, которая
+ * только что вышла на биржу. На форексе с месяцами истории это вводило в
+ * заблуждение: данные есть, не дошёл один запрос.
+ */
+export type CandleLoad =
+  | { ok: true; candles: ServerCandle[] }
+  | { ok: false; status: number | null };
+
+export async function loadCandles(assetId: string, tf: string, limit: number): Promise<CandleLoad> {
   try {
     const res = await fetch(`/api/game/candles?assetId=${encodeURIComponent(assetId)}&tf=${encodeURIComponent(tf)}&limit=${limit}`);
-    if (!res.ok) return [];
+    if (!res.ok) return { ok: false, status: res.status };
     const data = (await res.json()) as { candles?: ServerCandle[] };
-    return data.candles ?? [];
+    return { ok: true, candles: data.candles ?? [] };
   } catch {
-    return [];
+    return { ok: false, status: null };
   }
+}
+
+/** Для догона и ботов: им сбой и пустота равнозначны — берут что есть. */
+export async function fetchCandles(assetId: string, tf: string, limit: number): Promise<ServerCandle[]> {
+  const res = await loadCandles(assetId, tf, limit);
+  return res.ok ? res.candles : [];
 }
 
 export const funds = {

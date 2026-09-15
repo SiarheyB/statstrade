@@ -68,7 +68,7 @@ import { useMarketClock } from "@/lib/game/useMarketClock";
 import { useLiveTick } from "@/lib/game/useLiveTick";
 import assetsData from "@/data/assets.json";
 import { readTerminalPrefs, saveView, viewKey, writeTerminalPrefs } from "@/lib/game/terminalPrefs";
-import { fetchCandles } from "@/lib/game/worldClient";
+import { loadCandles, type CandleLoad } from "@/lib/game/worldClient";
 import Hint from "./Hint";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -79,6 +79,31 @@ type Bar = ChartCandle & { v: number };
 function sortBars(bars: Bar[]): Bar[] {
   return [...bars].sort((a, b) => a.t - b.t);
 }
+
+/** Почему графика нет: лимит частоты, сбой запроса или всё в порядке. */
+export type ChartLoadError = "rateLimited" | "failed" | null;
+
+/**
+ * Ряд после очередного опроса.
+ *
+ * Неудачный запрос НЕ стирает уже нарисованные свечи. Раньше любой сбой
+ * (429, 500, обрыв) превращался в пустой массив, и один неудачный опрос
+ * посреди игры очищал график до следующего — на часовом таймфрейме это
+ * целая минута надписи «Копим данные», хотя история на месте.
+ */
+export function barsAfterLoad(prev: Bar[], res: CandleLoad): Bar[] {
+  if (!res.ok) return prev;
+  return res.candles.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v }));
+}
+
+export function loadErrorOf(res: CandleLoad): ChartLoadError {
+  if (res.ok) return null;
+  return res.status === 429 ? "rateLimited" : "failed";
+}
+
+// Сколько ждать повтора, если графика ещё нет вовсе: штатный опрос на
+// часовом таймфрейме раз в минуту, и столько смотреть на пустое поле нельзя.
+const EMPTY_RETRY_MS = 5_000;
 
 /**
  * Маркер сделки — кружок со стрелкой внутри (вход/частичное закрытие/выход),
@@ -337,6 +362,7 @@ export default function PriceChart({
   // Пока ряд не пришёл, поле остаётся пустым с подписью — это честнее, чем
   // показывать чужой таймфрейм и «догонять» его рывками.
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<ChartLoadError>(null);
   const [following, setFollowing] = useState(true);
   const [tool, setTool] = useState<Tool>("cursor");
   const [showMa, setShowMa] = useState(true);
@@ -417,6 +443,7 @@ export default function PriceChart({
   const priceRef = useRef(currentPrice);
   const symbolRef = useRef(symbol);
   const tRef = useRef(t);
+  const loadErrorRef = useRef<ChartLoadError>(loadError);
   const colorsRef = useRef(candleColors);
   const drawingsRef = useRef(drawings);
   const toolRef = useRef(tool);
@@ -580,6 +607,7 @@ export default function PriceChart({
     // Со стороны это читается как «страница несколько раз перезагрузилась».
     setBars([]);
     setLoading(true);
+    setLoadError(null);
     // Окно просмотра тоже сбрасываем: границы, посчитанные для минуток, на
     // дневном ряду бессмысленны.
     // Восстанавливаем сохранённый масштаб для этой пары «инструмент —
@@ -588,11 +616,26 @@ export default function PriceChart({
     viewRef.current = saved ?? null;
     setFollowing(saved == null);
 
+    // Есть ли у этого инструмента и таймфрейма хоть что-то нарисованное.
+    // Считается заново на каждую смену пары/таймфрейма — ряд при этом
+    // сбрасывается выше.
+    let haveBars = false;
+    let retry: ReturnType<typeof setTimeout> | null = null;
     const load = async () => {
-      const data = await fetchCandles(assetId, tf, 400);
+      const res = await loadCandles(assetId, tf, 400);
       if (!alive) return;
-      setBars(data.map((c) => ({ t: c.t, o: c.o, h: c.h, l: c.l, c: c.c, v: c.v })));
+      if (res.ok) haveBars = res.candles.length >= 2;
+      setBars((prev) => barsAfterLoad(prev, res));
+      setLoadError(loadErrorOf(res));
       setLoading(false);
+      // Графика нет и запрос сорвался — не ждём штатного опроса.
+      if (!res.ok && !haveBars) {
+        if (retry) clearTimeout(retry);
+        retry = setTimeout(() => {
+          retry = null;
+          if (alive) void load();
+        }, EMPTY_RETRY_MS);
+      }
     };
     void load();
     // Внутридневные ряды обновляем чаще: там бар живёт минуты. На дневном и
@@ -605,6 +648,7 @@ export default function PriceChart({
     return () => {
       alive = false;
       clearInterval(timer);
+      if (retry) clearTimeout(retry);
     };
   }, [assetId, tf, hydrated]);
 
@@ -614,6 +658,7 @@ export default function PriceChart({
     priceRef.current = livePrice;
     symbolRef.current = symbol;
     tRef.current = t;
+    loadErrorRef.current = loadError;
     colorsRef.current = candleColors;
     drawingsRef.current = drawings;
     toolRef.current = tool;
@@ -667,7 +712,15 @@ export default function PriceChart({
         ctx.fillStyle = CHART_COLORS.axisTextWeak;
         ctx.font = "12px ui-sans-serif, system-ui";
         ctx.textAlign = "center";
-        ctx.fillText(tRef.current("game.chart.loading"), W / 2, H / 2);
+        // «Копим данные» — только когда сервер ответил, а свечей и правда
+        // меньше двух (бумага только что вышла на биржу). Сбой называем
+        // сбоем: иначе форекс с месяцами истории выглядел «пустым».
+        const err = loadErrorRef.current;
+        ctx.fillText(
+          tRef.current(err ? `game.chart.error.${err}` : "game.chart.loading"),
+          W / 2,
+          H / 2,
+        );
         ctx.textAlign = "left";
         return;
       }
@@ -1027,6 +1080,7 @@ export default function PriceChart({
     draw();
   }, [
     liveBars,
+    loadError,
     currentPrice,
     symbol,
     t,
