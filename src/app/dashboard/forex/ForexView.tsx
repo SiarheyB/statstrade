@@ -120,6 +120,13 @@ export default function ForexView() {
 
   const toggleVpOverlay = useCallback(() => setShowVpOverlay((v) => !v), []);
 
+  // Сканер дивергенций: маркеры на графике и таблица истории под ним.
+  // Включён по умолчанию — раньше он показывался всегда, и у тех, кто уже
+  // пользуется страницей, после обновления ничего не должно пропасть.
+  // Выключенный сканер не только прячется, но и не опрашивает API.
+  const [showDivergence, setShowDivergence] = useState(true);
+  const toggleDivergence = useCallback(() => setShowDivergence((v) => !v), []);
+
   const [divLoading, setDivLoading] = useState(false);
   const [divError, setDivError] = useState<string | null>(null);
 
@@ -152,14 +159,15 @@ export default function ForexView() {
       setSessionIds(saved.sessions.filter((v): v is SessionId => known.has(v as SessionId)));
     }
     if (typeof saved.showVpOverlay === "boolean") setShowVpOverlay(saved.showVpOverlay);
+    if (typeof saved.showDivergence === "boolean") setShowDivergence(saved.showDivergence);
     setHydrated(true);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, []);
 
   useEffect(() => {
     if (!hydrated) return;
-    writeChartPrefs(PREFS_KEY, { symbol, range, sessions: sessionIds, showVpOverlay });
-  }, [hydrated, symbol, range, sessionIds, showVpOverlay]);
+    writeChartPrefs(PREFS_KEY, { symbol, range, sessions: sessionIds, showVpOverlay, showDivergence });
+  }, [hydrated, symbol, range, sessionIds, showVpOverlay, showDivergence]);
 
   // Drawing tools / pan / zoom — same feature set as /dashboard/orderflow
   const [drawings, setDrawings] = useState<DrawingRow[]>([]);
@@ -582,10 +590,16 @@ function inferBinSize(levels: { price: number }[]): number {
 
   useEffect(() => {
     if (!hydrated) return;
+    if (!showDivergence) {
+      // Старые маркеры не должны всплыть при следующем включении на другом
+      // инструменте — при включении список загрузится заново.
+      setDivSignals([]); // eslint-disable-line react-hooks/set-state-in-effect
+      return;
+    }
     let alive = true;
     loadDivergence(() => alive);
     return () => { alive = false; };
-  }, [loadDivergence, hydrated]);
+  }, [loadDivergence, hydrated, showDivergence]);
 
   // Тихое обновление Volume Profile / Imbalance / Divergence раз в 15с —
   // раньше грузились один раз при смене symbol/range и не обновлялись,
@@ -599,13 +613,13 @@ function inferBinSize(levels: { price: number }[]): number {
       if (document.hidden) return;
       loadVolumeProfile(() => alive, true);
       loadImbalance(() => alive, true);
-      loadDivergence(() => alive, true);
+      if (showDivergence) loadDivergence(() => alive, true);
     }, 15000);
     return () => {
       alive = false;
       clearInterval(iv);
     };
-  }, [loadVolumeProfile, loadImbalance, loadDivergence]);
+  }, [loadVolumeProfile, loadImbalance, loadDivergence, showDivergence]);
 
 
   // ─── Draw candle chart — same primitives as /dashboard/orderflow ─────
@@ -697,7 +711,7 @@ function inferBinSize(levels: { price: number }[]): number {
     const visibleDivSignals = firstCandleT !== undefined && lastCandleT !== undefined
       ? divSignals.filter(s => s.t >= firstCandleT && s.t <= lastCandleT)
       : divSignals;
-    drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, visibleDivSignals);
+    if (showDivergence) drawDivergenceMarkers(ctx, sx, sy, plotX, plotW, plotH, visibleDivSignals);
 
     // Рисунки пользователя (трендовые линии, прямоугольники и т.п.)
     if (showDrawings && drawings.length) {
@@ -803,7 +817,7 @@ function inferBinSize(levels: { price: number }[]): number {
         drawTooltipBox(ctx, lines, cx, cy, layout);
       }
     }
-  }, [data, candles, getTimeAxis, range, timezone, locale, t, symbol, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals]);
+  }, [data, candles, getTimeAxis, range, timezone, locale, t, symbol, showVpOverlay, sessionIds, showDrawings, drawings, selectedDrawingId, activeTool, drawingPoints, magnet, boundsRef, viewRef, layoutRef, hoverRef, snappedRef, drawingDragRef, drawingResizeRef, divSignals, showDivergence]);
 
   // ─── Draw delta/CVD — same renderer as /dashboard/orderflow ──────────
 
@@ -948,6 +962,14 @@ function inferBinSize(levels: { price: number }[]): number {
             {t("of.vpOverlay")}
           </button>
           <button
+            onClick={toggleDivergence}
+            className={`inline-flex items-center gap-1.5 input-base py-1.5 px-2 text-xs transition ${showDivergence ? "text-accent border-accent/40" : "text-muted hover:border-border-strong"}`}
+            title={t("fx.hintDivergence")}
+          >
+            <span className={`h-3 w-3 rounded-sm border ${showDivergence ? "bg-accent border-accent" : "border-border-strong"}`} />
+            {t("fx.divergence")}
+          </button>
+          <button
             onClick={load}
             disabled={loading}
             className="inline-flex items-center gap-1 px-2 py-1.5 rounded-lg input-base text-xs hover:border-border-strong disabled:opacity-50"
@@ -1063,7 +1085,7 @@ function inferBinSize(levels: { price: number }[]): number {
           высота графика, растянутая ячейка grid оставляла бы под ним пустоту). */}
       <VolumeProfile data={vpData} loading={vpLoading} error={vpError} />
       <ImbalanceHeatmap data={imbData} loading={imbLoading} error={imbError} />
-      <DivergenceHistory signals={divSignals} loading={divLoading} error={divError} />
+      {showDivergence && <DivergenceHistory signals={divSignals} loading={divLoading} error={divError} />}
     </div>
   );
 }
