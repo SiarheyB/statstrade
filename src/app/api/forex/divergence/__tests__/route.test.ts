@@ -90,4 +90,17 @@ describe("GET /api/forex/divergence", () => {
     const res = await GET(new Request(`${base}?symbol=EUR/USD&period=4h`));
     expect(res.status).toBe(500);
   });
+
+  it("повторный запрос из кэша отдаёт тот же ответ, а не обёртку", async () => {
+    // Раньше в кэш клали { at, data }, и при попадании в кэш (TTL 5 с) клиент
+    // получал обёртку без signals. Включение сканера сразу после выключения
+    // рисовало пустой график — дивергенции появлялись только «со второго раза».
+    mockPrisma.fxCandle.findMany.mockResolvedValue(makeCandles(60));
+    const url = `${base}?symbol=EUR/USD&period=4h`;
+    const first = await (await GET(new Request(url))).json();
+    const second = await (await GET(new Request(url))).json();
+    expect(mockPrisma.fxCandle.findMany).toHaveBeenCalledTimes(1);
+    expect(Array.isArray(second.signals)).toBe(true);
+    expect(second).toEqual(first);
+  });
 });

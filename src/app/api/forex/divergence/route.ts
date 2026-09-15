@@ -173,7 +173,10 @@ export async function GET(req: Request) {
     const limited = signals.slice(-10);
 
     const data = { symbol, period, signals: limited };
-    cache.set(key, { at: Date.now(), data });
+    // Кладём сам ответ: время записи кэш хранит сам (lib/routeCache.ts). Лишняя
+    // обёртка { at, data } уходила клиенту при попадании в кэш, в ней не было
+    // signals — и повторный запрос в пределах TTL рисовал пустой график.
+    cache.set(key, data);
     return NextResponse.json(data);
   } catch (err) {
     return serverError((err as Error).message);

@@ -124,7 +124,10 @@ export async function GET(req: Request) {
     }
 
     const data = { symbol, period, current, series, signal };
-    cache.set(key, { at: Date.now(), data });
+    // Кладём сам ответ: время записи кэш хранит сам (lib/routeCache.ts). Лишняя
+    // обёртка { at, data } уходила клиенту при попадании в кэш — повторный
+    // запрос в пределах TTL получал ответ без current/series.
+    cache.set(key, data);
     return NextResponse.json(data);
   } catch (err) {
     return serverError((err as Error).message);

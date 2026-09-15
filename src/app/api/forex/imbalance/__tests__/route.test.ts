@@ -84,4 +84,16 @@ describe("GET /api/forex/imbalance", () => {
     const res = await GET(new Request(`${base}?symbol=EUR/USD&period=1h`));
     expect(res.status).toBe(500);
   });
+
+  it("повторный запрос из кэша отдаёт тот же ответ, а не обёртку", async () => {
+    // Раньше в кэш клали { at, data }, и при попадании в кэш клиент получал
+    // обёртку без current/series — тот же дефект, что у дивергенций.
+    mockPrisma.fxCandle.findMany.mockResolvedValue(makeCandles(20));
+    const url = `${base}?symbol=EUR/USD&period=1h`;
+    const first = await (await GET(new Request(url))).json();
+    const second = await (await GET(new Request(url))).json();
+    expect(mockPrisma.fxCandle.findMany).toHaveBeenCalledTimes(1);
+    expect(Array.isArray(second.series)).toBe(true);
+    expect(second).toEqual(first);
+  });
 });
