@@ -31,7 +31,6 @@ export default function LandingMajors({
           <MajorColumn key={coin.symbol} coin={coin} t={t} />
         ))}
       </div>
-      <p className="mt-2 text-center text-[11px] text-faint">{t("landing.majors.legend")}</p>
     </div>
   );
 }
