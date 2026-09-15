@@ -13,6 +13,7 @@ import { prisma } from "./db";
 import { createRouteCache } from "./routeCache";
 import { getCalendar } from "./econcal";
 import { getNews, asLang, type Lang } from "./news";
+import { loadMajors, type MajorCoin } from "./landingMajors";
 
 /** Сколько дней календаря показываем на главной (сегодня + следующие). */
 export const CALENDAR_DAYS = 3;
@@ -111,6 +112,7 @@ export type LandingData = {
   events: LandingEvent[];
   signal: LandingSignal | null;
   news: LandingNewsItem[];
+  majors: MajorCoin[];
 };
 
 /**
@@ -250,11 +252,15 @@ export async function getLandingData(lang: Lang | string | null = null, now = Da
     const from = new Date(calendarFrom(now).getTime() - TZ_SLACK_MS);
     const to = new Date(startOfToday(now).getTime() + CALENDAR_DAYS * DAY_MS + TZ_SLACK_MS);
 
-    const [stats, calendar, signal, news] = await Promise.all([
+    const [stats, calendar, signal, news, majors] = await Promise.all([
       loadStats(startOfToday(now), now),
       getCalendar({ from, to }),
       loadSignal(),
       getNews({ lang: locale, limit: NEWS_LIMIT }),
+      // Отдельный try/catch, а не общий на весь Promise.all: Binance или
+      // стакан недоступны — блок «Старшие монеты» просто пропадает, а не
+      // роняет весь остальной лендинг (календарь, новости, сигнал дня).
+      loadMajors().catch(() => []),
     ]);
 
     return {
@@ -272,6 +278,7 @@ export async function getLandingData(lang: Lang | string | null = null, now = Da
         actual: e.actual,
       })),
       signal,
+      majors,
       news: news.items.slice(0, NEWS_LIMIT).map((n) => ({
         id: n.id,
         source: n.source,

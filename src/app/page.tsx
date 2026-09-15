@@ -14,6 +14,7 @@ import LandingNews from "@/components/landing/LandingNews";
 import LandingFeatures from "@/components/landing/LandingFeatures";
 import LandingPricing from "@/components/landing/LandingPricing";
 import LandingGame from "@/components/landing/LandingGame";
+import LandingMajors from "@/components/landing/LandingMajors";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import gameAssets from "@/data/assets.json";
 import { BarChart3 } from "lucide-react";
@@ -100,6 +101,12 @@ export default async function Home() {
       </header>
 
       <main className="flex-1">
+        {landing && (landing.majors?.length ?? 0) > 0 && (
+          <div className="pt-8">
+            <LandingMajors coins={landing.majors} t={t} />
+          </div>
+        )}
+
         <section className="max-w-4xl mx-auto px-6 pt-16 pb-12 text-center">
           <h1 className="text-4xl sm:text-5xl font-bold tracking-tight">
             {t("landing.heroPre")}{" "}
