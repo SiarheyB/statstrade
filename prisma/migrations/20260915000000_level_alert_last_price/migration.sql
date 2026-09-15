@@ -1,0 +1,1 @@
+ALTER TABLE "LevelAlert" ADD COLUMN "lastPrice" DOUBLE PRECISION;

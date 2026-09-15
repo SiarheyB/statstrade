@@ -69,6 +69,11 @@ export async function runLevelAlerts(): Promise<AlertRunResult> {
 
   const fired: { alert: (typeof alerts)[number]; price: number }[] = [];
   const rearm: string[] = [];
+  // Цену запоминаем на ВСЕХ проверенных подписках, не только на сработавших —
+  // без неё на следующем проходе не с чем сравнивать, чтобы поймать
+  // пересечение уровня между тиками (см. decide() и комментарий у lastPrice
+  // в schema.prisma).
+  const lastPrices: { id: string; price: number }[] = [];
 
   for (const a of alerts) {
     const price = prices.get(a.symbol);
@@ -81,9 +86,11 @@ export async function runLevelAlerts(): Promise<AlertRunResult> {
       atr: a.atr,
       thresholdAtr: a.thresholdAtr,
       triggered: a.triggeredAt !== null,
+      prevPrice: a.lastPrice,
     });
     if (what === "fire") fired.push({ alert: a, price });
     else if (what === "rearm") rearm.push(a.id);
+    lastPrices.push({ id: a.id, price });
   }
 
   if (rearm.length) {
@@ -92,6 +99,19 @@ export async function runLevelAlerts(): Promise<AlertRunResult> {
       data: { triggeredAt: null, triggeredPrice: null },
     });
     result.rearmed = count;
+  }
+
+  // Одним запросом на каждое значение цены — символов у активных подписок
+  // немного, и совпадающая цена (тот же символ у разных подписчиков) не
+  // требует отдельного апдейта на каждую строку.
+  const byPrice = new Map<number, string[]>();
+  for (const { id, price } of lastPrices) {
+    const ids = byPrice.get(price);
+    if (ids) ids.push(id);
+    else byPrice.set(price, [id]);
+  }
+  for (const [price, ids] of byPrice) {
+    await prisma.levelAlert.updateMany({ where: { id: { in: ids } }, data: { lastPrice: price } });
   }
 
   if (fired.length === 0) return result;

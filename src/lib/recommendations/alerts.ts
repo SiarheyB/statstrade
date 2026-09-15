@@ -64,6 +64,17 @@ export function decide(opts: {
   thresholdAtr: number;
   /** Уже срабатывала? */
   triggered: boolean;
+  /**
+   * Цена на ПРОШЛОМ проходе крона (раз в минуту), если он уже был.
+   *
+   * Без неё пробойный бар, прошедший всю зону порога быстрее чем за минуту,
+   * мог не сработать вовсе: цена была далеко от уровня и до, и после — а
+   * внутрь узкой зоны крон просто ни разу не попал между двумя тиками. Раз
+   * известна прошлая цена, ловим сам факт пересечения уровня (цена была по
+   * одну сторону, стала по другую), независимо от того, насколько близко
+   * она была к нему в момент самой проверки.
+   */
+  prevPrice?: number | null;
 }): AlertDecision {
   const dist = distanceInAtr(opts.price, opts.levelPrice, opts.atr);
   if (!Number.isFinite(dist)) return "none";
@@ -71,7 +82,11 @@ export function decide(opts: {
   if (opts.triggered) {
     return dist > threshold * REARM_FACTOR ? "rearm" : "none";
   }
-  return dist <= threshold ? "fire" : "none";
+  if (dist <= threshold) return "fire";
+  if (opts.prevPrice != null && (opts.prevPrice - opts.levelPrice) * (opts.price - opts.levelPrice) <= 0) {
+    return "fire";
+  }
+  return "none";
 }
 
 function decimalsOf(v: number): number {

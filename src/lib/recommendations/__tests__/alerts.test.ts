@@ -68,6 +68,28 @@ describe("решение о срабатывании", () => {
     expect(decide({ ...base, price: justOutside, triggered: true })).toBe("none");
     expect(decide({ ...base, price: justOutside + 0.1, triggered: true })).toBe("rearm");
   });
+
+  describe("пробойный бар между двумя проходами крона", () => {
+    // Порог узкий (0.05×ATR = 1 по цене — зона 99..101), а крон проверяет
+    // раз в минуту: пробойная свеча может пройти всю зону быстрее, и цена
+    // окажется далеко от уровня И до, И после проверки. Без prevPrice такое
+    // срабатывание терялось бы полностью.
+    const tight = { levelPrice: 100, atr: 20, thresholdAtr: 0.05, triggered: false };
+
+    it("срабатывает, если уровень остался между прошлой и текущей ценой", () => {
+      expect(decide({ ...tight, price: 130, prevPrice: 70 })).toBe("fire");
+      expect(decide({ ...tight, price: 70, prevPrice: 130 })).toBe("fire");
+    });
+
+    it("не срабатывает, если обе цены остались по одну сторону от уровня", () => {
+      expect(decide({ ...tight, price: 130, prevPrice: 110 })).toBe("none");
+    });
+
+    it("не срабатывает без прошлой цены (первый проход крона для подписки)", () => {
+      expect(decide({ ...tight, price: 130, prevPrice: null })).toBe("none");
+      expect(decide({ ...tight, price: 130 })).toBe("none");
+    });
+  });
 });
 
 describe("текст уведомления", () => {
