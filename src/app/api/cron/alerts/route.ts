@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { secretEquals } from "@/lib/crypto";
 import { runLevelAlerts } from "@/lib/recommendations/alertRunner";
 import { runEconcalPush } from "@/lib/econcalPushRunner";
+import { getCalendar } from "@/lib/econcal";
 
 export const maxDuration = 60;
 
@@ -22,6 +23,14 @@ export const maxDuration = 60;
  * либо случается, либо нет, а «напомнить за 5 минут» с точностью в 5 минут не
  * напоминание.
  *
+ * ПЕРЕД этим — getCalendar(): сам календарь до сих пор обновлялся только по
+ * посещению страницы (см. lib/econcal.ts, «stale» + фоновый refresh) — если
+ * ночью никто не заходит на /dashboard/calendar, факт (Actual) по вышедшим
+ * ночью новостям не подтягивался часами. Функция сама решает, нужен ли поход
+ * за фидом (не чаще раза в 30 минут, с троттлом в 60 секунд) — дёргать её
+ * каждую минуту ничего не стоит и держит и колокольчик, и push-напоминания
+ * ниже на свежих данных.
+ *
  * Крон хоста, а не внутренний планировщик: /api/cron/* — общий приём проекта
  * (тот же секрет, что у /api/cron/sync и /api/cron/recommendations, см.
  * docs/SELF_HOSTING.md).
@@ -39,6 +48,12 @@ async function handle(req: Request) {
   if (!authorized(req)) {
     return NextResponse.json({ error: "Не авторизован" }, { status: 401 });
   }
+
+  // Сначала календарь — напоминания ниже читают уже сохранённые события из
+  // БД, и им нужны свежие данные ДО прохода, а не после. Падение обновления
+  // не должно уронить весь крон — ловим отдельно, тем же принципом, что и
+  // ниже.
+  await getCalendar().catch(() => {});
 
   // Независимо друг от друга: упавший календарь не должен отменять проверку
   // уровней и наоборот. allSettled, а не Promise.all, ровно поэтому.
