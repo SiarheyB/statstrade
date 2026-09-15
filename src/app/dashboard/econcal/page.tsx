@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import clsx from "clsx";
-import { CalendarClock, RefreshCw, HelpCircle, Clock } from "lucide-react";
+import { CalendarClock, ChevronLeft, ChevronRight, RefreshCw, HelpCircle, Clock } from "lucide-react";
 import { useI18n } from "@/lib/i18n/provider";
 import type { Locale } from "@/lib/i18n/core";
 import { translateEventTitle, explainEvent } from "@/lib/econcalTerms";
@@ -67,12 +67,28 @@ export default function EconCalPage() {
   // Day scope: today (default), tomorrow, or the whole fetched week.
   const [scope, setScope] = useState<"today" | "tomorrow" | "week">("today");
 
-  // Current week only (the free feed serves just this week).
+  // Прошлые недели копятся в базе сами (см. lib/econcal.ts — каждый обход
+  // фида добавляет новую «текущую» неделю, старые остаются лежать), а фид
+  // отдаёт только её саму — значит история доступна ТОЛЬКО назад, вперёд
+  // будущей недели ни у нас, ни у бесплатного фида нет. 0 — текущая неделя,
+  // отрицательное — на weekOffset недель раньше.
+  const [weekOffset, setWeekOffsetRaw] = useState(0);
+  // «Сегодня»/«завтра» имеют смысл только для текущей недели — на прошлой все
+  // события уже позади, и фильтр просто ничего не показал бы, что выглядело
+  // бы как пустой календарь без объяснения. Переключаем scope сразу в момент
+  // перехода на другую неделю, а не отдельным эффектом.
+  const setWeekOffset = useCallback((next: number | ((prev: number) => number)) => {
+    setWeekOffsetRaw((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      if (value !== 0) setScope("week");
+      return value;
+    });
+  }, []);
   const range = useMemo(() => {
-    const from = weekStart(0, timezone);
+    const from = weekStart(weekOffset, timezone);
     const to = new Date(from.getTime() + 7 * 86400000);
     return { from, to };
-  }, [timezone]);
+  }, [weekOffset, timezone]);
 
   const load = useCallback(
     async (force = false) => {
@@ -208,14 +224,42 @@ export default function EconCalPage() {
         </button>
       </div>
       <p className="text-sm text-muted mt-1">{t("econcal.subtitle")}</p>
-      <div className="inline-flex items-center gap-2 mt-2 mb-4 text-sm">
-        <span className="text-faint">{t("econcal.thisWeek")}:</span>
-        <span className="font-medium tabular-nums">{weekLabel}</span>
+
+      {/* Навигация по неделям: вперёд дальше текущей нет смысла — ни у нас,
+          ни у бесплатного фида нет данных дальше недели, в которой сейчас
+          находимся (см. комментарий у weekOffset). Назад — сколько угодно,
+          насколько хватает накопленной истории. */}
+      <div className="inline-flex items-center gap-1.5 mt-2 mb-4 text-sm">
+        <button
+          onClick={() => setWeekOffset((w) => w - 1)}
+          className="input-base py-1 px-1.5 hover:border-border-strong"
+          aria-label={t("econcal.prevWeek")}
+        >
+          <ChevronLeft size={15} />
+        </button>
+        <span className="font-medium tabular-nums min-w-[13rem] text-center">{weekLabel}</span>
+        <button
+          onClick={() => setWeekOffset((w) => Math.min(0, w + 1))}
+          disabled={weekOffset >= 0}
+          className="input-base py-1 px-1.5 hover:border-border-strong disabled:opacity-30 disabled:cursor-not-allowed"
+          aria-label={t("econcal.nextWeek")}
+        >
+          <ChevronRight size={15} />
+        </button>
+        {weekOffset !== 0 && (
+          <button
+            onClick={() => setWeekOffset(0)}
+            className="ml-1 text-xs text-accent hover:underline"
+          >
+            {t("econcal.thisWeek")}
+          </button>
+        )}
       </div>
 
       {/* Часы и обратный отсчёт: главный вопрос у календаря — «сколько
-          осталось до ближайшей публикации», а не «который час вообще». */}
-      {now > 0 && (
+          осталось до ближайшей публикации», а не «который час вообще». Для
+          прошлой недели он бессмысленен — там все события уже прошли. */}
+      {now > 0 && weekOffset === 0 && (
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-sm" data-testid="econcal-clock">
           <span className="inline-flex items-center gap-1.5 text-muted">
             <Clock size={14} className="text-faint" />
@@ -235,7 +279,10 @@ export default function EconCalPage() {
         </div>
       )}
 
-      {/* Day scope: today (default) / tomorrow / whole week */}
+      {/* Day scope: today (default) / tomorrow / whole week — только для
+          текущей недели, на прошлой единственный осмысленный вид — «неделя
+          целиком» (переключатель скрыт, см. эффект у weekOffset выше). */}
+      {weekOffset === 0 && (
       <div className="flex items-center gap-1 mb-3">
         {(["today", "tomorrow", "week"] as const).map((s) => (
           <button
@@ -250,6 +297,7 @@ export default function EconCalPage() {
           </button>
         ))}
       </div>
+      )}
 
       {/* Filters */}
       <div className="space-y-2 mb-5">
