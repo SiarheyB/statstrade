@@ -811,6 +811,8 @@ const en: Dict = {
   // (подход цены к уровню, скорый выход новости), поэтому заголовок общий.
   "notifications.title": "Notifications",
   "notifications.empty": "Nothing new",
+  "notifications.markRead": "Mark as read",
+  "notifications.markAllRead": "Mark all read",
   "announcements.read": "Mark as read",
   "announcements.unread": "{n} new",
   "announcements.justNow": "just now",
@@ -3349,6 +3351,8 @@ const ru: Dict = {
   "announcements.empty": "Нет объявлений",
   "notifications.title": "Уведомления",
   "notifications.empty": "Ничего нового",
+  "notifications.markRead": "Отметить прочитанным",
+  "notifications.markAllRead": "Прочитать всё",
   "announcements.read": "Отметить как прочитанное",
   "announcements.unread": "{n} новых",
   "announcements.justNow": "только что",

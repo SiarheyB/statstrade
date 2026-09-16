@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { BellDot, Megaphone, TrendingUp, CalendarClock } from "lucide-react";
+import { BellDot, Megaphone, TrendingUp, CalendarClock, Check } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -189,6 +189,13 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
     }
   }, []);
 
+  // «Прочитать всё» — та же операция markRead по каждой непрочитанной строке.
+  // Отдельного bulk-эндпоинта нет: непрочитанных обычно единицы, а не сотни,
+  // и заводить второй API-путь ради этого не стоило.
+  const markAllRead = useCallback(() => {
+    for (const item of unreadItems) markRead(item);
+  }, [unreadItems, markRead]);
+
   const handleClick = useCallback(
     (item: Item) => {
       // У личного уведомления есть адрес — по клику ведём туда, ради этого
@@ -243,8 +250,17 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
           className="fixed z-[100] w-96 bg-surface border border-border rounded-xl shadow-xl overflow-hidden"
           style={{ top: pos.top, left: pos.left }}
         >
-          <div className="px-4 py-3 border-b border-border">
+          <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-border">
             <h3 className="text-sm font-semibold">{t("notifications.title")}</h3>
+            {unread > 0 && (
+              <button
+                type="button"
+                onClick={markAllRead}
+                className="text-xs text-accent hover:underline"
+              >
+                {t("notifications.markAllRead")}
+              </button>
+            )}
           </div>
 
           <div className="divide-y divide-border">
@@ -266,11 +282,23 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
                 // приходится вчитываться в каждую строку.
                 const Icon = KIND_ICON[item.kind] ?? Megaphone;
                 return (
-                  <button
+                  // div, а не button: внутри строки есть свой кликабельный
+                  // крестик «прочитано» — вложенные button/button невалидны в
+                  // HTML и ломают фокус/гидратацию (тот же приём, что и в
+                  // AssetPicker для цветных меток).
+                  <div
                     key={`${item.source}:${item.id}`}
+                    role="button"
+                    tabIndex={0}
                     onClick={() => handleClick(item)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleClick(item);
+                      }
+                    }}
                     className={clsx(
-                      "w-full min-w-0 text-left px-4 py-2.5 transition border-l-2 hover:bg-surface-2",
+                      "group w-full min-w-0 cursor-pointer text-left px-4 py-2.5 transition border-l-2 hover:bg-surface-2",
                       isUnread
                         ? "border-l-accent font-semibold"
                         : "border-l-transparent font-normal",
@@ -298,8 +326,27 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
                           {item.title}
                         </span>
                       </span>
-                      <span className="text-[10px] text-faint whitespace-nowrap shrink-0 mt-0.5">
-                        {fmtAge(item.createdAt, t)}
+                      <span className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] text-faint whitespace-nowrap mt-0.5">
+                          {fmtAge(item.createdAt, t)}
+                        </span>
+                        {/* Явная кнопка «прочитано» — раньше отметить строку
+                            можно было только кликом по всей строке (заодно
+                            уводившим по ссылке или разворачивавшим текст),
+                            без единого видимого признака, что так вообще
+                            можно. */}
+                        <button
+                          type="button"
+                          title={t("notifications.markRead")}
+                          aria-label={t("notifications.markRead")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markRead(item);
+                          }}
+                          className="rounded p-0.5 text-faint opacity-0 transition hover:text-accent group-hover:opacity-100 focus-visible:opacity-100"
+                        >
+                          <Check size={13} />
+                        </button>
                       </span>
                     </div>
                     <p
@@ -310,7 +357,7 @@ export default function NotificationBell({ collapsed: _collapsed }: { collapsed?
                     >
                       {item.body}
                     </p>
-                  </button>
+                  </div>
                 );
               })
             )}
