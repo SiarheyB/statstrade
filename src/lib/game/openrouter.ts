@@ -83,6 +83,16 @@ async function fetchFreeModels(): Promise<string[]> {
     // OpenRouter использует оба признака в разных семействах моделей.
     const ids = (data.data ?? [])
       .filter((m) => m.id.endsWith(":free") || m.pricing?.prompt === "0")
+      // Рассуждающие модели (R1, QwQ, "-thinking", o1/o3 и т.п.) тратят
+      // весь maxTokens на цепочку рассуждений ДО самого ответа — при коротком
+      // лимите (у нас 100-220 токенов на реплику/решение бота) генерация
+      // обрывается на середине размышления, и наружу уходит либо пустой
+      // ответ, либо голое начало вроде «Here's a thinking process:» без
+      // единого слова по существу. reasoning.exclude в самом запросе (см.
+      // requestOnce) должен убирать это у моделей, которые его поддерживают,
+      // но не у всех апстримов OpenRouter это работает одинаково — отсекаем
+      // явно узнаваемые reasoning-модели из пула ещё на этапе выбора.
+      .filter((m) => !/(?:^|[-/])(?:r1|o1|o3|qwq|thinking)(?:[-:]|$)/i.test(m.id))
       .map((m) => m.id);
     if (ids.length > 0) {
       freeModelsCache = { ids, fetchedAt: Date.now() };
@@ -152,6 +162,29 @@ export async function askModel(
   return null;
 }
 
+// Известные вступления рассуждающих моделей, которые иногда всё равно
+// просачиваются в content — либо потому, что апстрим игнорирует
+// reasoning.exclude, либо потому, что сама модель пишет их обычным текстом,
+// а не в отдельном служебном поле. Последний рубеж защиты, а не основной
+// (основной — сам exclude выше и фильтр моделей в fetchFreeModels).
+const REASONING_PREAMBLE = /^(?:here'?s\s+(?:a|the)\s+thinking\s+process|let\s+me\s+think|thinking:|<think>|okay,?\s+let'?s\s+think)/i;
+
+/**
+ * Срезает вступление рассуждающей модели, если оно всё же попало в ответ.
+ * Модель, которую по-настоящему обрезало на середине размышления, не
+ * содержит после преамбулы ничего осмысленного — тогда вернётся пустая
+ * строка, и вызывающий код (requestOnce) справедливо посчитает это отказом,
+ * а не реальным ответом.
+ */
+export function stripReasoningArtifacts(text: string): string {
+  if (!REASONING_PREAMBLE.test(text.trim())) return text;
+  // Реальный ответ модели, если он есть, обычно идёт отдельным абзацем после
+  // рассуждения — берём последний непустой абзац.
+  const paragraphs = text.split(/\n{2,}/).map((p) => p.trim()).filter(Boolean);
+  const last = paragraphs[paragraphs.length - 1] ?? "";
+  return REASONING_PREAMBLE.test(last) ? "" : last;
+}
+
 async function requestOnce(
   model: string,
   messages: ChatTurn[],
@@ -177,6 +210,14 @@ async function requestOnce(
         messages,
         max_tokens: options.maxTokens ?? 120,
         temperature: options.temperature ?? 0.9,
+        // Реплика бота и торговое решение — короткий текст, которому не
+        // нужна видимая цепочка рассуждений. У рассуждающих моделей (когда
+        // такая всё же попадает в цепочку, см. фильтр в fetchFreeModels)
+        // reasoning-токены иначе едят весь max_tokens ДО ответа по существу,
+        // и наружу уходит голое начало рассуждения. exclude просит OpenRouter
+        // не включать эти токены в content — провайдеры, которые reasoning
+        // вообще не поддерживают, это поле просто игнорируют.
+        reasoning: { exclude: true },
       }),
     });
     if (!res.ok) {
@@ -186,8 +227,8 @@ async function requestOnce(
       return { text: null, fatal: res.status === 401 || res.status === 403 };
     }
     const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
-    const text = data.choices?.[0]?.message?.content?.trim();
-    return { text: text && text.length > 0 ? text : null, fatal: false };
+    const text = stripReasoningArtifacts(data.choices?.[0]?.message?.content?.trim() ?? "");
+    return { text: text.length > 0 ? text : null, fatal: false };
   } catch {
     return { text: null, fatal: false };
   } finally {

@@ -122,4 +122,61 @@ describe("askModel — переключение моделей", () => {
     expect(text).toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("просит у OpenRouter не включать рассуждения в ответ", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(jsonResponse({ choices: [{ message: { content: "ок" } }] }));
+    const { askModel } = await loadOpenrouter();
+    await askModel([{ role: "user", content: "привет" }]);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.reasoning).toEqual({ exclude: true });
+  });
+
+  it("не отдаёт наружу вступление рассуждающей модели, если оно всё же просочилось", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ choices: [{ message: { content: "Here's a thinking process:" } }] }),
+    );
+    const { askModel } = await loadOpenrouter();
+    const text = await askModel([{ role: "user", content: "что делать с BTC?" }]);
+    // Обрезанный на середине размышления ответ — это отказ, а не текст для
+    // публикации: пусто, но не голая преамбула.
+    expect(text).toBeNull();
+  });
+
+  it("вытаскивает реальный ответ, если он идёт отдельным абзацем после рассуждения", async () => {
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({
+        choices: [
+          {
+            message: {
+              content: "Here's a thinking process:\n1. цена растёт\n2. объём подтверждает\n\nБеру лонг по BTC.",
+            },
+          },
+        ],
+      }),
+    );
+    const { askModel } = await loadOpenrouter();
+    const text = await askModel([{ role: "user", content: "что делать с BTC?" }]);
+    expect(text).toBe("Беру лонг по BTC.");
+  });
+});
+
+describe("stripReasoningArtifacts", () => {
+  it("не трогает обычный ответ без служебной преамбулы", async () => {
+    const { stripReasoningArtifacts } = await loadOpenrouter();
+    expect(stripReasoningArtifacts("Беру лонг по BTC.")).toBe("Беру лонг по BTC.");
+  });
+
+  it("превращает голую преамбулу без ответа в пустую строку", async () => {
+    const { stripReasoningArtifacts } = await loadOpenrouter();
+    expect(stripReasoningArtifacts("Here's a thinking process:")).toBe("");
+    expect(stripReasoningArtifacts("<think>рассуждаю о рынке")).toBe("");
+  });
+
+  it("оставляет последний абзац, если он идёт после преамбулы", async () => {
+    const { stripReasoningArtifacts } = await loadOpenrouter();
+    expect(stripReasoningArtifacts("Let me think about this.\n\nЖду коррекции.")).toBe("Жду коррекции.");
+  });
 });

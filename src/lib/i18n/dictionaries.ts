@@ -2446,6 +2446,7 @@ const en: Dict = {
 
   "game.chat.hint": "Attach your chart and the others will open exactly what you see — the market is one for everyone.",
   "game.chat.empty": "Nobody has said anything yet. Be the first.",
+  "game.chat.mentionsYou": "mentions you",
   "game.chat.placeholder": "Say something…",
   "game.chat.attach": "Attach the chart: {symbol}, drawings: {count}",
   "game.chat.openIdea": "Open {asset}",
@@ -4981,6 +4982,7 @@ const ru: Dict = {
 
   "game.chat.hint": "Приложи свой график — остальные откроют ровно то, что видишь ты: рынок один на всех.",
   "game.chat.empty": "Пока никто ничего не сказал. Будь первым.",
+  "game.chat.mentionsYou": "обращаются к тебе",
   "game.chat.placeholder": "Написать…",
   "game.chat.attach": "Приложить график: {symbol}, разметки: {count}",
   "game.chat.openIdea": "Открыть {asset}",

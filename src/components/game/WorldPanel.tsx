@@ -329,6 +329,7 @@ export default function WorldPanel({
       {section === "chat" && (
         <ChatPanel
           inFund={!!me.fundId}
+          myNickname={me.nickname}
           currentAssetId={currentAssetId}
           currentSymbol={currentSymbol}
           drawings={drawings}

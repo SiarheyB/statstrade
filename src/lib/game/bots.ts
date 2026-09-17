@@ -764,10 +764,20 @@ async function speak(
   ]);
 
   if (!text) return false;
-  // Модель иногда отвечает абзацем — режем: длинная стена текста в живом
-  // чате выдаёт бота вернее любого содержания. Заодно вычищаем ссылки: даже
-  // уговорив бота, через него нельзя будет раздать адрес.
-  const clean = stripLinks(text.replace(/^["'«]|["'»]$/g, "").split("\n")[0]).slice(0, 220).trim();
+  // Модель иногда отвечает абзацем — берём ПЕРВЫЙ НЕПУСТОЙ, а не первую
+  // строку буквально: у некоторых моделей реальный ответ идёт после пустой
+  // строки-отбивки (заголовок, потом реплика), и .split("\n")[0] в таком
+  // случае откусывал бы именно заголовок — вплоть до огрызка вроде «Here's a
+  // thinking process:», если reasoning-преамбулу не срезал уже askModel (см.
+  // stripReasoningArtifacts в openrouter.ts). Длинная стена текста в живом
+  // чате всё равно выдаёт бота вернее любого содержания, поэтому берём
+  // только один абзац. Заодно вычищаем ссылки: даже уговорив бота, через
+  // него нельзя будет раздать адрес.
+  const firstParagraph = text
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .find((p) => p.length > 0) ?? "";
+  const clean = stripLinks(firstParagraph.replace(/^["'«]|["'»]$/g, "").split("\n")[0]).slice(0, 220).trim();
   if (clean.length < 2) return false;
 
   await prisma.gameChatMessage.create({ data: { channel, playerId: botId, text: clean } });

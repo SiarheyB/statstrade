@@ -33,14 +33,41 @@ export function timeLeft(ts: number, now = Date.now()): { value: number; unit: "
 }
 type Channel = (typeof CHANNELS)[number];
 
+// Экранируем ник перед вставкой в RegExp: символы вроде "." или "+" в нём
+// иначе читались бы как спецсимволы регулярки, а не буквально.
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Упомянули ли игрока в сообщении — по его нику, границами слова, без учёта
+ * регистра. То же самое сравнение, что сервер уже делает при выборе, кто из
+ * ботов отвечает на вопрос (см. answerQuestion в lib/game/bots.ts) — здесь
+ * оно нужно для подсветки в интерфейсе: раньше обращение ничем не отличалось
+ * от остального текста, и заметить, что ответили именно тебе, можно было,
+ * только вчитавшись в каждую строку.
+ */
+export function mentionsMe(text: string, myNickname: string): boolean {
+  const nickname = myNickname.trim();
+  if (nickname.length === 0) return false;
+  // \b в JS понимает только [A-Za-z0-9_] — на кириллице граница слова между
+  // «Гоша» и следующим «р» в «Гошария» им не ловится вовсе, и \W-вариант тоже
+  // не годится по той же причине (кириллица для \w — не буквы). Явные классы
+  // \p{L}\p{N} с флагом u понимают границу слова для любого алфавита.
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(nickname)}(?![\\p{L}\\p{N}])`, "iu").test(text);
+}
+
 export default function ChatPanel({
   inFund,
+  myNickname,
   currentAssetId,
   currentSymbol,
   drawings,
   onOpenIdea,
 }: {
   inFund: boolean;
+  /** Ник игрока — по нему ищем обращения в тексте сообщений (см. mentionsMe). */
+  myNickname: string;
   currentAssetId: string | undefined;
   currentSymbol: string;
   drawings: GameDrawing[];
@@ -177,11 +204,24 @@ export default function ChatPanel({
 
       <div ref={scrollBoxRef} className="h-[320px] overflow-y-auto space-y-2 pr-1">
         {messages.length === 0 && <div className="text-xs text-faint">{t("game.chat.empty")}</div>}
-        {messages.map((message) => (
-          <div key={message.id} className="text-sm">
+        {messages.map((message) => {
+          // Свои же сообщения не подсвечиваем, даже если в них случайно
+          // встретился собственный ник — обращение к самому себе не несёт
+          // никакой информации.
+          const mentioned = message.author.nickname !== myNickname && mentionsMe(message.text, myNickname);
+          return (
+          <div
+            key={message.id}
+            className={`text-sm rounded-lg px-2 py-1.5 -mx-2 ${mentioned ? "bg-accent/10 ring-1 ring-accent/30" : ""}`}
+          >
             <div className="flex items-baseline gap-2">
               <span className="font-medium">{message.author.nickname}</span>
               <span className="text-[11px] text-accent">{t(`game.shop.rank.${message.author.rankKey}`)}</span>
+              {mentioned && (
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-accent">
+                  {t("game.chat.mentionsYou")}
+                </span>
+              )}
               <span className="ml-auto text-[11px] text-faint tabular-nums">
                 {new Date(message.createdAt).toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" })}
               </span>
@@ -198,7 +238,8 @@ export default function ChatPanel({
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
