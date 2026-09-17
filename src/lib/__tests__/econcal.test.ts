@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Hoisted mocks to avoid initialization errors
 const mocks = vi.hoisted(() => ({
@@ -409,35 +409,46 @@ describe('econcal module', () => {
     });
   });
 
-  // Чистка режет по РЕАЛЬНОМУ сроку хранения (ECONCAL_RETENTION_DAYS, по
-  // умолчанию 365 дней), а не по границе текущей недели — прошлый вариант резал
-  // накопленную историю почти целиком на каждом обходе фида (см. комментарий
-  // у pruneOldEvents в lib/econcal.ts).
+  // Чистка режет по РЕАЛЬНОМУ сроку хранения (ECONCAL_RETENTION_DAYS), а не по
+  // границе текущей недели — прошлый вариант резал накопленную историю почти
+  // целиком на каждом обходе фида (см. комментарий у pruneOldEvents в
+  // lib/econcal.ts). По умолчанию (переменная не задана) — хранить ВСЕГДА, ни
+  // одна строка не удаляется.
   describe('pruneOldEvents', () => {
-    const cutoffFor = async (now: Date) => {
+    const ORIGINAL_ENV = process.env.ECONCAL_RETENTION_DAYS;
+    afterEach(() => {
+      if (ORIGINAL_ENV === undefined) delete process.env.ECONCAL_RETENTION_DAYS;
+      else process.env.ECONCAL_RETENTION_DAYS = ORIGINAL_ENV;
+    });
+
+    it('keeps everything forever by default (no env set) — deleteMany is not even called', async () => {
+      delete process.env.ECONCAL_RETENTION_DAYS;
       mocks.deleteManyMock.mockClear();
-      await pruneOldEvents(now);
-      return mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
-    };
-
-    it('cuts 365 days back from now by default', async () => {
-      const cutoff = await cutoffFor(new Date('2026-08-12T15:00:00Z'));
-      expect(cutoff.toISOString()).toBe('2025-08-12T15:00:00.000Z');
+      const removed = await pruneOldEvents(new Date('2026-08-12T15:00:00Z'));
+      expect(removed).toBe(0);
+      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
     });
 
-    it('does not touch events from the previous week — only genuinely old ones', async () => {
-      // Событие прошлой недели (несколько дней назад) должно пережить чистку:
-      // порог отсчитывается от РЕАЛЬНОГО срока хранения, а не от начала
-      // текущей календарной недели.
-      const now = new Date('2026-08-17T00:30:00Z');
-      const cutoff = await cutoffFor(now);
-      const lastWeekEvent = new Date('2026-08-10T12:00:00Z');
-      expect(lastWeekEvent.getTime()).toBeGreaterThan(cutoff.getTime());
+    it('"0" also means keep forever', async () => {
+      process.env.ECONCAL_RETENTION_DAYS = '0';
+      mocks.deleteManyMock.mockClear();
+      await pruneOldEvents(new Date('2026-08-12T15:00:00Z'));
+      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
     });
 
-    it('runs after every calendar refresh', async () => {
+    it('a positive number cuts that many days back from now', async () => {
+      process.env.ECONCAL_RETENTION_DAYS = '90';
+      mocks.deleteManyMock.mockClear();
+      await pruneOldEvents(new Date('2026-08-12T15:00:00Z'));
+      const cutoff = mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
+      expect(cutoff.toISOString()).toBe('2026-05-14T15:00:00.000Z');
+    });
+
+    it('runs after every calendar refresh (no-op when retention is unset)', async () => {
+      delete process.env.ECONCAL_RETENTION_DAYS;
       await getCalendar({ force: true });
-      expect(mocks.deleteManyMock).toHaveBeenCalled();
+      // Пройти должно, но удалять при дефолте «хранить всегда» нечего.
+      expect(mocks.deleteManyMock).not.toHaveBeenCalled();
     });
   });
 });

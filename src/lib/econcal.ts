@@ -144,11 +144,25 @@ export type RefreshResult = { feed: string; upserted: number; error?: string };
 // Теперь режем по РЕАЛЬНОМУ сроку хранения в днях — как и у остальных
 // источников с внешним фидом (FX_CANDLE_RETENTION_DAYS и т.п.), а не по
 // текущей календарной неделе.
-const ECONCAL_RETENTION_DAYS = Number(process.env.ECONCAL_RETENTION_DAYS) || 365;
+//
+// По умолчанию 0 — «хранить всегда»: это единственный вариант, который на уже
+// развёрнутых серверах ничего не меняет без правки .env (переменной там нет —
+// Number(undefined) даёт NaN, а NaN || 0 даёт 0, то есть то же «не задано»,
+// что и раньше давало 365 через ||). Пустая строка ("") ведёт себя так же:
+// Number("") === 0.
+//
+// Читаем переменную внутри функции, а не константой модуля: тесты дёргают
+// pruneOldEvents с разными значениями env в одном процессе.
+function econcalRetentionDays(): number {
+  return Number(process.env.ECONCAL_RETENTION_DAYS) || 0;
+}
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function pruneOldEvents(now: Date = new Date()): Promise<number> {
-  const cutoff = new Date(now.getTime() - ECONCAL_RETENTION_DAYS * DAY_MS);
+  const retentionDays = econcalRetentionDays();
+  // 0 (или не задано) — хранить всегда, чистка не бежит вовсе.
+  if (retentionDays <= 0) return 0;
+  const cutoff = new Date(now.getTime() - retentionDays * DAY_MS);
   const { count } = await prisma.economicEvent.deleteMany({ where: { time: { lt: cutoff } } });
   return count;
 }
