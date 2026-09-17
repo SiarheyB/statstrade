@@ -130,26 +130,25 @@ async function fetchFeed(url: string): Promise<NormalizedEvent[]> {
 
 export type RefreshResult = { feed: string; upserted: number; error?: string };
 
-// Понедельник 00:00 UTC текущей недели.
-function startOfWeekUtc(now: Date = new Date()): Date {
-  const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  const mondayOffset = (d.getUTCDay() + 6) % 7; // вс = 0 → 6 дней назад
-  d.setUTCDate(d.getUTCDate() - mondayOffset);
-  return d;
-}
-
-// Единственная чистка календаря: фид отдаёт только текущую неделю, а таблица
-// копила события всех прошлых обходов. Прошлая неделя уходит сама собой, как
-// только начинается новая, — настраивать тут нечего.
+// Раньше чистка резала по границе недели (всё, что старше начала ТЕКУЩЕЙ
+// недели, — под нож) — это должно было убирать только всякий раз саму себя
+// изживающую «прошлую неделю», но на деле стирало НАКОПЛЕННУЮ историю почти
+// целиком на каждом обходе фида: тот отдаёт только текущую неделю, а любая
+// более старая неделя, попавшая в таблицу за месяцы работы, удалялась при
+// первом же refreshCalendar() после того, как становилась «прошлой». С тех
+// пор как обход фида дёргается раз в минуту крон-эндпоинтом
+// (/api/cron/alerts, см. app/api/cron/alerts/route.ts), от истории
+// практически ничего не успевало долежать даже до следующего дня — и
+// пролистать календарь на пару недель назад было нечем.
 //
-// Режем по времени события (не по createdAt), с запасом в сутки от начала
-// недели: страница считает границы недели в ЧАСОВОМ ПОЯСЕ пользователя
-// (см. weekStart в dashboard/econcal), который может отставать от UTC на
-// половину суток — без запаса у части пользователей понедельник опустел бы.
-const WEEK_EDGE_SLACK_MS = 24 * 60 * 60 * 1000;
+// Теперь режем по РЕАЛЬНОМУ сроку хранения в днях — как и у остальных
+// источников с внешним фидом (FX_CANDLE_RETENTION_DAYS и т.п.), а не по
+// текущей календарной неделе.
+const ECONCAL_RETENTION_DAYS = Number(process.env.ECONCAL_RETENTION_DAYS) || 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export async function pruneOldEvents(now: Date = new Date()): Promise<number> {
-  const cutoff = new Date(startOfWeekUtc(now).getTime() - WEEK_EDGE_SLACK_MS);
+  const cutoff = new Date(now.getTime() - ECONCAL_RETENTION_DAYS * DAY_MS);
   const { count } = await prisma.economicEvent.deleteMany({ where: { time: { lt: cutoff } } });
   return count;
 }

@@ -409,8 +409,10 @@ describe('econcal module', () => {
     });
   });
 
-  // Чистка привязана к границе недели: как только начался понедельник,
-  // события прошлых недель уходят сами (плюс сутки запаса на часовые пояса).
+  // Чистка режет по РЕАЛЬНОМУ сроку хранения (ECONCAL_RETENTION_DAYS, по
+  // умолчанию 365 дней), а не по границе текущей недели — прошлый вариант резал
+  // накопленную историю почти целиком на каждом обходе фида (см. комментарий
+  // у pruneOldEvents в lib/econcal.ts).
   describe('pruneOldEvents', () => {
     const cutoffFor = async (now: Date) => {
       mocks.deleteManyMock.mockClear();
@@ -418,22 +420,19 @@ describe('econcal module', () => {
       return mocks.deleteManyMock.mock.calls[0][0].where.time.lt as Date;
     };
 
-    it('cuts at Monday 00:00 UTC of the current week minus a day of slack', async () => {
-      // Среда, 12 августа 2026 → понедельник недели = 10 августа.
+    it('cuts 365 days back from now by default', async () => {
       const cutoff = await cutoffFor(new Date('2026-08-12T15:00:00Z'));
-      expect(cutoff.toISOString()).toBe('2026-08-09T00:00:00.000Z');
+      expect(cutoff.toISOString()).toBe('2025-08-12T15:00:00.000Z');
     });
 
-    it('treats Sunday as the last day of the current week, not the first', async () => {
-      // Воскресенье 16 августа принадлежит неделе, начавшейся 10 августа —
-      // события этой недели удалять ещё рано.
-      const cutoff = await cutoffFor(new Date('2026-08-16T23:00:00Z'));
-      expect(cutoff.toISOString()).toBe('2026-08-09T00:00:00.000Z');
-    });
-
-    it('moves the cut forward once the new week starts on Monday', async () => {
-      const cutoff = await cutoffFor(new Date('2026-08-17T00:30:00Z'));
-      expect(cutoff.toISOString()).toBe('2026-08-16T00:00:00.000Z');
+    it('does not touch events from the previous week — only genuinely old ones', async () => {
+      // Событие прошлой недели (несколько дней назад) должно пережить чистку:
+      // порог отсчитывается от РЕАЛЬНОГО срока хранения, а не от начала
+      // текущей календарной недели.
+      const now = new Date('2026-08-17T00:30:00Z');
+      const cutoff = await cutoffFor(now);
+      const lastWeekEvent = new Date('2026-08-10T12:00:00Z');
+      expect(lastWeekEvent.getTime()).toBeGreaterThan(cutoff.getTime());
     });
 
     it('runs after every calendar refresh', async () => {
