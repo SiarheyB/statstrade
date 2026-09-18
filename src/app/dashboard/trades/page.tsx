@@ -3,7 +3,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight } from "lucide-react";
 import type { SerializedTrade, AccountSummary } from "@/lib/types";
-import { tradeRR, type RiskProfileData } from "@/lib/risk";
+import { tradeRR, riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
 import TradeImageCell from "@/components/TradeImageCell";
@@ -287,9 +287,16 @@ export default function TradesPage() {
   const accountLabel = (accountId: string): string =>
     accounts.find((a) => a.id === accountId)?.label ?? "—";
 
-  // R-multiple for a trade — shared with /dashboard/calendar (src/lib/risk.ts)
-  // so both pages agree on the same number for the same trade.
+  // R сделки. Если у счёта задан 1R, R = P&L / 1R, и берётся он ТОЛЬКО с
+  // сервера (tr.rr): там 1R — тот, что действовал на момент закрытия сделки
+  // (lib/riskHistory.ts). Пересчёт здесь по текущему профилю переписывал всю
+  // историю при каждой смене риска (0.5% → 1% делил R пополам у всех сделок).
+  // Без 1R R считается от стопа — это локально, чтобы правка «Стопа» была
+  // видна сразу, не дожидаясь перезагрузки.
   function rrFor(tr: SerializedTrade, stopLoss: number | null): number | null {
+    const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
+    const hasOneR = prof ? riskPerTradeAmount(prof, balanceOf(tr.accountId)) != null : false;
+    if (hasOneR && tr.rr != null) return tr.rr;
     return tradeRR(tr, stopLoss, riskProfiles, balanceOf(tr.accountId));
   }
 
