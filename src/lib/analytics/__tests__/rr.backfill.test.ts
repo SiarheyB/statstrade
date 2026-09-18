@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   importedFindMany: vi.fn(),
   accountFindUnique: vi.fn(),
   riskProfileFindMany: vi.fn(),
+  riskProfileVersionFindMany: vi.fn(),
   annotationFindMany: vi.fn(),
   transaction: vi.fn(),
   rebuildTradeHourly: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/db", () => ({
     importedTrade: { findMany: mocks.importedFindMany, update: vi.fn() },
     exchangeAccount: { findUnique: mocks.accountFindUnique },
     riskProfile: { findMany: mocks.riskProfileFindMany },
+    riskProfileVersion: { findMany: mocks.riskProfileVersionFindMany },
     tradeAnnotation: { findMany: mocks.annotationFindMany },
     $transaction: mocks.transaction,
   },
@@ -42,6 +44,7 @@ describe("backfillMissingRR", () => {
     // Аккаунт есть, сделок в нём не осталось — короткий путь пересчёта.
     mocks.accountFindUnique.mockResolvedValue({ userId: "u1", balance: 10000 });
     mocks.riskProfileFindMany.mockResolvedValue([]);
+    mocks.riskProfileVersionFindMany.mockResolvedValue([]);
     mocks.annotationFindMany.mockResolvedValue([]);
     mocks.rebuildTradeHourly.mockResolvedValue(undefined);
   });

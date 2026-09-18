@@ -5,6 +5,7 @@ vi.mock("@/lib/risk", () => ({
   serializeLossLimits: vi.fn(() => ({})),
   serializeRiskPerTrade: vi.fn(() => ({})),
   defaultRiskProfile: vi.fn(() => ({ enabled: false, maxStopsPerDay: null })),
+  riskPerTradeAmount: vi.fn(() => null),
 }));
 
 import {

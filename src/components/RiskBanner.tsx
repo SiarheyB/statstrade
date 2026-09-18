@@ -59,10 +59,24 @@ export default function RiskBanner({ accountId }: { accountId: string }) {
         ? t("risk.banner.warning")
         : t("risk.banner.ok");
 
-  const limitText = (l: LimitStatus) =>
-    l.key === "stops"
-      ? `${t("risk.stopsShort")} ${l.used}/${l.limit}`
-      : `${t(`risk.period.${l.key}`)} ${fmtUsd(l.used)} / ${fmtUsd(l.limit)}`;
+  // 2.2R, но 2R без хвоста из нулей.
+  const fmtR = (v: number) => `${Number(v.toFixed(1))}R`;
+
+  // У «стопов» два разных числа, и раньше показывалось только второе, под
+  // подписью «Стопы»: одна сделка на −2.2R давала «Стопы 3/3» и читалась как
+  // три стопа. Теперь слева честный счёт сделок, справа — просадка в R, из
+  // которой лимит и считается. Второй кусок опускаем, когда 1R не задан: там
+  // used и так считается по сделкам, и «1/3 · риск 1R/3R» было бы шумом.
+  const limitText = (l: LimitStatus) => {
+    if (l.key !== "stops") {
+      return `${t(`risk.period.${l.key}`)} ${fmtUsd(l.used)} / ${fmtUsd(l.limit)}`;
+    }
+    const stops = l.netStops ?? l.used;
+    const head = `${t("risk.stopsShort")} ${stops}/${l.limit}`;
+    if (l.usedR == null || l.usedR === stops) return head;
+    return `${head} · ${t("risk.riskShort")} ${fmtR(l.usedR)}/${l.limit}R`;
+  };
+
 
   const limitColor = (l: LimitStatus) =>
     l.state === "breached" ? "text-loss" : l.state === "warning" ? "text-warn" : "text-muted";

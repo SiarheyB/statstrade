@@ -149,12 +149,22 @@ export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): numbe
 // R-multiple for a trade: if the risk manager is enabled for this account with
 // a configured per-trade risk, R = netPnl / (that money amount) — otherwise
 // falls back to the stop-loss-distance model above.
+// `riskAmountOverride` — стоимость 1R, действовавшая на МОМЕНТ ЗАКРЫТИЯ сделки
+// (lib/riskHistory.ts). Передан — берётся он, а не текущий профиль: иначе смена
+// риска в настройках переписывала бы R у всей истории. `undefined` = истории
+// нет, считаем по профилю как раньше; `null` = тогда 1R не был задан, и это
+// осознанный ответ, а не повод подставить сегодняшний риск.
 export function tradeRR(
   tr: RRTradeInput,
   stopLoss: number | null,
   riskProfiles: Record<string, RiskProfileData>,
   balance: number | null,
+  riskAmountOverride?: number | null,
 ): number | null {
+  if (riskAmountOverride !== undefined) {
+    if (riskAmountOverride && riskAmountOverride > 0) return tr.netPnl / riskAmountOverride;
+    return stopDistanceRR(tr, stopLoss);
+  }
   const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
   if (prof) {
     const riskAmt = riskPerTradeAmount(prof, balance);
@@ -179,6 +189,13 @@ export type LimitStatus = {
   limit: number;
   pct: number; // 0..1+
   state: LimitState;
+  // Только для key === "stops". `used` там — просадка в R, округлённая вверх,
+  // а НЕ число стоп-сделок: одна сделка на −2.2R даёт used = 3. Читалось это как
+  // «три стопа» и выглядело багом, поэтому рядом отдаём и то, и другое:
+  //   netStops — чистый счёт сделок за сутки (убыточные минус прибыльные),
+  //   usedR    — та самая просадка в R, без округления.
+  netStops?: number;
+  usedR?: number;
 };
 export type AccountRisk = {
   accountId: string;
@@ -257,6 +274,7 @@ export function computeAccountRisk(
     // стоп (0.96R) считается использованным целиком. Эпсилон — чтобы ровные
     // значения (3.0000001 из-за float) не округлялись лишний раз вверх.
     // В плюсе → 0 использованных стопов, никогда не отрицательно.
+    const usedR = used;
     used = Math.max(0, Math.ceil(used - 1e-9));
 
     limits.push({
@@ -266,6 +284,10 @@ export function computeAccountRisk(
       limit: profile.maxStopsPerDay,
       pct: used / profile.maxStopsPerDay,
       state: stateFor(used, profile.maxStopsPerDay),
+      // Сколько РЕАЛЬНО было стоп-сделок — чтобы баннер не выдавал просадку в R
+      // за число сделок (одна сделка на −2.2R ≠ три стопа).
+      netStops: Math.max(0, today.losses - today.wins),
+      usedR: Math.max(0, usedR),
     });
   }
 

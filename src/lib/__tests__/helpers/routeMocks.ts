@@ -250,6 +250,12 @@ export const mockPrisma = {
     deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
   },
 
+  // История «риска на сделку» (/api/risk/settings → lib/riskHistory.server).
+  riskProfileVersion: {
+    findMany: vi.fn().mockResolvedValue([]),
+    createMany: vi.fn().mockResolvedValue({ count: 0 }),
+  },
+
   // Подписки на уровни (/api/recommendations/alerts).
   levelAlert: {
     findMany: vi.fn().mockResolvedValue([]),

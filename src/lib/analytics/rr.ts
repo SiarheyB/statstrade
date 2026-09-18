@@ -19,6 +19,7 @@
 
 import { prisma } from "@/lib/db";
 import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
+import { buildRiskResolver } from "@/lib/riskHistory";
 import { rebuildTradeHourly, rebuildTradeHourlyForTrade } from "./hourly";
 
 async function loadRiskContext(accountId: string) {
@@ -34,7 +35,16 @@ async function loadRiskContext(accountId: string) {
   const profiles: Record<string, RiskProfileData> = { "": defaultRiskProfile() };
   for (const r of profileRows) profiles[r.accountId] = parseRiskProfile(r);
 
-  return { profiles, balance: account.balance, userId: account.userId };
+  // 1R берётся не из текущего профиля, а из версии, действовавшей на момент
+  // закрытия сделки (lib/riskHistory.ts) — иначе перевод риска 0.5% → 1%
+  // переписывал бы R у всей истории.
+  const versionRows = await prisma.riskProfileVersion.findMany({
+    where: { userId: account.userId, accountId: { in: [accountId, ""] } },
+    select: { accountId: true, effectiveFrom: true, amount: true },
+  });
+  const riskAt = buildRiskResolver(versionRows, profiles, account.balance);
+
+  return { profiles, balance: account.balance, userId: account.userId, riskAt };
 }
 
 // Пересчитать и сохранить rr для ВСЕХ сделок аккаунта (crypto Trade +
@@ -50,7 +60,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
       where: { accountId },
       select: {
         id: true, accountId: true, side: true, entryPrice: true, exitPrice: true,
-        fees: true, qty: true, netPnl: true,
+        fees: true, qty: true, netPnl: true, exitTime: true,
       },
     }),
     prisma.importedTrade.findMany({
@@ -58,6 +68,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
       select: {
         id: true, accountId: true, externalId: true, side: true, entryPrice: true,
         exitPrice: true, commission: true, qty: true, netPnl: true, stopLoss: true,
+        exitTime: true,
       },
     }),
   ]);
@@ -81,7 +92,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
   const updates = [
     ...cryptoTrades.map((t) => {
       const stopLoss = annStopLoss.get(t.id) ?? null;
-      const rr = tradeRR(t, stopLoss, ctx.profiles, ctx.balance);
+      const rr = tradeRR(t, stopLoss, ctx.profiles, ctx.balance, ctx.riskAt(t.accountId, t.exitTime));
       return prisma.trade.update({ where: { id: t.id }, data: { rr } });
     }),
     ...importedTrades.map((t) => {
@@ -92,7 +103,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
           accountId: t.accountId, side: t.side, entryPrice: t.entryPrice,
           exitPrice: t.exitPrice, fees: t.commission, qty: t.qty, netPnl: t.netPnl,
         },
-        stopLoss, ctx.profiles, ctx.balance,
+        stopLoss, ctx.profiles, ctx.balance, ctx.riskAt(t.accountId, t.exitTime),
       );
       return prisma.importedTrade.update({ where: { id: t.id }, data: { rr } });
     }),
@@ -120,7 +131,10 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
       where: { userId_tradeKey: { userId: ctx.userId, tradeKey } },
       select: { stopLoss: true },
     });
-    const rr = tradeRR(cryptoTrade, ann?.stopLoss ?? null, ctx.profiles, ctx.balance);
+    const rr = tradeRR(
+      cryptoTrade, ann?.stopLoss ?? null, ctx.profiles, ctx.balance,
+      ctx.riskAt(cryptoTrade.accountId, cryptoTrade.exitTime),
+    );
     await prisma.trade.update({ where: { id: tradeKey }, data: { rr } });
     // Меняется одна сделка → пересобираем только её день, а не всю историю.
     await rebuildTradeHourlyForTrade(accountId, cryptoTrade.exitTime);
@@ -143,6 +157,7 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
       fees: importedTrade.commission, qty: importedTrade.qty, netPnl: importedTrade.netPnl,
     },
     stopLoss, ctx.profiles, ctx.balance,
+    ctx.riskAt(importedTrade.accountId, importedTrade.exitTime),
   );
   await prisma.importedTrade.update({ where: { id: importedTrade.id }, data: { rr } });
   await rebuildTradeHourlyForTrade(accountId, importedTrade.exitTime);

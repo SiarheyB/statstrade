@@ -9,6 +9,7 @@ import {
   defaultRiskProfile,
 } from "@/lib/risk";
 import { recomputeRRForAccount } from "@/lib/analytics/rr";
+import { snapshotRiskVersions } from "@/lib/riskHistory.server";
 
 const limitSchema = z.object({
   on: z.boolean(),
@@ -60,6 +61,10 @@ export async function PUT(req: Request) {
   }
 
   try {
+    // Сначала — снимок ПРЕЖНЕГО риска задним числом (если истории ещё нет).
+    // Порядок важен: после upsert'ов прежнее значение уже не прочитать.
+    await snapshotRiskVersions(user.userId, "bootstrap");
+
     const changedAccountIds = new Set<string>();
     for (const [accountId, prof] of Object.entries(parsed.data.profiles)) {
       changedAccountIds.add(accountId);
@@ -82,6 +87,11 @@ export async function PUT(req: Request) {
         update: data,
       });
     }
+
+    // Прежде чем пересчитывать R, фиксируем НОВУЮ стоимость 1R «с этого момента»
+    // (RiskProfileVersion). Без этого снимка пересчёт ниже переписал бы R у всей
+    // истории: сделки, закрытые с риском 0.5%, показывались бы как 1%-ные.
+    await snapshotRiskVersions(user.userId, "change");
 
     // Риск-профиль аккаунта меняет 1R сразу для всех его сделок — пересчитываем
     // сохранённый rr. "" (профиль по умолчанию) действует на все аккаунты, у
