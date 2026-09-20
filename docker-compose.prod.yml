@@ -173,6 +173,10 @@ services:
     volumes:
       - ./deploy/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - ./deploy/nginx/offline.html:/usr/share/nginx/html/offline.html:ro
+      # Установщики десктопного «Периметра» и его latest.json. Лежат на хосте,
+      # только на чтение: в образ и в репозиторий такие файлы не кладём.
+      # Папку создать один раз: sudo mkdir -p /srv/perimetr/files
+      - /srv/perimetr:/srv/perimetr:ro
     ports:
       # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
       - "127.0.0.1:3000:80"
