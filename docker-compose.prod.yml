@@ -160,6 +160,37 @@ services:
     networks:
       - tradestats
 
+  # Отчёт по копиям десктопного «Периметра»: раз в 10 минут GoAccess дочитывает
+  # журнал /srv/perimetr-logs/usage.log и пересобирает HTML-отчёт, который edge
+  # отдаёт по паролю на /perimetr-stats/. --persist/--restore хранят накопленное
+  # в базе (дочитывается только новое), поэтому ротация журнала историю не теряет.
+  # --restore — только когда база уже есть: на пустой GoAccess падает.
+  perimetr-stats:
+    image: allinurl/goaccess:1.12
+    container_name: perimetr-stats
+    restart: unless-stopped
+    mem_limit: 128m
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /stats/report /stats/db
+        while true; do
+          if [ -s /logs/usage.log ]; then
+            RESTORE=""
+            [ -n "$$(ls -A /stats/db)" ] && RESTORE="--restore"
+            goaccess /logs/usage.log $$RESTORE \
+              --log-format='%h [%d:%t %^] "%r" %s %b "%R" "%u"' \
+              --date-format=%d/%b/%Y --time-format=%T \
+              --no-ip-validation --no-query-string --persist --db-path=/stats/db \
+              --html-report-title='Периметр — копии приложения' \
+              -o /stats/report/index.html
+          fi
+          sleep 600
+        done
+    volumes:
+      - /srv/perimetr-logs:/logs:ro
+      - /srv/perimetr-stats:/stats
+
   # Входная прослойка: туннель (Tailscale Funnel / cloudflared) указывает на
   # 127.0.0.1:3000 как и раньше — только теперь это nginx, а не app. Когда app
   # недоступен, nginx отдаёт deploy/nginx/offline.html с автообновлением.
@@ -177,6 +208,10 @@ services:
       # только на чтение: в образ и в репозиторий такие файлы не кладём.
       # Папку создать один раз: sudo mkdir -p /srv/perimetr/files
       - /srv/perimetr:/srv/perimetr:ro
+      # Журнал учёта копий «Периметра» (пишет nginx, читает perimetr-stats) и готовый
+      # отчёт с паролем. Папки создать один раз — см. docs у проекта perimetr_scan (server.md).
+      - /srv/perimetr-logs:/var/log/perimetr
+      - /srv/perimetr-stats:/srv/perimetr-stats:ro
     ports:
       # Слушаем только localhost — наружу выставляет туннель (Tailscale/Cloudflare).
       - "127.0.0.1:3000:80"
