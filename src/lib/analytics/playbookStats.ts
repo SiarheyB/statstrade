@@ -47,7 +47,7 @@ export async function playbookStats(userId: string): Promise<PlaybookStatRow[]> 
                WHEN "netPnl" < -1e-9 THEN 'loss'
                ELSE 'breakeven'
              END
-      FROM "ImportedTrade" WHERE "accountId" IN (${inIds})
+      FROM "ImportedTrade" WHERE "accountId" IN (${inIds}) AND "groupId" IS NULL
     ) AS t
     JOIN "TradeAnnotation" a ON a."tradeKey" = t."id" AND a."userId" = ${userId}
     WHERE a."pattern" IS NOT NULL AND a."pattern" <> ''

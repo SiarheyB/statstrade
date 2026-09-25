@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight, Layers, Unlink } from "lucide-react";
 import type { SerializedTrade, AccountSummary } from "@/lib/types";
 import { tradeRR, riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
 import { Term } from "@/components/Term";
@@ -16,6 +16,9 @@ import { Pagination } from "@/components/Pagination";
 import { useI18n } from "@/lib/i18n/provider";
 import { zonedParts, zonedDateToUtcMs } from "@/lib/timezone";
 import { useSync } from "@/components/SyncProvider";
+import TradeMergeDialog from "@/components/TradeMergeDialog";
+import { buildDisplayRows, isMergeable } from "@/lib/trades/display";
+import { findGroupCandidates } from "@/lib/trades/grouping";
 
 const DAY_MS = 24 * 3600 * 1000;
 
@@ -89,6 +92,11 @@ export default function TradesPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  // Объединение сетки лимиток в одну сделку (см. lib/trades/grouping.ts).
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mergeOpen, setMergeOpen] = useState(false);
+  const [merging, setMerging] = useState(false);
+  const [mergeError, setMergeError] = useState<string | null>(null);
   const [chart, setChart] = useState<{ trade: SerializedTrade; x: number; y: number } | null>(null);
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -305,6 +313,95 @@ export default function TradesPage() {
   // правка сразу отражалась в UI до перезагрузки страницы.
   const pageRows = data?.trades ?? [];
 
+  // Строки таблицы: объединённая сетка занимает ОДНУ строку с агрегатами, её
+  // позиции показываются под описанием при разворачивании (см.
+  // lib/trades/display.ts).
+  const displayRows = buildDisplayRows(pageRows);
+
+  // Подсказка «похоже на одну сделку»: позиции одного инструмента и стороны,
+  // прожившие один период непрерывно открытой позиции (см. clusterByFlat).
+  // Только подсказка — объединяет по-прежнему человек, автоматически ничего
+  // не склеивается. Ищем среди строк ТЕКУЩЕЙ страницы: сетка исполняется
+  // подряд и на соседние страницы не разъезжается.
+  const candidates = findGroupCandidates(
+    pageRows.filter(isMergeable).map((tr) => ({
+      id: tr.id,
+      symbol: tr.symbol,
+      side: tr.side,
+      lots: tr.lots ?? 0,
+      qty: tr.qty,
+      entryTime: new Date(tr.entryTime),
+      exitTime: new Date(tr.exitTime),
+      entryPrice: tr.entryPrice,
+      exitPrice: tr.exitPrice,
+      stopLoss: tr.stopLoss,
+      takeProfit: null,
+      commission: tr.commission ?? tr.fees,
+      swap: tr.swap ?? 0,
+      grossProfit: tr.grossPnl,
+      netPnl: tr.netPnl,
+    })),
+  );
+  // id сделки → все id её предполагаемой сетки (клик выбирает набор целиком).
+  const candidateOf = new Map<string, string[]>();
+  for (const set of candidates) {
+    const ids = set.map((m) => m.id);
+    for (const id of ids) candidateOf.set(id, ids);
+  }
+
+  // Выбор позиций для объединения. Ключ — id сделки ("accountId:externalId").
+  const selectedTrades = pageRows.filter((tr) => selected.has(tr.id));
+  // Объединять можно только однородный набор: один инструмент и одна сторона.
+  const sameSideSelection =
+    selectedTrades.length < 2 ||
+    selectedTrades.every(
+      (tr) => tr.side === selectedTrades[0].side && tr.symbol === selectedTrades[0].symbol,
+    );
+
+  function toggleSelected(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // Объединить выбранное. Список перезагружаем целиком: меняются и агрегаты
+  // группы, и R всех сделок счёта (recomputeRRForAccount на сервере).
+  async function mergeSelected() {
+    setMerging(true);
+    try {
+      const res = await fetch("/api/trades/groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tradeIds: [...selected] }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setMergeError(body.error ?? "error");
+        return;
+      }
+      setSelected(new Set());
+      setMergeOpen(false);
+      await load();
+    } finally {
+      setMerging(false);
+    }
+  }
+
+  async function ungroup(groupKey: string) {
+    setMerging(true);
+    try {
+      await fetch(`/api/trades/groups?groupKey=${encodeURIComponent(groupKey)}`, {
+        method: "DELETE",
+      });
+      await load();
+    } finally {
+      setMerging(false);
+    }
+  }
+
   // Листаем скриншоты в пределах открытой страницы таблицы: следующая порция
   // сделок ещё не загружена, а тянуть её из просмотрщика — это уже другая
   // история (и лишние запросы посреди листания).
@@ -360,7 +457,11 @@ export default function TradesPage() {
       t("trades.col.pattern"), t("trades.col.entryPoint"),
       t("trades.col.entryType"), t("trades.col.mistake"), t("trades.col.image"),
     ];
-    const rows = exportRows.map((tr) => {
+    // Выгрузка повторяет экран: объединённая сетка — ОДНА строка с агрегатами,
+    // её позиции отдельными строками не идут. Иначе сумма столбца P&L в Excel
+    // была бы вдвое больше реальной.
+    const rows = buildDisplayRows(exportRows).map((row) => {
+      const tr = row.trade;
       const a = annOf(tr);
       const rr = rrFor(tr, a.stopLoss);
       const image = imageOf(tr);
@@ -383,7 +484,7 @@ export default function TradesPage() {
         tr.lots != null ? tr.lots.toFixed(2) : tr.qty.toFixed(6),
         tr.entryPrice,
         tr.exitPrice,
-        a.stopLoss ?? "",
+        a.stopLoss ?? tr.stopLoss ?? "",
         rr == null ? "" : rr.toFixed(2),
         tr.fees.toFixed(2),
         tr.returnPct.toFixed(2),
@@ -526,8 +627,12 @@ export default function TradesPage() {
                 нет, перераспределять нечего — поэтому там бага не было видно. */}
             <table className="w-full text-sm table-fixed">
               <colgroup>
-                <col className="w-[2%]" />
-                <col className="w-[10%]" />
+                {/* Чекбокс выбора и стрелка разворота живут в ОДНОЙ ячейке.
+                    Отдельная колонка под чекбокс в table-fixed растягивалась
+                    в широкий пустой столбец: проценты остальных колонок уже
+                    дают 100%, и лишняя колонка забирала место сверх этого. */}
+                <col className="w-[5%]" />
+                <col className="w-[9%]" />
                 <col className="w-[3%]" />
                 <col className="w-[11%]" />
                 <col className="w-[8%]" />
@@ -560,10 +665,15 @@ export default function TradesPage() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((tr) => {
+                {displayRows.map((row) => {
+                  const tr = row.trade;
+                  // Объединённая сетка: строка несёт агрегаты, а её позиции
+                  // показываются под описанием при разворачивании.
+                  const isGroup = tr.isGroup === true;
                   const a = annOf(tr);
                   const rr = rrFor(tr, a.stopLoss);
                   const expanded = expandedId === tr.id;
+                  const mergeable = isMergeable(tr);
                   return (
                     <Fragment key={tr.id}>
                     <tr
@@ -571,8 +681,22 @@ export default function TradesPage() {
                       onClick={() => setExpandedId(expanded ? null : tr.id)}
                       className={`cursor-pointer border-b border-border last:border-0 hover:bg-surface-2/50 ${expanded ? "bg-surface-2/40" : ""}`}
                     >
-                      <td className={`pl-3 pr-1 py-2 text-faint border-l-2 ${tr.side === "long" ? "border-l-profit/60" : "border-l-loss/60"}`}>
-                        <ChevronRight size={14} className={`transition ${expanded ? "rotate-90 text-fg" : ""}`} />
+                      <td className={`pl-2 pr-1 py-2 text-faint border-l-2 ${tr.side === "long" ? "border-l-profit/60" : "border-l-loss/60"}`}>
+                        <span className="flex items-center gap-1.5">
+                          {/* Клик по чекбоксу не должен разворачивать строку. */}
+                          <span onClick={(e) => e.stopPropagation()} className="flex w-3.5 shrink-0 items-center">
+                            {mergeable && (
+                              <input
+                                type="checkbox"
+                                checked={selected.has(tr.id)}
+                                onChange={() => toggleSelected(tr.id)}
+                                aria-label={t("trades.group.merge")}
+                                className="cursor-pointer accent-[var(--color-accent)]"
+                              />
+                            )}
+                          </span>
+                          <ChevronRight size={14} className={`shrink-0 transition ${expanded ? "rotate-90 text-fg" : ""}`} />
+                        </span>
                       </td>
                       <td className="px-3 py-2 font-medium">
                         <span className="inline-flex items-center gap-1.5">
@@ -591,6 +715,29 @@ export default function TradesPage() {
                           >
                             {fmtSymbol(tr.symbol)}
                           </span>
+                          {isGroup && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent"
+                              title={t("trades.group.members", { n: tr.memberCount ?? 0 })}
+                            >
+                              <Layers size={11} />×{tr.memberCount ?? 0}
+                            </span>
+                          )}
+                          {/* Подсказка: позиция похожа на часть одной сетки.
+                              Клик отмечает весь набор — дальше как обычно,
+                              через диалог подтверждения. */}
+                          {!isGroup && candidateOf.has(tr.id) && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelected(new Set(candidateOf.get(tr.id)));
+                              }}
+                              title={t("trades.group.candidate")}
+                              className="inline-flex shrink-0 items-center text-faint/70 hover:text-accent"
+                            >
+                              <Layers size={12} />
+                            </button>
+                          )}
                         </span>
                       </td>
                       <td className="px-3 py-2"><SideBadge side={tr.side} /></td>
@@ -617,6 +764,32 @@ export default function TradesPage() {
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
                         <td colSpan={14} className="px-4 py-4">
+                          {isGroup && (
+                            <div className="mb-3 flex flex-wrap items-center gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2 text-xs">
+                              <span className="inline-flex items-center gap-1.5 text-accent">
+                                <Layers size={13} />
+                                {t("trades.group.badge")} · {t("trades.group.members", { n: tr.memberCount ?? 0 })}
+                              </span>
+                              {/* Разброс стопов показывается всегда, когда он был:
+                                  по нему видно, насколько точен R группы. */}
+                              {tr.stopSpread != null && tr.stopSpread > 0 && (
+                                <span className="text-faint">
+                                  {t("trades.group.stopsRange", {
+                                    min: fmtPrice(tr.stopMin ?? 0),
+                                    max: fmtPrice(tr.stopMax ?? 0),
+                                  })}
+                                </span>
+                              )}
+                              <button
+                                onClick={() => ungroup(tr.id)}
+                                disabled={merging}
+                                className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-border px-2 py-1 text-muted hover:text-fg disabled:opacity-50"
+                              >
+                                <Unlink size={12} />
+                                {t("trades.group.ungroup")}
+                              </button>
+                            </div>
+                          )}
                           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                             {tr.lots != null && (
                               <>
@@ -652,7 +825,7 @@ export default function TradesPage() {
                                 entryTime={tr.entryTime}
                                 result={tr.result}
                                 pattern={a.pattern}
-                                imageUrl={imageOf(tr).url}
+                                imageUrl={imageOf({ ...tr, id: tr.id }).url}
                                 connected={cloudConnected}
                                 onUploaded={(url, provider, publicUrl) => setImages((prev) => ({ ...prev, [tr.id]: { url, provider, publicUrl } }))}
                                 onDeleted={() => setImages((prev) => ({ ...prev, [tr.id]: { url: null, provider: null, publicUrl: null } }))}
@@ -664,6 +837,55 @@ export default function TradesPage() {
                             <div className="text-xs text-faint mb-1">{t("trades.comment")}</div>
                             <NoteInput value={a.note} onSave={(v) => saveAnn(tr.id, { ...a, note: v })} />
                           </div>
+                          {/* Позиции, свёрнутые в эту сделку — как в отчёте
+                              брокера. Отдельной таблицей под описанием: в самом
+                              списке сделок сетка занимает одну строку. */}
+                          {row.members.length > 0 && (
+                            <div className="mt-4">
+                              <div className="mb-1.5 flex items-center gap-1.5 text-xs text-faint">
+                                <Layers size={12} />
+                                {t("trades.group.members", { n: row.members.length })}
+                              </div>
+                              <div className="overflow-x-auto rounded-lg border border-border">
+                                <table className="w-full text-xs">
+                                  <thead>
+                                    <tr className="text-faint border-b border-border">
+                                      <th className="px-3 py-1.5 text-left font-normal">{t("trades.col.open")}</th>
+                                      <th className="px-3 py-1.5 text-left font-normal">{t("trades.col.close")}</th>
+                                      <th className="px-3 py-1.5 text-right font-normal">{t("trades.col.qty")}</th>
+                                      <th className="px-3 py-1.5 text-right font-normal">{t("trades.col.entry")}</th>
+                                      <th className="px-3 py-1.5 text-right font-normal">{t("trades.col.exit")}</th>
+                                      <th className="px-3 py-1.5 text-right font-normal">{t("trades.col.stop")}</th>
+                                      <th className="px-3 py-1.5 text-right font-normal">{t("trades.col.netPnl")}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {row.members.map((m) => (
+                                      <tr key={m.id} className="border-b border-border last:border-0">
+                                        <td className="px-3 py-1.5 whitespace-nowrap text-muted">
+                                          {fmtDate(m.entryTime)} {fmtTime(m.entryTime, timezone)}
+                                        </td>
+                                        <td className="px-3 py-1.5 whitespace-nowrap text-muted">
+                                          {fmtDate(m.exitTime)} {fmtTime(m.exitTime, timezone)}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right tabular-nums text-muted">
+                                          {m.lots != null ? fmtNumSmart(m.lots, 2) : fmtNumSmart(m.qty, 4)}
+                                        </td>
+                                        <td className="px-3 py-1.5 text-right tabular-nums text-muted">{fmtPrice(m.entryPrice)}</td>
+                                        <td className="px-3 py-1.5 text-right tabular-nums text-muted">{fmtPrice(m.exitPrice)}</td>
+                                        <td className="px-3 py-1.5 text-right tabular-nums text-faint">
+                                          {m.stopLoss != null ? fmtPrice(m.stopLoss) : "—"}
+                                        </td>
+                                        <td className={`px-3 py-1.5 text-right tabular-nums ${m.netPnl >= 0 ? "text-profit" : "text-loss"}`}>
+                                          {fmtUsd(m.netPnl, { sign: true })}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}
@@ -685,6 +907,50 @@ export default function TradesPage() {
             />
           </div>
         </div>
+      )}
+
+      {/* Панель выбора: появляется, как только отмечены две позиции. Кнопка
+          неактивна для разных сторон — у long+short нет осмысленной средней
+          цены входа (см. validateSelection). */}
+      {selected.size > 0 && (
+        <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-xl border border-border bg-surface px-4 py-2.5 shadow-xl">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-muted">{t("trades.group.selected", { n: selected.size })}</span>
+            <button
+              onClick={() => setMergeOpen(true)}
+              disabled={selected.size < 2 || !sameSideSelection}
+              title={!sameSideSelection ? t("trades.group.mixedSides") : undefined}
+              className="inline-flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 font-medium text-white disabled:opacity-50"
+            >
+              <Layers size={14} />
+              {t("trades.group.merge")}
+            </button>
+            <button
+              onClick={() => { setSelected(new Set()); setMergeError(null); }}
+              className="text-muted hover:text-fg"
+            >
+              {t("trades.group.clear")}
+            </button>
+          </div>
+          {mergeError && (
+            <div className="mt-1.5 text-xs text-loss">
+              {mergeError === "mixedSides"
+                ? t("trades.group.mixedSides")
+                : mergeError === "mixedAccounts"
+                  ? t("trades.group.mixedAccounts")
+                  : mergeError}
+            </div>
+          )}
+        </div>
+      )}
+
+      {mergeOpen && (
+        <TradeMergeDialog
+          trades={selectedTrades}
+          busy={merging}
+          onConfirm={mergeSelected}
+          onCancel={() => setMergeOpen(false)}
+        />
       )}
 
       {/* Floating trade chart on ticker hover */}

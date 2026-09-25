@@ -45,7 +45,7 @@ function sourceRows(accountId: string, hourFilter: Prisma.Sql) {
            END AS "result",
            "rr"
     FROM "ImportedTrade"
-    WHERE "accountId" = ${accountId} ${hourFilter}
+    WHERE "accountId" = ${accountId} AND "groupId" IS NULL ${hourFilter}
   `;
 }
 

@@ -42,6 +42,15 @@ export type SerializedTrade = {
   commission?: number;
   assetClass?: string;
   accountCurrency?: string;
+  // Объединение нескольких позиций в одну сделку (см. lib/trades/grouping.ts).
+  // groupKey есть и у строки-группы, и у её участников — по нему клиент
+  // собирает блок. Агрегаты (memberCount, разброс стопов) только у группы.
+  groupKey?: string;
+  isGroup?: true;
+  memberCount?: number;
+  stopSpread?: number | null;
+  stopMin?: number | null;
+  stopMax?: number | null;
 };
 
 export type AccountSummary = {

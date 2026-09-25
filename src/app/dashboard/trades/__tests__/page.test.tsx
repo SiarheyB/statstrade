@@ -316,3 +316,81 @@ describe("TradesPage", () => {
     expect(screen.getByTestId("preview-pos")).toHaveTextContent("1/1");
   });
 });
+
+// Объединение сетки лимиток в одну сделку (см. lib/trades/grouping.ts).
+describe("TradesPage — объединённая сетка", () => {
+  // Сервер отдаёт кластер как «строка-группа, затем её позиции по времени».
+  const grid = () => [
+    makeTrade({
+      id: "acc1:group:g1", symbol: "GBPJPY", market: "forex", lots: 0.05,
+      isGroup: true, groupKey: "grp1", memberCount: 3,
+      entryPrice: 209.3246, netPnl: -19.02, fees: 0.2, rr: -1,
+      stopSpread: 0, stopMin: 208.751, stopMax: 208.751,
+    }),
+    makeTrade({ id: "acc1:m1", symbol: "GBPJPY", market: "forex", lots: 0.01, groupKey: "grp1", entryPrice: 209.383, netPnl: -3.39 }),
+    makeTrade({ id: "acc1:m2", symbol: "GBPJPY", market: "forex", lots: 0.01, groupKey: "grp1", entryPrice: 209.353, netPnl: -3.94 }),
+  ];
+
+  it("сетка занимает в списке одну строку с итогом", async () => {
+    installFetch(() => grid());
+    render(<TradesPage />);
+    await screen.findAllByText("GBPJPY");
+
+    expect(document.querySelectorAll("tbody tr[data-trade-id]")).toHaveLength(1);
+    // В строке — суммарный P&L, а не P&L отдельной позиции.
+    expect(screen.getAllByText(/19[.,]02/)).toHaveLength(1);
+    expect(screen.queryByText(/3[.,]39/)).toBeNull();
+    expect(screen.getByText(/×3/)).toBeInTheDocument();
+  });
+
+  it("свёрнутые позиции показываются под описанием при разворачивании", async () => {
+    installFetch(() => grid());
+    render(<TradesPage />);
+    const cells = await screen.findAllByText("GBPJPY");
+
+    // До разворачивания позиций на экране нет.
+    expect(screen.queryByText(/3[.,]39/)).toBeNull();
+    fireEvent.click(cells[0]);
+    // После — видны обе позиции со своими ценами и P&L.
+    expect(screen.getByText(/3[.,]39/)).toBeInTheDocument();
+    expect(screen.getByText(/3[.,]94/)).toBeInTheDocument();
+    expect(screen.getByText("trades.group.ungroup")).toBeInTheDocument();
+  });
+
+  it("уже объединённая сетка повторно не выбирается", async () => {
+    installFetch(() => grid());
+    render(<TradesPage />);
+    await screen.findAllByText("GBPJPY");
+    expect(document.querySelectorAll('input[type="checkbox"]')).toHaveLength(0);
+  });
+
+  it("выбор двух позиций открывает панель объединения", async () => {
+    installFetch(() => [
+      makeTrade({ id: "acc1:a", symbol: "GBPJPY", market: "forex", lots: 0.01 }),
+      makeTrade({ id: "acc1:b", symbol: "GBPJPY", market: "forex", lots: 0.01 }),
+    ]);
+    render(<TradesPage />);
+    await screen.findAllByText("GBPJPY");
+
+    const boxes = document.querySelectorAll('input[type="checkbox"]');
+    expect(boxes).toHaveLength(2);
+    fireEvent.click(boxes[0]);
+    fireEvent.click(boxes[1]);
+    expect(screen.getByText(/trades.group.selected/)).toBeInTheDocument();
+    expect(screen.getByText("trades.group.merge").closest("button")).not.toBeDisabled();
+  });
+
+  it("лонг с шортом объединить нельзя", async () => {
+    installFetch(() => [
+      makeTrade({ id: "acc1:a", symbol: "GBPJPY", market: "forex", lots: 0.01, side: "long" }),
+      makeTrade({ id: "acc1:b", symbol: "GBPJPY", market: "forex", lots: 0.01, side: "short" }),
+    ]);
+    render(<TradesPage />);
+    await screen.findAllByText("GBPJPY");
+
+    const boxes = document.querySelectorAll('input[type="checkbox"]');
+    fireEvent.click(boxes[0]);
+    fireEvent.click(boxes[1]);
+    expect(screen.getByText("trades.group.merge").closest("button")).toBeDisabled();
+  });
+});

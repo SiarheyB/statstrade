@@ -297,10 +297,32 @@ model ImportedTrade {
   importBatch  String? // id of the upload batch (for rollback)
   // R-multiple — та же схема, что у Trade.rr (см. lib/analytics/rr.ts).
   rr           Float?
+  // Объединение сетки лимиток в одну сделку (см. lib/trades/grouping.ts).
+  //
+  // Группа — ОТДЕЛЬНАЯ строка этой же таблицы с isGroup = true и externalId
+  // вида "group:<cuid>", хранящая агрегаты; участники получают groupId = её id.
+  // Отдельной таблицы нет намеренно: все читатели статистики (/api/stats,
+  // hourly, rr, playbookStats, tradeReturns, mentorShare) продолжают работать с
+  // одной моделью, и добавить нужно ровно одно условие `groupId: null`.
+  //
+  // Исходные строки не меняются — разгруппировать значит снять groupId и
+  // удалить строку-группу. В разделе «Сделки» видны все участники (отчёт
+  // брокера как есть), в статистику попадает только строка-группа.
+  groupId      String?
+  group        ImportedTrade?  @relation("TradeGroup", fields: [groupId], references: [id], onDelete: SetNull)
+  members      ImportedTrade[] @relation("TradeGroup")
+  isGroup      Boolean         @default(false)
+  memberCount  Int? // сколько позиций свёрнуто (только у строки-группы)
+  // Разброс стопов участников в долях риска — насколько приблизителен R
+  // группы. 0 = стопы совпадали. См. STOP_SPREAD_MINOR.
+  stopSpread   Float?
+  stopMin      Float?
+  stopMax      Float?
 
   @@unique([accountId, externalId])
   @@index([accountId])
   @@index([accountId, exitTime])
+  @@index([groupId])
 }
 
 // A single execution (fill) imported from an exchange. Round-trip trades are

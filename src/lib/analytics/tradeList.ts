@@ -82,6 +82,13 @@ type Row = {
   assetClass: string | null;
   accountCurrency: string | null;
   stopLoss: number | null;
+  rowId: string; // настоящий PK строки (для связи groupId → участники)
+  groupId: string | null;
+  isGroup: boolean;
+  memberCount: number | null;
+  stopSpread: number | null;
+  stopMin: number | null;
+  stopMax: number | null;
 };
 
 // Обе таблицы сделок в одной форме. Приведения типов обязательны: у NULL-колонок
@@ -94,7 +101,10 @@ function sourceRows(accountIds: string[]): Prisma.Sql {
            "grossPnl", "fees", "netPnl", "returnPct", "fillCount", "result", "rr",
            NULL::float8 AS "lots", NULL::float8 AS "pips", NULL::float8 AS "swap",
            NULL::float8 AS "commission", NULL::text AS "assetClass",
-           NULL::text AS "accountCurrency", NULL::float8 AS "stopLoss"
+           NULL::text AS "accountCurrency", NULL::float8 AS "stopLoss",
+           "id" AS "rowId", NULL::text AS "groupId", false AS "isGroup",
+           NULL::int AS "memberCount", NULL::float8 AS "stopSpread",
+           NULL::float8 AS "stopMin", NULL::float8 AS "stopMax"
     FROM "Trade"
     WHERE "accountId" IN (${ids})
     UNION ALL
@@ -107,7 +117,8 @@ function sourceRows(accountIds: string[]): Prisma.Sql {
              WHEN "netPnl" < -1e-9 THEN 'loss'
              ELSE 'breakeven'
            END,
-           "rr", "lots", "pips", "swap", "commission", 'forex', "currency", "stopLoss"
+           "rr", "lots", "pips", "swap", "commission", 'forex', "currency", "stopLoss",
+           "id", "groupId", "isGroup", "memberCount", "stopSpread", "stopMin", "stopMax"
     FROM "ImportedTrade"
     WHERE "accountId" IN (${ids})
   `;
@@ -225,13 +236,27 @@ export async function queryTrades(
     }
   }
 
-  const whereSql = where.length
-    ? Prisma.sql`WHERE ${Prisma.join(where, " AND ")}`
-    : Prisma.empty;
+  // Участники объединённой сетки в отбор не попадают: фильтр и сортировка идут
+  // по главной строке кластера, а сами позиции добираются к ней ниже.
+  where.push(Prisma.sql`t."isMain"`);
+  const whereSql = Prisma.sql`WHERE ${Prisma.join(where, " AND ")}`;
   const src = Prisma.sql`(${sourceRows(accountIds)}) AS t`;
 
+  // Единица выдачи — СДЕЛКА, а не строка таблицы: объединённая сетка лимиток
+  // (см. lib/trades/grouping.ts) это одна сделка из нескольких позиций. Кластер
+  // склеивается по COALESCE("groupId", "rowId"), а «главная» строка кластера —
+  // строка-группа (у неё groupId IS NULL) либо сама одиночная позиция.
+  //
+  // Фильтры и сортировка применяются к ГЛАВНОЙ строке, участники подтягиваются
+  // следом целиком. Иначе фильтр «убыточные» мог бы оставить на экране три
+  // позиции из пяти, а итог группы не сошёлся бы с видимыми строками.
+  const clustered = Prisma.sql`
+    SELECT t.*, COALESCE(t."groupId", t."rowId") AS "clusterId",
+           (t."groupId" IS NULL) AS "isMain"
+    FROM ${src}
+  `;
   const totalRows = await prisma.$queryRaw<{ n: number }[]>`
-    SELECT COUNT(*)::int AS n FROM ${src} ${whereSql}
+    SELECT COUNT(*)::int AS n FROM (${clustered}) AS t ${whereSql}
   `;
   const total = totalRows[0]?.n ?? 0;
   if (total === 0) return { trades: [], total: 0 };
@@ -245,10 +270,24 @@ export async function queryTrades(
       ? Prisma.empty
       : Prisma.sql`LIMIT ${opts.pageSize} OFFSET ${opts.page * opts.pageSize}`;
 
+  // Страница = набор КЛАСТЕРОВ. Сначала отбираем главные строки в нужном
+  // порядке и режем их по странице, затем добираем участников — группа никогда
+  // не разрывается между страницами (иначе на границе было бы видно три
+  // позиции из пяти и итог, не сходящийся с экраном).
   const rows = await prisma.$queryRaw<Row[]>`
-    SELECT t.* FROM ${src} ${whereSql}
-    ORDER BY ${SORT_SQL[sort]} ${dirSql}, t."id" ASC
-    ${pageSql}
+    WITH all_rows AS (${clustered}),
+    page AS (
+      SELECT t."clusterId",
+             ROW_NUMBER() OVER (ORDER BY ${SORT_SQL[sort]} ${dirSql}, t."id" ASC) AS ord
+      FROM all_rows AS t ${whereSql}
+      ORDER BY ${SORT_SQL[sort]} ${dirSql}, t."id" ASC
+      ${pageSql}
+    )
+    SELECT r.* FROM all_rows AS r
+    JOIN page AS p ON p."clusterId" = r."clusterId"
+    -- Внутри кластера: сначала строка-группа (фронт переносит её агрегаты в
+    -- первую по времени позицию), затем участники по времени входа.
+    ORDER BY p.ord ASC, r."isGroup" DESC, r."entryTime" ASC, r."id" ASC
   `;
 
   const annMap = new Map(annotations.map((a) => [a.tradeKey, a]));
@@ -301,6 +340,19 @@ export async function queryTrades(
       ...(r.commission != null ? { commission: r.commission } : {}),
       ...(r.assetClass ? { assetClass: r.assetClass } : {}),
       ...(r.accountCurrency ? { accountCurrency: r.accountCurrency } : {}),
+      // Объединение сетки (lib/trades/grouping.ts). groupKey связывает строку
+      // с её группой на клиенте; у строки-группы это её собственный ключ.
+      ...(r.groupId ? { groupKey: r.groupId } : {}),
+      ...(r.isGroup
+        ? {
+            isGroup: true as const,
+            groupKey: r.rowId,
+            memberCount: r.memberCount ?? 0,
+            stopSpread: r.stopSpread,
+            stopMin: r.stopMin,
+            stopMax: r.stopMax,
+          }
+        : {}),
     };
   });
 

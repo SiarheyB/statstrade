@@ -42,7 +42,7 @@ export async function tradeNetPnls(
     ? Prisma.sql`SELECT "netPnl" FROM "Trade" WHERE "accountId" IN (${inIds}) ${marketFilter}`
     : null;
   const imported = includeImported
-    ? Prisma.sql`SELECT "netPnl" FROM "ImportedTrade" WHERE "accountId" IN (${inIds})`
+    ? Prisma.sql`SELECT "netPnl" FROM "ImportedTrade" WHERE "accountId" IN (${inIds}) AND "groupId" IS NULL`
     : null;
 
   const query =

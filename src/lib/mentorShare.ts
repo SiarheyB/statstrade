@@ -77,7 +77,8 @@ async function computePublicSummaryUncached(
       },
     }),
     prisma.importedTrade.findMany({
-      where: { accountId: { in: accountIds }, ...(inPeriod ? { exitTime: inPeriod } : {}) },
+      // groupId: null — участники объединённой сетки заменены строкой-группой, иначе их PnL посчитался бы дважды (lib/trades/grouping.ts).
+      where: { accountId: { in: accountIds }, groupId: null, ...(inPeriod ? { exitTime: inPeriod } : {}) },
       orderBy: { exitTime: "asc" },
       select: {
         accountId: true, externalId: true, symbol: true, base: true, quote: true,
@@ -334,7 +335,8 @@ async function computePublicTradesUncached(
       },
     }),
     prisma.importedTrade.findMany({
-      where: { accountId: { in: accountIds }, ...(inPeriod ? { exitTime: inPeriod } : {}) },
+      // groupId: null — участники объединённой сетки заменены строкой-группой, иначе их PnL посчитался бы дважды (lib/trades/grouping.ts).
+      where: { accountId: { in: accountIds }, groupId: null, ...(inPeriod ? { exitTime: inPeriod } : {}) },
       orderBy: { exitTime: "desc" },
       take: PUBLIC_TRADES_LIMIT,
       select: {

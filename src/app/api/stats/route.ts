@@ -132,6 +132,9 @@ async function buildBase(
   // Imported (forex / MetaTrader) closed round-trips — money taken as-is.
   const importedWhere: Prisma.ImportedTradeWhereInput = {
     accountId: { in: [...ownedIds] },
+    // Позиции, свёрнутые в группу, в статистику не идут — вместо них учтена
+    // строка-группа (см. lib/trades/grouping.ts). Иначе PnL сетки задвоился бы.
+    groupId: null,
   };
   if (accountId !== "all" && ownedIds.has(accountId)) importedWhere.accountId = accountId;
   if (fromMs != null || toMs != null) {

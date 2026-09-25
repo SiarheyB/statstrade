@@ -56,13 +56,17 @@ describe('mentorShare module', () => {
     mocks.exchangeAccountFindMany.mockResolvedValue([{ id: 'a1', balance: 500 }]);
     await computePublicSummary('user123');
 
-    for (const call of [mocks.tradeFindMany, mocks.importedTradeFindMany]) {
-      const args = call.mock.calls[0][0];
-      // Публичная ссылка открывается без входа и сколько угодно раз — тянуть
-      // все колонки всей истории тут нельзя.
-      expect(args.select).toBeTruthy();
-      expect(args.where).toEqual({ accountId: { in: ['a1'] } });
-    }
+    // Публичная ссылка открывается без входа и сколько угодно раз — тянуть
+    // все колонки всей истории тут нельзя.
+    expect(mocks.tradeFindMany.mock.calls[0][0].select).toBeTruthy();
+    expect(mocks.tradeFindMany.mock.calls[0][0].where).toEqual({ accountId: { in: ['a1'] } });
+    // У импортированных сделок добавляется groupId: null — позиции, свёрнутые
+    // в одну сделку, заменены строкой-группой (lib/trades/grouping.ts).
+    expect(mocks.importedTradeFindMany.mock.calls[0][0].select).toBeTruthy();
+    expect(mocks.importedTradeFindMany.mock.calls[0][0].where).toEqual({
+      accountId: { in: ['a1'] },
+      groupId: null,
+    });
   });
 
   it('returns default capital when no accounts found', async () => {
