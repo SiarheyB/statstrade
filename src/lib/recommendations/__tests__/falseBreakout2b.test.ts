@@ -94,11 +94,11 @@ describe("detectFalseBreakout2b", () => {
   // Тот же подход, но одним крупным баром — это уже разгон, сетап валиден.
   it("accepts a fast approach made by one large bar", () => {
     const fast: DailyCandle[] = [];
-    for (let i = 0; i < 20; i++) fast.push(bar(i, 80, 81, 79, 80));
-    fast.push(bar(20, 80, 81, 79, 80));
-    fast.push(bar(21, 80, 81, 79, 80));
-    fast.push(bar(22, 80, 81, 79, 80));
-    fast.push(bar(23, 80, 106, 79.5, 101));
+    for (let i = 0; i < 20; i++) fast.push(bar(i, 64, 65, 63, 64));
+    fast.push(bar(20, 64, 65, 63, 64));
+    fast.push(bar(21, 64, 65, 63, 64));
+    fast.push(bar(22, 64, 65, 63, 64));
+    fast.push(bar(23, 64, 106, 63.5, 101));
     expect(detectFalseBreakout2b(fast, LEVEL, ATR)).not.toBeNull();
   });
 

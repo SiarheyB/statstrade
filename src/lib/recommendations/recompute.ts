@@ -8,7 +8,7 @@ import { prisma } from "@/lib/db";
 import { getFeatureConfig } from "@/lib/featureConfig";
 import { detectLevels, filterLevelsNearPrice, computeAtr, detectTrend, type DailyCandle, type DetectedLevel } from "./levels";
 import { computeBreakoutSignals } from "./breakoutSignals";
-import { detectFalseBreakout2b } from "./falseBreakout2b";
+import { DEFAULT_2B_THRESHOLDS, detectFalseBreakout2b } from "./falseBreakout2b";
 import {
   assessLevelQuality,
   passesQualityGate,
@@ -139,16 +139,18 @@ export const MIN_RETEST_AGE_DAYS = 10;
 export function falseBreakoutLevelRejection(
   level: { type: DetectedLevel["type"]; lastTouchedAt: number },
   candlesTo: Date,
+  minAgeDays: number = MIN_RETEST_AGE_DAYS,
 ): "not_retracement_source" | "retest_too_recent" | null {
   if (level.type !== "retracement" && level.type !== "structure_break") return "not_retracement_source";
   const daysSinceTouch = (candlesTo.getTime() - level.lastTouchedAt) / DAY_MS;
-  if (daysSinceTouch < MIN_RETEST_AGE_DAYS) return "retest_too_recent";
+  if (daysSinceTouch < minAgeDays) return "retest_too_recent";
   return null;
 }
 
 export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Promise<RecomputeResult> {
   const feature = await getFeatureConfig("tradeRecommendations");
   const maxDistanceAtr = feature.maxDistanceAtr;
+  const minFalseBreakoutAgeDays = feature.minFalseBreakoutAgeDays;
   const symbols = await listCandidateSymbols();
   cb.onSymbolsListed?.(symbols.length);
   let neutralSkipped = 0;
@@ -226,7 +228,13 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
       // рынком уровню. Границы гэпов сюда же: касаний, которые делают уровень
       // уровнем, у них нет.
       const suitable2bLevel = LEVEL_TYPES_2B.has(level.type) && level.strength >= SIGNIFICANT_LEVEL_STRENGTH;
-      const setup2b = suitable2bLevel ? detectFalseBreakout2b(candles, level.price, atr) : null;
+      const setup2b = suitable2bLevel ? detectFalseBreakout2b(
+            candles,
+            level.price,
+            atr,
+            { ...DEFAULT_2B_THRESHOLDS, minLevelAgeDays: minFalseBreakoutAgeDays },
+            level.formedAt,
+          ) : null;
       const signals = setup2b
         ? {
             for: ["false_breakout_2b", "fast_approach_2b", "far_retest_2b"],
@@ -272,7 +280,7 @@ export async function recomputeRecommendations(cb: RecomputeCallbacks = {}): Pro
       // ЛП2Б исключён намеренно (см. выше): там уровень свежий по замыслу —
       // пробойный бар только что закрылся за ним.
       if (signals.bias === "false_breakout") {
-        const reason = falseBreakoutLevelRejection(level, candlesTo);
+        const reason = falseBreakoutLevelRejection(level, candlesTo, minFalseBreakoutAgeDays);
         if (reason) {
           rejected[reason] = (rejected[reason] ?? 0) + 1;
           continue;

@@ -44,6 +44,18 @@ export interface FalseBreakout2bThresholds {
    * возврат: подходить к уровню нужно с разгона, а не подползать вплотную.
    */
   accumulationRangeAtr: number;
+  /**
+   * Насколько далеко от уровня должно быть накопление, в ATR. Тихий коридор
+   * ближе этого — стоянка у уровня (ARKMUSDT), а не разгон к нему: быстрый
+   * подход допустим, копление рядом с уровнем — нет.
+   */
+  accumulationMinGapAtr: number;
+  /**
+   * Возраст уровня: от точки, которая его основала, до пробойного бара — не
+   * меньше стольких дней. Свежий уровень с накоплением вплотную под ним
+   * (ARKMUSDT 25.09.2026) — заготовка честного пробоя, а не ложного.
+   */
+  minLevelAgeDays: number;
   /** Сколько баров перед пробойным смотрим на накопление. */
   accumulationWindow: number;
   /** Допуск «бар коснулся уровня» при поиске прошлых касаний, в ATR. */
@@ -85,6 +97,9 @@ export const DEFAULT_2B_THRESHOLDS: FalseBreakout2bThresholds = {
   // рабочие сетапы.
   minDaysSinceTouch: 20,
   accumulationRangeAtr: 1,
+  accumulationMinGapAtr: 3,
+  // 10 — жёсткий минимум, 15 — целевое значение по решению трейдера.
+  minLevelAgeDays: 15,
   accumulationWindow: 5,
   touchToleranceAtr: 0.3,
   retestCloseNearAtr: 0.75,
@@ -162,10 +177,14 @@ export function detectFalseBreakout2b(
   levelPrice: number,
   atr: number,
   th: FalseBreakout2bThresholds = DEFAULT_2B_THRESHOLDS,
+  levelFormedAt?: number,
 ): FalseBreakout2b | null {
   if (!(atr > 0) || candles.length < th.approachWindow + 2) return null;
 
   const last = candles[candles.length - 1];
+
+  // Уровень должен быть достаточно старым: считаем от бара, основавшего его.
+  if (levelFormedAt !== undefined && (last.t - levelFormedAt) / 86_400_000 < th.minLevelAgeDays) return null;
   const prev = candles[candles.length - 2];
 
   // Пробой должен быть СВЕЖИМ — сделанным именно последним баром: до него
@@ -231,7 +250,7 @@ export function detectFalseBreakout2b(
   const preLow = Math.min(...preBreak.map((c) => c.l));
   const preBreakRangeAtr = (preHigh - preLow) / atr;
   const gapToLevelAtr = (brokeUp ? levelPrice - preHigh : preLow - levelPrice) / atr;
-  if (preBreakRangeAtr <= th.accumulationRangeAtr && gapToLevelAtr <= th.accumulationRangeAtr) return null;
+  if (preBreakRangeAtr <= th.accumulationRangeAtr && gapToLevelAtr <= th.accumulationMinGapAtr) return null;
 
   return {
     brokeSide,

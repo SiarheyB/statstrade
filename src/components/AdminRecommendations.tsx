@@ -238,10 +238,13 @@ function ProgressBar({ progress }: { progress: Progress }) {
   );
 }
 
-type FeatureValue = { enabled: boolean; maxDistanceAtr: number };
+type FeatureValue = { enabled: boolean; maxDistanceAtr: number; minFalseBreakoutAgeDays: number };
 
 // Числовые настройки фичи, которые правятся прямо на этой странице.
-const NUMERIC_FIELDS = [{ key: "maxDistanceAtr" as const, step: "0.1", min: "0.1" }];
+const NUMERIC_FIELDS = [
+  { key: "maxDistanceAtr" as const, step: "0.1", min: "0.1" },
+  { key: "minFalseBreakoutAgeDays" as const, step: "1", min: "1" },
+];
 type FeatureRow = { key: string; fieldHelp: Record<string, string>; value: FeatureValue };
 type AccessFeatureRow = { key: string; value: { enabled: boolean } };
 

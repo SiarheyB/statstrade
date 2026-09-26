@@ -186,8 +186,13 @@ describe("passesQualityGate — свежий прокол", () => {
     expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("unconfirmed_deep_pierce");
   });
 
-  it("keeps a breakout when the fresh pierce was shallow", () => {
-    const q = quality({ lastBarPierceAtr: 0.2 });
+  it("rejects a breakout after any real fresh pierce (ZHIPUUSDT, 0.17×ATR)", () => {
+    const q = quality({ lastBarPierceAtr: 0.17 });
+    expect(passesQualityGate(q, "breakout", CALM).rejectedBy).toContain("unconfirmed_deep_pierce");
+  });
+
+  it("keeps a breakout when the fresh pierce was only noise", () => {
+    const q = quality({ lastBarPierceAtr: 0.05 });
     expect(passesQualityGate(q, "breakout", CALM).rejectedBy).not.toContain("unconfirmed_deep_pierce");
   });
 
