@@ -3,7 +3,6 @@ import {
   DEFAULT_THRESHOLD_ATR,
   MAX_THRESHOLD_ATR,
   MIN_THRESHOLD_ATR,
-  REARM_FACTOR,
   alertText,
   clampThreshold,
   decide,
@@ -61,12 +60,10 @@ describe("решение о срабатывании", () => {
     expect(decide({ ...base, price: 101, triggered: true })).toBe("none");
   });
 
-  it("заряжается заново, только когда цена ушла заметно дальше порога", () => {
-    // Запас (REARM_FACTOR) нужен, чтобы дрожание цены ровно на границе не
-    // превращалось в поток уведомлений.
-    const justOutside = 100 + base.thresholdAtr * base.atr * REARM_FACTOR;
-    expect(decide({ ...base, price: justOutside, triggered: true })).toBe("none");
-    expect(decide({ ...base, price: justOutside + 0.1, triggered: true })).toBe("rearm");
+  it("не перезаряжается, даже когда цена ушла далеко от уровня", () => {
+    // Одна рекомендация — одно уведомление за день: сработавшая подписка
+    // молчит, пока её не смоет ближайший пересчёт рекомендаций.
+    expect(decide({ ...base, price: 200, triggered: true })).toBe("none");
   });
 
   describe("пробойный бар между двумя проходами крона", () => {

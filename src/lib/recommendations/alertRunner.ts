@@ -22,8 +22,6 @@ export type AlertRunResult = {
   checked: number;
   /** По скольким отправлено уведомление. */
   fired: number;
-  /** Сколько сработавших ранее подписок заряжено заново (цена ушла от уровня). */
-  rearmed: number;
   /** Сколько устройств получило push. */
   pushed: number;
   error?: string;
@@ -46,11 +44,12 @@ async function fetchPrices(): Promise<Map<string, number>> {
 }
 
 export async function runLevelAlerts(): Promise<AlertRunResult> {
-  const result: AlertRunResult = { checked: 0, fired: 0, rearmed: 0, pushed: 0 };
+  const result: AlertRunResult = { checked: 0, fired: 0, pushed: 0 };
 
-  // Читаем и сработавшие тоже: им нужен обратный переход (цена ушла далеко —
-  // подписка заряжается заново, см. REARM_FACTOR в alerts.ts). Без этого
-  // подписка была бы одноразовой при живом на вид колокольчике.
+  // Сработавшие подписки тоже читаем — decide() их просто пропустит: одна
+  // рекомендация шлёт уведомление не больше раза за день, пока её не смоет
+  // ближайшим пересчётом рекомендаций (recomputeRecommendations() чистит
+  // LevelAlert целиком).
   const alerts = await prisma.levelAlert.findMany();
   result.checked = alerts.length;
   // Ни одной подписки — наружу не ходим вовсе. Крон дёргается каждую минуту, и
@@ -68,7 +67,6 @@ export async function runLevelAlerts(): Promise<AlertRunResult> {
   }
 
   const fired: { alert: (typeof alerts)[number]; price: number }[] = [];
-  const rearm: string[] = [];
   // Цену запоминаем на ВСЕХ проверенных подписках, не только на сработавших —
   // без неё на следующем проходе не с чем сравнивать, чтобы поймать
   // пересечение уровня между тиками (см. decide() и комментарий у lastPrice
@@ -89,16 +87,7 @@ export async function runLevelAlerts(): Promise<AlertRunResult> {
       prevPrice: a.lastPrice,
     });
     if (what === "fire") fired.push({ alert: a, price });
-    else if (what === "rearm") rearm.push(a.id);
     lastPrices.push({ id: a.id, price });
-  }
-
-  if (rearm.length) {
-    const { count } = await prisma.levelAlert.updateMany({
-      where: { id: { in: rearm } },
-      data: { triggeredAt: null, triggeredPrice: null },
-    });
-    result.rearmed = count;
   }
 
   // Одним запросом на каждое значение цены — символов у активных подписок

@@ -26,19 +26,6 @@ export function clampThreshold(v: number): number {
   return Math.min(MAX_THRESHOLD_ATR, Math.max(MIN_THRESHOLD_ATR, v));
 }
 
-/**
- * Во сколько раз дальше порога должна уйти цена, чтобы уже сработавшее
- * уведомление снова «зарядилось».
- *
- * Без этого возврата подписка была бы одноразовой: человек один раз получил
- * уведомление, цена от уровня отошла, назавтра подошла снова — и тишина, хотя
- * подписка на вид активна. А без запаса (коэффициент 1) уведомления сыпались
- * бы пачкой всё время, пока цена дрожит ровно на границе порога. Двойное
- * расстояние — обычный гистерезис: чтобы зарядиться заново, цене нужно уйти
- * заметно дальше, чем нужно было, чтобы сработать.
- */
-export const REARM_FACTOR = 2;
-
 /** Расстояние от цены до уровня в долях ATR. */
 export function distanceInAtr(price: number, levelPrice: number, atr: number): number {
   // ATR нулевой или битый — расстояние в ATR не определено. Возвращаем
@@ -48,14 +35,19 @@ export function distanceInAtr(price: number, levelPrice: number, atr: number): n
   return Math.abs(price - levelPrice) / atr;
 }
 
-export type AlertDecision = "fire" | "rearm" | "none";
+export type AlertDecision = "fire" | "none";
 
 /**
  * Что делать с подпиской при текущей цене.
  *
  *  fire  — цена вошла в зону уровня, уведомление нужно отправить;
- *  rearm — цена ушла достаточно далеко, сработавшую подписку можно зарядить снова;
  *  none  — ничего не изменилось.
+ *
+ * Сработавшая подписка (triggered) больше не перезаряжается: одна
+ * рекомендация — одно уведомление за день. Подписка живёт ровно до
+ * ближайшего пересчёта рекомендаций (recomputeRecommendations() чистит
+ * LevelAlert целиком), назавтра для новой рекомендации по этому уровню
+ * заводится новая подписка с чистого листа.
  */
 export function decide(opts: {
   price: number;
@@ -76,12 +68,10 @@ export function decide(opts: {
    */
   prevPrice?: number | null;
 }): AlertDecision {
+  if (opts.triggered) return "none";
   const dist = distanceInAtr(opts.price, opts.levelPrice, opts.atr);
   if (!Number.isFinite(dist)) return "none";
   const threshold = clampThreshold(opts.thresholdAtr);
-  if (opts.triggered) {
-    return dist > threshold * REARM_FACTOR ? "rearm" : "none";
-  }
   if (dist <= threshold) return "fire";
   if (opts.prevPrice != null && (opts.prevPrice - opts.levelPrice) * (opts.price - opts.levelPrice) <= 0) {
     return "fire";
