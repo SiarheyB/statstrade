@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp } from "lucide-react";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, Apple } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
@@ -1102,6 +1102,31 @@ export default function RecommendationsView() {
           дневным оборотом меньше $1 млн не показываем совсем: на таком стакане исполнение съедает сетап. На инструмент — один, самый сильный сетап. Не сигнал «покупай/продавай» — только
           подготовка к торговому дню, решение за вами.
         </p>
+      </div>
+
+      {/* Ссылки ведут на редирект nginx (/perimetr/download/…), а не на файл
+          напрямую: имя установщика меняется с каждым релизом «Периметра», а
+          сам редирект на хосте всегда указывает на актуальную версию (см.
+          deploy/nginx/nginx.conf). */}
+      <div className="rounded-xl border border-border bg-surface p-4 flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <div className="font-medium">ПЕРИМЕТР</div>
+          <div className="text-sm text-muted mt-0.5">Сканер торговых формаций</div>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <a
+            href="/perimetr/download/windows"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 text-accent px-3 py-1.5 text-sm font-medium hover:bg-accent/25 transition"
+          >
+            <Download size={14} /> Windows
+          </a>
+          <a
+            href="/perimetr/download/mac"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 text-accent px-3 py-1.5 text-sm font-medium hover:bg-accent/25 transition"
+          >
+            <Apple size={14} /> macOS
+          </a>
+        </div>
       </div>
 
       <div className="flex gap-2 flex-wrap">
