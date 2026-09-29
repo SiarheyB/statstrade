@@ -467,9 +467,15 @@ function countBlockingLevels(
 }
 
 // Самый глубокий уход ЗАКРЫТИЕМ за уровень после его образования, в ATR.
-// Хвост в `freshBars` баров не смотрим: свежий пробой — это сегодняшняя
-// ситуация (в том числе заготовка ЛП2Б), а не свидетельство, что уровень
-// давно сняли.
+// Хвост в `freshBars` баров не смотрим ТОЛЬКО пока цена ещё реально стоит за
+// уровнем — там пробой либо ещё не подтверждён, либо это ровно та заготовка
+// ЛП2Б, ради которой хвост и прощается. Если же цена уже ВЕРНУЛАСЬ на
+// исходную сторону, поход за уровень закончен и стал историей: скрывать его
+// как "свежий хвост" нельзя — это и есть свидетельство, что уровень уже сняли
+// и вернулись, а не сегодняшняя ситуация (PLTRUSDT: 8 дней назад цена ушла на
+// 194 при уровне 188.33 и уже вернулась под него — без этой проверки гейт
+// прощал уход, потому что он попадал в последние 10 баров, и давал "пробой
+// лонг" по уровню, который только что не устоял).
 function breachAfterFormed(
   candles: DailyCandle[],
   levelPrice: number,
@@ -479,7 +485,9 @@ function breachAfterFormed(
   freshBars: number,
 ): number {
   if (formedAt == null || atr <= 0) return 0;
-  const until = candles.length - 1 - freshBars;
+  const last = candles[candles.length - 1];
+  const stillBeyond = side === "above" ? last.c > levelPrice : last.c < levelPrice;
+  const until = stillBeyond ? candles.length - 1 - freshBars : candles.length - 1;
   let deepest = 0;
   for (let i = 0; i <= until; i++) {
     const bar = candles[i];

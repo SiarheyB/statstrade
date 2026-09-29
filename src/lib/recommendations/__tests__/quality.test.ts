@@ -404,6 +404,21 @@ describe("passesQualityGate — снятый уровень", () => {
     expect(q.breachedAfterFormedAtr).toBe(0);
   });
 
+  it("still counts a breach inside the fresh tail once price has returned to the approach side (PLTRUSDT)", () => {
+    // Уровень 120 сверху; 8 дней назад цена ушла на 126 (за уровень), но
+    // последний бар уже вернулся под него (закрытие 118). Это не живой пробой
+    // "в процессе" — поход закончен, и распознавать его как хвост нельзя,
+    // иначе снятый уровень снова выглядит рабочим для сетапа "пробой".
+    const candles = [
+      ...background(40),
+      candle(40, 121, 126, 120, 125),
+      candle(41, 124, 125, 118, 119),
+      candle(42, 118, 119, 116, 118),
+    ];
+    const q = assessLevelQuality(candles, 120, ATR, 118, [], DEFAULT_THRESHOLDS, candles[0].t);
+    expect(q.breachedAfterFormedAtr).toBeCloseTo(5 / ATR, 2);
+  });
+
   it("measures the deepest close beyond the level after the BSU", () => {
     // Уровень 120 сверху; на 15-м баре окна закрытие 123 — это 0.75×ATR за него.
     const candles = [...background(20), candle(20, 121, 124, 120, 123), ...background(15, 21)];
