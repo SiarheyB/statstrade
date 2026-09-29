@@ -21,7 +21,7 @@ vi.mock('next/headers', () => ({
   cookies: () => ({
     get: (n: string) => cookieStore.get(n),
     set: (n: string, v: string) => { cookieStore.set(n, { value: v }); },
-    delete: (n: string) => { cookieStore.delete(n); },
+    delete: (n: string | { name: string }) => { cookieStore.delete(typeof n === "string" ? n : n.name); },
   }),
 }));
 

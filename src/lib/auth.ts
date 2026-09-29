@@ -129,7 +129,11 @@ export async function createSessionCookie(
 
 export async function clearSessionCookie() {
   const store = await cookies();
-  store.delete(COOKIE_NAME);
+  // path ОБЯЗАТЕЛЕН и должен совпадать с path куки при установке (см. выше):
+  // без него браузер удаляет куку по path текущего запроса (для
+  // /api/auth/logout это "/api/auth"), а настоящая кука с path "/" остаётся
+  // жива — выход с любой страницы, кроме /api/auth/*, молча не разлогинивал.
+  store.delete({ name: COOKIE_NAME, path: "/" });
 }
 
 // Read and verify the current session from cookies. Returns null when missing.
@@ -178,7 +182,7 @@ export async function getPendingUserId(): Promise<string | null> {
 
 export async function clearPendingCookie() {
   const store = await cookies();
-  store.delete(PENDING_COOKIE);
+  store.delete({ name: PENDING_COOKIE, path: "/" });
 }
 
 export { COOKIE_NAME };
