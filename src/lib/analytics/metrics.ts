@@ -20,6 +20,8 @@ export type SymbolStats = {
 export type Bucket = {
   key: string;
   label: string;
+  /** Вторая строка подписи под столбцом — например биржа под именем счёта. */
+  sublabel?: string;
   trades: number;
   netPnl: number;
   winRate: number;
@@ -132,6 +134,7 @@ export type Metrics = {
   byHour: Bucket[];
   byMonth: Bucket[];
   byExchange: Bucket[];
+  byAccount: Bucket[]; // разрез по счетам (у одной биржи их несколько)
   byEntryPoint: Bucket[]; // ТВХ
   byEntryType: Bucket[];
   byMistake: Bucket[]; // ошибки
@@ -516,6 +519,23 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
     (k) => k.charAt(0).toUpperCase() + k.slice(1),
   ).sort((a, b) => b.netPnl - a.netPnl);
 
+  // Разрез по СЧЕТАМ, а не по биржам: на одной бирже у человека легко четыре
+  // счёта (MT5 — норма), и сложенные в один столбец они прячут, какой именно
+  // счёт тянет вниз. Биржа остаётся второй строкой подписи (`sublabel`).
+  // Ключ — accountId, человеческое имя счёта подставляет клиент из
+  // `accounts` (в метриках его нет: сделка знает только id).
+  const exchangeByAccount = new Map(sorted.map((t) => [t.accountId, t.exchange]));
+  const byAccount = bucketStats(
+    sorted,
+    (t) => t.accountId,
+    (k) => k,
+  )
+    .map((b) => {
+      const ex = exchangeByAccount.get(b.key) ?? "";
+      return { ...b, sublabel: ex ? ex.charAt(0).toUpperCase() + ex.slice(1) : undefined };
+    })
+    .sort((a, b) => b.netPnl - a.netPnl);
+
   const byEntryPoint = bucketStats(
     sorted,
     (t) => t.entryPoint || UNSET_LABEL,
@@ -653,6 +673,7 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
     byHour,
     byMonth,
     byExchange,
+    byAccount,
     byEntryPoint,
     byEntryType,
     byMistake,

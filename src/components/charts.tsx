@@ -215,6 +215,47 @@ export function DailyPnlChart({
 
 // Generic breakdown bar chart (by day-of-week, hour, month, symbol, ТВХ...).
 // `metric` selects whether bars show net P&L or win rate.
+// Подпись столбца: длинное название («Не закрыл прибыль», «Вход против
+// алгоритма») в 11px не влезает и у наклонённых подписей уезжает за левый край
+// графика — раньше от него оставался хвост «...о алгоритму». Режем по символам
+// с многоточием, полное имя человек видит в тултипе (и в `title`, которое
+// браузер показывает при наведении прямо на подпись).
+// Вторая строка (`sublabel`) — биржа под именем счёта.
+const TICK_MAX_CHARS = 14;
+function BreakdownTick(props: {
+  data?: Bucket[];
+  angled?: boolean;
+  x?: number;
+  y?: number;
+  payload?: { value: string; index: number };
+}) {
+  const { data = [], angled, x = 0, y = 0, payload } = props;
+  const full = payload?.value ?? "";
+  const sub = data[payload?.index ?? -1]?.sublabel;
+  const short = full.length > TICK_MAX_CHARS ? `${full.slice(0, TICK_MAX_CHARS - 1)}…` : full;
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <title>{sub ? `${full} · ${sub}` : full}</title>
+      <text
+        transform={angled ? "rotate(-35)" : undefined}
+        x={0}
+        y={0}
+        dy={12}
+        textAnchor={angled ? "end" : "middle"}
+        fill={AXIS}
+        fontSize={11}
+      >
+        {short}
+      </text>
+      {sub && !angled && (
+        <text x={0} y={0} dy={25} textAnchor="middle" fill={AXIS} fontSize={9} opacity={0.75}>
+          {sub}
+        </text>
+      )}
+    </g>
+  );
+}
+
 export function BreakdownChart({
   data,
   height = 240,
@@ -227,6 +268,8 @@ export function BreakdownChart({
   const { t: tr } = useI18n();
   if (data.length === 0) return <Empty />;
   const isWin = metric === "winRate";
+  const angled = data.length > 8;
+  const hasSub = data.some((d) => d.sublabel);
   return (
     <div style={{ height, minHeight: 240 }} className="w-full min-w-[300px]">
       <ResponsiveContainer width="100%" height="100%">
@@ -234,12 +277,10 @@ export function BreakdownChart({
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
           <XAxis
             dataKey="label"
-            tick={{ fill: AXIS, fontSize: 11 }}
             stroke={GRID}
             interval={0}
-            angle={data.length > 8 ? -35 : 0}
-            textAnchor={data.length > 8 ? "end" : "middle"}
-            height={data.length > 8 ? 50 : 24}
+            tick={<BreakdownTick data={data} angled={angled} />}
+            height={angled ? 64 : hasSub ? 40 : 24}
           />
           <YAxis
             tickFormatter={isWin ? (v: number) => `${Math.round(v)}%` : compact}
@@ -256,6 +297,7 @@ export function BreakdownChart({
               return (
                 <TooltipBox>
                   <div className="text-muted">{p.label}</div>
+                  {p.sublabel && <div className="text-faint">{p.sublabel}</div>}
                   {isWin ? (
                     <>
                       <div className="font-medium">{p.winRate.toFixed(1)}% win</div>

@@ -169,6 +169,17 @@ export default function DashboardPage() {
   // сделок, хотя на экране из него получались четыре стрелки на карточках.
   const trend = m?.trend ?? null;
 
+  // Метрики знают только accountId — человеческое имя счёта лежит в
+  // `data.accounts`. Счёт мог быть удалён, а сделки по нему остались: тогда
+  // подписываем биржей, иначе столбец был бы без подписи вовсе.
+  const accountBuckets = useMemo(() => {
+    const byId = new Map((data?.accounts ?? []).map((a) => [a.id, a]));
+    return (m?.byAccount ?? []).map((b) => {
+      const acc = byId.get(b.key);
+      return { ...b, label: acc?.label ?? b.sublabel ?? b.key };
+    });
+  }, [data?.accounts, m?.byAccount]);
+
   return (
     <div className="px-6 py-5 max-w-7xl mx-auto">
       {/* Header + filters */}
@@ -469,7 +480,7 @@ export default function DashboardPage() {
             </div>
             <div className="card p-5">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-sm">{t("dash.byExchange")}</h3>
+                <h3 className="font-medium text-sm">{t("dash.byAccount")}</h3>
                 <div className="flex gap-1 text-xs">
                   {(["netPnl", "winRate"] as const).map((mk) => (
                     <button
@@ -484,7 +495,7 @@ export default function DashboardPage() {
                   ))}
                 </div>
               </div>
-              <BreakdownChart data={m.byExchange} metric={exchangeMetric} height={220} />
+              <BreakdownChart data={accountBuckets} metric={exchangeMetric} height={220} />
             </div>
           </div>
 

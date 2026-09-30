@@ -199,6 +199,19 @@ describe("computeMetrics", () => {
     expect(m.byExchange[1].label).toBe("Bybit");
   });
 
+  it("splits accounts of one exchange into separate buckets", () => {
+    const trades = [
+      makeTrade({ id: "t1", accountId: "a1", exchange: "mt5", netPnl: -30, result: "loss" }),
+      makeTrade({ id: "t2", accountId: "a2", exchange: "mt5", netPnl: 70, result: "win" }),
+      makeTrade({ id: "t3", accountId: "a2", exchange: "mt5", netPnl: 10, result: "win" }),
+    ];
+    const m = computeMetrics(trades);
+    expect(m.byExchange.length).toBe(1);
+    expect(m.byAccount.map((b) => b.key)).toEqual(["a2", "a1"]);
+    expect(m.byAccount[0].trades).toBe(2);
+    expect(m.byAccount[0].sublabel).toBe("Mt5");
+  });
+
   it("computes byDayOfWeek and byHour using UTC", () => {
     const trades = [
       makeTrade({ id: "t1", exitTime: new Date("2024-01-01T10:00:00Z") }), // Monday
