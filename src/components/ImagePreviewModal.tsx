@@ -98,12 +98,30 @@ export default function ImagePreviewModal({
     });
   }
 
-  function onWheel(e: React.WheelEvent) {
-    e.preventDefault();
-    e.stopPropagation();
-    const factor = Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED);
-    zoomAt(e.clientX, e.clientY, factor);
-  }
+  // Колесо вешаем нативно с { passive: false }: React делегирует wheel на
+  // корень документа пассивным слушателем, и preventDefault() внутри onWheel
+  // молча игнорируется — страница под модалкой скроллилась вместе с зумом.
+  const zoomAtRef = useRef(zoomAt);
+  zoomAtRef.current = zoomAt;
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    function onWheel(e: WheelEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      zoomAtRef.current(e.clientX, e.clientY, Math.exp(-e.deltaY * WHEEL_ZOOM_SPEED));
+    }
+    vp.addEventListener("wheel", onWheel, { passive: false });
+    return () => vp.removeEventListener("wheel", onWheel);
+  }, [failed]);
+
+  // Пока просмотр открыт, страница под ним не скроллится вовсе: колесо мимо
+  // картинки (по затемнённому фону) иначе уводит таблицу сделок.
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = prev; };
+  }, []);
 
   // Клик по неувеличенному изображению — зум к точке клика (курсор
   // "zoom-in" это и обещает). Двойной клик по увеличенному — сброс к 100%.
@@ -200,7 +218,6 @@ export default function ImagePreviewModal({
           <>
             <div
               ref={viewportRef}
-              onWheel={onWheel}
               onClick={onImageClick}
               onDoubleClick={onDoubleClick}
               onPointerDown={onPointerDown}
