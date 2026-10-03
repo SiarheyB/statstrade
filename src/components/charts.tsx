@@ -157,7 +157,7 @@ export function DailyPnlChart({
     : data;
 
   return (
-    <div className="min-h-[64px] min-w-[300px] w-full h-full">
+    <div className="min-w-[300px] w-full h-[300px]">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 8, right: 8, left: 8, bottom: 0 }}>
           <CartesianGrid stroke={GRID} strokeDasharray="3 3" vertical={false} />
