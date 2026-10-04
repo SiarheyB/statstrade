@@ -162,7 +162,8 @@ services:
 
   # Отчёт по копиям десктопного «Периметра»: раз в 10 минут GoAccess дочитывает
   # журнал /srv/perimetr-logs/usage.log и пересобирает HTML-отчёт, который edge
-  # отдаёт по паролю на /perimetr-stats/. --persist/--restore хранят накопленное
+  # отдаёт по паролю на /perimetr-stats/ (а также /desktop/ и /android/ — телефоны и
+  # настольные копии считаем врозь). --persist/--restore хранят накопленное
   # в базе (дочитывается только новое), поэтому ротация журнала историю не теряет.
   # --restore — только когда база уже есть: на пустой GoAccess падает.
   perimetr-stats:
@@ -173,18 +174,23 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        mkdir -p /stats/report /stats/db
+        mkdir -p /stats/report/desktop /stats/report/android /stats/db /stats/db-desktop /stats/db-android
+        # $$1 — журнал, $$2 — база, $$3 — куда положить отчёт, $$4 — заголовок.
+        # У каждого отчёта своя база: общая считала бы копии по нескольку раз.
+        report() {
+          [ -s "$$1" ] || return 0
+          RESTORE=""
+          [ -n "$$(ls -A $$2)" ] && RESTORE="--restore"
+          goaccess "$$1" $$RESTORE \
+            --log-format='%h [%d:%t %^] "%r" %s %b "%R" "%u"' \
+            --date-format=%d/%b/%Y --time-format=%T \
+            --no-ip-validation --no-query-string --persist --db-path="$$2" \
+            --html-report-title="$$4" -o "$$3"
+        }
         while true; do
-          if [ -s /logs/usage.log ]; then
-            RESTORE=""
-            [ -n "$$(ls -A /stats/db)" ] && RESTORE="--restore"
-            goaccess /logs/usage.log $$RESTORE \
-              --log-format='%h [%d:%t %^] "%r" %s %b "%R" "%u"' \
-              --date-format=%d/%b/%Y --time-format=%T \
-              --no-ip-validation --no-query-string --persist --db-path=/stats/db \
-              --html-report-title='Периметр — копии приложения' \
-              -o /stats/report/index.html
-          fi
+          report /logs/usage.log /stats/db /stats/report/index.html 'Периметр — все копии'
+          report /logs/usage-desktop.log /stats/db-desktop /stats/report/desktop/index.html 'Периметр — десктоп'
+          report /logs/usage-android.log /stats/db-android /stats/report/android/index.html 'Периметр — Android'
           sleep 600
         done
     volumes:
