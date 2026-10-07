@@ -7,6 +7,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { Select } from "@/components/Select";
 import { fmtUsd, fmtDate, fmtSymbol } from "@/lib/format";
 import { zonedParts, zonedDateToUtcMs, tzOffsetForServer, type TimezoneId } from "@/lib/timezone";
+import { buildDisplayRows } from "@/lib/trades/display";
 
 // Дневной агрегат в том виде, в каком его отдаёт /api/calendar.
 type DayStat = {
@@ -119,7 +120,13 @@ export default function CalendarPage() {
       const res = await fetch(`/api/trades?${params}`);
       if (res.ok && alive) {
         const d2 = (await res.json()) as { trades: SerializedTrade[] };
-        setSelectedTrades(d2.trades);
+        // /api/trades отдаёт КЛАСТЕР целиком: строку-группу И её позиции
+        // (см. lib/analytics/tradeList.ts). В списке дня объединённая сетка
+        // должна занимать ОДНУ строку с агрегатами — иначе она показывалась бы
+        // трижды (группа + две позиции) и не сходилась бы ни со счётчиком
+        // сделок, ни с П&Л ячейки: те участников не считают (groupId IS NULL
+        // в lib/analytics/hourly.ts).
+        setSelectedTrades(buildDisplayRows(d2.trades).map((r) => r.trade));
       }
     })();
     return () => {
