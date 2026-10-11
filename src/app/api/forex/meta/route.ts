@@ -17,6 +17,8 @@ const KNOWN_PAIRS: Record<string, { base: string; quote: string; label: string }
   // Данные по ним идут из Dukascopy (см. collector/forex/dukascopy.mjs).
   "XAU/USD": { base: "XAU", quote: "USD", label: "Gold / US Dollar" },
   "XAG/USD": { base: "XAG", quote: "USD", label: "Silver / US Dollar" },
+  // Индекс доллара: у Dukascopy это DOLLAR.IDX (аналог DXY, ~102).
+  "DOLLAR.IDX/USD": { base: "DXY", quote: "USD", label: "US Dollar Index" },
 };
 
 /** Список пар из ENV FX_SYMBOLS (фоллбек, если в БД ничего не настроено). */
