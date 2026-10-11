@@ -204,12 +204,28 @@ export async function GET(req: Request) {
   try {
     // fetch = кэш + дедупликация «в полёте» (см. lib/routeCache.ts).
     const data = await cache.fetch(key, async () => {
-      const toMs = Date.now();
-      const fromMs = toMs - tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
+      let toMs = Date.now();
+      const windowMs = tf * (CANDLES_IN_WINDOW[range] ?? DEFAULT_CANDLES);
+      let fromMs = toMs - windowMs;
       const sourceInterval = AGGREGATE_FROM[range] ?? range;
       // Один запрос на все три ряда: свечи, B/A и дельта считаются из одних и
       // тех же строк, просто по-разному.
-      const rows = await loadRows(symbol, sourceInterval, fromMs, toMs);
+      let rows = await loadRows(symbol, sourceInterval, fromMs, toMs);
+      // Окно «до сейчас» на закрытом рынке (выходные) и у короткого ТФ целиком
+      // падает в пустоту: 2000 минуток — это ~33 часа, а рынок стоит двое суток.
+      // Тогда сдвигаем окно к последней свече, иначе график пуст при живой БД.
+      if (rows.length === 0) {
+        const last = await prisma.fxCandle.findFirst({
+          where: { symbol, exchange: "finnhub", interval: sourceInterval, t: { lte: new Date(toMs) } },
+          orderBy: { t: "desc" },
+          select: { t: true },
+        });
+        if (last) {
+          toMs = last.t.getTime() + tf;
+          fromMs = toMs - windowMs;
+          rows = await loadRows(symbol, sourceInterval, fromMs, toMs);
+        }
+      }
       const candles = candlesFromRows(rows, range);
       const ba = computeBA(rows);
       const deltaRes = computeDelta(rows);
