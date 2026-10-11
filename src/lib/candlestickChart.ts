@@ -647,10 +647,18 @@ export function computeInitialView(
   axis: TimeAxis = LINEAR_TIME_AXIS,
 ) {
   const step = candles.length > 1 ? candles[1].t - candles[0].t : (to - from) / 40 || 60000;
+  // Правый край — «сейчас», но не дальше нескольких шагов за последней свечой:
+  // ось времени схлопывает пропуски только МЕЖДУ свечами, а хвост от последней
+  // свечи до текущего момента остаётся. В выходные (рынок закрыт с пятницы)
+  // окно «последние N свечей до сейчас» целиком падало в этот хвост, и график
+  // открывался пустым, хотя история в базе есть.
+  const lastT = candles.length ? candles[candles.length - 1].t : undefined;
+  const tailLimit = lastT === undefined ? to : lastT + step * 3;
+  const end = Math.min(to, tailLimit);
   // Отступаем назад в «торговом» времени: на линейной оси окно шириной
   // visibleCount * step вмещало бы меньше свечей, чем просили, ровно на
   // длину попавших в него выходных.
-  const t0 = Math.max(from, axis.expand(axis.compress(to) - visibleCount * step));
+  const t0 = Math.max(from, axis.expand(axis.compress(end) - visibleCount * step));
   let vy0 = Infinity;
   let vy1 = -Infinity;
   for (const k of candles) {
@@ -663,7 +671,7 @@ export function computeInitialView(
     vy1 = Math.max(...candles.map((k) => k.h), 1);
   }
   const pad = (vy1 - vy0) * 0.04 || vy1 * 0.01;
-  return { t0, t1: to, y0: vy0 - pad, y1: vy1 + pad };
+  return { t0, t1: end, y0: vy0 - pad, y1: vy1 + pad };
 }
 
 /** Delta histogram (top/bottom of midline) + CVD line overlay, with axis labels. */
