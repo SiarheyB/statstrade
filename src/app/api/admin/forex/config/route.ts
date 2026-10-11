@@ -11,11 +11,11 @@ export const dynamic = "force-dynamic";
 // FX_SYMBOLS как фоллбек (см. collector/forex/index.mjs).
 
 // Форекс-пары форматом "XXX/YYY" (Twelve Data / Finnhub OANDA:XXX_YYY).
-const SYMBOL_RE = /^[A-Z]{3}\/[A-Z]{3}$/;
+const SYMBOL_RE = /^[A-Z]{2,6}(?:\.[A-Z]{2,4})?\/[A-Z]{2,6}$/;
 const symbolSchema = z
   .string()
   .transform((s) => s.trim().toUpperCase())
-  .refine((s) => SYMBOL_RE.test(s), { message: "Формат пары: EUR/USD (3 буквы / 3 буквы)" });
+  .refine((s) => SYMBOL_RE.test(s), { message: "Формат пары: EUR/USD (3 буквы / 3 буквы; индексы — DOLLAR.IDX/USD)" });
 
 export async function GET() {
   const session = await getAdminSession();
