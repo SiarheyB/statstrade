@@ -170,6 +170,12 @@ model ExchangeAccount {
   // для этого аккаунта. NULL = ещё ни разу → /api/stats пересоберёт при первом
   // обращении (бэкафилл после деплоя / legacy-аккаунты).
   tradesRebuiltAt     DateTime?
+  // Выгрузка сделок прямо из советника MT5 (TradeGridPanel → POST /api/mt/push).
+  // Храним только sha256 токена: сам токен показывается один раз при выдаче.
+  // Токен даёт ровно одно право — загружать сделки в ЭТОТ аккаунт.
+  pushTokenHash       String?         @unique
+  pushTokenCreatedAt  DateTime?
+  lastPushAt          DateTime?
   fills               Fill[]
   importedTrades      ImportedTrade[]
   trades              Trade[]

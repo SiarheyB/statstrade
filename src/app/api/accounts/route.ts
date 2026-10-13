@@ -33,6 +33,8 @@ const ACCOUNT_FIELDS = {
   lastSyncAt: true, syncStatus: true, syncError: true, syncPhase: true,
   syncCursor: true, syncTotal: true, syncImported: true, fullSyncAt: true,
   autoSync: true, syncIntervalMinutes: true, createdAt: true,
+  // Только чтобы ответить «советник подключён»: сам хэш наружу не уходит.
+  pushTokenHash: true, lastPushAt: true,
 } as const;
 
 /**
@@ -93,6 +95,8 @@ export async function GET(req: Request) {
       autoSync: a.autoSync,
       syncIntervalMinutes: a.syncIntervalMinutes,
       fillCount: fillsBy.get(a.id) ?? 0,
+      pushConnected: !!a.pushTokenHash,
+      lastPushAt: a.lastPushAt,
       createdAt: a.createdAt,
     })),
   );

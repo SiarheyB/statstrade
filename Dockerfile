@@ -81,6 +81,9 @@ COPY --from=builder /app/next.config.ts ./next.config.ts
 # на проде падал с «No such file or directory» — в дев-режиме всё работало,
 # потому что там рядом лежит весь репозиторий.
 COPY backup/db-backup-functions.sh ./backup/db-backup-functions.sh
+# Файлы для скачивания только зарегистрированным (советник MT5): лежат вне
+# public/, отдаёт их /api/advisor/download после проверки сессии.
+COPY --from=builder /app/downloads ./downloads
 
 EXPOSE 3000
 

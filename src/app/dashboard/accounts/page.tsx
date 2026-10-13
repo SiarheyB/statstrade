@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Plus,
   RefreshCw,
@@ -11,6 +12,12 @@ import {
   CheckCircle2,
   Upload,
   X,
+  KeyRound,
+  Copy,
+  Check,
+  PlugZap,
+  Download,
+  ChevronRight,
 } from "lucide-react";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
@@ -58,6 +65,9 @@ type Account = {
   autoSync: boolean;
   syncIntervalMinutes: number;
   fillCount: number;
+  // Выгрузка из советника TradeGridPanel (POST /api/mt/push).
+  pushConnected?: boolean;
+  lastPushAt?: string | null;
 };
 
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
@@ -90,6 +100,7 @@ export default function AccountsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tokenFor, setTokenFor] = useState<Account | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -239,6 +250,14 @@ export default function AccountsPage() {
                       {isMtSource(a.source) ? (
                         <>
                           {a.accountCurrency} · {t("acc.mt.tradesCount", { n: a.importedCount })}
+                          {a.pushConnected && (
+                            <span className="inline-flex items-center gap-1 ml-2 text-muted">
+                              <PlugZap size={12} />
+                              {a.lastPushAt
+                                ? t("acc.push.connectedAt", { date: fmtDate(a.lastPushAt) })
+                                : t("acc.push.connected")}
+                            </span>
+                          )}
                         </>
                       ) : (
                         <>
@@ -250,6 +269,17 @@ export default function AccountsPage() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Советник TradeGridPanel написан на MQL5 — только MT5 */}
+                  {a.source === "mt5" && (
+                    <button
+                      onClick={() => setTokenFor(a)}
+                      disabled={busy === a.id}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+                    >
+                      <KeyRound size={14} />
+                      {t("acc.push.button")}
+                    </button>
+                  )}
                   {isMtSource(a.source) ? (
                     <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 cursor-pointer">
                       <input
@@ -375,6 +405,16 @@ export default function AccountsPage() {
             </div>
           ))}
         </div>
+      )}
+
+      {tokenFor && (
+        <PushTokenModal
+          account={tokenFor}
+          onClose={() => {
+            setTokenFor(null);
+            load();
+          }}
+        />
       )}
 
       {showForm && (
@@ -739,6 +779,135 @@ function AccountForm({
                   : t("acc.form.connect")}
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// Токен для советника TradeGridPanel: выдаётся/перевыпускается и отзывается
+// здесь, показывается один раз (в базе только sha256, см. lib/mt/push.ts).
+function PushTokenModal({ account, onClose }: { account: Account; onClose: () => void }) {
+  const { t } = useI18n();
+  const [token, setToken] = useState<string | null>(null);
+  const [connected, setConnected] = useState(!!account.pushConnected);
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function issue() {
+    if (connected && !confirm(t("acc.push.reissueConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/accounts/${account.id}/push-token`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) setError(data.error ?? t("settings.saveError"));
+      else {
+        setToken(data.token);
+        setConnected(true);
+        setCopied(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function revoke() {
+    if (!confirm(t("acc.push.revokeConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/accounts/${account.id}/push-token`, { method: "DELETE" });
+      if (!res.ok) setError((await res.json()).error ?? t("settings.saveError"));
+      else {
+        setToken(null);
+        setConnected(false);
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function copy() {
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div className="card w-full max-w-md p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">{t("acc.push.title")}</h2>
+          <button onClick={onClose} className="text-faint hover:text-fg" aria-label={t("acc.push.done")}>
+            <X size={18} />
+          </button>
+        </div>
+        <p className="text-sm text-muted mb-1">{account.label}</p>
+        <p className="text-sm text-muted mb-3">{t("acc.push.hint")}</p>
+        <Link
+          href="/dashboard/advisor"
+          className="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25"
+        >
+          <Download size={16} />
+          <span className="flex-1">{t("acc.push.download")}</span>
+          <ChevronRight size={16} />
+        </Link>
+
+        {token ? (
+          <>
+            <div className="flex gap-2">
+              <input readOnly value={token} className="input-base flex-1 font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+              <button onClick={copy} className="px-3 rounded-lg input-base hover:border-border-strong" aria-label={t("acc.push.copy")}>
+                {copied ? <Check size={16} className="text-profit" /> : <Copy size={16} />}
+              </button>
+            </div>
+            <p className="text-xs text-warn mt-2">{t("acc.push.once")}</p>
+          </>
+        ) : (
+          <p className="text-sm mb-1">
+            {connected
+              ? account.lastPushAt
+                ? t("acc.push.connectedAt", { date: fmtDate(account.lastPushAt) })
+                : t("acc.push.connected")
+              : t("acc.push.notConnected")}
+          </p>
+        )}
+
+        <ol className="text-xs text-faint mt-4 space-y-1 list-decimal pl-4">
+          <li>{t("acc.push.step1")}</li>
+          <li>{t("acc.push.step2")}</li>
+          <li>{t("acc.push.step3")}</li>
+        </ol>
+
+        {error && <p className="text-sm text-loss mt-3">{error}</p>}
+
+        <div className="flex items-center justify-between mt-5">
+          {connected ? (
+            <button onClick={revoke} disabled={busy} className="text-sm text-loss hover:underline disabled:opacity-50">
+              {t("acc.push.revoke")}
+            </button>
+          ) : <span />}
+          <div className="flex gap-2">
+            {!token && (
+              <button
+                onClick={issue}
+                disabled={busy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent/15 text-accent text-sm hover:bg-accent/25 disabled:opacity-50"
+              >
+                <KeyRound size={14} />
+                {connected ? t("acc.push.reissue") : t("acc.push.issue")}
+              </button>
+            )}
+            <button onClick={onClose} className="px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong">
+              {t("acc.push.done")}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

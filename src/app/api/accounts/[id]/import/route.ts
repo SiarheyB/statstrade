@@ -5,10 +5,9 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
-import { diffImport } from "@/lib/mt/reimport";
+import { applyImport } from "@/lib/mt/applyImport";
 import type { MtFormat } from "@/lib/mt/types";
 import { logger } from "@/lib/logger";
-import { recomputeRRForAccount } from "@/lib/analytics/rr";
 
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MB
 
@@ -154,68 +153,20 @@ export async function POST(
   }
 
   // ----------  ЗАПИСЬ В БАЗУ ----------
+  // Общий путь с выгрузкой из советника (lib/mt/applyImport.ts).
   try {
-    // Знакомые тикеты не пропускаем, а сравниваем с тем, что уже в базе:
-    // MT5 при частичном закрытии отдаёт ТУ ЖЕ позицию с пересчитанными
-    // объёмом, ценой выхода и профитом (см. lib/mt/reimport.ts). Прежний
-    // createMany({ skipDuplicates: true }) такую строку молча пропускал, и
-    // сделка навсегда оставалась закрытой наполовину.
-    const existing = await prisma.importedTrade.findMany({
-      where: { accountId: account.id, externalId: { in: rows.map((r) => r.externalId) } },
-      select: {
-        id: true, externalId: true, symbol: true, side: true, lots: true, qty: true,
-        contractSize: true, entryTime: true, exitTime: true, entryPrice: true,
-        exitPrice: true, stopLoss: true, takeProfit: true, commission: true, swap: true,
-        grossProfit: true, netPnl: true, pips: true, comment: true,
-      },
-    });
-    const diff = diffImport(rows, existing);
-
-    const res = await prisma.importedTrade.createMany({ data: diff.create, skipDuplicates: true });
-    // По одной: значения у каждой строки свои, одним запросом их не обновить.
-    // Дозакрытых позиций в отчёте единицы — это не горячий путь.
-    //
-    // importBatch НЕ трогаем намеренно: откат последней загрузки удаляет
-    // партию целиком, и перевесив обновлённую строку на новый батч, мы бы
-    // откатом СТЁРЛИ сделку, существовавшую до этой загрузки.
-    for (const u of diff.update) {
-      await prisma.importedTrade.update({ where: { id: u.id }, data: u.data });
-    }
-    logger.info("import", account.id, "diff", {
-      created: diff.create.length,
-      updated: diff.update.length,
-      unchanged: diff.unchanged,
-      // Видно, ПОЧЕМУ строка переписалась: дозакрыли объём или брокер поправил
-      // своп задним числом — это разные истории.
-      changes: diff.update.slice(0, 20).map((u) => ({ ticket: u.externalId, fields: u.changed })),
-    });
-
-    await prisma.exchangeAccount.update({
-      where: { id: account.id },
-      data: {
-        lastSyncAt: new Date(),
-        ...(deposit != null && deposit > 0
-          ? { balance: deposit, balanceAt: new Date(), capital: deposit }
-          : {}),
-      },
-    });
-    // Новые ImportedTrade ещё без rr (колонка nullable) — считаем сразу,
-    // иначе Сделки/Календарь показывали бы пусто до первой правки stopLoss.
-    await recomputeRRForAccount(account.id).catch(() => {});
-    bumpStatsVersion(user.userId);
+    const result = await applyImport({ account, userId: user.userId, trades, balance });
     logger.info("import", account.id, "DB upsert SUCCESS", {
-      imported: res.count,
-      updated: diff.update.length,
-      skipped: diff.unchanged,
-      batch,
-      netTotal: rows.reduce((s, r) => s + r.netPnl, 0)
+      imported: result.imported,
+      updated: result.updated,
+      skipped: result.skipped,
+      batch: result.batch,
+      netTotal: result.netTotal,
     });
     return NextResponse.json({
-      imported: res.count,
-      // Дозакрытые позиции: сделка была, но брокер пересчитал её итог.
-      updated: diff.update.length,
-      // Теперь это честное «пришло то же самое», а не «знакомый тикет».
-      skipped: diff.unchanged,
+      imported: result.imported,
+      updated: result.updated,
+      skipped: result.skipped,
       parsed: rows.length,
       symbols,
       dateRange,
