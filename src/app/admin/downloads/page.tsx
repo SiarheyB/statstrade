@@ -74,8 +74,6 @@ export default async function AdminDownloadsPage({ searchParams }: { searchParam
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.advisor.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("admin.advisor.subtitle")}</p>
 
-      {group === "advisor" && <AdvisorUpload currentLabel={current?.label ?? BUNDLED_LABEL} uploaded={!!current} />}
-
       {/* Вкладка на каждую программу: не сваливаем всё на одну страницу. */}
       <div className="mt-6 flex gap-1 border-b border-border">
         {(["advisor", "perimetr"] as const).map((g) => (
@@ -90,6 +88,8 @@ export default async function AdminDownloadsPage({ searchParams }: { searchParam
           </Link>
         ))}
       </div>
+
+      {group === "advisor" && <AdvisorUpload currentLabel={current?.label ?? BUNDLED_LABEL} uploaded={!!current} />}
 
       <div className="mt-6 flex flex-wrap items-center gap-2">
         {group === "perimetr" && (
