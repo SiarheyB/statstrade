@@ -4,7 +4,7 @@
 // требуемой маржи (раздел 4.2) и проверка "хватает ли баланса" — edge case
 // раздела 26 (заявка больше доступного баланса отклоняется, ордер не
 // создаётся). Плечо ограничено maxLeverage активного стиля (раздел 5).
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n/provider";
 import { fmtUsd } from "@/lib/format";
 import { useGameStore } from "@/store/gameStore";
@@ -50,6 +50,18 @@ export default function OrderTicket({
   const [takeProfit, setTakeProfit] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [flash, setFlash] = useState<PositionSide | null>(null);
+  // Подсветку кнопки гасит таймер, и его надо снимать при размонтировании:
+  // иначе он срабатывает у уже снятой формы и setState зовётся в пустоту.
+  // В тестах это роняло весь прогон — «window is not defined» прилетало из
+  // React уже ПОСЛЕ сноса jsdom-окружения, в виде нерегулярной ошибки,
+  // приписанной чужим файлам.
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
   const now = useMarketClock();
 
   // Плечо активного стиля могло уменьшиться при переключении стиля —
@@ -143,7 +155,8 @@ export default function OrderTicket({
       return;
     }
     setFlash(side);
-    setTimeout(() => setFlash(null), 700);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlash(null), 700);
   }
 
   const longLiqPrice =
