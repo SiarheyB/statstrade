@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import type { LucideIcon } from "lucide-react";
-import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3, Gamepad2, Flame } from "lucide-react";
+import { ShieldCheck, LayoutDashboard, Layers, Users, Plug, Coins, Newspaper, Database, ScrollText, ArrowLeft, Menu, X, Headset, HeartHandshake, SlidersHorizontal, ChevronDown, ChevronRight, FileText, PanelLeftClose, PanelLeftOpen, Megaphone, TrendingUp, Sparkles, BarChart3, Gamepad2, Flame, Download } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { useSidebar } from "@/lib/sidebar/provider";
@@ -49,6 +49,7 @@ const LINKS: NavItem[] = [
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
 
   // Эксплуатация и мониторинг — смотрят реже остального.
+  { href: "/admin/advisor", key: "admin.nav.advisor", icon: Download },
   { href: "/admin/traffic", key: "admin.nav.traffic", icon: BarChart3 },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },
