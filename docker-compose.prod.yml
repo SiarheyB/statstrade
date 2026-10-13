@@ -146,6 +146,10 @@ services:
       # вместе с ним — экспорт «в никуда». Плюс так дамп можно забрать с
       # сервера обычным scp.
       - ./backup/tmp:/app/backup/tmp
+      # Установщики «Периметра» — только чтение: приложение само выбирает
+      # самую свежую версию по имени файла (lib/perimetrFiles.ts), симлинки
+      # Perimetr-latest-* больше не нужны. Нужен ровно этот путь, как у edge.
+      - /srv/perimetr:/srv/perimetr:ro
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     # Встроенный DNS Docker (127.0.0.11) проксирует запросы на апстримы,
