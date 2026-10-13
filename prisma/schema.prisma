@@ -2087,26 +2087,30 @@ model UserNotification {
   @@map("UserNotification")
 }
 
-// Журнал скачиваний советника MT5 (/api/advisor/download). Одна строка на каждую
-// отданную копию файла. IP не хранится (как и в PageView): только страна из
-// заголовков CDN, устройство/браузер/ОС из User-Agent. email — снимок на момент
-// скачивания, чтобы запись не терялась после удаления пользователя.
-model AdvisorDownload {
-  id        String   @id @default(cuid())
-  ts        DateTime @default(now())
-  userId    String?
-  email     String
-  version   String? // mtime файла (ISO) — какая сборка ушла
-  bytes     Int
-  device    String   @default("unknown")
-  browser   String?
-  os        String?
-  country   String?
-  lang      String?
-  referrer  String? // путь страницы, с которой кликнули (из Referer)
-  isRepeat  Boolean  @default(false) // пользователь скачивал и раньше
+// Журнал скачиваний программ: советник MT5 и «Периметр» (Windows / macOS /
+// Android). Одна строка на каждое скачивание. IP не хранится (как и в
+// PageView): только страна из заголовков CDN, устройство/браузер/ОС из
+// User-Agent. email — снимок на момент скачивания, чтобы запись не терялась
+// после удаления пользователя; у «Периметра» ссылки открыты и без входа, там
+// userId/email пустые.
+model AppDownload {
+  id       String   @id @default(cuid())
+  ts       DateTime @default(now())
+  product  String   @default("advisor") // advisor | perimetr-windows | perimetr-macos | perimetr-android
+  userId   String?
+  email    String?
+  version  String? // номер версии (у советника — как ввёл админ)
+  bytes    Int? // размер файла, если приложение его отдаёт само
+  device   String   @default("unknown")
+  browser  String?
+  os       String?
+  country  String?
+  lang     String?
+  referrer String? // путь страницы, с которой кликнули (из Referer)
+  isRepeat Boolean  @default(false) // этот человек скачивал эту программу и раньше
 
   @@index([ts])
+  @@index([product, ts])
   @@index([userId, ts])
 }
 

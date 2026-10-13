@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Download, Users, Repeat, CalendarDays } from "lucide-react";
 import { prisma } from "@/lib/db";
 import { BUNDLED_LABEL } from "@/lib/advisorFile";
+import { productsOf, PRODUCTS, type Product } from "@/lib/downloads";
 import AdvisorUpload from "@/components/admin/AdvisorUpload";
 import { getServerT, getTimezone } from "@/lib/i18n/server";
 import { offsetMinutes } from "@/lib/timezone";
@@ -14,10 +15,15 @@ const LIST_LIMIT = 200;
 
 type Search = { [k: string]: string | string[] | undefined };
 
-export default async function AdminAdvisorPage({ searchParams }: { searchParams: Promise<Search> }) {
+export default async function AdminDownloadsPage({ searchParams }: { searchParams: Promise<Search> }) {
   const { t } = await getServerT();
   const sp = await searchParams;
   const raw = Array.isArray(sp.p) ? sp.p[0] : sp.p;
+  const str = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const group: "advisor" | "perimetr" = str(sp.t) === "perimetr" ? "perimetr" : "advisor";
+  const groupProducts = productsOf(group);
+  const platform = groupProducts.find((p) => p === str(sp.pl)) as Product | undefined;
+  const wanted = platform ? [platform] : groupProducts;
   const period: PeriodKey = raw && raw in PERIODS ? (raw as PeriodKey) : "30d";
 
   const tzOffsetMin = offsetMinutes(await getTimezone()) ?? 0;
@@ -26,14 +32,15 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
   const nowMs = Date.now();
   const since = PERIODS[period] ? new Date(nowMs - PERIODS[period] * 86400_000) : undefined;
 
-  const current = await prisma.advisorFile.findUnique({ where: { id: "current" }, select: { label: true } });
-  const rows = await prisma.advisorDownload.findMany({
-    where: since ? { ts: { gte: since } } : undefined,
+  const current = group !== "advisor" ? null : await prisma.advisorFile.findUnique({ where: { id: "current" }, select: { label: true } });
+  const rows = await prisma.appDownload.findMany({
+    where: { product: { in: wanted }, ...(since ? { ts: { gte: since } } : {}) },
     orderBy: { ts: "desc" },
     take: 5000,
   });
 
-  const users = new Set(rows.map((r) => r.userId ?? r.email));
+  // Анонимные скачивания «Периметра» в уникальных не считаем: опознать нечем.
+  const users = new Set(rows.flatMap((r) => (r.userId ?? r.email ? [r.userId ?? r.email] : [])));
   const repeats = rows.filter((r) => r.isRepeat).length;
   const dayKey = (d: Date) => new Date(d.getTime() + tzOffsetMin * 60_000).toISOString().slice(0, 10);
   const today = dayKey(new Date(nowMs));
@@ -56,6 +63,8 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
     series.push({ day, n: rows.filter((r) => dayKey(r.ts) === day).length });
   }
   const maxN = Math.max(1, ...series.map((s) => s.n));
+  const q = (over: { p?: string; t?: string; pl?: string }) =>
+    `/admin/downloads?t=${over.t ?? group}&p=${over.p ?? period}${(over.pl ?? (over.t ? "" : platform)) ? `&pl=${over.pl ?? platform}` : ""}`;
   const time = (d: Date) =>
     new Date(d.getTime() + tzOffsetMin * 60_000).toISOString().slice(0, 16).replace("T", " ");
   const kb = (b: number) => `${Math.round(b / 1024)} KB`;
@@ -65,13 +74,44 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.advisor.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("admin.advisor.subtitle")}</p>
 
-      <AdvisorUpload currentLabel={current?.label ?? BUNDLED_LABEL} uploaded={!!current} />
+      {group === "advisor" && <AdvisorUpload currentLabel={current?.label ?? BUNDLED_LABEL} uploaded={!!current} />}
 
-      <div className="mt-6 flex flex-wrap gap-2">
+      {/* Вкладка на каждую программу: не сваливаем всё на одну страницу. */}
+      <div className="mt-6 flex gap-1 border-b border-border">
+        {(["advisor", "perimetr"] as const).map((g) => (
+          <Link
+            key={g}
+            href={q({ t: g })}
+            className={`px-4 py-2 text-sm -mb-px border-b-2 transition ${
+              g === group ? "border-accent text-accent font-medium" : "border-transparent text-muted hover:text-fg"
+            }`}
+          >
+            {t(`admin.downloads.tab.${g}`)}
+          </Link>
+        ))}
+      </div>
+
+      <div className="mt-6 flex flex-wrap items-center gap-2">
+        {group === "perimetr" && (
+          <>
+            {[undefined, ...groupProducts].map((p) => (
+              <Link
+                key={p ?? "all"}
+                href={q({ pl: p ?? "" })}
+                className={`px-3 py-1.5 rounded-lg text-sm transition ${
+                  p === platform ? "bg-accent/15 text-accent" : "text-muted hover:text-fg hover:bg-surface-2"
+                }`}
+              >
+                {p ? PRODUCTS[p].label : t("admin.downloads.allPlatforms")}
+              </Link>
+            ))}
+            <span className="w-px h-5 bg-border mx-1" />
+          </>
+        )}
         {(Object.keys(PERIODS) as PeriodKey[]).map((p) => (
           <Link
             key={p}
-            href={`/admin/advisor?p=${p}`}
+            href={q({ p })}
             className={`px-3 py-1.5 rounded-lg text-sm transition ${
               p === period ? "bg-accent/15 text-accent" : "text-muted hover:text-fg hover:bg-surface-2"
             }`}
@@ -127,17 +167,18 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
                   {r.userId ? (
                     <Link href={`/admin/users/${r.userId}`} className="hover:text-accent">{r.email}</Link>
                   ) : (
-                    r.email
+                    r.email ?? <span className="text-muted">{t("admin.downloads.guest")}</span>
                   )}
                   {r.isRepeat && <span className="ml-2 text-xs text-muted">{t("admin.advisor.again")}</span>}
                 </td>
                 <td className="p-3 text-muted">
+                  {group === "perimetr" && PRODUCTS[r.product as Product] ? `${PRODUCTS[r.product as Product].label} · ` : ""}
                   {[r.device, r.os, r.browser].filter(Boolean).join(" · ")}
                   {r.country ? ` · ${r.country}` : ""}
                 </td>
                 <td className="p-3 text-muted">{r.referrer ?? "—"}</td>
                 <td className="p-3 text-muted whitespace-nowrap">
-                  {kb(r.bytes)}
+                  {r.bytes != null ? kb(r.bytes) : "—"}
                   {r.version ? ` · v${/^\d{4}-/.test(r.version) ? time(new Date(r.version)) : r.version}` : ""}
                 </td>
               </tr>

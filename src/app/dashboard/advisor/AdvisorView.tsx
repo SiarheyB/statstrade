@@ -20,7 +20,7 @@ import { useI18n } from "@/lib/i18n/provider";
 // Файл лежит в downloads/ в корне репозитория (НЕ в public: скачивать можно
 // только зарегистрированным, см. /api/advisor/download) и обновляется вручную:
 // после правок советника (репозиторий SiarheyB/mt5_experts) — перекомпилировать
-// в MetaEditor и загрузить TradeGridPanel.ex5 в /admin/advisor (там же номер версии).
+// в MetaEditor и загрузить TradeGridPanel.ex5 в /admin/downloads (там же номер версии).
 const ADVISOR_FILE = "/api/advisor/download";
 
 // Скриншоты из public/advisor. wide — весь график терминала, на всю ширину.

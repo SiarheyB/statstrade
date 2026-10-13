@@ -49,7 +49,7 @@ const LINKS: NavItem[] = [
   { href: "/admin/donate", key: "admin.nav.donate", icon: HeartHandshake },
 
   // Эксплуатация и мониторинг — смотрят реже остального.
-  { href: "/admin/advisor", key: "admin.nav.advisor", icon: Download },
+  { href: "/admin/downloads", key: "admin.nav.downloads", icon: Download },
   { href: "/admin/traffic", key: "admin.nav.traffic", icon: BarChart3 },
   { href: "/admin/logs", key: "admin.nav.logs", icon: FileText },
   { href: "/admin/audit", key: "admin.nav.audit", icon: ScrollText },

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download } from "lucide-react";
+import { TrendingUp, TrendingDown, ChevronDown, ChevronUp, Download, Smartphone } from "lucide-react";
 import clsx from "clsx";
 import { useI18n } from "@/lib/i18n/provider";
 import { levelTypeLabel, signalLabel, directionLabel } from "@/lib/recommendations/labels";
@@ -1114,7 +1114,7 @@ export default function RecommendationsView() {
         </p>
       </div>
 
-      {/* Ссылки ведут на редирект nginx (/perimetr/download/…), а не на файл
+      {/* Ссылки ведут на редирект nginx (/api/perimetr/download/…, он считает скачивание), а не на файл
           напрямую: имя установщика меняется с каждым релизом «Периметра», а
           сам редирект на хосте всегда указывает на актуальную версию (см.
           deploy/nginx/nginx.conf). */}
@@ -1125,16 +1125,22 @@ export default function RecommendationsView() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <a
-            href="/perimetr/download/windows"
+            href="/api/perimetr/download/windows"
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 text-accent px-3 py-1.5 text-sm font-medium hover:bg-accent/25 transition"
           >
             <Download size={14} /> Windows
           </a>
           <a
-            href="/perimetr/download/mac"
+            href="/api/perimetr/download/mac"
             className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 text-accent px-3 py-1.5 text-sm font-medium hover:bg-accent/25 transition"
           >
             <AppleLogo size={14} /> macOS
+          </a>
+          <a
+            href="/api/perimetr/download/android"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-accent/15 text-accent px-3 py-1.5 text-sm font-medium hover:bg-accent/25 transition"
+          >
+            <Smartphone size={14} /> Android
           </a>
         </div>
       </div>
