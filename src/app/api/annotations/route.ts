@@ -12,6 +12,10 @@ const schema = z.object({
   mistake: z.string().max(60).nullable().optional(),
   pattern: z.string().max(60).nullable().optional(),
   stopLoss: z.number().positive().nullable().optional(),
+  // Ручной риск сделки: деньги и/или процент от капитала. Ноль и минус
+  // смысла не имеют, поэтому только положительные (как у стопа).
+  riskAmount: z.number().positive().max(1e12).nullable().optional(),
+  riskPct: z.number().positive().max(100).nullable().optional(),
   note: z.string().max(2000).nullable().optional(),
 });
 
@@ -37,10 +41,12 @@ export async function PUT(req: Request) {
   const mistake = parsed.data.mistake?.trim() || null;
   const pattern = parsed.data.pattern?.trim() || null;
   const stopLoss = parsed.data.stopLoss ?? null;
+  const riskAmount = parsed.data.riskAmount ?? null;
+  const riskPct = parsed.data.riskPct ?? null;
   const note = parsed.data.note?.trim() || null;
   const { tradeKey } = parsed.data;
 
-  const data = { entryPoint, entryType, mistake, pattern, stopLoss, note };
+  const data = { entryPoint, entryType, mistake, pattern, stopLoss, riskAmount, riskPct, note };
 
   // tradeKey принимался любой. Сама аннотация создаётся в строке автора и
   // чужие цифры не искажает (recomputeRRForTradeKey читает аннотацию ВЛАДЕЛЬЦА
@@ -68,9 +74,13 @@ export async function PUT(req: Request) {
       create: { userId: user.userId, tradeKey, ...data },
       update: data,
     });
-    // stopLoss — единственное поле аннотации, влияющее на RR; остальные
+    // На RR влияют только стоп и ручной риск сделки; остальные поля
     // (ТВХ, паттерн и т.п.) его не трогают, пересчёт им не нужен.
-    if (parsed.data.stopLoss !== undefined) {
+    if (
+      parsed.data.stopLoss !== undefined ||
+      parsed.data.riskAmount !== undefined ||
+      parsed.data.riskPct !== undefined
+    ) {
       await recomputeRRForTradeKey(tradeKey).catch(() => {});
     }
     bumpStatsVersion(user.userId);
@@ -81,6 +91,8 @@ export async function PUT(req: Request) {
       mistake: result.mistake,
       pattern: result.pattern,
       stopLoss: result.stopLoss,
+      riskAmount: result.riskAmount,
+      riskPct: result.riskPct,
       note: result.note,
     });
   } catch (err) {

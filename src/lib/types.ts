@@ -28,6 +28,10 @@ export type SerializedTrade = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  // Ручной риск сделки (деньги / % от капитала). Задан — R считается от
+  // него, см. manualRiskAmount() в lib/risk.ts.
+  riskAmount: number | null;
+  riskPct: number | null;
   // R-multiple посчитан один раз на сервере (см. /api/stats) — учитывает
   // риск-профиль аккаунта, если он включён; иначе по дистанции стопа.
   rr: number | null;

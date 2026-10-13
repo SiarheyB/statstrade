@@ -100,6 +100,23 @@ export function riskPerTradeAmount(
   return (balance * r.value) / 100;
 }
 
+// Требуется ли комментарий «почему» при переходе с риска prev на next.
+//
+// Спрашиваем ровно про то, что человек решает сам: УВЕЛИЧЕНИЕ или УМЕНЬШЕНИЕ
+// риска. Поэтому сравниваются НАСТРОЙКИ (процент/сумма), а не 1R в деньгах:
+// 1R считается от капитала и переезжает сам при каждом движении баланса — лови
+// мы его, приложение требовало бы объяснений за правку, которой не было.
+//
+// Первая настройка риска (его не было) и выключение комментария не требуют:
+// это не «поменял риск», а «завёл» и «отключил». Смена единицы (% ↔ $) —
+// требует: 1R от неё меняется так же, как от величины.
+export function riskChangeNeedsComment(prev: PeriodLimit, next: PeriodLimit): boolean {
+  const prevOn = prev.on && prev.value > 0;
+  const nextOn = next.on && next.value > 0;
+  if (!prevOn || !nextOn) return false;
+  return prev.value !== next.value || prev.unit !== next.unit;
+}
+
 // --- R-multiple (RR) — shared by /dashboard/trades and /dashboard/calendar
 // so both show the same number for the same trade. ---
 
@@ -146,6 +163,102 @@ export function stopDistanceRR(tr: RRTradeInput, stopLoss: number | null): numbe
   return grossR - feeR;
 }
 
+// Ручной риск сделки — 1R для ЭТОЙ сделки, заданный руками в её карточке.
+//
+// Полей два, и они НЕ пересчитываются друг из друга, потому что отвечают на
+// разные вопросы:
+//   riskPct    — ПЛАН: сколько процентов капитала трейдер готов был потерять.
+//                Он и есть 1R: план не зависит от того, как лёг набор объёма.
+//   riskAmount — ФАКТ: сколько денег реально заложено в стоп по набранному
+//                объёму. Почти всегда чуть меньше плана (объём набирается
+//                лотами, точно в 1% не попасть), и именно поэтому стоп даёт
+//                не ровно −1R, а, скажем, −0.97R; комиссия и своп добавляют
+//                сверху и доводят до −1.03R. Считать по нему 1R значило бы
+//                объявлять любой недобор объёма «ровно одним риском» и терять
+//                как раз то отклонение, ради которого поле и заведено.
+//
+// Поэтому знаменатель R — план, а факт в формулу не входит вовсе: числитель
+// (netPnl от брокера) уже содержит и недобор объёма, и комиссию, и своп.
+// Факт нужен, чтобы ПОКАЗАТЬ отклонение (см. plannedVsActual в карточке).
+//
+// Фактическая сумма берётся знаменателем ровно в одном случае — когда плана
+// нет (процент не введён или баланс счёта неизвестен, и развернуть процент в
+// деньги не во что). Тогда это единственное число про риск, что у нас есть.
+export function manualRiskAmount(
+  riskAmount: number | null | undefined,
+  riskPct: number | null | undefined,
+  balance: number | null,
+): number | null {
+  if (riskPct != null && riskPct > 0 && balance != null && balance > 0) {
+    return (balance * riskPct) / 100;
+  }
+  if (riskAmount != null && riskAmount > 0) return riskAmount;
+  return null;
+}
+
+// Плановый 1R в деньгах — сколько ДОЛЖНО было быть заложено в стоп по проценту
+// от капитала. Отдельно от manualRiskAmount: тому важно отдать хоть какое-то
+// число для R, а здесь нужен именно план, и его отсутствие — значимый ответ
+// (сравнивать факт не с чем).
+export function plannedRiskAmount(
+  riskPct: number | null | undefined,
+  balance: number | null,
+): number | null {
+  if (riskPct == null || riskPct <= 0) return null;
+  if (balance == null || balance <= 0) return null;
+  return (balance * riskPct) / 100;
+}
+
+// Фактически заложенные в стоп деньги, посчитанные из самой сделки — чтобы
+// руками вводить только план (процент), а факт подставлялся сам.
+//
+// Напрашивается считать его из лотов: |вход − стоп| × лоты × размер контракта.
+// Но это даёт деньги в ВАЛЮТЕ КОТИРОВКИ, а счёт ведётся в своей (USDCHF на
+// долларовом счёте — франки), и пришлось бы тащить курс на момент закрытия,
+// которого у нас нет. Курс, однако, уже зашит в саму сделку: брокер посчитал
+// gross P&L в валюте счёта за известное движение цены. Отсюда
+//
+//   риск = |вход − стоп| × объём × курс,  |gross| = |выход − вход| × объём × курс
+//   ⇒ риск = |gross| × |вход − стоп| / |выход − вход|
+//
+// — ни объёма, ни размера контракта, ни курса. Работает одинаково для форекса
+// и крипты, а у объединённой сетки средние взвешены по лотам, так что и там
+// пропорция верна.
+//
+// Оценка остаётся ОЦЕНКОЙ: стоп в отчёте MT4/MT5 — это S/L НА МОМЕНТ ЗАКРЫТИЯ,
+// и если его подтянули в безубыток, посчитанный «факт» будет неправдой. Лечится
+// тем же способом, что и RR по стопу: вписать в «Стоп» тот, с которым входили,
+// либо вписать сумму руками — ручной ввод всегда главнее расчёта.
+//
+// Движения цены нет (выход ровно по входу) или брокер отдал нулевой gross —
+// пропорцию строить не из чего, и это честный null, а не ноль.
+export function impliedStopRisk(tr: {
+  entryPrice: number;
+  exitPrice: number;
+  grossPnl: number;
+  stopLoss: number | null;
+}): number | null {
+  if (tr.stopLoss == null) return null;
+  const stopDist = Math.abs(tr.entryPrice - tr.stopLoss);
+  const moved = Math.abs(tr.exitPrice - tr.entryPrice);
+  if (stopDist <= 0 || moved <= 0) return null;
+  const risk = (Math.abs(tr.grossPnl) * stopDist) / moved;
+  return Number.isFinite(risk) && risk > 0 ? risk : null;
+}
+
+// Каким был бы R, если бы сделка закрылась по стопу: фактически заложенная
+// сумма плюс комиссия и своп, делённые на плановый 1R. Это та самая оценка
+// «−1.03R вместо −1R», которую не видно до закрытия сделки. Своп складывается,
+// а не вычитается: у брокера он уже со знаком (netPnl = gross + swap − комиссия).
+export function stopRMultiple(
+  args: { riskAmount: number | null; plannedR: number | null; fees: number; swap: number },
+): number | null {
+  const { riskAmount, plannedR, fees, swap } = args;
+  if (riskAmount == null || riskAmount <= 0) return null;
+  if (plannedR == null || plannedR <= 0) return null;
+  return (-riskAmount + swap - fees) / plannedR;
+}
+
 // R-multiple for a trade: if the risk manager is enabled for this account with
 // a configured per-trade risk, R = netPnl / (that money amount) — otherwise
 // falls back to the stop-loss-distance model above.
@@ -160,7 +273,13 @@ export function tradeRR(
   riskProfiles: Record<string, RiskProfileData>,
   balance: number | null,
   riskAmountOverride?: number | null,
+  manualRisk?: number | null,
 ): number | null {
+  // Ручной риск сделки важнее всего остального: человек прямо сказал, каким
+  // был 1R в ЭТОЙ сделке, и спорить с ним ни профилю (там риск один на весь
+  // счёт), ни стопу из отчёта брокера (который к закрытию мог быть подтянут
+  // в безубыток) не с чем.
+  if (manualRisk != null && manualRisk > 0) return tr.netPnl / manualRisk;
   if (riskAmountOverride !== undefined) {
     if (riskAmountOverride && riskAmountOverride > 0) return tr.netPnl / riskAmountOverride;
     return stopDistanceRR(tr, stopLoss);

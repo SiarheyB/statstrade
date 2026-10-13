@@ -147,4 +147,82 @@ describe("RiskManager", () => {
     fireEvent.click(saveBtn);
     await waitFor(() => expect(screen.getByText("common.save")).toBeInTheDocument());
   });
+
+  // --- Комментарий к изменению риска (журнал решений) ---
+
+  const withRisk = (value: number) => ({
+    "": {
+      enabled: true,
+      maxStopsPerDay: 3,
+      riskPerTrade: { on: true, value, unit: "pct" },
+      lossLimits: {
+        day: { on: false, value: 0, unit: "pct" },
+        week: { on: false, value: 0, unit: "pct" },
+        month: { on: false, value: 0, unit: "pct" },
+        year: { on: false, value: 0, unit: "pct" },
+      },
+    },
+  });
+
+  // Поле величины риска — текстовое, со значением профиля.
+  const riskField = (v: string) => screen.getByDisplayValue(v) as HTMLInputElement;
+
+  it("правка риска требует комментария и блокирует сохранение", async () => {
+    setupFetch(withRisk(0.5));
+    render(<RiskManager />);
+    await waitFor(() => expect(screen.queryByText("common.loading")).not.toBeInTheDocument());
+    expect(screen.queryByText("risk.comment.label")).not.toBeInTheDocument();
+
+    fireEvent.change(riskField("0.5"), { target: { value: "1" } });
+
+    expect(screen.getByText("risk.change.badge")).toBeInTheDocument();
+    expect(screen.getByText("risk.comment.label")).toBeInTheDocument();
+    expect(screen.getByText("risk.comment.required")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("common.save"));
+    const put = mockFetch.mock.calls.find(
+      (c: any[]) => c[0] === "/api/risk/settings" && c[1]?.method === "PUT",
+    );
+    expect(put).toBeFalsy();
+  });
+
+  it("с комментарием сохраняет и отправляет его на сервер", async () => {
+    setupFetch(withRisk(0.5));
+    render(<RiskManager />);
+    await waitFor(() => expect(screen.queryByText("common.loading")).not.toBeInTheDocument());
+    fireEvent.change(riskField("0.5"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/risk.comment.label/), {
+      target: { value: "40 сделок по системе, повышаю риск по плану" },
+    });
+
+    fireEvent.click(screen.getByText("common.save"));
+    await waitFor(() => expect(screen.getByText("common.saved")).toBeInTheDocument());
+    const put = mockFetch.mock.calls.find(
+      (c: any[]) => c[0] === "/api/risk/settings" && c[1]?.method === "PUT",
+    );
+    expect(JSON.parse(put![1].body).comment).toContain("40 сделок");
+  });
+
+  it("после сохранения блок исчезает — настройки стали новой точкой отсчёта", async () => {
+    setupFetch(withRisk(0.5));
+    render(<RiskManager />);
+    await waitFor(() => expect(screen.queryByText("common.loading")).not.toBeInTheDocument());
+    fireEvent.change(riskField("0.5"), { target: { value: "1" } });
+    fireEvent.change(screen.getByLabelText(/risk.comment.label/), { target: { value: "причина" } });
+    fireEvent.click(screen.getByText("common.save"));
+    await waitFor(() => expect(screen.queryByText("risk.comment.label")).not.toBeInTheDocument());
+  });
+
+  it("правка лимита убытка комментария не требует", async () => {
+    setupFetch(withRisk(1));
+    render(<RiskManager />);
+    await waitFor(() => expect(screen.queryByText("common.loading")).not.toBeInTheDocument());
+    // Включаем дневной лимит — риск не трогаем.
+    const dayRow = screen.getByText("risk.period.day").closest("div")!;
+    fireEvent.click(dayRow.querySelector('input[type="checkbox"]')!);
+    expect(screen.queryByText("risk.comment.label")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("common.save"));
+    await waitFor(() => expect(screen.getByText("common.saved")).toBeInTheDocument());
+  });
 });
+

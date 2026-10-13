@@ -3,7 +3,15 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight, Layers, Unlink } from "lucide-react";
 import type { SerializedTrade, AccountSummary } from "@/lib/types";
-import { tradeRR, riskPerTradeAmount, type RiskProfileData } from "@/lib/risk";
+import {
+  tradeRR,
+  riskPerTradeAmount,
+  manualRiskAmount,
+  plannedRiskAmount,
+  stopRMultiple,
+  impliedStopRisk,
+  type RiskProfileData,
+} from "@/lib/risk";
 import { Term } from "@/components/Term";
 import { TradeChart } from "@/components/charts.lazy";
 import TradeImageCell from "@/components/TradeImageCell";
@@ -29,6 +37,8 @@ type Ann = {
   mistake: string | null;
   pattern: string | null;
   stopLoss: number | null;
+  riskAmount: number | null;
+  riskPct: number | null;
   note: string | null;
 };
 const PAGE_SIZE = 25;
@@ -71,6 +81,8 @@ export default function TradesPage() {
     entryPointOptions: [], entryTypeOptions: [], mistakeOptions: [], patternOptions: [],
   });
   const [ann, setAnn] = useState<Record<string, Ann>>({});
+  // Зеркало ann для отложенных сохранений — см. saveAnn.
+  const annRef = useRef<Record<string, Ann>>({});
   const [images, setImages] = useState<Record<string, { url: string | null; provider: string | null; publicUrl: string | null }>>({});
   const [cloudConnected, setCloudConnected] = useState(false);
   const [previewTradeId, setPreviewTradeId] = useState<string | null>(null);
@@ -189,6 +201,8 @@ export default function TradesPage() {
             mistake: tr.mistake,
             pattern: tr.pattern,
             stopLoss: tr.stopLoss,
+            riskAmount: tr.riskAmount,
+            riskPct: tr.riskPct,
             note: tr.note,
           };
         }
@@ -257,6 +271,10 @@ export default function TradesPage() {
     })();
   }, []);
 
+  useEffect(() => {
+    annRef.current = ann;
+  }, [ann]);
+
   const epOptions = options.entryPointOptions;
   const etOptions = options.entryTypeOptions;
   const mtOptions = options.mistakeOptions;
@@ -270,12 +288,22 @@ export default function TradesPage() {
         mistake: tr.mistake,
         pattern: tr.pattern,
         stopLoss: tr.stopLoss,
+        riskAmount: tr.riskAmount,
+        riskPct: tr.riskPct,
         note: tr.note,
       }
     );
   }
 
-  async function saveAnn(tradeKey: string, next: Ann) {
+  // Сохранение аннотации берёт ПАТЧ, а не готовый объект: поля сохраняются с
+  // задержкой (NumInput/NoteInput ждут паузу в наборе), и готовый объект —
+  // это снимок аннотации на момент НАЧАЛА набора. Человек, который ввёл
+  // процент риска и сразу перешёл в соседнее поле суммы, этим снимком затирал
+  // свой же процент: сохранение суммы уезжало со старым (пустым) процентом.
+  // Поэтому патч накладывается на АКТУАЛЬНОЕ состояние (annRef), а base нужен
+  // лишь как начальное значение для строки, которую ещё не правили.
+  async function saveAnn(tradeKey: string, base: Ann, patch: Partial<Ann>) {
+    const next: Ann = { ...(annRef.current[tradeKey] ?? base), ...patch };
     setAnn((prev) => ({ ...prev, [tradeKey]: next }));
     await fetch("/api/annotations", {
       method: "PUT",
@@ -301,12 +329,38 @@ export default function TradesPage() {
   // историю при каждой смене риска (0.5% → 1% делил R пополам у всех сделок).
   // Без 1R R считается от стопа — это локально, чтобы правка «Стопа» была
   // видна сразу, не дожидаясь перезагрузки.
-  function rrFor(tr: SerializedTrade, stopLoss: number | null): number | null {
-    const prof = riskProfiles[tr.accountId] ?? riskProfiles[""];
-    const hasOneR = prof ? riskPerTradeAmount(prof, balanceOf(tr.accountId)) != null : false;
-    if (hasOneR && tr.rr != null) return tr.rr;
-    return tradeRR(tr, stopLoss, riskProfiles, balanceOf(tr.accountId));
+  // Ручной риск сделки считается тут же, а не берётся с сервера: правка полей
+  // «Риск»/«Риск %» должна менять R сразу, как и правка «Стопа».
+  // Задан ли 1R риск-менеджером счёта. Это же условие решает, показывать ли
+  // ручные поля риска (см. showRiskFields).
+  const hasManagedR = (accountId: string): boolean => {
+    const prof = riskProfiles[accountId] ?? riskProfiles[""];
+    return prof ? riskPerTradeAmount(prof, balanceOf(accountId)) != null : false;
+  };
+
+  function rrFor(tr: SerializedTrade, a: Pick<Ann, "stopLoss" | "riskAmount" | "riskPct">): number | null {
+    const balance = balanceOf(tr.accountId);
+    const manual = manualRiskAmount(a.riskAmount, a.riskPct, balance);
+    if (manual != null) return tr.netPnl / manual;
+    if (hasManagedR(tr.accountId) && tr.rr != null) return tr.rr;
+    return tradeRR(tr, a.stopLoss, riskProfiles, balance);
   }
+
+  // Показывать ли ручные поля риска у этой сделки.
+  //
+  // Форекс (MT4/MT5) — всегда: там 1R у каждой сделки свой, он зависит от того,
+  // как лёг набор объёма, и риск-менеджер этого не знает.
+  //
+  // Крипта — только пока риск-менеджер счёта НЕ задаёт 1R: он там единый на
+  // счёт и настраивается в своём разделе, а два места для одного числа только
+  // путали бы. Включили его потом — поля пропадают у НОВЫХ сделок, но
+  // остаются там, где значения уже введены: прятать их значило бы молча
+  // изменить RR у истории и лишить человека возможности эти цифры исправить.
+  const showRiskFields = (tr: SerializedTrade, a: Pick<Ann, "riskAmount" | "riskPct">): boolean =>
+    marketShort(tr.market) === "forex" ||
+    !hasManagedR(tr.accountId) ||
+    a.riskPct != null ||
+    a.riskAmount != null;
 
   // Фильтрация и сортировка выполнены на сервере — здесь только то, что он
   // прислал. Список тегов у строки берём из локального состояния ann, чтобы
@@ -452,7 +506,7 @@ export default function TradesPage() {
       t("trades.col.symbol"), t("trades.col.side"), t("trades.col.market"),
       t("trades.export.open"), t("trades.export.close"), t("trades.export.durationMin"),
       t("trades.col.qty"), t("trades.col.entry"), t("trades.col.exit"), t("trades.col.stop"),
-      t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
+      t("trades.col.riskPct"), t("trades.col.risk"), t("trades.col.rr"), t("trades.export.fee"), t("trades.col.return"), t("trades.col.netPnl"),
       t("trades.export.result"), t("trades.col.pips"), t("trades.col.swap"),
       t("trades.col.pattern"), t("trades.col.entryPoint"),
       t("trades.col.entryType"), t("trades.col.mistake"), t("trades.col.image"),
@@ -463,7 +517,7 @@ export default function TradesPage() {
     const rows = buildDisplayRows(exportRows).map((row) => {
       const tr = row.trade;
       const a = annOf(tr);
-      const rr = rrFor(tr, a.stopLoss);
+      const rr = rrFor(tr, a);
       const image = imageOf(tr);
       // publicUrl работает без входа в приложение (см. TradeImageCell/
       // /api/trade-images). Фолбэк на imageUrl — на случай старых записей
@@ -485,6 +539,17 @@ export default function TradesPage() {
         tr.entryPrice,
         tr.exitPrice,
         a.stopLoss ?? tr.stopLoss ?? "",
+        // Колонки риска повторяют экран: там, где полей не видно (крипта под
+        // риск-менеджером), в выгрузке тоже пусто — иначе в CSV всплыл бы риск,
+        // которого человек у этой сделки не видел.
+        showRiskFields(tr, a) ? a.riskPct ?? "" : "",
+        // «Факт» тоже как на экране: введённый руками, а пока его нет —
+        // посчитанный из сделки.
+        showRiskFields(tr, a)
+          ? a.riskAmount ??
+            impliedStopRisk({ ...tr, stopLoss: a.stopLoss ?? tr.stopLoss })?.toFixed(2) ??
+            ""
+          : "",
         rr == null ? "" : rr.toFixed(2),
         tr.fees.toFixed(2),
         tr.returnPct.toFixed(2),
@@ -671,7 +736,13 @@ export default function TradesPage() {
                   // показываются под описанием при разворачивании.
                   const isGroup = tr.isGroup === true;
                   const a = annOf(tr);
-                  const rr = rrFor(tr, a.stopLoss);
+                  const rr = rrFor(tr, a);
+                  // Факт риска, посчитанный из самой сделки: подставляется,
+                  // пока сумма не введена руками (см. impliedStopRisk).
+                  const impliedRisk = impliedStopRisk({
+                    ...tr,
+                    stopLoss: a.stopLoss ?? tr.stopLoss,
+                  });
                   const expanded = expandedId === tr.id;
                   const mergeable = isMergeable(tr);
                   return (
@@ -804,19 +875,58 @@ export default function TradesPage() {
                               </>
                             )}
                             <DetailField label={t("trades.col.stop")}>
-                              <StopInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, { ...a, stopLoss: v })} />
+                              <NumInput value={a.stopLoss} onSave={(v) => saveAnn(tr.id, a, { stopLoss: v })} />
                             </DetailField>
+                            {/* Риск сделки — ДВА НЕЗАВИСИМЫХ поля, не две записи
+                                одной величины: процент это план (он и есть 1R),
+                                сумма — сколько реально легло в стоп по набранному
+                                объёму. Пересчитывать их друг из друга нельзя —
+                                тогда пропадёт ровно то расхождение, ради которого
+                                факт и вводится (см. lib/risk.ts). */}
+                            {showRiskFields(tr, a) && (
+                              <>
+                            <DetailField
+                              label={
+                                <Term desc={t("trades.colDesc.riskPct")}>
+                                  {t("trades.col.riskPct")}
+                                </Term>
+                              }
+                            >
+                              <NumInput
+                                value={a.riskPct}
+                                onSave={(v) => saveAnn(tr.id, a, { riskPct: v })}
+                              />
+                            </DetailField>
+                            <DetailField
+                              label={
+                                <Term desc={t("trades.colDesc.risk")}>
+                                  {t("trades.col.risk")}
+                                </Term>
+                              }
+                            >
+                              {/* Пусто — подставляем расчёт из самой сделки
+                                  (impliedStopRisk), он же стоит плейсхолдером.
+                                  Введённое руками всегда главнее расчёта. */}
+                              <NumInput
+                                value={a.riskAmount}
+                                placeholder={impliedRisk != null ? "≈ " + fmtUsd(impliedRisk) : "—"}
+                                onSave={(v) => saveAnn(tr.id, a, { riskAmount: v })}
+                              />
+                              <RiskPlanHint trade={tr} ann={a} balance={balanceOf(tr.accountId)} />
+                            </DetailField>
+                              </>
+                            )}
                             <DetailField label={t("trades.col.entryPoint")}>
-                              <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryPoint: v })} />
+                              <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, a, { entryPoint: v })} />
                             </DetailField>
                             <DetailField label={t("trades.col.pattern")}>
-                              <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, { ...a, pattern: v })} />
+                              <AnnSelect value={a.pattern} options={ptOptions} onChange={(v) => saveAnn(tr.id, a, { pattern: v })} />
                             </DetailField>
                             <DetailField label={t("trades.col.entryType")}>
-                              <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, { ...a, entryType: v })} />
+                              <AnnSelect value={a.entryType} options={etOptions} onChange={(v) => saveAnn(tr.id, a, { entryType: v })} />
                             </DetailField>
                             <DetailField label={t("trades.col.mistake")}>
-                              <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, { ...a, mistake: v })} />
+                              <AnnSelect value={a.mistake} options={mtOptions} onChange={(v) => saveAnn(tr.id, a, { mistake: v })} />
                             </DetailField>
                             <DetailField label={t("trades.col.image")}>
                               <TradeImageCell
@@ -835,7 +945,7 @@ export default function TradesPage() {
                           </div>
                           <div className="mt-4">
                             <div className="text-xs text-faint mb-1">{t("trades.comment")}</div>
-                            <NoteInput value={a.note} onSave={(v) => saveAnn(tr.id, { ...a, note: v })} />
+                            <NoteInput value={a.note} onSave={(v) => saveAnn(tr.id, a, { note: v })} />
                           </div>
                           {/* Позиции, свёрнутые в эту сделку — как в отчёте
                               брокера. Отдельной таблицей под описанием: в самом
@@ -1024,6 +1134,55 @@ function AnnSelect({
 }
 
 // One labelled control in the expanded trade-detail panel.
+// Строка под полем «Риск, $»: план из процента, факт из поля и во что это
+// выльется на стопе. Без неё два числа рядом выглядят противоречием («почему
+// 1% — это 9.95, а не 10?»), а весь смысл пары как раз в их расхождении.
+function RiskPlanHint({
+  trade,
+  ann,
+  balance,
+}: {
+  trade: SerializedTrade;
+  ann: Pick<Ann, "riskAmount" | "riskPct" | "stopLoss">;
+  balance: number | null;
+}) {
+  const { t } = useI18n();
+  const planned = plannedRiskAmount(ann.riskPct, balance);
+  if (planned == null) return null;
+  // Введённый факт главнее расчётного — человек мог знать про свой стоп то,
+  // чего нет в отчёте брокера.
+  const implied = impliedStopRisk({ ...trade, stopLoss: ann.stopLoss ?? trade.stopLoss });
+  const actual = ann.riskAmount ?? implied;
+  // Комиссия у форекса лежит отдельно (commission/swap), у крипты — в fees.
+  const fees = trade.commission ?? trade.fees;
+  const stopR = stopRMultiple({
+    riskAmount: actual,
+    plannedR: planned,
+    fees,
+    swap: trade.swap ?? 0,
+  });
+  return (
+    <div className="mt-1 text-[11px] leading-tight text-faint">
+      {/* Колонка узкая, и строка переносится. Переносить её можно только между
+          частями: разорванное пополам «стоп ≈ −0.88R» читается как мусор. */}
+      <span className="whitespace-nowrap">
+        {t("trades.risk.plan", { amount: fmtUsd(planned) })}
+      </span>
+      {/* Сам факт тут не повторяется: введённый стоит в поле выше, расчётный —
+          там же плейсхолдером. Подсказка добавляет то, чего в полях нет. */}
+      {stopR != null && (
+        <>
+          {" "}
+          <span className="whitespace-nowrap text-loss/80">
+            {"· "}
+            {t("trades.risk.onStop", { r: stopR.toFixed(2) })}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DetailField({
   label,
   children,
@@ -1095,15 +1254,18 @@ function parseStop(raw: string): number | null {
   return Number.isFinite(x) && x > 0 ? x : null;
 }
 
-// Stop-loss cell. Saves reliably: debounced auto-save while typing, plus an
-// immediate commit on blur / Enter. The prop→draft sync is suppressed while the
-// field is focused so auto-save never clobbers in-progress input.
-function StopInput({
+// Поле положительного числа (стоп, риск в деньгах, риск в процентах). Saves
+// reliably: debounced auto-save while typing, plus an immediate commit on blur /
+// Enter. The prop→draft sync is suppressed while the field is focused so
+// auto-save never clobbers in-progress input.
+function NumInput({
   value,
   onSave,
+  placeholder = "—",
 }: {
   value: number | null;
   onSave: (v: number | null) => void;
+  placeholder?: string;
 }) {
   const [draft, setDraft] = useState(value != null ? String(value) : "");
   const focused = useRef(false);
@@ -1128,7 +1290,7 @@ function StopInput({
       type="text"
       inputMode="decimal"
       value={draft}
-      placeholder="—"
+      placeholder={placeholder}
       maxLength={20}
       onFocus={() => {
         focused.current = true;

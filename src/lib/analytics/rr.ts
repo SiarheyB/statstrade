@@ -18,7 +18,13 @@
 //    (запрос ничего не находит), так что безопасно оставлять на каждый старт.
 
 import { prisma } from "@/lib/db";
-import { tradeRR, parseRiskProfile, defaultRiskProfile, type RiskProfileData } from "@/lib/risk";
+import {
+  tradeRR,
+  manualRiskAmount,
+  parseRiskProfile,
+  defaultRiskProfile,
+  type RiskProfileData,
+} from "@/lib/risk";
 import { buildRiskResolver } from "@/lib/riskHistory";
 import { rebuildTradeHourly, rebuildTradeHourlyForTrade } from "./hourly";
 
@@ -85,14 +91,21 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
   ];
   const annotations = await prisma.tradeAnnotation.findMany({
     where: { tradeKey: { in: tradeKeys } },
-    select: { tradeKey: true, stopLoss: true },
+    select: { tradeKey: true, stopLoss: true, riskAmount: true, riskPct: true },
   });
   const annStopLoss = new Map(annotations.map((a) => [a.tradeKey, a.stopLoss]));
+  // Ручной риск сделки (деньги/процент) бьёт и профиль, и стоп — см. tradeRR.
+  const annRisk = new Map(
+    annotations.map((a) => [a.tradeKey, manualRiskAmount(a.riskAmount, a.riskPct, ctx.balance)]),
+  );
 
   const updates = [
     ...cryptoTrades.map((t) => {
       const stopLoss = annStopLoss.get(t.id) ?? null;
-      const rr = tradeRR(t, stopLoss, ctx.profiles, ctx.balance, ctx.riskAt(t.accountId, t.exitTime));
+      const rr = tradeRR(
+        t, stopLoss, ctx.profiles, ctx.balance,
+        ctx.riskAt(t.accountId, t.exitTime), annRisk.get(t.id) ?? null,
+      );
       return prisma.trade.update({ where: { id: t.id }, data: { rr } });
     }),
     ...importedTrades.map((t) => {
@@ -104,6 +117,7 @@ export async function recomputeRRForAccount(accountId: string): Promise<void> {
           exitPrice: t.exitPrice, fees: t.commission, qty: t.qty, netPnl: t.netPnl,
         },
         stopLoss, ctx.profiles, ctx.balance, ctx.riskAt(t.accountId, t.exitTime),
+        annRisk.get(key) ?? null,
       );
       return prisma.importedTrade.update({ where: { id: t.id }, data: { rr } });
     }),
@@ -129,11 +143,12 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
   if (cryptoTrade) {
     const ann = await prisma.tradeAnnotation.findUnique({
       where: { userId_tradeKey: { userId: ctx.userId, tradeKey } },
-      select: { stopLoss: true },
+      select: { stopLoss: true, riskAmount: true, riskPct: true },
     });
     const rr = tradeRR(
       cryptoTrade, ann?.stopLoss ?? null, ctx.profiles, ctx.balance,
       ctx.riskAt(cryptoTrade.accountId, cryptoTrade.exitTime),
+      manualRiskAmount(ann?.riskAmount, ann?.riskPct, ctx.balance),
     );
     await prisma.trade.update({ where: { id: tradeKey }, data: { rr } });
     // Меняется одна сделка → пересобираем только её день, а не всю историю.
@@ -147,7 +162,7 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
   if (!importedTrade) return;
   const ann = await prisma.tradeAnnotation.findUnique({
     where: { userId_tradeKey: { userId: ctx.userId, tradeKey } },
-    select: { stopLoss: true },
+    select: { stopLoss: true, riskAmount: true, riskPct: true },
   });
   const stopLoss = ann?.stopLoss ?? importedTrade.stopLoss ?? null;
   const rr = tradeRR(
@@ -158,6 +173,7 @@ export async function recomputeRRForTradeKey(tradeKey: string): Promise<void> {
     },
     stopLoss, ctx.profiles, ctx.balance,
     ctx.riskAt(importedTrade.accountId, importedTrade.exitTime),
+    manualRiskAmount(ann?.riskAmount, ann?.riskPct, ctx.balance),
   );
   await prisma.importedTrade.update({ where: { id: importedTrade.id }, data: { rr } });
   await rebuildTradeHourlyForTrade(accountId, importedTrade.exitTime);

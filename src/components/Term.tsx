@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { GLOSSARY } from "@/lib/glossary";
 import { useI18n } from "@/lib/i18n/provider";
 
@@ -22,6 +22,14 @@ export function Term({
   // Glossary holds the canonical term keys; the description text comes from i18n.
   const description = desc ?? (GLOSSARY[key] ? t(`term.${key}`) : undefined);
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  // Реальный размер всплывашки. Раньше вместо него стояла константа 120px, и
+  // подсказка в несколько строк (например, у полей риска) нижним краем уезжала
+  // за экран. Замеряем при появлении: пока курсор ходит, всплывашка остаётся
+  // смонтированной, и callback-ref больше не срабатывает.
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const measure = useCallback((el: HTMLSpanElement | null) => {
+    if (el) setSize({ w: el.offsetWidth, h: el.offsetHeight });
+  }, []);
 
   if (!description) return <>{children ?? key}</>;
 
@@ -32,18 +40,28 @@ export function Term({
     <span
       onMouseEnter={(e) => setPos({ x: e.clientX, y: e.clientY })}
       onMouseMove={(e) => setPos({ x: e.clientX, y: e.clientY })}
-      onMouseLeave={() => setPos(null)}
+      onMouseLeave={() => {
+        setPos(null);
+        setSize(null);
+      }}
       className={`cursor-help border-b border-dotted border-faint/70 ${className}`}
     >
       {children ?? key}
       {pos && (
         <span
+          ref={measure}
           className="pointer-events-none fixed z-50 block max-w-xs rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-xs font-normal normal-case leading-snug tracking-normal text-fg shadow-lg"
           style={{
-            // Прижимаем к краям вьюпорта: max-w-xs = 320px + отступ, иначе у
-            // крайних колонок (RR) тултип уходил за правый край экрана.
-            left: Math.max(8, Math.min(pos.x + 14, window.innerWidth - 336)),
-            top: Math.min(pos.y + 14, window.innerHeight - 120),
+            // Прижимаем к краям вьюпорта: иначе у крайних колонок (RR) тултип
+            // уходил за правый край экрана. До замера (первый кадр) считаем по
+            // максимальной ширине max-w-xs = 320px.
+            left: Math.max(8, Math.min(pos.x + 14, window.innerWidth - (size?.w ?? 320) - 8)),
+            // Внизу экрана всплывашка переезжает НАД курсором, а не просто
+            // подпирается снизу: длинную подсказку иначе не видно целиком.
+            top:
+              size && pos.y + 14 + size.h > window.innerHeight - 8
+                ? Math.max(8, pos.y - 14 - size.h)
+                : pos.y + 14,
           }}
         >
           {header && <span className="mb-0.5 block font-medium text-accent">{header}</span>}

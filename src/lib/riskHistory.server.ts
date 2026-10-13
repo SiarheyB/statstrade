@@ -24,11 +24,17 @@ import { parseRiskProfile, defaultRiskProfile, riskPerTradeAmount } from "./risk
  *    единственной версией, и вся история легла бы под новое значение — ровно тот
  *    баг, от которого всё затевалось.
  *  - "change" — после применения: пишет новое значение «с этого момента».
+ *
+ * `comment` — почему риск изменили (журнал решений). Ложится на ВСЕ строки
+ * этого сохранения: общий профиль разворачивается по счетам, и одно решение
+ * человека порождает несколько версий. У бутстрапа комментария нет по смыслу —
+ * там записывается прошлое, которого никто сейчас не решал.
  */
 export async function snapshotRiskVersions(
   userId: string,
   mode: "bootstrap" | "change" = "change",
   at: Date = new Date(),
+  comment: string | null = null,
 ): Promise<number> {
   const [accounts, profileRows] = await Promise.all([
     prisma.exchangeAccount.findMany({
@@ -60,6 +66,7 @@ export async function snapshotRiskVersions(
     effectiveFrom: Date;
     riskPerTrade: string;
     amount: number | null;
+    comment: string | null;
   }[] = [];
 
   for (const acc of accounts) {
@@ -78,6 +85,7 @@ export async function snapshotRiskVersions(
       effectiveFrom,
       riskPerTrade: JSON.stringify(profile.riskPerTrade),
       amount,
+      comment: mode === "bootstrap" ? null : comment,
     });
   }
 

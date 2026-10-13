@@ -8,6 +8,11 @@ import {
   computeAccountRisk,
   tradeRR,
   stopDistanceRR,
+  manualRiskAmount,
+  plannedRiskAmount,
+  stopRMultiple,
+  impliedStopRisk,
+  riskChangeNeedsComment,
 } from "@/lib/risk";
 import type { HourBucket } from "@/lib/analytics/periods";
 
@@ -369,5 +374,148 @@ describe("tradeRR / stopDistanceRR", () => {
   it("falls back to the stop distance when the profile risk is unusable", () => {
     const off = { ...defaultRiskProfile(), enabled: true };
     expect(tradeRR(long, 95, { "acc-1": off }, 10000)).toBe(2);
+  });
+});
+
+describe("ручной риск сделки", () => {
+  const long = {
+    accountId: "acc-1",
+    side: "long" as const,
+    entryPrice: 100,
+    exitPrice: 110,
+    fees: 0,
+    qty: 1,
+    netPnl: 10,
+  };
+
+  it("1R — это план из процента, а не фактически заложенная сумма", () => {
+    // Капитал 1000, план 1% = 10 $. Объём набрался на 9.95 $ — это ФАКТ,
+    // и 1R от него не зависит: иначе недобор объёма объявлялся бы ровно
+    // одним риском, и стоп всегда давал бы −1R.
+    expect(manualRiskAmount(9.95, 1, 1000)).toBe(10);
+  });
+
+  it("без плана знаменателем становится фактическая сумма", () => {
+    expect(manualRiskAmount(9.95, null, 1000)).toBe(9.95);
+    // Процент есть, но развернуть его не во что — баланса счёта нет.
+    expect(manualRiskAmount(9.95, 1, null)).toBe(9.95);
+  });
+
+  it("пустые поля — риска нет", () => {
+    expect(manualRiskAmount(null, null, 10000)).toBeNull();
+    expect(manualRiskAmount(0, 0, 10000)).toBeNull();
+    expect(manualRiskAmount(null, 1, null)).toBeNull();
+  });
+
+  it("plannedRiskAmount молчит, когда плана нет", () => {
+    expect(plannedRiskAmount(1, 1000)).toBe(10);
+    expect(plannedRiskAmount(null, 1000)).toBeNull();
+    expect(plannedRiskAmount(1, null)).toBeNull();
+  });
+
+  it("недобор объёма даёт на стопе меньше одного риска", () => {
+    // 9.70 из плановых 10 — стоп стоит 0.97R, а не 1R.
+    const r = stopRMultiple({ riskAmount: 9.7, plannedR: 10, fees: 0, swap: 0 });
+    expect(r).toBeCloseTo(-0.97, 10);
+  });
+
+  it("комиссия и своп доводят стоп выше одного риска", () => {
+    // Те же 9.70, но сверху 0.30 комиссии и 0.03 отрицательного свопа.
+    const r = stopRMultiple({ riskAmount: 9.7, plannedR: 10, fees: 0.3, swap: -0.03 });
+    expect(r).toBeCloseTo(-1.003, 10);
+  });
+
+  it("без факта или без плана оценка стопа не считается", () => {
+    expect(stopRMultiple({ riskAmount: null, plannedR: 10, fees: 0, swap: 0 })).toBeNull();
+    expect(stopRMultiple({ riskAmount: 9.7, plannedR: null, fees: 0, swap: 0 })).toBeNull();
+  });
+
+  it("R считается от ручного риска, а не от стопа и не от профиля", () => {
+    const prof = {
+      ...defaultRiskProfile(),
+      enabled: true,
+      riskPerTrade: { on: true, value: 10, unit: "amount" as const },
+    };
+    expect(tradeRR(long, 95, { "acc-1": prof }, 10000, undefined, 5)).toBe(2);
+    expect(tradeRR(long, 90, { "acc-1": prof }, 10000, undefined, 20)).toBe(0.5);
+  });
+
+  it("ручной риск бьёт и версию 1R на момент закрытия", () => {
+    expect(tradeRR(long, 95, {}, 10000, 100, 5)).toBe(2);
+  });
+
+  it("без ручного риска всё считается как раньше", () => {
+    expect(tradeRR(long, 95, {}, 10000, undefined, null)).toBe(2);
+    expect(tradeRR(long, 95, {}, 10000, 100)).toBe(0.1);
+  });
+});
+
+describe("impliedStopRisk — факт риска из самой сделки", () => {
+  it("считает риск в валюте СЧЁТА, не трогая курс котировки", () => {
+    // USDCHF на долларовом счёте: котировка во франках, но курс уже зашит в
+    // gross P&L. Вход 0.8327, стоп 0.8300 (27 пунктов), выход 0.8348
+    // (21 пункт) и gross −31 $ ⇒ риск = 31 × 27 / 21.
+    const risk = impliedStopRisk({
+      entryPrice: 0.8327,
+      exitPrice: 0.8348,
+      grossPnl: -31,
+      stopLoss: 0.83,
+    });
+    expect(risk).toBeCloseTo((31 * 0.0027) / 0.0021, 6);
+  });
+
+  it("не зависит от стороны сделки", () => {
+    const long = impliedStopRisk({ entryPrice: 100, exitPrice: 110, grossPnl: 50, stopLoss: 95 });
+    const short = impliedStopRisk({ entryPrice: 100, exitPrice: 90, grossPnl: 50, stopLoss: 105 });
+    expect(long).toBeCloseTo(25, 10);
+    expect(short).toBeCloseTo(25, 10);
+  });
+
+  it("без стопа считать нечего", () => {
+    expect(impliedStopRisk({ entryPrice: 100, exitPrice: 110, grossPnl: 50, stopLoss: null })).toBeNull();
+  });
+
+  it("стоп в точке входа — риска ноль, пропорции нет", () => {
+    expect(impliedStopRisk({ entryPrice: 100, exitPrice: 110, grossPnl: 50, stopLoss: 100 })).toBeNull();
+  });
+
+  it("выход ровно по входу — курс из сделки не достать", () => {
+    // Иначе было бы деление на ноль и Infinity в поле «факт».
+    expect(impliedStopRisk({ entryPrice: 100, exitPrice: 100, grossPnl: 0, stopLoss: 95 })).toBeNull();
+  });
+
+  it("нулевой gross (брокер не отдал) — null, а не нулевой риск", () => {
+    expect(impliedStopRisk({ entryPrice: 100, exitPrice: 110, grossPnl: 0, stopLoss: 95 })).toBeNull();
+  });
+});
+
+describe("riskChangeNeedsComment", () => {
+  const pct = (v: number) => ({ on: true, value: v, unit: "pct" as const });
+  const usd = (v: number) => ({ on: true, value: v, unit: "amount" as const });
+  const off = { on: false, value: 0, unit: "pct" as const };
+
+  it("увеличение и уменьшение риска требуют объяснения", () => {
+    expect(riskChangeNeedsComment(pct(0.5), pct(1))).toBe(true);
+    expect(riskChangeNeedsComment(pct(1), pct(0.5))).toBe(true);
+  });
+
+  it("смена единицы тоже меняет 1R", () => {
+    expect(riskChangeNeedsComment(pct(1), usd(100))).toBe(true);
+  });
+
+  it("то же значение — ничего не спрашиваем", () => {
+    // Сюда попадает сохранение, где правили лимиты убытка, а риск не трогали.
+    expect(riskChangeNeedsComment(pct(1), pct(1))).toBe(false);
+  });
+
+  it("первая настройка риска и его выключение — не «изменение»", () => {
+    expect(riskChangeNeedsComment(off, pct(1))).toBe(false);
+    expect(riskChangeNeedsComment(pct(1), off)).toBe(false);
+    expect(riskChangeNeedsComment(off, off)).toBe(false);
+  });
+
+  it("нулевое значение считается выключенным риском", () => {
+    // Иначе «включено, но 0» требовало бы комментария при вводе первой цифры.
+    expect(riskChangeNeedsComment({ on: true, value: 0, unit: "pct" }, pct(1))).toBe(false);
   });
 });

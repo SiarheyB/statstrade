@@ -295,6 +295,8 @@ export async function queryTrades(
     const a = annMap.get(r.id) as
       | (AnnRow & {
           stopLoss?: number | null;
+          riskAmount?: number | null;
+          riskPct?: number | null;
           note?: string | null;
           imageUrl?: string | null;
           imageProvider?: string | null;
@@ -330,6 +332,8 @@ export async function queryTrades(
       // Импортированный S/L (из отчёта MT) действует, пока пользователь не
       // переопределил его вручную — как в /api/stats.
       stopLoss: a?.stopLoss ?? r.stopLoss ?? null,
+      riskAmount: a?.riskAmount ?? null,
+      riskPct: a?.riskPct ?? null,
       note: a?.note ?? null,
       imageUrl: a?.imageUrl ?? null,
       imageProvider: a?.imageProvider ?? null,

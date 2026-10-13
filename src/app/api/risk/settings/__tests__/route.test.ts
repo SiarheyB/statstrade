@@ -6,7 +6,13 @@ vi.mock("@/lib/risk", () => ({
   serializeRiskPerTrade: vi.fn(() => ({})),
   defaultRiskProfile: vi.fn(() => ({ enabled: false, maxStopsPerDay: null })),
   riskPerTradeAmount: vi.fn(() => null),
+  // Нужен ли комментарий к правке риска — настоящее правило проверено в
+  // lib/__tests__/risk.test.ts; тут мок, чтобы включать и выключать ветку.
+  riskChangeNeedsComment: vi.fn(() => false),
 }));
+
+import { riskChangeNeedsComment } from "@/lib/risk";
+const needsComment = vi.mocked(riskChangeNeedsComment);
 
 import {
   asGuest,
@@ -33,8 +39,12 @@ const profile = {
 beforeEach(() => {
   mockGetAuthUser.mockReset();
   mockPrisma.riskProfile.findMany.mockReset();
+  // PUT читает прежние профили, чтобы понять, менялся ли риск.
+  mockPrisma.riskProfile.findMany.mockResolvedValue([]);
   mockPrisma.riskProfile.upsert.mockReset();
   mockPrisma.riskProfile.deleteMany.mockReset();
+  needsComment.mockReset();
+  needsComment.mockReturnValue(false);
 });
 
 describe("GET /api/risk/settings", () => {
@@ -92,4 +102,43 @@ describe("PUT /api/risk/settings", () => {
     expect(res.status).toBe(200);
     expect(mockPrisma.riskProfile.deleteMany).toHaveBeenCalled();
   });
+
+  it("не сохраняет изменение риска без комментария", async () => {
+    asUser();
+    needsComment.mockReturnValue(true);
+    mockPrisma.riskProfile.upsert.mockResolvedValue({});
+    const res = await PUT(
+      new Request(base, { method: "PUT", body: JSON.stringify({ profiles: { "": profile } }) }),
+    );
+    expect(res.status).toBe(400);
+    // Ничего не записано: правило не должно обходиться запросом мимо формы.
+    expect(mockPrisma.riskProfile.upsert).not.toHaveBeenCalled();
+  });
+
+  it("сохраняет изменение риска с комментарием", async () => {
+    asUser();
+    needsComment.mockReturnValue(true);
+    mockPrisma.riskProfile.upsert.mockResolvedValue({});
+    const res = await PUT(
+      new Request(base, {
+        method: "PUT",
+        body: JSON.stringify({ profiles: { "": profile }, comment: "Серия стопов, режу риск" }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    expect(mockPrisma.riskProfile.upsert).toHaveBeenCalled();
+  });
+
+  it("пробелы за комментарий не считаются", async () => {
+    asUser();
+    needsComment.mockReturnValue(true);
+    const res = await PUT(
+      new Request(base, {
+        method: "PUT",
+        body: JSON.stringify({ profiles: { "": profile }, comment: "   " }),
+      }),
+    );
+    expect(res.status).toBe(400);
+  });
 });
+
