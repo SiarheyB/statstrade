@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { Download, Users, Repeat, CalendarDays } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { BUNDLED_LABEL } from "@/lib/advisorFile";
+import AdvisorUpload from "@/components/admin/AdvisorUpload";
 import { getServerT, getTimezone } from "@/lib/i18n/server";
 import { offsetMinutes } from "@/lib/timezone";
 
@@ -24,6 +26,7 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
   const nowMs = Date.now();
   const since = PERIODS[period] ? new Date(nowMs - PERIODS[period] * 86400_000) : undefined;
 
+  const current = await prisma.advisorFile.findUnique({ where: { id: "current" }, select: { label: true } });
   const rows = await prisma.advisorDownload.findMany({
     where: since ? { ts: { gte: since } } : undefined,
     orderBy: { ts: "desc" },
@@ -61,6 +64,8 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
     <div className="p-6 md:p-8 max-w-7xl">
       <h1 className="text-2xl font-semibold tracking-tight">{t("admin.advisor.title")}</h1>
       <p className="mt-1 text-sm text-muted">{t("admin.advisor.subtitle")}</p>
+
+      <AdvisorUpload currentLabel={current?.label ?? BUNDLED_LABEL} uploaded={!!current} />
 
       <div className="mt-6 flex flex-wrap gap-2">
         {(Object.keys(PERIODS) as PeriodKey[]).map((p) => (
@@ -133,7 +138,7 @@ export default async function AdminAdvisorPage({ searchParams }: { searchParams:
                 <td className="p-3 text-muted">{r.referrer ?? "—"}</td>
                 <td className="p-3 text-muted whitespace-nowrap">
                   {kb(r.bytes)}
-                  {r.version ? ` · ${time(new Date(r.version))}` : ""}
+                  {r.version ? ` · v${/^\d{4}-/.test(r.version) ? time(new Date(r.version)) : r.version}` : ""}
                 </td>
               </tr>
             ))}

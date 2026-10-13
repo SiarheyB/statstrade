@@ -20,8 +20,7 @@ import { useI18n } from "@/lib/i18n/provider";
 // Файл лежит в downloads/ в корне репозитория (НЕ в public: скачивать можно
 // только зарегистрированным, см. /api/advisor/download) и обновляется вручную:
 // после правок советника (репозиторий SiarheyB/mt5_experts) — перекомпилировать
-// в MetaEditor, скопировать TradeGridPanel.ex5 в downloads/ и поправить ADVISOR_VERSION.
-const ADVISOR_VERSION = "2.10";
+// в MetaEditor и загрузить TradeGridPanel.ex5 в /admin/advisor (там же номер версии).
 const ADVISOR_FILE = "/api/advisor/download";
 
 // Скриншоты из public/advisor. wide — весь график терминала, на всю ширину.
@@ -296,7 +295,7 @@ const EN: Content = {
     "The token grants one right only — uploading trades into this account. It can't read anything or trade. Don't share it; if it leaks, click «New token» and the old one stops working.",
 };
 
-export default function AdvisorView({ canDownload }: { canDownload: boolean }) {
+export default function AdvisorView({ canDownload, version }: { canDownload: boolean; version: string }) {
   const { locale } = useI18n();
   const ru = locale === "ru";
   const c = ru ? RU : EN;
@@ -334,7 +333,7 @@ export default function AdvisorView({ canDownload }: { canDownload: boolean }) {
             </>
           )}
           <span className="text-sm text-faint">
-            TradeGridPanel.ex5 · {c.version} {ADVISOR_VERSION}
+            TradeGridPanel.ex5 · {c.version} {version}
           </span>
         </div>
         <p className="text-xs text-warn mt-3">{c.mt5only}</p>

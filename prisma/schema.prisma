@@ -2109,3 +2109,18 @@ model AdvisorDownload {
   @@index([ts])
   @@index([userId, ts])
 }
+
+// Актуальная сборка советника MT5, загруженная через /admin/advisor. Всегда
+// ровно одна строка (id = "current"): новая загрузка заменяет прежнюю, так что
+// старая версия удаляется сама. В БД, а не на диске, потому что watchtower
+// пересоздаёт контейнер app на каждом деплое, и файл внутри него пропал бы.
+// Пока строки нет, отдаётся файл из образа (downloads/TradeGridPanel.ex5).
+model AdvisorFile {
+  id         String   @id // "current"
+  data       Bytes
+  size       Int
+  sha256     String
+  label      String // номер версии, как его ввёл админ: «2.11»
+  uploadedAt DateTime @default(now())
+  uploadedBy String
+}

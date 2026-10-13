@@ -1,22 +1,21 @@
-import { readFile, stat } from "node:fs/promises";
-import path from "node:path";
 import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized } from "@/lib/api";
+import { getAdvisorBuild } from "@/lib/advisorFile";
 import { rateLimit } from "@/lib/ratelimit";
 import { logger } from "@/lib/logger";
 import { prisma } from "@/lib/db";
 import { parseUa, primaryLang } from "@/lib/traffic/ua";
 import { countryFromHeaders } from "@/lib/traffic/hit";
 
-// Файл советника лежит ВНЕ public/ (папка downloads/ в корне, в образ её кладёт
-// Dockerfile): из public его мог бы скачать кто угодно, включая ботов.
+// Файл советника лежит ВНЕ public/ (актуальная сборка — в БД, загружается из
+// /admin/advisor; запасная — downloads/ в образе, см. lib/advisorFile.ts):
+// из public его мог бы скачать кто угодно, включая ботов.
 // Отдаём только вошедшему зарегистрированному пользователю — демо-сессия
 // («посмотреть без регистрации») тоже не считается.
-const FILE = path.join(process.cwd(), "downloads", "TradeGridPanel.ex5");
 
 // Журнал скачиваний для админки (/admin/advisor). Сбой записи не должен
 // отнимать у человека файл, поэтому всё глотаем.
-async function recordDownload(req: Request | undefined, userId: string, email: string, bytes: number) {
+async function recordDownload(req: Request | undefined, userId: string, email: string, bytes: number, version: string) {
   try {
     const h = req?.headers;
     const ua = parseUa(h?.get("user-agent"));
@@ -24,10 +23,6 @@ async function recordDownload(req: Request | undefined, userId: string, email: s
     try {
       const ref = h?.get("referer");
       if (ref) referrer = new URL(ref).pathname.slice(0, 200);
-    } catch {}
-    let version: string | null = null;
-    try {
-      version = (await stat(FILE)).mtime.toISOString();
     } catch {}
     const before = await prisma.advisorDownload.count({ where: { userId } });
     await prisma.advisorDownload.create({
@@ -54,14 +49,18 @@ export async function GET(req?: Request) {
     return NextResponse.json({ error: "Слишком много скачиваний, попробуйте позже" }, { status: 429 });
   }
 
-  let data: Buffer;
+  let build: Awaited<ReturnType<typeof getAdvisorBuild>> = null;
   try {
-    data = await readFile(FILE);
-  } catch {
-    logger.error("advisor", user.userId, "advisor file missing", { file: FILE });
+    build = await getAdvisorBuild();
+  } catch (e) {
+    logger.error("advisor", user.userId, "advisor file read failed", { err: String(e) });
+  }
+  if (!build) {
+    logger.error("advisor", user.userId, "advisor file missing");
     return NextResponse.json({ error: "Файл советника временно недоступен" }, { status: 404 });
   }
-  await recordDownload(req, user.userId, user.email, data.length);
+  const data = build.data;
+  await recordDownload(req, user.userId, user.email, data.length, build.label);
   logger.info("advisor", user.userId, "advisor downloaded", { bytes: data.length });
   return new NextResponse(new Uint8Array(data), {
     headers: {
