@@ -10,6 +10,7 @@ export default function AdvisorUpload({ currentLabel, uploaded }: { currentLabel
   const { t } = useI18n();
   const fileRef = useRef<HTMLInputElement>(null);
   const [label, setLabel] = useState("");
+  const [fileName, setFileName] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ text: string; error: boolean } | null>(null);
 
@@ -23,6 +24,7 @@ export default function AdvisorUpload({ currentLabel, uploaded }: { currentLabel
       setMsg({ text: okText, error: false });
       setLabel("");
       if (fileRef.current) fileRef.current.value = "";
+      setFileName("");
       router.refresh();
     } catch (e) {
       setMsg({ text: e instanceof Error ? e.message : t("admin.advisor.upload.failed"), error: true });
@@ -52,21 +54,45 @@ export default function AdvisorUpload({ currentLabel, uploaded }: { currentLabel
         {t("admin.advisor.upload.current", { v: currentLabel })}{" "}
         {uploaded ? t("admin.advisor.upload.fromAdmin") : t("admin.advisor.upload.fromImage")}
       </p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <input ref={fileRef} type="file" accept=".ex5" className="text-sm" disabled={busy} />
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/* Нативный <input type=file> выглядит как случайная рамка и не похож
+            на кнопку — прячем его, а нажимается понятная кнопка. */}
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".ex5"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => setFileName(e.target.files?.[0]?.name ?? "")}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          disabled={busy}
+          className="px-4 py-2 rounded-lg text-sm font-medium border border-accent text-accent hover:bg-accent/10 transition disabled:opacity-50"
+        >
+          {t("admin.advisor.upload.choose")}
+        </button>
+        <span className={`text-sm ${fileName ? "text-fg" : "text-muted"}`}>
+          {fileName || t("admin.advisor.upload.noFile")}
+        </span>
         <input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder={t("admin.advisor.upload.version")}
           maxLength={20}
-          className="w-28 input-base px-2 py-1 text-sm"
+          className="w-44 input-base px-3 py-2 text-sm"
           disabled={busy}
         />
-        <button onClick={upload} disabled={busy || !label.trim()} className="input-base px-3 py-1 text-sm hover:border-border-strong disabled:opacity-50">
+        <button
+          onClick={upload}
+          disabled={busy || !label.trim() || !fileName}
+          className="px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+        >
           {t("admin.advisor.upload.button")}
         </button>
         {uploaded && (
-          <button onClick={reset} disabled={busy} className="px-3 py-1.5 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2">
+          <button onClick={reset} disabled={busy} className="px-3 py-2 rounded-lg text-sm text-muted hover:text-fg hover:bg-surface-2">
             {t("admin.advisor.upload.reset")}
           </button>
         )}
