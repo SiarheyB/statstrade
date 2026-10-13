@@ -770,7 +770,10 @@ export default function TradesPage() {
                         </span>
                       </td>
                       <td className="px-3 py-2 font-medium">
-                        <span className="inline-flex items-center gap-1.5">
+                        {/* flex-wrap: колонка фиксированной ширины, на узком экране
+                            значок «×N» уходит на вторую строку, а не наезжает
+                            на соседний столбец (Л/Ш). */}
+                        <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
                           {rr != null && rr < -1 && (
                             <span className="relative group inline-flex shrink-0" title={t("trades.riskWarning")}>
                               <AlertTriangle size={14} className="text-loss" />
