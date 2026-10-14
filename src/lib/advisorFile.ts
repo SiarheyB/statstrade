@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 // Файл из образа: запасной вариант, пока админ ничего не загружал.
 const BUNDLED = path.join(process.cwd(), "downloads", "TradeGridPanel.ex5");
 // Номер версии бандл-файла (был зашит в AdvisorView).
-export const BUNDLED_LABEL = "2.10";
+export const BUNDLED_LABEL = "2.11";
 
 export type AdvisorBuild = {
   data: Buffer;
