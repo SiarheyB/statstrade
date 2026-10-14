@@ -1,7 +1,7 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight, Layers, Unlink } from "lucide-react";
+import { ArrowUpDown, ArrowUp, ArrowDown, FileDown, RefreshCw, AlertTriangle, ChevronRight, Layers, Unlink, Minus } from "lucide-react";
 import type { SerializedTrade, AccountSummary } from "@/lib/types";
 import {
   tradeRR,
@@ -39,6 +39,7 @@ type Ann = {
   stopLoss: number | null;
   riskAmount: number | null;
   riskPct: number | null;
+  breakeven: boolean;
   note: string | null;
 };
 const PAGE_SIZE = 25;
@@ -203,6 +204,7 @@ export default function TradesPage() {
             stopLoss: tr.stopLoss,
             riskAmount: tr.riskAmount,
             riskPct: tr.riskPct,
+            breakeven: tr.breakeven,
             note: tr.note,
           };
         }
@@ -290,6 +292,7 @@ export default function TradesPage() {
         stopLoss: tr.stopLoss,
         riskAmount: tr.riskAmount,
         riskPct: tr.riskPct,
+        breakeven: tr.breakeven,
         note: tr.note,
       }
     );
@@ -743,6 +746,12 @@ export default function TradesPage() {
                     ...tr,
                     stopLoss: a.stopLoss ?? tr.stopLoss,
                   });
+                  // Помеченная безубытком сделка в списке не красится в минус:
+                  // деньги остались настоящими, но это не стоп, и красный
+                  // цвет читался бы как ещё один убыток подряд.
+                  const be = a.breakeven;
+                  const moneyTone = (v: number) =>
+                    be ? "text-muted" : v >= 0 ? "text-profit" : "text-loss";
                   const expanded = expandedId === tr.id;
                   const mergeable = isMergeable(tr);
                   return (
@@ -789,6 +798,15 @@ export default function TradesPage() {
                           >
                             {fmtSymbol(tr.symbol)}
                           </span>
+                          {be && (
+                            <span
+                              title={t("trades.be.hint")}
+                              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-strong bg-surface-2 px-1.5 py-0.5 text-[10px] font-semibold text-muted"
+                            >
+                              <Minus size={9} />
+                              {t("trades.be.badge")}
+                            </span>
+                          )}
                           {isGroup && (
                             <span
                               className="inline-flex items-center gap-1 rounded bg-accent/15 px-1.5 py-0.5 text-[10px] text-accent"
@@ -830,10 +848,10 @@ export default function TradesPage() {
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{tr.lots != null ? fmtNumSmart(tr.lots, 2) : fmtNumSmart(tr.qty, 4)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.entryPrice)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtPrice(tr.exitPrice)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${tr.returnPct >= 0 ? "text-profit" : "text-loss"}`}>{fmtPct(tr.returnPct)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${tr.netPnl >= 0 ? "text-profit" : "text-loss"}`}>{fmtUsd(tr.netPnl, { sign: true })}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${moneyTone(tr.returnPct)}`}>{fmtPct(tr.returnPct)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums font-medium ${moneyTone(tr.netPnl)}`}>{fmtUsd(tr.netPnl, { sign: true })}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-muted">{fmtUsd(tr.fees)}</td>
-                      <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : rr >= 0 ? "text-profit" : "text-loss"}`}>{fmtRR(rr)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${rr == null ? "text-faint" : moneyTone(rr)}`}>{fmtRR(rr)}</td>
                     </tr>
                     {expanded && (
                       <tr className="border-b border-border bg-surface-2/20">
@@ -919,6 +937,32 @@ export default function TradesPage() {
                             </DetailField>
                               </>
                             )}
+                            {/* Выход в безубыток — решение человека, а не стоп.
+                                Меняет только КАТЕГОРИЮ результата: деньги
+                                остаются как есть (lib/analytics/breakeven.ts). */}
+                            <DetailField
+                              label={
+                                <Term desc={t("trades.colDesc.breakeven")}>
+                                  {t("trades.col.result")}
+                                </Term>
+                              }
+                            >
+                              <label
+                                className={`flex items-center gap-2 rounded-lg border px-2.5 py-1.5 cursor-pointer select-none ${
+                                  a.breakeven
+                                    ? "border-profit bg-profit/10"
+                                    : "border-border bg-surface-2"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={a.breakeven}
+                                  onChange={(e) => saveAnn(tr.id, a, { breakeven: e.target.checked })}
+                                  className="accent-profit h-4 w-4"
+                                />
+                                <span className="text-xs">{t("trades.be.toggle")}</span>
+                              </label>
+                            </DetailField>
                             <DetailField label={t("trades.col.entryPoint")}>
                               <AnnSelect value={a.entryPoint} options={epOptions} onChange={(v) => saveAnn(tr.id, a, { entryPoint: v })} />
                             </DetailField>

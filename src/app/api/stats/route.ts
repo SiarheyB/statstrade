@@ -215,6 +215,9 @@ async function buildBase(
     t.pattern = a?.pattern ?? null;
     // Keep the imported S/L (from the MT report) unless the user overrode it.
     t.stopLoss = a?.stopLoss ?? t.stopLoss ?? null;
+    // «Вышел в безубыток»: сделка перестаёт быть убытком для винрейта, серий и
+    // профит-фактора, но её деньги не трогаются (lib/analytics/breakeven.ts).
+    if (a?.breakeven) t.result = "breakeven";
     t.note = a?.note ?? null;
     t.imageUrl = a?.imageUrl ?? null;
     t.imageProvider = a?.imageProvider ?? null;

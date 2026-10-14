@@ -27,25 +27,38 @@
 
 import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
+import { markedByJoin, moneyResultSql, resultSql } from "./breakeven";
 
 // Разные модели сделок сводятся к одной форме: crypto (Trade) и импортированные
 // форекс/MT (ImportedTrade). Соответствия полей повторяют /api/stats:
 // fees = commission, result выводится из знака netPnl с тем же эпсилоном.
+//
+// Поверх денег накладывается ручная пометка «безубыток» (lib/analytics/
+// breakeven.ts): помеченная сделка не должна попадать ни в wins, ни в losses —
+// из этих двух колонок риск-менеджер считает стопы, и выход в БУ приближал
+// дневной лимит наравне со стопом.
+//
+// Аннотация принадлежит ПОЛЬЗОВАТЕЛЮ, а здесь известен только счёт, поэтому
+// владелец берётся подзапросом: tradeKey и так уникален глобально, но джойн
+// без userId дал бы чужой аннотации влиять на чужую статистику.
 function sourceRows(accountId: string, hourFilter: Prisma.Sql) {
+  const owner = Prisma.sql`(SELECT "userId" FROM "ExchangeAccount" WHERE "id" = ${accountId})`;
   return Prisma.sql`
-    SELECT "accountId", "exitTime", "netPnl", "fees", "result", "rr"
-    FROM "Trade"
-    WHERE "accountId" = ${accountId} ${hourFilter}
+    SELECT t."accountId", t."exitTime", t."netPnl", t."fees",
+           ${resultSql(Prisma.sql`t."result"`, markedByJoin("a"))} AS "result",
+           t."rr"
+    FROM "Trade" AS t
+    LEFT JOIN "TradeAnnotation" AS a
+      ON a."tradeKey" = t."id" AND a."userId" = ${owner}
+    WHERE t."accountId" = ${accountId} ${hourFilter}
     UNION ALL
-    SELECT "accountId", "exitTime", "netPnl", "commission" AS "fees",
-           CASE
-             WHEN "netPnl" > 1e-9 THEN 'win'
-             WHEN "netPnl" < -1e-9 THEN 'loss'
-             ELSE 'breakeven'
-           END AS "result",
-           "rr"
-    FROM "ImportedTrade"
-    WHERE "accountId" = ${accountId} AND "groupId" IS NULL ${hourFilter}
+    SELECT t."accountId", t."exitTime", t."netPnl", t."commission" AS "fees",
+           ${resultSql(moneyResultSql("t"), markedByJoin("a"))} AS "result",
+           t."rr"
+    FROM "ImportedTrade" AS t
+    LEFT JOIN "TradeAnnotation" AS a
+      ON a."tradeKey" = t."accountId" || ':' || t."externalId" AND a."userId" = ${owner}
+    WHERE t."accountId" = ${accountId} AND t."groupId" IS NULL ${hourFilter}
   `;
 }
 

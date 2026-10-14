@@ -32,6 +32,9 @@ export type SerializedTrade = {
   // него, см. manualRiskAmount() в lib/risk.ts.
   riskAmount: number | null;
   riskPct: number | null;
+  // Ручная пометка «вышел в безубыток» — сделка не считается убытком в
+  // статистике, см. lib/analytics/breakeven.ts.
+  breakeven: boolean;
   // R-multiple посчитан один раз на сервере (см. /api/stats) — учитывает
   // риск-профиль аккаунта, если он включён; иначе по дистанции стопа.
   rr: number | null;

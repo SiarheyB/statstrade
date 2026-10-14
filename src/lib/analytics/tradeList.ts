@@ -14,6 +14,7 @@ import { prisma } from "@/lib/db";
 import { Prisma } from "@prisma/client";
 import type { SerializedTrade } from "@/lib/types";
 import type { TradeResult, TradeSide } from "@/lib/analytics/types";
+import { markedByKeys, moneyResultSql, resultSql } from "./breakeven";
 
 export const TRADE_SORTS = [
   "entryTime", "exitTime", "netPnl", "returnPct", "durationMs", "fees",
@@ -93,12 +94,26 @@ type Row = {
 
 // Обе таблицы сделок в одной форме. Приведения типов обязательны: у NULL-колонок
 // Postgres иначе не выведет тип и UNION ALL не сойдётся.
-function sourceRows(accountIds: string[]): Prisma.Sql {
+// beKeys — ключи сделок, помеченных «безубытком» (lib/analytics/breakeven.ts).
+// Отбираются в Node по тем же соображениям, что и фильтры по аннотациям выше:
+// их у пользователя единицы, и это дешевле join'а в UNION-запросе. Выражение
+// result одно на выдачу и на фильтр — иначе сделка пропадала бы из фильтра
+// «безубыток», оставаясь помеченной в списке.
+function sourceRows(accountIds: string[], beKeys: string[]): Prisma.Sql {
   const ids = Prisma.join(accountIds);
+  const cryptoResult = resultSql(
+    Prisma.sql`"result"`,
+    markedByKeys(Prisma.sql`"id"`, beKeys),
+  );
+  const importedResult = resultSql(
+    moneyResultSql("ImportedTrade"),
+    markedByKeys(Prisma.sql`"accountId" || ':' || "externalId"`, beKeys),
+  );
   return Prisma.sql`
     SELECT "id", "symbol", "base", "quote", "market", "exchange", "accountId",
            "side", "entryTime", "exitTime", "qty", "entryPrice", "exitPrice",
-           "grossPnl", "fees", "netPnl", "returnPct", "fillCount", "result", "rr",
+           "grossPnl", "fees", "netPnl", "returnPct", "fillCount",
+           ${cryptoResult} AS "result", "rr",
            NULL::float8 AS "lots", NULL::float8 AS "pips", NULL::float8 AS "swap",
            NULL::float8 AS "commission", NULL::text AS "assetClass",
            NULL::text AS "accountCurrency", NULL::float8 AS "stopLoss",
@@ -112,11 +127,7 @@ function sourceRows(accountIds: string[]): Prisma.Sql {
            "source", "accountId", "side", "entryTime", "exitTime", "qty",
            "entryPrice", "exitPrice", "grossProfit" + "swap", "commission", "netPnl",
            0::float8, 1,
-           CASE
-             WHEN "netPnl" > 1e-9 THEN 'win'
-             WHEN "netPnl" < -1e-9 THEN 'loss'
-             ELSE 'breakeven'
-           END,
+           ${importedResult},
            "rr", "lots", "pips", "swap", "commission", 'forex', "currency", "stopLoss",
            "id", "groupId", "isGroup", "memberCount", "stopSpread", "stopMin", "stopMax"
     FROM "ImportedTrade"
@@ -128,7 +139,9 @@ function sourceRows(accountIds: string[]): Prisma.Sql {
 // равно конкретному значению. Аннотаций у пользователя немного, поэтому проще
 // и дешевле отобрать ключи в Node, чем join'ить таблицу в UNION-запросе.
 type AnnField = "entryPoint" | "entryType" | "mistake" | "pattern";
-type AnnRow = { tradeKey: string } & Partial<Record<AnnField, string | null>>;
+type AnnRow = { tradeKey: string; breakeven?: boolean } & Partial<
+  Record<AnnField, string | null>
+>;
 
 function keysFor(annotations: AnnRow[], field: AnnField, value: string): string[] {
   if (value === UNSET) {
@@ -154,7 +167,7 @@ export async function querySymbols(userId: string): Promise<string[]> {
   if (ids.length === 0) return [];
   const rows = await prisma.$queryRaw<{ symbol: string }[]>`
     SELECT DISTINCT ${CANON_SYMBOL} AS symbol
-    FROM (${sourceRows(ids)}) AS t
+    FROM (${sourceRows(ids, [])}) AS t
     ORDER BY symbol ASC
   `;
   return rows.map((r) => r.symbol);
@@ -240,7 +253,8 @@ export async function queryTrades(
   // по главной строке кластера, а сами позиции добираются к ней ниже.
   where.push(Prisma.sql`t."isMain"`);
   const whereSql = Prisma.sql`WHERE ${Prisma.join(where, " AND ")}`;
-  const src = Prisma.sql`(${sourceRows(accountIds)}) AS t`;
+  const beKeys = annotations.filter((a) => a.breakeven).map((a) => a.tradeKey);
+  const src = Prisma.sql`(${sourceRows(accountIds, beKeys)}) AS t`;
 
   // Единица выдачи — СДЕЛКА, а не строка таблицы: объединённая сетка лимиток
   // (см. lib/trades/grouping.ts) это одна сделка из нескольких позиций. Кластер
@@ -297,6 +311,7 @@ export async function queryTrades(
           stopLoss?: number | null;
           riskAmount?: number | null;
           riskPct?: number | null;
+          breakeven?: boolean;
           note?: string | null;
           imageUrl?: string | null;
           imageProvider?: string | null;
@@ -334,6 +349,7 @@ export async function queryTrades(
       stopLoss: a?.stopLoss ?? r.stopLoss ?? null,
       riskAmount: a?.riskAmount ?? null,
       riskPct: a?.riskPct ?? null,
+      breakeven: a?.breakeven === true,
       note: a?.note ?? null,
       imageUrl: a?.imageUrl ?? null,
       imageProvider: a?.imageProvider ?? null,

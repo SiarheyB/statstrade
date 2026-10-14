@@ -8,6 +8,7 @@
 // HTTP-контекста (getAuthUser читает cookies), а проверять SQL на живой БД надо.
 
 import { prisma } from "@/lib/db";
+import { markedByJoin, moneyResultSql, resultSql } from "./breakeven";
 import { Prisma } from "@prisma/client";
 
 export type PlaybookStatRow = {
@@ -31,23 +32,34 @@ export async function playbookStats(userId: string): Promise<PlaybookStatRow[]> 
   const inIds = Prisma.join(ids);
 
   const rows = await prisma.$queryRaw<
-    { pattern: string; entryPoint: string; trades: number; wins: number; netPnl: number }[]
+    {
+      pattern: string;
+      entryPoint: string;
+      trades: number;
+      wins: number;
+      losses: number;
+      netPnl: number;
+    }[]
   >`
     SELECT a."pattern" AS pattern,
            COALESCE(NULLIF(a."entryPoint", ''), '') AS "entryPoint",
            COUNT(*)::int AS trades,
            COUNT(*) FILTER (WHERE t.result = 'win')::int AS wins,
+           COUNT(*) FILTER (WHERE t.result = 'loss')::int AS losses,
            COALESCE(SUM(t."netPnl"), 0)::float8 AS "netPnl"
     FROM (
-      SELECT "id", "netPnl", "result" FROM "Trade" WHERE "accountId" IN (${inIds})
+      SELECT c."id", c."netPnl", ${resultSql(Prisma.sql`c."result"`, markedByJoin("ca"))}
+      FROM "Trade" AS c
+      LEFT JOIN "TradeAnnotation" AS ca
+        ON ca."tradeKey" = c."id" AND ca."userId" = ${userId}
+      WHERE c."accountId" IN (${inIds})
       UNION ALL
-      SELECT "accountId" || ':' || "externalId", "netPnl",
-             CASE
-               WHEN "netPnl" > 1e-9 THEN 'win'
-               WHEN "netPnl" < -1e-9 THEN 'loss'
-               ELSE 'breakeven'
-             END
-      FROM "ImportedTrade" WHERE "accountId" IN (${inIds}) AND "groupId" IS NULL
+      SELECT i."accountId" || ':' || i."externalId", i."netPnl",
+             ${resultSql(moneyResultSql("i"), markedByJoin("ia"))}
+      FROM "ImportedTrade" AS i
+      LEFT JOIN "TradeAnnotation" AS ia
+        ON ia."tradeKey" = i."accountId" || ':' || i."externalId" AND ia."userId" = ${userId}
+      WHERE i."accountId" IN (${inIds}) AND i."groupId" IS NULL
     ) AS t
     JOIN "TradeAnnotation" a ON a."tradeKey" = t."id" AND a."userId" = ${userId}
     WHERE a."pattern" IS NOT NULL AND a."pattern" <> ''
@@ -57,7 +69,8 @@ export async function playbookStats(userId: string): Promise<PlaybookStatRow[]> 
     pattern: r.pattern,
     entryPoint: r.entryPoint,
     trades: r.trades,
-    winRate: r.trades > 0 ? (r.wins / r.trades) * 100 : 0,
+    // Безубытки вне знаменателя — как и на дашборде (lib/analytics/metrics.ts).
+    winRate: r.wins + r.losses > 0 ? (r.wins / (r.wins + r.losses)) * 100 : 0,
     netPnl: r.netPnl,
   }));
 }

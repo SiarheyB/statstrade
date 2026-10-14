@@ -201,13 +201,17 @@ function bucketStats(
   keyFn: (t: RoundTripTrade) => string,
   labelFn: (key: string) => string,
 ): Bucket[] {
-  const map = new Map<string, { trades: number; netPnl: number; wins: number }>();
+  // decided — сделки, у которых исход решился деньгами. Безубытки в винрейт не
+  // входят ни здесь, ни в общей метрике (lib/analytics/breakeven.ts), иначе
+  // срез по инструменту противоречил бы шапке дашборда.
+  const map = new Map<string, { trades: number; netPnl: number; wins: number; decided: number }>();
   for (const t of trades) {
     const key = keyFn(t);
-    const b = map.get(key) ?? { trades: 0, netPnl: 0, wins: 0 };
+    const b = map.get(key) ?? { trades: 0, netPnl: 0, wins: 0, decided: 0 };
     b.trades += 1;
     b.netPnl += t.netPnl;
     if (t.result === "win") b.wins += 1;
+    if (t.result !== "breakeven") b.decided += 1;
     map.set(key, b);
   }
   return Array.from(map.entries()).map(([key, b]) => ({
@@ -215,7 +219,7 @@ function bucketStats(
     label: labelFn(key),
     trades: b.trades,
     netPnl: b.netPnl,
-    winRate: b.trades > 0 ? (b.wins / b.trades) * 100 : 0,
+    winRate: b.decided > 0 ? (b.wins / b.decided) * 100 : 0,
   }));
 }
 
@@ -293,11 +297,13 @@ function computeTrend(trades: RoundTripTrade[], capital: number, now: number): T
   const agg = (arr: RoundTripTrade[]) => {
     const net = arr.reduce((s, t) => s + t.netPnl, 0);
     const wins = arr.filter((t) => t.result === "win");
+    const losses = arr.filter((t) => t.result === "loss");
     const gp = wins.reduce((s, t) => s + t.netPnl, 0);
-    const gl = Math.abs(arr.filter((t) => t.result === "loss").reduce((s, t) => s + t.netPnl, 0));
+    const gl = Math.abs(losses.reduce((s, t) => s + t.netPnl, 0));
+    const decided = wins.length + losses.length;
     return {
       net,
-      winRate: (wins.length / arr.length) * 100,
+      winRate: decided > 0 ? (wins.length / decided) * 100 : 0,
       pf: gl > 0 ? gp / gl : gp > 0 ? Infinity : 0,
       exp: net / arr.length,
     };
@@ -355,10 +361,13 @@ export function computeMetrics(
     } else if (t.result === "loss") {
       curLoss += 1;
       curWin = 0;
-    } else {
-      curWin = 0;
-      curLoss = 0;
     }
+    // Безубыток ПРОЗРАЧЕН для серий: он не удлиняет их и не обрывает.
+    // Серия отвечает на вопрос «сколько раз подряд рынок дал по рукам», а
+    // выход в БУ по своей воле — не ответ ни «да», ни «нет». Обрывай он серию
+    // — и полоса из трёх стопов с одним БУ посередине выглядела бы как две
+    // полосы по одному, то есть статистика прятала бы как раз то, ради чего
+    // на неё смотрят.
     largestWinStreak = Math.max(largestWinStreak, curWin);
     largestLossStreak = Math.max(largestLossStreak, curLoss);
   }
@@ -405,13 +414,17 @@ export function computeMetrics(
     : 0;
 
   // daily P&L series and daily returns for Sharpe/Sortino
-const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR: number; lossR: number }>();
+const dayMap = new Map<
+    string,
+    { pnl: number; trades: number; wins: number; decided: number; winR: number; lossR: number }
+  >();
   for (const t of sorted) {
     const key = t.exitTime.toISOString().slice(0, 10);
-    const d = dayMap.get(key) ?? { pnl: 0, trades: 0, wins: 0, winR: 0, lossR: 0 };
+    const d = dayMap.get(key) ?? { pnl: 0, trades: 0, wins: 0, decided: 0, winR: 0, lossR: 0 };
     d.pnl += t.netPnl;
     d.trades += 1;
     if (t.result === "win") d.wins += 1;
+    if (t.result !== "breakeven") d.decided += 1;
     const r = rMultiple(t);
     if (r != null) {
       if (r > 0) d.winR += r;
@@ -427,7 +440,7 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
   for (const key of dailyKeys) {
     const d = dayMap.get(key)!;
     cum += d.pnl;
-    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades, winRate: d.trades ? (d.wins / d.trades) * 100 : 0, winR: d.winR, lossR: d.lossR });
+    daily.push({ date: key, pnl: d.pnl, cumulative: cum, trades: d.trades, winRate: d.decided ? (d.wins / d.decided) * 100 : 0, winR: d.winR, lossR: d.lossR });
     if (runningEquity > 0) dailyReturns.push(d.pnl / runningEquity);
     runningEquity += d.pnl;
   }
@@ -466,20 +479,23 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
   }
   for (const side of ["long", "short"] as TradeSide[]) {
     const s = bySide[side];
-    s.winRate = s.trades > 0 ? (s.wins / s.trades) * 100 : 0;
+    // Знаменатель без безубытков — как в общей метрике.
+    const decided = s.wins + s.losses;
+    s.winRate = decided > 0 ? (s.wins / decided) * 100 : 0;
   }
 
   // by symbol
   const symMap = new Map<
     string,
-    { trades: number; netPnl: number; wins: number; volume: number }
+    { trades: number; netPnl: number; wins: number; decided: number; volume: number }
   >();
   for (const t of sorted) {
-    const b = symMap.get(t.symbol) ?? { trades: 0, netPnl: 0, wins: 0, volume: 0 };
+    const b = symMap.get(t.symbol) ?? { trades: 0, netPnl: 0, wins: 0, decided: 0, volume: 0 };
     b.trades += 1;
     b.netPnl += t.netPnl;
     b.volume += t.entryPrice * t.qty;
     if (t.result === "win") b.wins += 1;
+    if (t.result !== "breakeven") b.decided += 1;
     symMap.set(t.symbol, b);
   }
   const bySymbol: SymbolStats[] = Array.from(symMap.entries())
@@ -487,7 +503,7 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
       symbol,
       trades: b.trades,
       netPnl: b.netPnl,
-      winRate: b.trades > 0 ? (b.wins / b.trades) * 100 : 0,
+      winRate: b.decided > 0 ? (b.wins / b.decided) * 100 : 0,
       volume: b.volume,
     }))
     .sort((a, b) => Math.abs(b.netPnl) - Math.abs(a.netPnl));
@@ -576,7 +592,13 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
 
   // derived scalars
   const tradeCount = sorted.length;
-  const winRate = tradeCount > 0 ? (wins.length / tradeCount) * 100 : 0;
+  // Безубытки ВНЕ знаменателя: винрейт отвечает на вопрос «из состоявшихся
+  // сделок сколько в плюс», а выход в БУ — не состоявшаяся ставка, человек
+  // закрыл позицию сам (lib/analytics/breakeven.ts). Считай мы его в
+  // знаменателе — дисциплинированный выход бил бы по винрейту так же, как стоп.
+  // Сколько их было, видно рядом: счётчик «W / L / BE» на дашборде.
+  const decided = wins.length + losses.length;
+  const winRate = decided > 0 ? (wins.length / decided) * 100 : 0;
   const tradingDays = daily.length;
   const winningDays = daily.filter((d) => d.pnl > 0).length;
   const losingDays = daily.filter((d) => d.pnl < 0).length;
@@ -613,7 +635,8 @@ const dayMap = new Map<string, { pnl: number; trades: number; wins: number; winR
     losses: losses.length,
     breakevens: breakevens.length,
     winRate,
-    lossRate: tradeCount > 0 ? (losses.length / tradeCount) * 100 : 0,
+    // Тот же знаменатель, что у winRate: вместе они дают 100 %.
+    lossRate: decided > 0 ? (losses.length / decided) * 100 : 0,
     profitFactor: grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Infinity : 0,
     payoffRatio: avgLoss > 0 ? avgWin / avgLoss : avgWin > 0 ? Infinity : 0,
     expectancy: tradeCount > 0 ? totalNetPnl / tradeCount : 0,

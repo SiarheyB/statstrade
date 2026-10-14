@@ -16,6 +16,8 @@ const schema = z.object({
   // смысла не имеют, поэтому только положительные (как у стопа).
   riskAmount: z.number().positive().max(1e12).nullable().optional(),
   riskPct: z.number().positive().max(100).nullable().optional(),
+  // «Вышел в безубыток» — см. lib/analytics/breakeven.ts.
+  breakeven: z.boolean().optional(),
   note: z.string().max(2000).nullable().optional(),
 });
 
@@ -43,10 +45,13 @@ export async function PUT(req: Request) {
   const stopLoss = parsed.data.stopLoss ?? null;
   const riskAmount = parsed.data.riskAmount ?? null;
   const riskPct = parsed.data.riskPct ?? null;
+  const breakeven = parsed.data.breakeven ?? false;
   const note = parsed.data.note?.trim() || null;
   const { tradeKey } = parsed.data;
 
-  const data = { entryPoint, entryType, mistake, pattern, stopLoss, riskAmount, riskPct, note };
+  const data = {
+    entryPoint, entryType, mistake, pattern, stopLoss, riskAmount, riskPct, breakeven, note,
+  };
 
   // tradeKey принимался любой. Сама аннотация создаётся в строке автора и
   // чужие цифры не искажает (recomputeRRForTradeKey читает аннотацию ВЛАДЕЛЬЦА
@@ -74,12 +79,15 @@ export async function PUT(req: Request) {
       create: { userId: user.userId, tradeKey, ...data },
       update: data,
     });
-    // На RR влияют только стоп и ручной риск сделки; остальные поля
-    // (ТВХ, паттерн и т.п.) его не трогают, пересчёт им не нужен.
+    // Пересчёт нужен полям, влияющим на цифры: стоп и ручной риск меняют RR,
+    // пометка «безубыток» — категорию результата, а из неё почасовые wins/
+    // losses, по которым риск-менеджер считает стопы. Остальные поля (ТВХ,
+    // паттерн и т.п.) не трогают ни то, ни другое.
     if (
       parsed.data.stopLoss !== undefined ||
       parsed.data.riskAmount !== undefined ||
-      parsed.data.riskPct !== undefined
+      parsed.data.riskPct !== undefined ||
+      parsed.data.breakeven !== undefined
     ) {
       await recomputeRRForTradeKey(tradeKey).catch(() => {});
     }
@@ -93,6 +101,7 @@ export async function PUT(req: Request) {
       stopLoss: result.stopLoss,
       riskAmount: result.riskAmount,
       riskPct: result.riskPct,
+      breakeven: result.breakeven,
       note: result.note,
     });
   } catch (err) {

@@ -106,8 +106,12 @@ describe("computeMetrics", () => {
     ];
     const m = computeMetrics(trades);
     expect(m.breakevens).toBe(1);
-    expect(m.winRate).toBe(50); // 1 win of 2
+    // Безубыток вне знаменателя: winRate отвечает «из состоявшихся сделок
+    // сколько в плюс», а БУ — не состоявшаяся ставка (lib/analytics/breakeven.ts).
+    expect(m.winRate).toBe(100); // 1 win of 1 decided
     expect(m.lossRate).toBe(0);
+    // Сам факт никуда не делся — он виден счётчиком рядом.
+    expect(m.tradeCount).toBe(2);
   });
 
   it("computes streaks correctly", () => {
