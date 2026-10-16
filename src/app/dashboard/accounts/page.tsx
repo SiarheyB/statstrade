@@ -24,6 +24,7 @@ import { Term } from "@/components/Term";
 import { useI18n } from "@/lib/i18n/provider";
 import { Select } from "@/components/Select";
 import { useSync, type ImportProg } from "@/components/SyncProvider";
+import { gzipForUpload } from "@/lib/mt/gzipClient";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchangeIds";
 
 // Ключевые слова, указывающие на ошибку прав доступа API-ключа.
@@ -503,7 +504,7 @@ function AccountForm({
     setPreviewing(true);
     try {
       const fd = new FormData();
-      fd.append("file", f);
+      fd.append("file", await gzipForUpload(f));
       fd.append("source", exchange);
       fd.append("accountCurrency", accountCurrency);
       const res = await fetch("/api/mt/preview", { method: "POST", body: fd });
@@ -563,7 +564,7 @@ function AccountForm({
           return;
         }
         const fd = new FormData();
-        fd.append("file", file);
+        fd.append("file", await gzipForUpload(file));
         const iRes = await fetch(`/api/accounts/${cData.id}/import`, { method: "POST", body: fd });
         const iData = await iRes.json();
         if (!iRes.ok) {

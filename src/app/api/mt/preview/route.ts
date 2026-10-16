@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
+import { gunzipIfNeeded } from "@/lib/mt/gzip";
 import type { MtFormat } from "@/lib/mt/types";
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -30,7 +31,12 @@ export async function POST(req: Request) {
   // голый 500 БЕЗ JSON — карточка импорта молча оставалась без сводки, и
   // причина не попадала ни на экран, ни в журнал ошибок админки.
   try {
-    const buf = Buffer.from(await file.arrayBuffer());
+    let buf: Buffer;
+  try {
+    buf = gunzipIfNeeded(Buffer.from(await file.arrayBuffer()), MAX_BYTES);
+  } catch {
+    return badRequest("Не удалось распаковать файл или он слишком большой (макс. 10 МБ)");
+  }
     const html =
       buf[0] === 0xff && buf[1] === 0xfe ? buf.toString("utf16le") : buf.toString("utf8");
 

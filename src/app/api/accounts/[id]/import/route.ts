@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { gunzipIfNeeded } from "@/lib/mt/gzip";
 import { randomUUID } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
@@ -67,7 +68,12 @@ export async function POST(
     return badRequest("Файл слишком большой (макс. 10 МБ)");
   }
 
-  const buf = Buffer.from(await file.arrayBuffer());
+  let buf: Buffer;
+  try {
+    buf = gunzipIfNeeded(Buffer.from(await file.arrayBuffer()), MAX_BYTES);
+  } catch {
+    return badRequest("Не удалось распаковать файл или он слишком большой (макс. 10 МБ)");
+  }
   logger.info("import", account.id, "buffer size", buf.length);
   let html: string | undefined;
   const encodings = ["utf-8", "utf-16le", "windows-1251", "utf-16be"];
