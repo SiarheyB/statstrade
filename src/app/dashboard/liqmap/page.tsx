@@ -521,10 +521,14 @@ export default function LiqMapPage() {
     const tf0 = v.x0 + (Math.max(0, Math.min(plotW, mx - plotX)) / plotW) * (v.x1 - v.x0);
     const price = v.y0 + (1 - Math.max(0, Math.min(plotH, my)) / plotH) * (v.y1 - v.y0);
     const f = e.deltaY < 0 ? 1 / 1.15 : 1.15;
-    v.x0 = tf0 - (tf0 - v.x0) * f;
-    v.x1 = tf0 + (v.x1 - tf0) * f;
-    v.y0 = price - (price - v.y0) * f;
-    v.y1 = price + (v.y1 - price) * f;
+    // Колесо над графиком — только время, над шкалой цены — только цена.
+    if (mx >= plotX + plotW) {
+      v.y0 = price - (price - v.y0) * f;
+      v.y1 = price + (v.y1 - price) * f;
+    } else {
+      v.x0 = tf0 - (tf0 - v.x0) * f;
+      v.x1 = tf0 + (v.x1 - tf0) * f;
+    }
     clampX(v);
     clampY(v, data.heatmap.priceMin, data.heatmap.priceMax);
     requestDraw();

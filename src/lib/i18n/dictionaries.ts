@@ -191,7 +191,7 @@ const en: Dict = {
   "of.sideBuy": "Buy",
   "of.sideSell": "Sell",
   "of.onlyBigLimits": "Showing only limit orders ≥ {n} {coin}",
-  "of.zoomHint": "wheel/swipe = zoom both axes · shift+wheel = time only · drag = pan · dblclick = reset",
+  "of.zoomHint": "wheel = stretch time · wheel or drag on the price scale = stretch price · drag = pan · dblclick = reset",
 
   // chart (общее для графиков форекса, карты ордеров и карты ликвидаций)
   "chart.fullscreen": "Fullscreen",
@@ -2342,7 +2342,7 @@ const en: Dict = {
   "game.chart.live": "Live",
   "game.chart.backToPrice": "Back to price",
   "game.chart.resetHint": "Return to the live price (or double-click the chart)",
-  "game.chart.hint": "Drag the price scale on the right — vertical stretch · drag the time axis below — horizontal · scroll to zoom both (Shift — time only) · drag the field to pan · double-click returns to the live price",
+  "game.chart.hint": "Drag the price scale on the right — vertical stretch · drag the time axis below — horizontal · scroll over the chart — time, over the price scale — price · drag the field to pan · double-click returns to the live price",
 
   // Вкладки терминала, шапка-HUD и вкладка «Карьера».
   "game.tab.terminal": "Terminal",
@@ -2853,7 +2853,7 @@ const ru: Dict = {
   "of.sideBuy": "Покупка",
   "of.sideSell": "Продажа",
   "of.onlyBigLimits": "Показаны только лимитные заявки от {n} {coin}",
-  "of.zoomHint": "колесо/свайп = зум обеих осей · shift+колесо = только по времени · перетаскивание = сдвиг · двойной клик = сброс",
+  "of.zoomHint": "колесо = растянуть по времени · колесо или перетаскивание на шкале цены = растянуть по цене · перетаскивание = сдвиг · двойной клик = сброс",
 
   // chart
   "chart.fullscreen": "Развернуть на весь экран",
@@ -4991,7 +4991,7 @@ const ru: Dict = {
   "game.chart.live": "Онлайн",
   "game.chart.backToPrice": "К текущей цене",
   "game.chart.resetHint": "Вернуться к текущей цене (или двойной клик по графику)",
-  "game.chart.hint": "Тяни правую шкалу цены — растягивается вертикаль · тяни нижнюю ось времени — горизонталь · колесо — обе оси сразу (Shift — только время) · перетаскивание поля — сдвиг · двойной клик — к текущей цене",
+  "game.chart.hint": "Тяни правую шкалу цены — растягивается вертикаль · тяни нижнюю ось времени — горизонталь · колесо над графиком — время, над шкалой цены — цена · перетаскивание поля — сдвиг · двойной клик — к текущей цене",
 
   // Вкладки терминала, шапка-HUD и вкладка «Карьера».
   "game.tab.terminal": "Терминал",

@@ -546,12 +546,17 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       const cv0 = axis.compress(v.t0);
       const cv1 = axis.compress(v.t1);
       const tcur = cv0 + fx * (cv1 - cv0);
-      const tspan = clamp((cv1 - cv0) * factor, minTSpan, maxTSpan);
-      let next = { ...v, t0: axis.expand(tcur - fx * tspan), t1: axis.expand(tcur + (1 - fx) * tspan) };
-      if (!e.shiftKey) {
+      // Колесо над графиком растягивает/сжимает ТОЛЬКО время, цена не
+      // трогается; над шкалой цены справа — только цену. Раньше колесо
+      // приближало обе оси сразу, и график «отдалялся», а не растягивался.
+      let next = { ...v };
+      if (mx >= plotX + plotW) {
         const pcur = v.y1 - fy * (v.y1 - v.y0);
         const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);
         next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
+      } else {
+        const tspan = clamp((cv1 - cv0) * factor, minTSpan, maxTSpan);
+        next = { ...next, t0: axis.expand(tcur - fx * tspan), t1: axis.expand(tcur + (1 - fx) * tspan) };
       }
       next = clampToBounds(next);
       viewRef.current = next;

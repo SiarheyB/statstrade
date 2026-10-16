@@ -14,8 +14,8 @@
 //    зум и панорама молча не работали, как было в первой версии.
 // 2. Масштаб тянется ЗА ОСИ, как в биржевых терминалах: потянул вверх по
 //    правой шкале — свечи растянулись по вертикали, потянул вбок по нижней —
-//    график сжался или растянулся по времени. Плюс колесо (обе оси сразу,
-//    Shift — только время) и перетаскивание по полю (панорама).
+//    график сжался или растянулся по времени. Плюс колесо (над полем — только
+//    время, над шкалой цены — только цена) и перетаскивание по полю (панорама).
 // 3. Пустая полоса слева убрана: computePlotLayout() резервирует под ценовую
 //    шкалу 76px СЛЕВА (это нужно другим страницам проекта), а подписи цен
 //    рисуются справа.
@@ -1367,12 +1367,16 @@ export default function PriceChart({
       const fx = Math.min(1, Math.max(0, (mx - lay.plotX) / lay.plotW));
       const fy = Math.min(1, Math.max(0, my / lay.plotH));
       const iCursor = v.i0 + fx * (v.i1 - v.i0);
-      const iSpan = (v.i1 - v.i0) * factor;
-      let next: View = { ...v, i0: iCursor - fx * iSpan, i1: iCursor + (1 - fx) * iSpan };
-      if (!e.shiftKey) {
+      // Колесо над графиком — только время, над шкалой цены — только цена
+      // (как на форексе и карте ордеров, см. lib/useChartInteractions.ts).
+      let next: View = { ...v };
+      if (mx >= lay.plotX + lay.plotW) {
         const pCursor = v.y1 - fy * (v.y1 - v.y0);
         const pSpan = (v.y1 - v.y0) * factor;
         next = { ...next, y1: pCursor + fy * pSpan, y0: pCursor - (1 - fy) * pSpan };
+      } else {
+        const iSpan = (v.i1 - v.i0) * factor;
+        next = { ...next, i0: iCursor - fx * iSpan, i1: iCursor + (1 - fx) * iSpan };
       }
       viewRef.current = clampView(next);
       persistViewRef.current();

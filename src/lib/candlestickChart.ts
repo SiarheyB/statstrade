@@ -540,17 +540,20 @@ export function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): s
 export const CHART_WATERMARK = "tradingstat.ru";
 
 /**
- * Подписи поверх графика: инструмент слева вверху и водяной знак справа внизу.
+ * Подписи поверх графика: инструмент слева вверху и водяной знак по центру.
  *
  * Зачем инструмент. В полноэкранном режиме шапка страницы с селектором не
  * видна, и понять, какой символ открыт, было неоткуда — особенно на скриншоте,
  * отправленном кому-то ещё.
  *
- * Зачем тень, а не подложка. Фон под текстом бывает любым: на карте
- * ликвидаций это ярко-жёлтое пятно, на карте лимиток — светло-серые стены,
- * рядом — чёрный. Полупрозрачный текст без тени на светлом фоне исчезает, а
- * плашка-подложка читается как элемент интерфейса, а не как подпись. Мягкая
- * тень даёт читаемость на любом фоне и остаётся незаметной.
+ * Цвета берутся из темы графика: раньше подпись была светлой с тёмной тенью
+ * под тёмную тему, и на светлой теме тикер выглядел грязно-серым пятном.
+ * Подложка под тикером — цвет фона графика, полупрозрачная: на карте
+ * ликвидаций под ним бывает яркое пятно, а на карте лимиток — серые стены.
+ *
+ * Водяной знак — крупно и почти прозрачно по центру (как у «Периметра»): в
+ * углу мелким кеглем он не читался на скриншотах, а по центру его не обрезать
+ * и не перепутать с данными.
  *
  * Рисовать ПОСЛЕ данных, но ДО курсора и подсказки: под данными знак терялся
  * бы в плотной карте, а поверх подсказки перекрывал бы цифры.
@@ -561,37 +564,41 @@ export function drawChartWatermarks(
   layout: PlotLayout,
 ) {
   const { plotX, plotW, plotH } = layout;
-  // Кегль от ширины графика, а не постоянный. Постоянный выглядит соразмерно
-  // только на одном размере: те же 11 пикселей на встроенном графике заметны,
-  // а на развёрнутом во весь экран 4K превращаются в едва различимую строчку.
-  // Границы держат его в разумных пределах на очень узком и очень широком.
+  // Кегль от ширины графика, а не постоянный: те же пиксели на встроенном
+  // графике заметны, а на развёрнутом во весь экран 4K едва различимы.
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const symbolSize = Math.round(clamp(plotW / 70, 13, 22));
-  const markSize = Math.round(clamp(plotW / 90, 11, 17));
+  const symbolSize = Math.round(clamp(plotW / 55, 14, 26));
+  const markSize = Math.round(clamp(plotW / 9, 28, 120));
 
   ctx.save();
-  ctx.shadowColor = "rgba(0,0,0,0.9)";
-  ctx.shadowBlur = 4;
   ctx.textBaseline = "alphabetic";
 
-  // Инструмент — слева вверху, читаемо, но тише подписей осей.
-  if (symbol) {
-    ctx.font = `600 ${symbolSize}px ui-sans-serif, system-ui`;
-    ctx.textAlign = "left";
-    ctx.fillStyle = "rgba(230,233,240,0.72)";
-    ctx.fillText(symbol, plotX + 10, symbolSize + 7);
-  }
+  // Водяной знак — по центру области графика, тихо.
+  ctx.font = `700 ${markSize}px ui-sans-serif, system-ui`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.globalAlpha = 0.09;
+  ctx.fillStyle = CHART_COLORS.axisTextStrong;
+  ctx.fillText(CHART_WATERMARK, plotX + plotW / 2, plotH / 2, plotW * 0.9);
+  ctx.globalAlpha = 1;
 
-  // Водяной знак — справа внизу, ещё тише: это подпись, а не данные. Но и не
-  // настолько, чтобы пропасть: на чужом скриншоте он должен читаться, иначе
-  // теряет смысл.
-  ctx.font = `${markSize}px ui-sans-serif, system-ui`;
-  ctx.textAlign = "right";
-  ctx.fillStyle = "rgba(230,233,240,0.42)";
-  ctx.fillText(CHART_WATERMARK, plotX + plotW - 10, plotH - 10);
+  // Инструмент — слева вверху, чётко, цветом подписей осей.
+  if (symbol) {
+    ctx.font = `700 ${symbolSize}px ui-sans-serif, system-ui`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    const w = ctx.measureText(symbol).width;
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = CHART_COLORS.bg;
+    ctx.fillRect(plotX + 6, 4, w + 10, symbolSize + 8);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = CHART_COLORS.axisTextStrong;
+    ctx.fillText(symbol, plotX + 11, 8);
+  }
 
   ctx.restore();
   ctx.textAlign = "left";
+  ctx.textBaseline = "alphabetic";
 }
 
 export function drawTimeCrosshairTag(ctx: CanvasRenderingContext2D, label: string, cx: number, layout: PlotLayout) {
