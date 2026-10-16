@@ -702,14 +702,16 @@ export default function TradesPage() {
                 <col className="w-[5%]" />
                 <col className="w-[9%]" />
                 <col className="w-[3%]" />
-                <col className="w-[11%]" />
+                <col className="w-[10%]" />
                 <col className="w-[8%]" />
                 <col className="w-[8%]" />
                 <col className="w-[5%]" />
                 <col className="w-[7%]" />
-                <col className="w-[8%]" />
-                <col className="w-[8%]" />
                 <col className="w-[7%]" />
+                <col className="w-[8%]" />
+                {/* «Доходность %» с иконкой сортировки шире 7% и наезжала на
+                    «Чистый P&L» (заголовки в nowrap). */}
+                <col className="w-[9%]" />
                 <col className="w-[8%]" />
                 <col className="w-[8%]" />
                 <col className="w-[7%]" />
