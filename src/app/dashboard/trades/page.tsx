@@ -720,7 +720,7 @@ export default function TradesPage() {
                 <tr className="text-xs text-muted border-b border-border">
                   <Th />
                   <Th><Term desc={t("trades.colDesc.symbol")}>{t("trades.col.symbol")}</Term></Th>
-                  <Th><Term desc={t("trades.colDesc.side")}>{t("trades.col.side")}</Term></Th>
+                  <Th nowrap><Term desc={t("trades.colDesc.side")}>{t("trades.col.side")}</Term></Th>
                   <Th><Term desc={t("trades.colDesc.market")}>{t("trades.col.market")}</Term></Th>
                   <Th sortable onClick={() => toggleSort("entryTime")} active={sortKey === "entryTime"}><Term desc={t("trades.colDesc.entryTime")}>{t("trades.col.open")}</Term></Th>
                   <Th sortable onClick={() => toggleSort("exitTime")} active={sortKey === "exitTime"}><Term desc={t("trades.colDesc.close")}>{t("trades.col.close")}</Term></Th>
@@ -1370,8 +1370,10 @@ function Th({
   sortable,
   active,
   onClick,
+  nowrap,
 }: {
   children?: React.ReactNode;
+  nowrap?: boolean;
   right?: boolean;
   sortable?: boolean;
   active?: boolean;
@@ -1380,11 +1382,11 @@ function Th({
   return (
     <th
       onClick={onClick}
-      className={`px-3 py-2.5 font-medium whitespace-nowrap ${right ? "text-right" : "text-left"} ${sortable ? "cursor-pointer select-none hover:text-fg" : ""} ${active ? "text-accent" : ""}`}
+      className={`px-2 py-2.5 font-medium align-bottom ${right ? "text-right" : "text-left"} ${sortable ? "cursor-pointer select-none hover:text-fg" : ""} ${active ? "text-accent" : ""}`}
     >
-      <span className={`inline-flex items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
-        {children}
-        {sortable && <ArrowUpDown size={12} />}
+      <span className={`inline-flex max-w-full items-center gap-1 ${right ? "flex-row-reverse" : ""}`}>
+        <span className={nowrap ? "whitespace-nowrap" : "min-w-0"}>{children}</span>
+        {sortable && <ArrowUpDown size={12} className="shrink-0" />}
       </span>
     </th>
   );
