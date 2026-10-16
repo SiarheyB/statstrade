@@ -540,6 +540,29 @@ export function fmtCrosshairLabel(ms: number, tz: TimezoneId, locale: string): s
 export const CHART_WATERMARK = "tradingstat.ru";
 
 /**
+ * Тёмный ли фон в прямоугольнике (координаты в CSS-пикселях, как у рисования).
+ * getImageData работает в пикселях холста, поэтому учитываем масштаб dpr из
+ * текущей матрицы. Если прочитать нельзя — считаем по теме графика.
+ */
+function isDarkBehind(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number): boolean {
+  const fallback = CHART_COLORS.bg !== "#ffffff";
+  try {
+    const k = ctx.getTransform().a || 1;
+    const img = ctx.getImageData(Math.round(x * k), Math.round(y * k), Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k)));
+    const d = img.data;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 16) {
+      sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+      n++;
+    }
+    return n ? sum / n < 128 : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * Подписи поверх графика: инструмент слева вверху и водяной знак по центру.
  *
  * Зачем инструмент. В полноэкранном режиме шапка страницы с селектором не
@@ -548,8 +571,6 @@ export const CHART_WATERMARK = "tradingstat.ru";
  *
  * Цвета берутся из темы графика: раньше подпись была светлой с тёмной тенью
  * под тёмную тему, и на светлой теме тикер выглядел грязно-серым пятном.
- * Подложка под тикером — цвет фона графика, полупрозрачная: на карте
- * ликвидаций под ним бывает яркое пятно, а на карте лимиток — серые стены.
  *
  * Водяной знак — крупно и почти прозрачно по центру (как у «Периметра»): в
  * углу мелким кеглем он не читался на скриншотах, а по центру его не обрезать
@@ -567,7 +588,7 @@ export function drawChartWatermarks(
   // Кегль от ширины графика, а не постоянный: те же пиксели на встроенном
   // графике заметны, а на развёрнутом во весь экран 4K едва различимы.
   const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
-  const symbolSize = Math.round(clamp(plotW / 55, 14, 26));
+  const symbolSize = Math.round(clamp(plotW / 90, 12, 16));
   const markSize = Math.round(clamp(plotW / 9, 28, 120));
 
   ctx.save();
@@ -582,18 +603,25 @@ export function drawChartWatermarks(
   ctx.fillText(CHART_WATERMARK, plotX + plotW / 2, plotH / 2, plotW * 0.9);
   ctx.globalAlpha = 1;
 
-  // Инструмент — слева вверху, чётко, цветом подписей осей.
+  // Инструмент — слева вверху, как легенда в терминалах: обычный кегль, без
+  // подложки (плашка смотрелась чужеродным прямоугольником). Цвет — по фону
+  // под подписью, а не по теме: карта ликвидаций тёмная и в светлой теме, а
+  // свечной график там белый. Тёмный текст с обводкой на тёмной карте выглядел
+  // наклейкой, поэтому вместо обводки — мягкая тень противоположного тона.
   if (symbol) {
-    ctx.font = `700 ${symbolSize}px ui-sans-serif, system-ui`;
+    ctx.font = `600 ${symbolSize}px ui-sans-serif, system-ui`;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    const w = ctx.measureText(symbol).width;
-    ctx.globalAlpha = 0.75;
-    ctx.fillStyle = CHART_COLORS.bg;
-    ctx.fillRect(plotX + 6, 4, w + 10, symbolSize + 8);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = CHART_COLORS.axisTextStrong;
-    ctx.fillText(symbol, plotX + 11, 8);
+    const x = plotX + 10;
+    const y = 8;
+    const w = Math.ceil(ctx.measureText(symbol).width);
+    const dark = isDarkBehind(ctx, x, y, w, symbolSize);
+    ctx.shadowBlur = 3;
+    ctx.shadowColor = dark ? "rgba(0,0,0,0.7)" : "rgba(255,255,255,0.9)";
+    ctx.fillStyle = dark ? "rgba(241,245,249,0.95)" : "#334155";
+    ctx.fillText(symbol, x, y);
+    ctx.shadowBlur = 0;
+    ctx.shadowColor = "transparent";
   }
 
   ctx.restore();

@@ -187,6 +187,22 @@ function BtcSpinner({ label }: { label: string }) {
   );
 }
 
+/**
+ * Карта лимиток, у которой есть границы цены, — иначе null.
+ *
+ * За период без снимков стакана (сырые снимки живут OB_RETENTION_DAYS, свечи —
+ * дольше) сервер отдаёт карту с priceMin/priceMax = Infinity, а JSON
+ * превращает их в null. `null < 80000` в JS истинно, граница цены становилась
+ * null, и draw() выходил, ничего не нарисовав: после одного такого куска
+ * истории график пропадал целиком при любом зуме.
+ */
+function usableHeatmap<T extends { priceMin: number | null; priceMax: number | null }>(
+  h: T | null | undefined,
+): (T & { priceMin: number; priceMax: number }) | null {
+  if (!h || !Number.isFinite(h.priceMin) || !Number.isFinite(h.priceMax)) return null;
+  return h as T & { priceMin: number; priceMax: number };
+}
+
 export default function OrderflowPage() {
   const { t, timezone, locale } = useI18n();
   const { theme } = useTheme();
@@ -870,7 +886,7 @@ export default function OrderflowPage() {
     // Раньше здесь стоял ранний возврат по !data.heatmap, и график молчал всё
     // время, пока считалась тяжёлая агрегация.
     if (!cv || !data) return;
-    const hm = data.heatmap;
+    const hm = usableHeatmap(data.heatmap);
     const candles = getMergedCandles();
     const dpr = window.devicePixelRatio || 1;
     const W = cv.clientWidth;
@@ -912,9 +928,10 @@ export default function OrderflowPage() {
       // стены из догруженных кусков могли оказаться выше/ниже видимой области
       // и выглядеть как «истории нет».
       for (const seg of historySegmentsRef.current) {
-        if (!seg.heatmap) continue;
-        if (seg.heatmap.priceMin < fYMin) fYMin = seg.heatmap.priceMin;
-        if (seg.heatmap.priceMax > fYMax) fYMax = seg.heatmap.priceMax;
+        const shm = usableHeatmap(seg.heatmap);
+        if (!shm) continue;
+        if (shm.priceMin < fYMin) fYMin = shm.priceMin;
+        if (shm.priceMax > fYMax) fYMax = shm.priceMax;
       }
       if (!Number.isFinite(fYMin) || !Number.isFinite(fYMax)) {
         // Ни карты, ни свечей — рисовать нечего.
@@ -957,7 +974,7 @@ export default function OrderflowPage() {
       const segMap = segOffscreenRef.current.map;
       ctx.imageSmoothingEnabled = false;
       for (const seg of historySegmentsRef.current) {
-        const shm = seg.heatmap;
+        const shm = usableHeatmap(seg.heatmap);
         if (!shm || !shm.cols || !shm.times.length) continue;
         const segT0 = shm.times[0];
         const segT1 = shm.times[shm.cols - 1];

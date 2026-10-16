@@ -1378,7 +1378,16 @@ export default function PriceChart({
         const iSpan = (v.i1 - v.i0) * factor;
         next = { ...next, i0: iCursor - fx * iSpan, i1: iCursor + (1 - fx) * iSpan };
       }
-      viewRef.current = clampView(next);
+      next = clampView(next);
+      if (mx < lay.plotX + lay.plotW) {
+        // Шкала цены раздвигается под свечи, попавшие в новое окно, — иначе
+        // при отдалении они уходили за верх и низ. Только раздвигается.
+        const natural = priceRange(visibleCandles(), next.i0, next.i1);
+        if (natural.y0 < next.y0 || natural.y1 > next.y1) {
+          next = { ...next, y0: Math.min(next.y0, natural.y0), y1: Math.max(next.y1, natural.y1) };
+        }
+      }
+      viewRef.current = next;
       persistViewRef.current();
       redrawRef.current();
     };
@@ -1400,7 +1409,7 @@ export default function PriceChart({
       canvas.removeEventListener("dblclick", onDouble);
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [clampView, materializeView]);
+  }, [clampView, materializeView, priceRange, visibleCandles]);
 
   const toolButton = "px-2 py-1 rounded-md text-xs font-medium transition";
 

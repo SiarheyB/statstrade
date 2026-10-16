@@ -56,6 +56,15 @@ type DrawingDragState = { drawingId: string; dx: number; dy: number; originalPoi
 
 const ZOOM_IN_LIMIT = 1;
 const ZOOM_OUT_LIMIT = 2;
+// По времени отдалять дальше загруженной истории незачем: лишнее окно — это
+// пустота по краям. Дальше пускает догрузка истории, которая расширяет границы.
+const TIME_ZOOM_OUT_LIMIT = 1.1;
+// Сколько пустого места (доля ширины окна) можно оставить справа от последней
+// свечи. Без ограничения отдаление уводило свечи в левый угол, а справа
+// оставалась неделя пустоты.
+const RIGHT_EDGE_PADDING_FRACTION = 0.2;
+// Запас по цене (доля диапазона свечей), когда шкала раздвигается под них.
+const PRICE_FIT_PADDING = 0.05;
 
 /** Snap a chart-space point to the nearest candle's high/low, if magnet is enabled. */
 export function snapToCandle(
@@ -206,12 +215,40 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
     const c1 = axis.compress(view.t1);
     const span = c1 - c0 || 1;
     const minC0 = axis.compress(b.t0) - (atRealEdge ? span * EDGE_PADDING_FRACTION : 0);
+    // Правый край — не дальше запаса за последней свечой. Проверяется первым:
+    // если окно шире данных, левый край важнее (там догружается история).
+    const candles = o.getCandles();
+    const lastT = candles.length ? candles[candles.length - 1].t : b.t1;
+    const maxC1 = axis.compress(lastT) + span * RIGHT_EDGE_PADDING_FRACTION;
+    if (c1 > maxC1) {
+      const back = Math.min(c1 - maxC1, Math.max(0, c0 - minC0));
+      if (back > 0) return { ...view, t0: axis.expand(c0 - back), t1: axis.expand(c1 - back) };
+    }
     if (c0 >= minC0) return view;
     // Сдвигаем окно в сжатом времени и разворачиваем обратно — иначе одинаковая
     // добавка в реальных мс давала бы разный сдвиг слева и справа от выходных.
     const shift = minC0 - c0;
     return { ...view, t0: axis.expand(c0 + shift), t1: axis.expand(c1 + shift) };
   }, [axisOf]);
+
+  // Растягивание по времени шкалу цены не трогает — но если в новое окно
+  // попали свечи выше или ниже видимой цены, шкала раздвигается ровно под них.
+  // Иначе при отдалении свечи уходили за верх и низ графика. Только
+  // раздвигается, никогда не сжимается: растяжку по цене, сделанную на шкале
+  // справа, это не сбрасывает.
+  const fitPriceToCandles = useCallback((view: ChartView): ChartView => {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const k of optsRef.current.getCandles()) {
+      if (k.t < view.t0 || k.t > view.t1) continue;
+      if (k.l < lo) lo = k.l;
+      if (k.h > hi) hi = k.h;
+    }
+    if (!Number.isFinite(lo) || !Number.isFinite(hi)) return view;
+    if (lo >= view.y0 && hi <= view.y1) return view;
+    const pad = (hi - lo) * PRICE_FIT_PADDING;
+    return { ...view, y0: Math.min(view.y0, lo - pad), y1: Math.max(view.y1, hi + pad) };
+  }, []);
 
   const onMove = useCallback((e: React.MouseEvent<HTMLCanvasElement>) => {
     const o = optsRef.current;
@@ -335,13 +372,13 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         const cx = (c0 + c1) / 2;
         const b = boundsRef.current;
         const minT = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
-        const maxT = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * ZOOM_OUT_LIMIT : Infinity;
+        const maxT = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * TIME_ZOOM_OUT_LIMIT : Infinity;
         const span = Math.min(maxT, Math.max(minT, (c1 - c0) * f));
-        viewRef.current = clampToBounds({
+        viewRef.current = fitPriceToCandles(clampToBounds({
           ...drag.view,
           t0: axis.expand(cx - span / 2),
           t1: axis.expand(cx + span / 2),
-        });
+        }));
         maybeTriggerHistory(viewRef.current);
       } else {
         const axis = axisOf();
@@ -535,7 +572,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       const fy = Math.min(1, Math.max(0, my / plotH));
       const b = boundsRef.current;
       const axis = axisOf();
-      const maxTSpan = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * ZOOM_OUT_LIMIT : Infinity;
+      const maxTSpan = b ? (axis.compress(b.t1) - axis.compress(b.t0)) * TIME_ZOOM_OUT_LIMIT : Infinity;
       const minTSpan = b ? b.step * 3 * ZOOM_IN_LIMIT : 0;
       const maxPSpan = b ? (b.y1 - b.y0) * ZOOM_OUT_LIMIT : Infinity;
       const minPSpan = b ? (b.y1 - b.y0) * 0.05 * ZOOM_IN_LIMIT : 0;
@@ -550,7 +587,8 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
       // трогается; над шкалой цены справа — только цену. Раньше колесо
       // приближало обе оси сразу, и график «отдалялся», а не растягивался.
       let next = { ...v };
-      if (mx >= plotX + plotW) {
+      const overPriceAxis = mx >= plotX + plotW;
+      if (overPriceAxis) {
         const pcur = v.y1 - fy * (v.y1 - v.y0);
         const pspan = clamp((v.y1 - v.y0) * factor, minPSpan, maxPSpan);
         next = { ...next, y1: pcur + fy * pspan, y0: pcur - (1 - fy) * pspan };
@@ -559,6 +597,7 @@ export function useChartInteractions(opts: ChartInteractionsOptions) {
         next = { ...next, t0: axis.expand(tcur - fx * tspan), t1: axis.expand(tcur + (1 - fx) * tspan) };
       }
       next = clampToBounds(next);
+      if (!overPriceAxis) next = fitPriceToCandles(next);
       viewRef.current = next;
       maybeTriggerHistory(next);
       scheduleRedraw();
