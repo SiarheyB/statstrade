@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAuthUser, unauthorized, badRequest } from "@/lib/api";
+import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { parseStatement } from "@/lib/mt/parse";
 import { toImportedTrade } from "@/lib/mt/to-imported";
 import type { MtFormat } from "@/lib/mt/types";
@@ -25,35 +25,47 @@ export async function POST(req: Request) {
   if (file.size > MAX_BYTES) return badRequest("Файл слишком большой (макс. 10 МБ)");
   const hint: MtFormat = source === "mt4" || source === "mt5" ? source : "unknown";
 
-  const buf = Buffer.from(await file.arrayBuffer());
-  const html =
-    buf[0] === 0xff && buf[1] === 0xfe ? buf.toString("utf16le") : buf.toString("utf8");
+  // Разбор идёт под try: отчёты приходят от людей, и на неожиданной разметке
+  // parseStatement/toImportedTrade могут бросить. Без обработчика Next отдавал
+  // голый 500 БЕЗ JSON — карточка импорта молча оставалась без сводки, и
+  // причина не попадала ни на экран, ни в журнал ошибок админки.
+  try {
+    const buf = Buffer.from(await file.arrayBuffer());
+    const html =
+      buf[0] === 0xff && buf[1] === 0xfe ? buf.toString("utf16le") : buf.toString("utf8");
 
-  const { format, trades, balance, errors } = parseStatement(html, hint);
-  if (trades.length === 0) {
-    return badRequest(errors[0] ?? "В файле не найдено закрытых сделок");
+    const { format, trades, balance, errors } = parseStatement(html, hint);
+    if (trades.length === 0) {
+      return badRequest(errors[0] ?? "В файле не найдено закрытых сделок");
+    }
+
+    const rows = trades.map((t) =>
+      toImportedTrade(t, { id: "", accountCurrency: currency }, format, "preview"),
+    );
+    const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();
+    const times = rows.map((r) => r.exitTime.getTime());
+    const netTotal = rows.reduce((s, r) => s + r.netPnl, 0);
+    const deposit = balance != null ? Math.round((balance - netTotal) * 100) / 100 : null;
+
+    return NextResponse.json({
+      format,
+      parsed: rows.length,
+      symbols,
+      dateRange: { from: new Date(Math.min(...times)), to: new Date(Math.max(...times)) },
+      netTotal,
+      balance,
+      deposit,
+      errors,
+      sample: rows.slice(0, 30).map((r) => ({
+        symbol: r.symbol, side: r.side, lots: r.lots,
+        exitTime: r.exitTime, pips: r.pips, netPnl: r.netPnl,
+      })),
+    });
+  } catch (err) {
+    // Имя файла и формат — в журнал: по ним видно, на каком отчёте разбор
+    // спотыкается, не прося человека присылать сам файл.
+    return serverError(
+      `MT preview (${hint}, ${file.name}, ${file.size} B): ${(err as Error).message}`,
+    );
   }
-
-  const rows = trades.map((t) =>
-    toImportedTrade(t, { id: "", accountCurrency: currency }, format, "preview"),
-  );
-  const symbols = Array.from(new Set(rows.map((r) => r.symbol))).sort();
-  const times = rows.map((r) => r.exitTime.getTime());
-  const netTotal = rows.reduce((s, r) => s + r.netPnl, 0);
-  const deposit = balance != null ? Math.round((balance - netTotal) * 100) / 100 : null;
-
-  return NextResponse.json({
-    format,
-    parsed: rows.length,
-    symbols,
-    dateRange: { from: new Date(Math.min(...times)), to: new Date(Math.max(...times)) },
-    netTotal,
-    balance,
-    deposit,
-    errors,
-    sample: rows.slice(0, 30).map((r) => ({
-      symbol: r.symbol, side: r.side, lots: r.lots,
-      exitTime: r.exitTime, pips: r.pips, netPnl: r.netPnl,
-    })),
-  });
 }

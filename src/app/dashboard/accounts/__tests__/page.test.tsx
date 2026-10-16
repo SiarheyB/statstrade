@@ -243,4 +243,95 @@ describe("AccountsPage — прогресс импорта", () => {
     await screen.findByText("My MT4");
     expect(screen.queryByText("acc.mt.import.uploading")).not.toBeInTheDocument();
   });
+
+  // Предпросмотр отчёта MT. Перед приложением на проде стоит nginx, и на 413 /
+  // 502 / 504 он отдаёт СВОЮ html-страницу. Раньше res.json() на ней бросал, а
+  // catch'а в pickFile не было — исключение улетало в никуда, и человек видел
+  // выбранный файл без сводки и без единого слова о причине. Ровно так выглядел
+  // отчёт, который «загрузился, но не посчитался».
+  async function openMtForm() {
+    render(<AccountsPage />);
+    await screen.findByText("acc.empty");
+    fireEvent.click(screen.getByText("acc.add"));
+    // Выбор биржи — свой компонент Select (не нативный): кнопка со значением
+    // плюс список опций.
+    fireEvent.click(screen.getByText("Binance"));
+    fireEvent.click(screen.getByText("MetaTrader 5"));
+    return document.querySelector('input[type="file"]') as HTMLInputElement;
+  }
+
+  function pickReport(input: HTMLInputElement) {
+    const file = new File(["<html>report</html>"], "ReportHistory-1054796.html", {
+      type: "text/html",
+    });
+    Object.defineProperty(input, "files", { value: [file], configurable: true });
+    fireEvent.change(input);
+  }
+
+  it("показывает причину, когда предпросмотр отрезан лимитом nginx", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([]);
+      if (url === "/api/mt/preview") {
+        // nginx отдаёт html, а не json — res.json() на нём бросает.
+        return Promise.resolve({
+          ok: false,
+          status: 413,
+          json: () => Promise.reject(new SyntaxError("Unexpected token <")),
+        });
+      }
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    const input = await openMtForm();
+    pickReport(input);
+    expect(await screen.findByText("acc.mt.tooLarge")).toBeInTheDocument();
+  });
+
+  it("показывает код ответа, когда сервер ответил не json", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([]);
+      if (url === "/api/mt/preview") {
+        // 502/504 от nginx: тело — страница «технический перерыв».
+        return Promise.resolve({
+          ok: false,
+          status: 502,
+          json: () => Promise.reject(new SyntaxError("Unexpected token <")),
+        });
+      }
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    const input = await openMtForm();
+    pickReport(input);
+    expect(
+      await screen.findByText(/acc.mt.previewFailed.*502/),
+    ).toBeInTheDocument();
+  });
+
+  it("сообщает, когда сервер недоступен", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([]);
+      if (url === "/api/mt/preview") return Promise.reject(new TypeError("Failed to fetch"));
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    const input = await openMtForm();
+    pickReport(input);
+    expect(await screen.findByText("acc.mt.previewNetwork")).toBeInTheDocument();
+  });
+
+  it("сводка появляется, когда ответ нормальный", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([]);
+      if (url === "/api/mt/preview") {
+        return jsonRes({ format: "mt5", parsed: 16, symbols: ["BTCUSDT"], netTotal: -473.71, deposit: 5000 });
+      }
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    const input = await openMtForm();
+    pickReport(input);
+    expect(await screen.findByText(/acc.mt.previewTrades.*16/)).toBeInTheDocument();
+  });
 });
+

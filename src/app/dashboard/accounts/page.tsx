@@ -507,9 +507,23 @@ function AccountForm({
       fd.append("source", exchange);
       fd.append("accountCurrency", accountCurrency);
       const res = await fetch("/api/mt/preview", { method: "POST", body: fd });
-      const d = await res.json();
+      // Ответ разбираем ТОЛЬКО как возможный JSON: до приложения стоит nginx,
+      // и на 413/502/504 он отдаёт свою HTML-страницу. Раньше res.json() на
+      // ней бросал, а catch'а не было вовсе — исключение улетало в никуда, и
+      // человек видел выбранный файл без сводки и без единого слова о том,
+      // что пошло не так (ровно так выглядел 413 на отчёте за весь период).
+      const d = await res.json().catch(() => null);
       if (!res.ok) {
-        setError(d.error ?? t("settings.saveError"));
+        setError(
+          d?.error ??
+            (res.status === 413
+              ? t("acc.mt.tooLarge")
+              : t("acc.mt.previewFailed", { status: String(res.status) })),
+        );
+        return;
+      }
+      if (!d) {
+        setError(t("acc.mt.previewFailed", { status: String(res.status) }));
         return;
       }
       setPreview({
@@ -519,6 +533,9 @@ function AccountForm({
         format: d.format,
         deposit: d.deposit ?? null,
       });
+    } catch {
+      // Сеть отвалилась, запрос прерван вкладкой, файл не дочитался.
+      setError(t("acc.mt.previewNetwork"));
     } finally {
       setPreviewing(false);
     }
