@@ -44,6 +44,11 @@ export const mockPrisma = {
   $queryRawUnsafe: vi.fn().mockResolvedValue([{ n: 0 }]),
   $transaction: vi.fn((args: unknown) => {
     if (Array.isArray(args)) return Promise.all(args as Promise<unknown>[]);
+    // Интерактивная форма: прогоняем колбэк на том же моке, иначе код внутри
+    // транзакции в тестах просто не выполняется.
+    if (typeof args === "function") {
+      return Promise.resolve((args as (tx: unknown) => unknown)(mockPrisma));
+    }
     return Promise.resolve([]);
   }),
   $executeRaw: vi.fn().mockResolvedValue(0),

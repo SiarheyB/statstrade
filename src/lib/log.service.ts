@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "./db";
+import { redactDetails, redactSecretsInText } from "./logSanitize";
 
 export type LogLevel = "info" | "warn" | "error";
 export type EventType = string;
@@ -37,8 +38,9 @@ export class LogService {
           module,
           accountId,
           eventType,
-          message,
-          details: details as Prisma.InputJsonObject,
+          // Скрининг секретов — здесь, а не в вызовах: см. lib/logSanitize.ts.
+          message: redactSecretsInText(message),
+          details: redactDetails(details) as Prisma.InputJsonObject,
           level,
         },
       });

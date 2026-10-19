@@ -1,4 +1,5 @@
 import { prisma } from "./db";
+import { redactSecretsInText } from "./logSanitize";
 
 // Централизованный лог серверных ошибок для админ-панели. Два источника пишут
 // сюда: serverError() (перехваченные в try/catch API-роутов — 500-е ответы) и
@@ -30,7 +31,13 @@ export function throttleSize(): number {
   return lastLogged.size;
 }
 
-export function logError(message: string, opts: { path?: string; stack?: string } = {}): void {
+export function logError(rawMessage: string, opts: { path?: string; stack?: string } = {}): void {
+  // Скрининг ДО ключа троттлинга: в текст пойманного исключения попадает что
+  // угодно, включая URL запроса к бирже с подписью и ключом (см.
+  // lib/logSanitize.ts). Заодно два «одинаковых, но с разным ключом» падения
+  // схлопываются в один ключ и троттлятся как одно.
+  const message = redactSecretsInText(rawMessage);
+  const stack = opts.stack ? redactSecretsInText(opts.stack) : undefined;
   const key = `${opts.path ?? ""}:${message}`;
   const now = Date.now();
   sweep(now);
@@ -43,7 +50,7 @@ export function logError(message: string, opts: { path?: string; stack?: string 
       data: {
         message: message.slice(0, 4000),
         path: opts.path?.slice(0, 500) ?? null,
-        stack: opts.stack?.slice(0, 8000) ?? null,
+        stack: stack?.slice(0, 8000) ?? null,
       },
     })
     .catch(() => {
