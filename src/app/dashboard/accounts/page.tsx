@@ -801,6 +801,7 @@ function AccountForm({
                   autoComplete="off"
                 />
               </div>
+              <p className="text-xs text-faint">{t("acc.form.ipHint")}</p>
               {needsPassphrase && (
                 <div>
                   <label className="block text-xs text-muted mb-1">
@@ -992,6 +993,18 @@ function ExchangeBadge({ exchange }: { exchange: string }) {
 }
 
 /**
+ * Биржа отвергла запрос из-за привязки ключа к IP-адресам (Bybit 10010
+ * «Unmatched IP», OKX 50110 и т.п.). Права тут в порядке — дело в whitelist,
+ * поэтому такая ошибка не должна показываться как «недостаточно разрешений»
+ * (её ловит ключевое слово «API key» из PERMISSION_ERROR_KEYWORDS).
+ */
+function isIpRestrictionError(error: string): boolean {
+  return /unmatched ip|bound ip|ip.{0,24}whitelist|whitelist.{0,24}ip|ip.{0,12}not (?:allowed|in)|10010|50110/i.test(
+    error,
+  );
+}
+
+/**
  * Проверяет, содержит ли текст ошибки признаки проблем с правами API-ключа.
  */
 function isPermissionError(error: string): boolean {
@@ -1013,7 +1026,41 @@ function PermissionErrorBanner({
   exchange: string;
   isMt: boolean;
 }) {
-  const isPerm = !isMt && isPermissionError(error);
+  const { t } = useI18n();
+  const isIp = !isMt && isIpRestrictionError(error);
+  const isPerm = !isMt && !isIp && isPermissionError(error);
+
+  if (isIp) {
+    const name = isExchangeId(exchange) ? SUPPORTED_EXCHANGES[exchange]?.name : exchange;
+    const url = isExchangeId(exchange) ? SUPPORTED_EXCHANGES[exchange]?.docsUrl : null;
+    return (
+      <div className="mt-1 w-full rounded-lg border border-warn/30 bg-warn/5 px-3 py-2 text-xs">
+        <div className="flex items-start gap-2">
+          <AlertTriangle size={14} className="text-warn shrink-0 mt-0.5" />
+          <div className="min-w-0">
+            <p className="font-medium text-warn">{t("acc.ipError.title", { name })}</p>
+            <p className="text-muted mt-0.5">{t("acc.ipError.body", { name })}</p>
+            {url && (
+              <a
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 mt-1.5 text-accent hover:text-accent/80 underline underline-offset-2"
+              >
+                {t("acc.ipError.link", { name })}
+              </a>
+            )}
+            <details className="mt-1.5">
+              <summary className="cursor-pointer text-faint hover:text-muted text-[11px]">
+                {t("acc.ipError.tech")}
+              </summary>
+              <p className="mt-1 text-faint text-[11px] font-mono break-all">{error}</p>
+            </details>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!isPerm) {
     return (

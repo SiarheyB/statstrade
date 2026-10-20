@@ -242,6 +242,24 @@ describe("AccountsPage", () => {
     expect(await screen.findByText(/Ошибка прав доступа API-ключа/)).toBeInTheDocument();
   });
 
+  it("ошибка привязки к IP (Bybit 10010) не выдаётся за ошибку прав", async () => {
+    const errAccount = {
+      ...account1,
+      syncError:
+        "bybit {\"retCode\":10010,\"retMsg\":\"Unmatched IP, please check your API key's bound IP addresses.\"}",
+    };
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([errAccount]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    await screen.findByText("My Binance");
+    expect(await screen.findByText(/acc.ipError.title/)).toBeInTheDocument();
+    expect(screen.getByText(/acc.ipError.body/)).toBeInTheDocument();
+    expect(screen.queryByText(/Ошибка прав доступа API-ключа/)).not.toBeInTheDocument();
+  });
+
   it("shows plain error text for non-permission sync errors", async () => {
     const errAccount = { ...account1, syncError: "Some random failure" };
     global.fetch = vi.fn((url: string) => {
