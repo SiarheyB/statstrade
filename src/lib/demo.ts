@@ -33,6 +33,9 @@ const SYMBOLS: DemoSymbol[] = [
 
 const FEE_RATE = 0.0005; // 0.05% taker
 
+// Депозит, который проставляется демо-счёту без собственного баланса.
+export const DEMO_BALANCE = 10000;
+
 function randn(): number {
   // Box-Muller
   let u = 0;
@@ -149,18 +152,69 @@ export function generateDemoFills(
   return rows;
 }
 
+// Все демо-филлы помечены этим префиксом в tradeId — по нему же их потом
+// находит откат. Настоящие филлы бирж такой id не получают.
+export const DEMO_TRADE_ID_PREFIX = "demo-";
+
+const DEMO_FILL_WHERE = { tradeId: { startsWith: DEMO_TRADE_ID_PREFIX } } as const;
+
+/** Сколько на счёте НАСТОЯЩИХ (не демо) филлов. */
+export async function countRealFills(accountId: string): Promise<number> {
+  return prisma.fill.count({ where: { accountId, NOT: DEMO_FILL_WHERE } });
+}
+
+/** Сколько на счёте демо-филлов (0 → откатывать нечего). */
+export async function countDemoFills(accountId: string): Promise<number> {
+  return prisma.fill.count({ where: { accountId, ...DEMO_FILL_WHERE } });
+}
+
+// Ключи аннотаций, принадлежащих ИМЕННО демо-сделкам: собираются из самих
+// демо-филлов тем же reconstructTrades, что строит сделки. Снести все
+// аннотации счёта нельзя — на нём лежат разметка и стопы реальных сделок
+// (ровно это и случалось при повторном нажатии «Демо»).
+async function demoTradeKeys(accountId: string): Promise<string[]> {
+  const fills = await prisma.fill.findMany({
+    where: { accountId, ...DEMO_FILL_WHERE },
+    orderBy: { timestamp: "asc" },
+    select: {
+      symbol: true, base: true, quote: true, market: true, side: true,
+      price: true, amount: true, fee: true, feeCurrency: true,
+      realizedPnl: true, timestamp: true, exchange: true, accountId: true,
+    },
+  });
+  if (!fills.length) return [];
+  return reconstructTrades(fills as FillInput[]).map((t) => t.id);
+}
+
+/**
+ * Удалить демо-данные счёта: филлы, аннотации демо-сделок и пересобрать
+ * материализованные сделки. Возвращает число удалённых филлов.
+ */
+export async function removeDemoData(
+  accountId: string,
+  userId: string,
+): Promise<number> {
+  const keys = await demoTradeKeys(accountId);
+  const { count } = await prisma.fill.deleteMany({
+    where: { accountId, ...DEMO_FILL_WHERE },
+  });
+  if (keys.length) {
+    await prisma.tradeAnnotation.deleteMany({
+      where: { userId, tradeKey: { in: keys } },
+    });
+  }
+  // Филлов стало меньше → материализованные сделки пересобираем целиком.
+  await rebuildAccountTrades(accountId);
+  return count;
+}
+
 export async function seedDemoData(
   accountId: string,
   exchange: string,
   userId: string,
 ): Promise<number> {
   // Clear any previous demo fills and their annotations for a clean slate.
-  await prisma.fill.deleteMany({
-    where: { accountId, tradeId: { startsWith: "demo-" } },
-  });
-  await prisma.tradeAnnotation.deleteMany({
-    where: { userId, tradeKey: { startsWith: `${accountId}:` } },
-  });
+  await removeDemoData(accountId, userId);
 
   const rows = generateDemoFills(accountId, exchange);
   await prisma.fill.createMany({ data: rows });
@@ -245,10 +299,18 @@ export async function seedDemoData(
   }
 
   // Give the demo account a deposit so the capital field / risk manager work.
-  await prisma.exchangeAccount.update({
+  // Только если баланса ещё нет: на счёте с реальными данными демо не должно
+  // затирать настоящий депозит.
+  const acc = await prisma.exchangeAccount.findUnique({
     where: { id: accountId },
-    data: { balance: 10000, balanceAt: new Date() },
+    select: { balance: true },
   });
+  if (!acc?.balance) {
+    await prisma.exchangeAccount.update({
+      where: { id: accountId },
+      data: { balance: DEMO_BALANCE, balanceAt: new Date() },
+    });
+  }
 
   return rows.length;
 }

@@ -6,6 +6,7 @@ import { getAuthUser, unauthorized, badRequest, serverError } from "@/lib/api";
 import { bumpStatsVersion } from "@/lib/statsCache";
 import { SUPPORTED_EXCHANGES, isExchangeId } from "@/lib/exchanges";
 import { isExchangeEnabled } from "@/lib/exchangeToggle";
+import { DEMO_TRADE_ID_PREFIX } from "@/lib/demo";
 
 const SOURCES = ["exchange", "mt4", "mt5", "manual"] as const;
 
@@ -60,14 +61,22 @@ export async function GET(req: Request) {
   // Счётчики — двумя групповыми запросами на все счета сразу, а не include
   // _count (тот считает по каждому счёту отдельно). Пустые Map, если не просили.
   const ids = accounts.map((a) => a.id);
-  const [fillCounts, importedCounts] = withCounts && ids.length
+  const [fillCounts, importedCounts, demoFillCounts] = withCounts && ids.length
     ? await Promise.all([
         prisma.fill.groupBy({ by: ["accountId"], where: { accountId: { in: ids } }, _count: { _all: true } }),
         prisma.importedTrade.groupBy({ by: ["accountId"], where: { accountId: { in: ids } }, _count: { _all: true } }),
+        // Демо-филлы отдельно: по ним страница счетов решает, можно ли ещё
+        // грузить демо и показывать ли «Откатить демо» (см. lib/demo.ts).
+        prisma.fill.groupBy({
+          by: ["accountId"],
+          where: { accountId: { in: ids }, tradeId: { startsWith: DEMO_TRADE_ID_PREFIX } },
+          _count: { _all: true },
+        }),
       ])
-    : [[], []];
+    : [[], [], []];
   const fillsBy = new Map(fillCounts.map((r) => [r.accountId, r._count._all]));
   const importedBy = new Map(importedCounts.map((r) => [r.accountId, r._count._all]));
+  const demoFillsBy = new Map(demoFillCounts.map((r) => [r.accountId, r._count._all]));
 
   return NextResponse.json(
     accounts.map((a) => ({
@@ -95,6 +104,7 @@ export async function GET(req: Request) {
       autoSync: a.autoSync,
       syncIntervalMinutes: a.syncIntervalMinutes,
       fillCount: fillsBy.get(a.id) ?? 0,
+      demoFillCount: demoFillsBy.get(a.id) ?? 0,
       pushConnected: !!a.pushTokenHash,
       lastPushAt: a.lastPushAt,
       createdAt: a.createdAt,

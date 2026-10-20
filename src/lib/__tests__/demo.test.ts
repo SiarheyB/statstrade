@@ -11,14 +11,24 @@ const mocks = vi.hoisted(() => ({
     mistakeOptions: null,
     patternOptions: null,
   }),
+  // Демо-филлы, по которым откат собирает ключи аннотаций.
+  fillFindMany: vi.fn().mockResolvedValue([]),
+  fillCount: vi.fn().mockResolvedValue(0),
+  // Баланс счёта: демо-депозит ставится, только когда его нет.
+  accountFindUnique: vi.fn().mockResolvedValue({ balance: null }),
 }));
 
 vi.mock('@/lib/db', () => ({
   prisma: {
-    fill: { createMany: mocks.createMany, deleteMany: mocks.deleteMany },
+    fill: {
+      createMany: mocks.createMany,
+      deleteMany: mocks.deleteMany,
+      findMany: mocks.fillFindMany,
+      count: mocks.fillCount,
+    },
     tradeAnnotation: { createMany: mocks.createMany, deleteMany: mocks.deleteMany },
     user: { findUnique: mocks.findUnique },
-    exchangeAccount: { update: mocks.update },
+    exchangeAccount: { update: mocks.update, findUnique: mocks.accountFindUnique },
   },
 }));
 
@@ -55,7 +65,7 @@ vi.mock('@/lib/annotations', () => ({
 }));
 
 // Import functions AFTER mocks are set up
-import { generateDemoFills, seedDemoData } from '@/lib/demo';
+import { generateDemoFills, seedDemoData, removeDemoData, countRealFills, countDemoFills } from '@/lib/demo';
 
 describe('demo module', () => {
   beforeEach(() => {
@@ -66,6 +76,10 @@ describe('demo module', () => {
       mistakeOptions: null,
       patternOptions: null,
     });
+    mocks.fillFindMany.mockResolvedValue([]);
+    mocks.fillCount.mockResolvedValue(0);
+    mocks.accountFindUnique.mockResolvedValue({ balance: null });
+    mocks.deleteMany.mockResolvedValue({ count: 0 });
   });
 
   describe('generateDemoFills', () => {
@@ -138,13 +152,18 @@ describe('demo module', () => {
   });
 
   describe('seedDemoData', () => {
-    it('deletes old demo fills and annotations before seeding', async () => {
+    it('deletes old demo fills before seeding', async () => {
       await seedDemoData('acc1', 'bybit', 'user1');
-      expect(mocks.deleteMany).toHaveBeenCalledTimes(2);
       expect(mocks.deleteMany).toHaveBeenCalledWith({
         where: { accountId: 'acc1', tradeId: { startsWith: 'demo-' } },
       });
-      expect(mocks.deleteMany).toHaveBeenCalledWith({
+    });
+
+    it('НЕ сносит аннотации всего счёта — только демо-сделок', async () => {
+      // Прежний код чистил все аннотации с tradeKey "acc1:", то есть разметку
+      // и стопы настоящих сделок тоже.
+      await seedDemoData('acc1', 'bybit', 'user1');
+      expect(mocks.deleteMany).not.toHaveBeenCalledWith({
         where: { userId: 'user1', tradeKey: { startsWith: 'acc1:' } },
       });
     });
@@ -163,6 +182,14 @@ describe('demo module', () => {
       });
     });
 
+    it('не затирает уже заданный баланс счёта', async () => {
+      mocks.accountFindUnique.mockResolvedValue({ balance: 2500 });
+      await seedDemoData('acc1', 'bybit', 'user1');
+      expect(mocks.update).not.toHaveBeenCalledWith(
+        expect.objectContaining({ data: expect.objectContaining({ balance: 10000 }) }),
+      );
+    });
+
     it('attaches annotations to trades with valid keys', async () => {
       await seedDemoData('acc1', 'bybit', 'user1');
       const annotationCalls = mocks.createMany.mock.calls.filter(c =>
@@ -177,6 +204,44 @@ describe('demo module', () => {
         const hasAnnotation = a.entryPoint != null || a.entryType != null || a.mistake != null || a.pattern != null || a.stopLoss != null;
         expect(hasAnnotation).toBe(true);
       }
+    });
+  });
+
+  describe('removeDemoData', () => {
+    it('сносит только демо-филлы и аннотации их сделок', async () => {
+      mocks.fillFindMany.mockResolvedValue([{ symbol: 'BTC/USDT' }]);
+      mocks.deleteMany.mockResolvedValue({ count: 42 });
+      const deleted = await removeDemoData('acc1', 'user1');
+      expect(deleted).toBe(42);
+      expect(mocks.deleteMany).toHaveBeenCalledWith({
+        where: { accountId: 'acc1', tradeId: { startsWith: 'demo-' } },
+      });
+      // Ключи — из reconstructTrades по демо-филлам (замокан выше).
+      expect(mocks.deleteMany).toHaveBeenCalledWith({
+        where: { userId: 'user1', tradeKey: { in: ['trade-1', 'trade-2'] } },
+      });
+    });
+
+    it('без демо-филлов аннотации не трогает', async () => {
+      mocks.fillFindMany.mockResolvedValue([]);
+      await removeDemoData('acc1', 'user1');
+      expect(mocks.deleteMany).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('счётчики филлов', () => {
+    it('countRealFills исключает демо-префикс', async () => {
+      await countRealFills('acc1');
+      expect(mocks.fillCount).toHaveBeenCalledWith({
+        where: { accountId: 'acc1', NOT: { tradeId: { startsWith: 'demo-' } } },
+      });
+    });
+
+    it('countDemoFills считает только демо-префикс', async () => {
+      await countDemoFills('acc1');
+      expect(mocks.fillCount).toHaveBeenCalledWith({
+        where: { accountId: 'acc1', tradeId: { startsWith: 'demo-' } },
+      });
     });
   });
 });

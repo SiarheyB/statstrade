@@ -59,7 +59,11 @@ const account1 = {
   autoSync: false,
   syncIntervalMinutes: 60,
   fillCount: 5,
+  demoFillCount: 0,
 };
+
+// Счёт, на котором есть ТОЛЬКО демо-сделки.
+const demoOnlyAccount = { ...account1, id: "acc-demo", fillCount: 280, demoFillCount: 280 };
 
 const mtAccount = {
   ...account1,
@@ -92,6 +96,65 @@ beforeEach(() => {
 });
 
 describe("AccountsPage", () => {
+  it("демо заблокировано, когда на счёте есть реальные сделки", async () => {
+    // fillCount 5 при demoFillCount 0 — это живой счёт: подмешивать в него
+    // синтетику нельзя (с этого и начался баг).
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([account1]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    const btn = (await screen.findByText("acc.demo")).closest("button")!;
+    expect(btn).toBeDisabled();
+    expect(screen.queryByText("acc.demoRollback")).not.toBeInTheDocument();
+  });
+
+  it("на счёте с одними демо-сделками демо доступно и есть откат", async () => {
+    global.fetch = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([demoOnlyAccount]);
+      return jsonRes({});
+    }) as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    const btn = (await screen.findByText("acc.demo")).closest("button")!;
+    expect(btn).not.toBeDisabled();
+    expect(screen.getByText("acc.demoRollback")).toBeInTheDocument();
+  });
+
+  it("откат демо шлёт DELETE на демо-роут", async () => {
+    const fetchMock = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([demoOnlyAccount]);
+      return jsonRes({ deleted: 280 });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    fireEvent.click(await screen.findByText("acc.demoRollback"));
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/accounts/acc-demo/demo", {
+        method: "DELETE",
+      }),
+    );
+  });
+
+  it("загрузка демо спрашивает подтверждение", async () => {
+    global.confirm = vi.fn(() => false) as unknown as typeof confirm;
+    const fetchMock = vi.fn((url: string) => {
+      if (url.split("?")[0] === "/api/accounts") return jsonRes([demoOnlyAccount]);
+      return jsonRes({ imported: 280 });
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    render(<AccountsPage />);
+    fireEvent.click(await screen.findByText("acc.demo"));
+    await waitFor(() => expect(global.confirm).toHaveBeenCalled());
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/demo"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("shows loading state initially", () => {
     render(<AccountsPage />);
     expect(screen.getByText("common.loading")).toBeInTheDocument();

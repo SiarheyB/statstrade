@@ -91,16 +91,21 @@ describe("GET /api/accounts", () => {
   it("с ?counts=1 счётчики приходят одним групповым запросом на все счета", async () => {
     asUser();
     mockPrisma.exchangeAccount.findMany.mockResolvedValue([account(), account({ id: "a2" })]);
-    mockPrisma.fill.groupBy.mockResolvedValue([{ accountId: "a1", _count: { _all: 7 } }]);
+    mockPrisma.fill.groupBy
+      // Первый вызов — все филлы, второй — только демо (кнопка «Демо»).
+      .mockResolvedValueOnce([{ accountId: "a1", _count: { _all: 7 } }])
+      .mockResolvedValueOnce([{ accountId: "a1", _count: { _all: 4 } }]);
     mockPrisma.importedTrade.groupBy.mockResolvedValue([{ accountId: "a2", _count: { _all: 3 } }]);
     const res = await GET(new Request(`${base}?counts=1`));
     const body = await res.json();
-    expect(mockPrisma.fill.groupBy).toHaveBeenCalledTimes(1);
+    expect(mockPrisma.fill.groupBy).toHaveBeenCalledTimes(2);
     expect(mockPrisma.importedTrade.groupBy).toHaveBeenCalledTimes(1);
     expect(body[0].fillCount).toBe(7);
     expect(body[0].importedCount).toBe(0);
     expect(body[1].fillCount).toBe(0);
     expect(body[1].importedCount).toBe(3);
+    expect(body[0].demoFillCount).toBe(4);
+    expect(body[1].demoFillCount).toBe(0);
   });
 });
 

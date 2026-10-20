@@ -18,6 +18,7 @@ import {
   PlugZap,
   Download,
   ChevronRight,
+  Undo2,
 } from "lucide-react";
 import { fmtDate, fmtUsd } from "@/lib/format";
 import { Term } from "@/components/Term";
@@ -66,12 +67,17 @@ type Account = {
   autoSync: boolean;
   syncIntervalMinutes: number;
   fillCount: number;
+  // Из них синтетические (кнопка «Демо»): реальных = fillCount - demoFillCount.
+  demoFillCount: number;
   // Выгрузка из советника TradeGridPanel (POST /api/mt/push).
   pushConnected?: boolean;
   lastPushAt?: string | null;
 };
 
 const INTERVALS = [15, 30, 60, 240, 720, 1440];
+
+// Сколько сделок генерирует seedDemoData — показываем в подтверждении.
+const DEMO_TRADE_COUNT = 140;
 
 type ExchangeOpt = { id: string; name: string; needsPassphrase: boolean; supportsDemo: boolean };
 
@@ -129,14 +135,38 @@ export default function AccountsPage() {
     return t("acc.market.both");
   }
 
+  // Демо-данные подмешиваются в статистику счёта, поэтому на счёте с живыми
+  // сделками сервер их не грузит без ?force=1 (см. роут). Кнопка там и так
+  // заблокирована — подтверждение остаётся на случай одних лишь демо-сделок.
   async function seedDemo(id: string) {
+    const a = accounts.find((x) => x.id === id);
+    if (!confirm(t("acc.demoConfirm", { n: DEMO_TRADE_COUNT }))) return;
+    const force = (a?.fillCount ?? 0) - (a?.demoFillCount ?? 0) > 0;
     setBusy(id);
     setNotice(null);
     try {
-      const res = await fetch(`/api/accounts/${id}/demo`, { method: "POST" });
+      const res = await fetch(`/api/accounts/${id}/demo${force ? "?force=1" : ""}`, {
+        method: "POST",
+      });
       const data = await res.json();
       if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
       else setNotice(t("acc.notice.demo", { n: data.imported }));
+    } finally {
+      setBusy(null);
+      load();
+    }
+  }
+
+  // Откат демо: сносит только синтетические филлы, реальные остаются.
+  async function rollbackDemo(id: string) {
+    if (!confirm(t("acc.demoRollbackConfirm"))) return;
+    setBusy(id);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/accounts/${id}/demo`, { method: "DELETE" });
+      const data = await res.json();
+      if (!res.ok) setNotice(data.error ?? t("settings.saveError"));
+      else setNotice(t("acc.notice.demoRolledBack", { n: data.deleted }));
     } finally {
       setBusy(null);
       load();
@@ -309,10 +339,23 @@ export default function AccountsPage() {
                   )}
                   {!isMtSource(a.source) && (
                     <>
+                      {a.demoFillCount > 0 && (
+                        <button
+                          onClick={() => rollbackDemo(a.id)}
+                          disabled={busy === a.id}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+                        >
+                          <Undo2 size={14} />
+                          {t("acc.demoRollback")}
+                        </button>
+                      )}
                       <button
                         onClick={() => seedDemo(a.id)}
-                        disabled={busy === a.id}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50"
+                        disabled={busy === a.id || a.fillCount - a.demoFillCount > 0}
+                        title={
+                          a.fillCount - a.demoFillCount > 0 ? t("acc.demoBlocked") : undefined
+                        }
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg input-base text-sm hover:border-border-strong disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         <Database size={14} />
                         {t("acc.demo")}
