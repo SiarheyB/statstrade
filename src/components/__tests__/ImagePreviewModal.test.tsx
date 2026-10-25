@@ -57,4 +57,20 @@ describe("ImagePreviewModal", () => {
     fireEvent.click(screen.getByLabelText("trades.image.zoomReset"));
     expect(screen.getByText("100%")).toBeInTheDocument();
   });
+
+  // Пересоздание модалки при листании выкидывало картинку из полноэкранного
+  // режима: развёрнутый элемент должен пережить смену url.
+  it("keeps the same frame when the url changes, resetting zoom", () => {
+    const { container, rerender } = render(
+      <ImagePreviewModal url="https://example.com/a.png" onClose={() => {}} />,
+    );
+    const frame = container.firstChild!.firstChild;
+    fireEvent.click(screen.getByLabelText("trades.image.zoomIn"));
+    expect(screen.getByText("140%")).toBeInTheDocument();
+
+    rerender(<ImagePreviewModal url="https://example.com/b.png" onClose={() => {}} />);
+    expect(container.firstChild!.firstChild).toBe(frame);
+    expect(screen.getByText("100%")).toBeInTheDocument();
+    expect((container.querySelector("img") as HTMLImageElement).src).toBe("https://example.com/b.png");
+  });
 });

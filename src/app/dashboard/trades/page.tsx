@@ -1142,10 +1142,9 @@ export default function TradesPage() {
       )}
 
       {preview && (
-        // key=url — remounts on a new image so zoom/pan resets, instead of
-        // an effect syncing it (see ImagePreviewModal for why).
+        // Без key: пересоздание модалки при листании выкидывало её из
+        // полноэкранного режима. Зум сбрасывается внутри по смене url.
         <ImagePreviewModal
-          key={preview.url}
           url={preview.url}
           caption={`${fmtSymbol(preview.trade.symbol)} · ${fmtDate(preview.trade.exitTime)}`}
           position={{ index: preview.index + 1, total: gallery.length }}

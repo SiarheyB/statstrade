@@ -53,15 +53,30 @@ export default function ImagePreviewModal({
   const dragRef = useRef<{ startX: number; startY: number; origX: number; origY: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
+  // Листание меняет url у ЖИВОЙ модалки, а не пересоздаёт её через key:
+  // пересоздание удаляет развёрнутый элемент из DOM, и браузер выходит из
+  // полноэкранного режима. Зум, сдвиг и ошибку загрузки прежней картинки
+  // сбрасываем прямо в рендере — так React советует подстраивать состояние
+  // под проп, без лишнего кадра со старым зумом.
+  const [shownUrl, setShownUrl] = useState(url);
+  if (shownUrl !== url) {
+    setShownUrl(url);
+    setFailed(false);
+    setScale(1);
+    setPos({ x: 0, y: 0 });
+  }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      // Развёрнутую картинку Esc только сворачивает (это делает useFullscreen),
+      // а не закрывает просмотр целиком.
+      if (e.key === "Escape" && !fsActive) onClose();
       if (e.key === "ArrowLeft") onPrev?.();
       if (e.key === "ArrowRight") onNext?.();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, onPrev, onNext]);
+  }, [onClose, onPrev, onNext, fsActive]);
 
   // Не даём смещению унести картинку далеко за пределы видимой области —
   // иначе после сильного зума+пана легко "потерять" изображение за краем.
@@ -164,13 +179,15 @@ export default function ImagePreviewModal({
         ref={fsRef}
         className={
           fsActive
-            ? "relative h-screen w-screen max-w-none bg-black"
+            ? "fixed inset-0 bg-black"
             : "relative w-[92vw] h-[88vh] max-w-5xl"
         }
         onClick={(e) => e.stopPropagation()}
       >
+        {/* Подпись и крестик в обычном режиме вынесены за угол картинки, а на
+            весь экран за краем ничего не видно — там они встают внутрь. */}
         {caption && (
-          <div className="absolute -top-3 left-0 z-10 max-w-[70%] truncate rounded-lg border border-border bg-bg/90 px-2.5 py-1 text-xs text-muted shadow-lg">
+          <div className={`absolute ${fsActive ? "top-3 left-3" : "-top-3 left-0"} z-10 max-w-[70%] truncate rounded-lg border border-border bg-bg/90 px-2.5 py-1 text-xs text-muted shadow-lg`}>
             {caption}
           </div>
         )}
@@ -195,7 +212,7 @@ export default function ImagePreviewModal({
         <button
           onClick={onClose}
           aria-label={t("common.close")}
-          className="absolute -top-3 -right-3 z-10 bg-bg border border-border rounded-full p-1.5 text-fg hover:text-accent shadow-lg"
+          className={`absolute ${fsActive ? "top-3 right-3" : "-top-3 -right-3"} z-10 bg-bg border border-border rounded-full p-1.5 text-fg hover:text-accent shadow-lg`}
         >
           <X size={16} />
         </button>

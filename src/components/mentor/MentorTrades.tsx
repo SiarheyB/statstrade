@@ -139,9 +139,9 @@ export default function MentorTrades({ accounts }: { accounts: PublicAccountTrad
       )}
 
       {current?.imageUrl && (
-        // key — чтобы при листании сбрасывался зум предыдущей картинки.
+        // Без key: пересоздание модалки при листании выкидывало её из
+        // полноэкранного режима. Зум сбрасывается внутри по смене url.
         <ImagePreviewModal
-          key={current.id}
           url={current.imageUrl}
           externalUrl={current.imageUrl}
           caption={`${fmtSymbol(current.symbol)} · ${current.entryTime.slice(0, 10)}`}
